@@ -392,6 +392,21 @@ describe('systemWatchdog — slow jobs', () => {
     )
   })
 
+  it('reports slowness at WARNING level, as this branch has always said it does', async () => {
+    // "A WARNING, not an error" has been in the comment above this reportError
+    // since it was written — but reportError had no level until 2026-09-06, so
+    // it raised an error regardless. A job that is slow is still running, and
+    // filing that beside a crash is what made the Sentry issue list
+    // untriageable: on 2026-09-06 three of seven unresolved issues were this
+    // exact report, and there was no field to separate them from the rest.
+    await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 400_000, 400_000]))
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ site: 'inngest.system-watchdog.slow-jobs', level: 'warning' }),
+    )
+  })
+
   it('does NOT report a single spike — one slow run is not a slow job', async () => {
     // This exact fixture used to fire, and that was the 2026-08-26 false alarm
     // in miniature: ownerrez-incremental-sync reported at "97s vs 9s median"

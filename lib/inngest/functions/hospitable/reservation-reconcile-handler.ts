@@ -39,7 +39,7 @@
 // ============================================================
 
 import { inngest }              from '@/lib/inngest/client'
-import { NonRetriableError }    from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
@@ -126,7 +126,7 @@ export const hospReservationReconcileHandler = inngest.createFunction(
         // GETTER all the way down and is invoked inside each step that spends
         // it, which is what finally makes a retry able to recover.
         const t = await getValidHospitableToken(user_id)
-        if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hospitable token found — reconnect required')
         return t
       },
       sync: (getToken, propertyIdMap) => syncHospitableReservations({

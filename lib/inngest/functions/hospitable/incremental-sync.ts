@@ -44,6 +44,7 @@ import {
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { RateLimitError, ProviderAuthError, ProviderRequestError } from '@/lib/integrations/types'
+import { rateLimitRetry } from '@/lib/inngest/retry-after'
 import { isUuid } from '@/lib/validation/uuid'
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
@@ -92,6 +93,13 @@ function isRateLimited(value: unknown): value is RateLimitedOutcome {
  * One extra attempt, not a loop: if honouring the provider's own interval still
  * isn't enough, the budget is genuinely gone and Inngest's retries are the
  * right next layer — so the second throttle is rethrown.
+ *
+ * It is rethrown as a RetryAfterError, not as the RateLimitError itself. "The
+ * right next layer" is only right if that layer waits: a plain rethrow handed
+ * Inngest a generic exponential backoff that knows nothing about the number
+ * Hospitable had just given us, so the handoff spent the remaining attempts
+ * re-asking too early and dead-lettered as `exhausted all retries: Rate
+ * limited — retry after 2s`. See lib/inngest/retry-after.ts.
  */
 async function withProviderCall<T>(
   step: SyncStep,
@@ -121,7 +129,7 @@ async function withProviderCall<T>(
   const second = await step.run(`${id}-retry`, attempt) as T | RateLimitedOutcome
   if (!isRateLimited(second)) return second
 
-  throw new RateLimitError(second.retryAfter)
+  throw rateLimitRetry(new RateLimitError(second.retryAfter))
 }
 
 /** The shape every branch's skip path returns. */

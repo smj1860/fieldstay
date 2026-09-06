@@ -22,7 +22,7 @@
 // ============================================================================
 
 import { inngest }           from '@/lib/inngest/client'
-import { NonRetriableError } from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { reportError }       from '@/lib/observability/report-error'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { fetchProviderPropertyIdMap } from '../shared/reservation-pipeline'
@@ -71,7 +71,7 @@ export const hostexWebhookHandler = inngest.createFunction(
       // credential a concurrent renewal can invalidate underneath this run.
       const getToken = async () => {
         const t = await getValidHostexToken(user_id)
-        if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostex token found — reconnect required')
         return t
       }
 

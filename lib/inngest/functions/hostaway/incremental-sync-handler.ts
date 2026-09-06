@@ -31,7 +31,7 @@
 // ============================================================================
 
 import { inngest }              from '@/lib/inngest/client'
-import { NonRetriableError }    from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { unwrap }               from '@/lib/supabase/unwrap'
@@ -91,7 +91,7 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       // API key cannot be refreshed at all, so "gone" here means gone until a
       // human acts. Burning retries hourly against a dead credential only
       // obscures the real failures.
-      if (!token) throw new NonRetriableError('No Hostaway token found — reconnect required')
+      if (!token) throw reconnectRequired('No Hostaway token found — reconnect required')
 
       const supabase = createServiceClient({ system: SYSTEM })
 
@@ -147,7 +147,7 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       logger,
       getToken:      async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
-        if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostaway token found — reconnect required')
         return t
       },
       orgId:         org_id,

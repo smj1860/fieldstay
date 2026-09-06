@@ -17,7 +17,7 @@
 // ============================================================
 
 import { inngest }             from '@/lib/inngest/client'
-import { NonRetriableError }   from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { translateSyncError } from '@/lib/integrations/types'
@@ -86,7 +86,7 @@ export const hospInitialSync = inngest.createFunction(
       // then fails the whole first import.
       const getToken = async () => {
         const t = await getValidHospitableToken(user_id)
-        if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hospitable token found — reconnect required')
         return t
       }
 
