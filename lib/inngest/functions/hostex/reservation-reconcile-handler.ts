@@ -28,7 +28,7 @@
 // ============================================================================
 
 import { inngest }             from '@/lib/inngest/client'
-import { NonRetriableError }   from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { reportError }         from '@/lib/observability/report-error'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { ensureHostexWebhookRegistration } from '@/lib/integrations/providers/hostex-webhook'
@@ -90,7 +90,7 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
       system:   SYSTEM,
       readToken: async () => {
         const t = await getValidHostexToken(user_id)
-        if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostex token found — reconnect required')
         return t
       },
       sync: async (getToken, propertyIdMap) => {

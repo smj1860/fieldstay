@@ -29,6 +29,24 @@ interface ReportErrorContext {
    * in `extra`.
    */
   tags?: Record<string, string>
+  /**
+   * Sentry severity for this event. Defaults to `'error'`, which is what
+   * `captureException` applies on its own.
+   *
+   * Pass `'warning'` for a report that is a SIGNAL rather than a fault: a
+   * protective guard that fired and did the safe thing, or a degradation that
+   * is worth seeing before it becomes an outage. Both were already being
+   * reported through here, and both arrived indistinguishable from a crash —
+   * the watchdog's slow-job report says "A WARNING, not an error" in its own
+   * comment and then raised an error, and four of the seven unresolved Sentry
+   * issues on 2026-09-06 were guards of this kind sitting alongside real
+   * failures with no way to filter one from the other.
+   *
+   * This does not suppress anything: a warning still creates an issue and is
+   * still searchable. It changes `level`, which is what alert rules and
+   * triage queries filter on.
+   */
+  level?: 'info' | 'warning' | 'error' | 'fatal'
 }
 
 /**
@@ -89,6 +107,7 @@ export function reportError(err: unknown, context: ReportErrorContext): void {
     : null
 
   Sentry.captureException(error, {
+    level: context.level ?? 'error',
     tags: {
       // Caller tags first, so `site`/`org_id` cannot be overwritten by one —
       // those two are what every triage query filters on.

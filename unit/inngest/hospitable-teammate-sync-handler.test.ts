@@ -268,7 +268,11 @@ describe('hospTeammateSyncHandler — empty-result guard', () => {
 
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
-      expect.objectContaining({ orgId: 'org_1' }),
+      // A WARNING: the guard worked, the roster is intact, and nothing
+      // failed. It still needs a human — a missing teammate:read scope is
+      // indistinguishable from a genuinely empty team — but filing it as an
+      // error put a successful defence in the same Sentry bucket as a crash.
+      expect.objectContaining({ orgId: 'org_1', level: 'warning' }),
     )
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('ZERO teammates'))
   })

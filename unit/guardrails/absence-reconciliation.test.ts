@@ -58,7 +58,7 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'empty-set-guard',
     why: 'Cancels FieldStay bookings absent from OwnerRez. An org with connected properties having zero bookings is implausible, and getBookings() can return a 200 with an empty body on an upstream hiccup — indistinguishable from a genuinely emptied account. Cancelling wrongly sends crew home from stays that are still happening.',
   },
-  'lib/inngest/functions/hospitable/teammate-sync-handler.ts:150': {
+  'lib/inngest/functions/hospitable/teammate-sync-handler.ts:156': {
     protection: 'empty-set-guard',
     why: 'Deactivates crew members absent from Hospitable. THE SITE THAT FIRED: hospFetchTeammates returned [] for any non-ok response, including the 403 expected for a connection without teammate:read, and did so from inside its pagination loop. Both halves are fixed, and the guard stays as the backstop because the caller cannot verify how the fetch failed.',
   },
@@ -377,7 +377,7 @@ describe('guardrail: reconciling by absence must survive an empty fetch', () => 
     // recognised. Without this, a regex typo turns the whole guardrail into a
     // permanently-passing no-op.
     const known = findReconcilers()
-    expect(known).toContain('lib/inngest/functions/hospitable/teammate-sync-handler.ts:150')
+    expect(known).toContain('lib/inngest/functions/hospitable/teammate-sync-handler.ts:156')
     expect(known).toContain('lib/dexie/sync/work-orders.ts:177')   // accumulator shape
     expect(known.length).toBeGreaterThanOrEqual(5)
 

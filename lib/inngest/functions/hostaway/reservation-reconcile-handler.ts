@@ -45,7 +45,7 @@
 // ============================================================================
 
 import { inngest }              from '@/lib/inngest/client'
-import { NonRetriableError }    from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostawayReservations } from './reservation-sync'
@@ -101,7 +101,7 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
       system:   SYSTEM,
       readToken: async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
-        if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostaway token found — reconnect required')
         return t
       },
       sync: async (getToken, propertyIdMap) => {

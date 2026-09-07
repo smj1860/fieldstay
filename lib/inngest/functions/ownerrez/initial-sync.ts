@@ -10,7 +10,8 @@
  */
 
 import { inngest }              from '@/lib/inngest/client'
-import { NonRetriableError }    from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
+import { rateLimitRetry }      from '@/lib/inngest/retry-after'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
@@ -275,7 +276,10 @@ export const ownerRezInitialSync = inngest.createFunction(
           properties = await client.getProperties()
         } catch (err) {
           if (err instanceof RateLimitError) {
-            throw err // Inngest will retry
+            // Inngest will retry — after the interval OwnerRez named, not
+            // wherever its generic backoff curve happens to fall. See
+            // lib/inngest/retry-after.ts.
+            throw rateLimitRetry(err)
           }
           throw err
         }
@@ -917,7 +921,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       // so Inngest stops immediately and the dashboard distinguishes this
       // from a transient failure.
       if (err instanceof TokenRevokedError) {
-        throw new NonRetriableError(humanError)
+        throw reconnectRequired(humanError)
       }
 
       // RE-THROW so Inngest records this as a failure and retries it.

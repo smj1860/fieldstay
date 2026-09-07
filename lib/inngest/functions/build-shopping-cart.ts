@@ -13,6 +13,7 @@ import { getValidKrogerToken }             from '@/lib/integrations/providers/kr
 import { reportError }                     from '@/lib/observability/report-error'
 import { ANTHROPIC_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import { RateLimitError }                  from '@/lib/integrations/types'
+import { rateLimitRetry }                 from '@/lib/inngest/retry-after'
 import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
@@ -223,11 +224,16 @@ export const buildShoppingCart = inngest.createFunction(
         if (err instanceof RateLimitError) {
           // Kroger's own API quota (or our proactive guard in front of it,
           // see lib/kroger/client.ts's krogerFetch) is exhausted. Rethrow
-          // so Inngest retries this step with backoff instead of silently
-          // degrading to the list-only fallback below — that would mask a
-          // transient condition as a permanent one and skip a retry that
-          // would likely succeed once the window resets.
-          throw err
+          // so Inngest retries this step instead of silently degrading to the
+          // list-only fallback below — that would mask a transient condition
+          // as a permanent one and skip a retry that would likely succeed
+          // once the window resets.
+          //
+          // As a RetryAfterError, so "once the window resets" is when the
+          // retry actually happens: a bare rethrow gets Inngest's generic
+          // backoff, which does not know the remaining window this error is
+          // carrying. See lib/inngest/retry-after.ts.
+          throw rateLimitRetry(err)
         }
 
         if (err instanceof NonRetriableError) {

@@ -47,7 +47,7 @@
 // ============================================================================
 
 import { inngest }              from '@/lib/inngest/client'
-import { NonRetriableError }    from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { translateSyncError }   from '@/lib/integrations/types'
 import { reportError }          from '@/lib/observability/report-error'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
@@ -107,7 +107,7 @@ export const hostawayInitialSync = inngest.createFunction(
       // persisted step output.
       const getToken = async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
-        if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostaway token found — reconnect required')
         return t
       }
 

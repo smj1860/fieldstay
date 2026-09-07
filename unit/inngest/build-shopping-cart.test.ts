@@ -343,7 +343,16 @@ describe('buildShoppingCart', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new RateLimitError(30))
 
-    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toBeInstanceOf(RateLimitError)
+    // A RetryAfterError, not the RateLimitError itself: the rethrow only
+    // achieves what its comment claims if the layer it hands off to WAITS.
+    // A bare RateLimitError is a plain Error to Inngest, which then retries on
+    // a generic exponential curve that knows nothing about the 30s Kroger
+    // just named. Asserted in SECONDS because the constructor takes
+    // MILLISECONDS — see lib/inngest/retry-after.ts.
+    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toMatchObject({
+      name:       'RetryAfterError',
+      retryAfter: '30',
+    })
 
     // Rate limiting is a transient, retriable condition — must NOT be
     // reported as an error or silently degrade to a list-only cart the

@@ -1166,6 +1166,8 @@ primitive instead is how that drift comes back.
 | `assertSafeExternalUrl` / `safeFetch` | `lib/security/url-guard.ts` | Every outbound fetch to a URL that is even partly tenant-supplied (iCal feeds, webhook targets, image URLs). Hostname string-matching is defeated by redirects, DNS, IPv6, and alternate IPv4 encodings; `safeFetch` re-validates every redirect hop |
 | `getPmMembersByOrgIds` / `getOrgDispatcher` | `lib/inngest/helpers.ts` | Resolving an org's PM recipients. The `ByOrgIds` form takes MANY org ids and returns a `Map` — the per-org `getPmMembers` inside a tenant loop is the N+1 that `unit/guardrails/n-plus-one-loops.test.ts` exists to catch |
 | Timeout budgets (`GEOCODE_TIMEOUT_MS`, …) + `isTimeoutError()` | `lib/http/timeout.ts` | Every outbound `fetch()`. A `fetch()` with no `AbortSignal` has no timeout at all — it hangs until the platform kills the function. Enforced by `unit/guardrails/external-fetch-timeout.test.ts` |
+| `rateLimitRetry(err)` | `lib/inngest/retry-after.ts` | Rethrowing a `RateLimitError` from inside an Inngest function. A bare rethrow is a plain Error to Inngest, which then retries on its own exponential curve and ignores the interval the provider just supplied — `hospitable-incremental-sync` dead-lettered as `exhausted all retries: Rate limited — retry after 2s` doing exactly that. Wraps it in Inngest's `RetryAfterError`, converting SECONDS to the constructor's MILLISECONDS |
+| `reconnectRequired(msg)` | `lib/inngest/reconnect-required.ts` | The terminal failure that is not ours: a provider no longer accepts a connection's credential. Still a `NonRetriableError`, but marked so `on-failure.ts` files it as a warning rather than `exhausted all retries` (a NonRetriableError exhausts nothing) and does NOT page the founder for a condition only that PM can fix. Inngest's serialized `error.name` does not survive, so the marker travels in the message |
 
 ### Auth patterns
 
@@ -1468,6 +1470,15 @@ item below" as part of the definition of done for any non-trivial change.
   and auth entry points (login/signup) need their own rate limiter (see
   `lib/rate-limit.ts` and `proxy.ts`'s `rateLimiterForPathname()`) —
   token entropy alone is not a substitute for throttling.
+- **Report severity** — `reportError()` takes an optional `level`. Pass
+  `'warning'` when the report is a SIGNAL rather than a fault: a protective
+  guard that fired and did the safe thing (the Hospitable empty-teammate
+  guard), or a degradation worth seeing before it becomes an outage (the
+  watchdog's slow-job report, whose own comment said "a WARNING, not an
+  error" while it raised one). Nothing is suppressed — the issue is still
+  created and searchable — but `level` is what alert rules and triage
+  queries filter on, and without it a successful defence sits in Sentry
+  indistinguishable from a crash.
 - **Sensitive-data logging** — never log guest phone numbers, SMS body
   content, `actual_cost`/financial specifics, Stripe tokens, or any
   secret/API key. See Code Quality Standards and the "Things That Will
