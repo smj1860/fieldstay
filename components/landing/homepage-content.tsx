@@ -48,6 +48,7 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // cookie lands on the right host.
 const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'Pricing',       href: '/pricing'     },
+  { label: 'STR Operations', href: '/short-term-rental-operations-software' },
   { label: 'Turnover App',  href: '/strops'      },
   { label: 'For Hosts',     href: '/hosts'       },
   { label: 'Enterprise',    href: '/enterprise'  },

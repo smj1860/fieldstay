@@ -285,6 +285,118 @@ export const VENDOR_MULTIPLE_PMS_FAQ = {
 } as const
 
 /**
+ * /short-term-rental-operations-software — the category landing page's FAQ.
+ *
+ * These are written for ANSWER ENGINES first and the "People also ask" block
+ * second, which is a different job from the rest of this file and worth
+ * saying out loud.
+ *
+ * A search result only has to be clickable. An extracted answer has to be
+ * correct with the page removed — a model quotes two sentences to someone who
+ * will never see the surrounding copy, cannot follow a "see above", and has
+ * no way to tell a hedge from a fact. So each answer below:
+ *
+ *   - LEADS WITH THE DIRECT ANSWER, then qualifies. A model truncating to the
+ *     first sentence must still be right.
+ *   - NAMES THE SUBJECT rather than saying "we" or "it". "FieldStay is …"
+ *     survives extraction; "We handle that" attaches itself to whatever
+ *     product the model was already discussing.
+ *   - CARRIES ITS OWN NUMBERS. A figure only reachable from a pricing table
+ *     elsewhere on the page is a figure the extraction loses.
+ *
+ * The first two are the highest-value entries and are deliberately
+ * DEFINITIONAL: "what is short-term rental operations software" and "is it a
+ * PMS" are the questions that decide whether a model places this product in
+ * the right category at all, and a model that has us filed as a booking
+ * platform will answer every later question wrong no matter what else the
+ * page says.
+ *
+ * The pricing figures here are duplicated as prose, not imported —
+ * lib/faq-content.ts deliberately has no imports so it can be read from both
+ * client and server code (see app/ownerrez/json-ld.ts's header for what
+ * importing a 'use client' module into server code does at build time).
+ * unit/pages/str-operations-software.test.ts is what keeps them honest: it
+ * asserts these strings against lib/stripe/brackets.ts and
+ * lib/guidebook/sponsor-economics.ts, so a schedule change fails CI here
+ * rather than going stale in public.
+ */
+export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
+  {
+    q: 'What is short-term rental operations software?',
+    a:
+      'Short-term rental operations software runs the physical work a rental generates after a booking ' +
+      'is confirmed: turnover cleans, crew scheduling and dispatch, inspections, maintenance work orders, ' +
+      'vendor coordination and supply restocking. It is distinct from a property management system (PMS), ' +
+      'which handles listings, reservations, rates and guest messaging. Most operators run both — the PMS ' +
+      'owns the booking, the operations platform owns everything the booking then requires on the ground. ' +
+      'FieldStay is an operations platform of this kind, built for managers running 1 to 150 properties.',
+  },
+  {
+    q: 'Is FieldStay a property management system, or does it replace OwnerRez or Hospitable?',
+    a:
+      'No — FieldStay does not replace your PMS and is not a booking platform. It connects to OwnerRez, ' +
+      'Hospitable or Hostaway (or reads a plain iCal feed from Airbnb and VRBO) and takes over the field ' +
+      'operations those systems leave to spreadsheets and group texts. Your reservations, rates and guest ' +
+      'messaging stay where they are; FieldStay reads the bookings and builds the turnover schedule, crew ' +
+      'assignments, maintenance and inventory from them.',
+  },
+  {
+    q: 'How much does short-term rental operations software cost?',
+    a:
+      'FieldStay is priced per property on a graduated schedule, published with no sales call required. ' +
+      'The first property is $49/month; properties 2–4 are $13 each, 5–15 are $10 each, 16–50 are $8 each, ' +
+      'and 51–150 are $6 each. Only the property that crosses a boundary is re-rated, so adding one never ' +
+      'jumps the whole bill. Annual billing is ten months for twelve. Every plan includes every feature — ' +
+      'nothing is gated behind a higher tier — and there is a 14-day free trial with no credit card.',
+  },
+  {
+    q: 'Can property management software pay for itself?',
+    a:
+      'In FieldStay, partly and by design. Each property\'s guest guidebook can carry up to 6 local ' +
+      'business sponsors — restaurants, activity companies, rental shops. A sponsor pays $15/month for the ' +
+      'placement and $5/month of that is credited automatically against your FieldStay invoice, starting ' +
+      'with the first sponsor and with no threshold to clear. Six sponsors is $30/month back. FieldStay ' +
+      'generates the print-ready pitch used to sell the slots. This is a revenue share, not a discount ' +
+      'code, and the credit applies every billing cycle the sponsor stays active.',
+  },
+  {
+    q: 'What is the difference between a PMS and an operations platform?',
+    a:
+      'A PMS is guest-facing and revenue-facing: listings, calendars, rates, reservations, guest ' +
+      'messaging, payments. An operations platform is staff-facing and asset-facing: who is cleaning which ' +
+      'unit, whether the clean was verified with photos, when the HVAC filter is due, which vendor is ' +
+      'certified to take the job, and what the owner sees at the end of the month. They overlap at exactly ' +
+      'one point — the booking — which is why an operations platform is normally connected to a PMS ' +
+      'rather than chosen instead of one.',
+  },
+  {
+    q: 'How many properties does FieldStay handle?',
+    a:
+      'Self-serve pricing covers 1 to 150 properties. Above 150 it is an Enterprise contract negotiated ' +
+      'directly rather than a published rate — a commercial boundary, not a technical limit. There is no ' +
+      'minimum: a single-property host and a 150-property manager use the same platform with the same ' +
+      'features, and only the per-property price differs.',
+  },
+  {
+    q: 'How does automatic crew assignment decide who gets a job?',
+    a:
+      'FieldStay scores each crew member against the job on proximity and current workload — every crew ' +
+      'member has a home location and a capacity score, and a reliability score built from their completion ' +
+      'history. The suggestion is stored with the reasoning behind it, so a manager can see why a given ' +
+      'person was picked and override it. Overrides are recorded and feed back into later suggestions.',
+  },
+  {
+    q: 'Does it track appliances and capital expenses?',
+    a:
+      'Yes. FieldStay keeps a per-asset ledger across 21 asset types — HVAC, water heaters, roofs, pool ' +
+      'pumps, septic systems, appliances and others — each with lifespan ranges and replacement costs, and ' +
+      'a health score from 0 to 100 that shows what is aging toward replacement before it fails. Assets ' +
+      'carry purchase price, placed-in-service date, warranty expiry and a MACRS depreciation class, with ' +
+      'annual depreciation entries that export for tax filing.',
+  },
+]
+
+/**
  * /strops — the offline SEO landing page.
  *
  * Lives here rather than in app/strops/ because this file is where FAQ content

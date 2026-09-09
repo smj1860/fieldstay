@@ -50,6 +50,7 @@ import { readCode } from './scan'
 const PUBLIC_MARKETING_PAGES = [
   '/',
   '/pricing',
+  '/short-term-rental-operations-software',
   '/hosts',
   '/strops',
   '/ownerrez',

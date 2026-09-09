@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { CREDIT_PER_SPONSOR_CENTS } from './sponsor-economics'
 
 /**
  * Returns the count of active sponsors for an org.
@@ -16,8 +17,16 @@ export async function getActiveSponsorCount(orgId: string): Promise<number> {
   return count ?? 0
 }
 
-/** Dollars (in cents) of plan credit earned per active sponsor, per month. */
-export const CREDIT_PER_SPONSOR_CENTS = 500
+/**
+ * Dollars (in cents) of plan credit earned per active sponsor, per month.
+ *
+ * Re-exported from lib/guidebook/sponsor-economics.ts, a leaf module with no
+ * imports, so a marketing page or client component can read the figure without
+ * importing THIS file and dragging createServiceClient() along with it. The
+ * name and value are unchanged; existing importers of this module are
+ * unaffected.
+ */
+export { CREDIT_PER_SPONSOR_CENTS } from './sponsor-economics'
 
 /**
  * Resolves the plan credit amount in cents from the active sponsor count.
