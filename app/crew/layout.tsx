@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { redirect } from 'next/navigation'
+import { toCrewLocale } from '@/lib/crew/locale'
 import { CrewShell } from './crew-shell'
 
 export const metadata: Metadata = {
@@ -42,7 +43,7 @@ export default async function CrewLayout({
   const admin = createServiceClient({ authenticatedUser: user })
   const crewRes = await admin
     .from('crew_members')
-    .select('id, name, org_id')
+    .select('id, name, org_id, locale')
     .eq('user_id', user.id)
     .eq('is_active', true)
     .maybeSingle()
@@ -81,7 +82,14 @@ export default async function CrewLayout({
 
   return (
     <div className="theme-locked-light">
-      <CrewShell crewName={crewRecord.name} userId={user.id} unreadCount={unreadCount}>{children}</CrewShell>
+      <CrewShell
+        crewName={crewRecord.name}
+        crewLocale={toCrewLocale(crewRecord.locale)}
+        userId={user.id}
+        unreadCount={unreadCount}
+      >
+        {children}
+      </CrewShell>
     </div>
   )
 }

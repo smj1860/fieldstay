@@ -5,6 +5,7 @@ import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
 import { DexieProvider }           from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
+import type { CrewLocale }          from '@/types/database'
 import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -34,11 +35,13 @@ const PUSH_ENDPOINT = '/api/crew/push-subscribe' as const
 
 export function CrewShell({
   crewName,
+  crewLocale,
   userId,
   unreadCount,
   children,
 }: {
   crewName:     string
+  crewLocale:   CrewLocale
   userId:       string
   /** Server-rendered — see the note in CrewBottomNav. */
   unreadCount?: number | null
@@ -275,7 +278,7 @@ export function CrewShell({
   }, [userId, signedOut])
 
   return (
-    <CrewContext.Provider value={{ crewName, userId }}>
+    <CrewContext.Provider value={{ crewName, userId, crewLocale }}>
     <DexieProvider userId={userId}>
       <div className="min-h-screen bg-canvas-themed flex flex-col max-w-lg mx-auto">
         {/* ── Branded header ─────────────────────────────────────────────── */}

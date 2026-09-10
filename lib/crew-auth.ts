@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { toCrewLocale } from '@/lib/crew/locale'
+import type { CrewLocale } from '@/types/database'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
 export interface CrewAuthContext {
   user:     { id: string }
   supabase: SupabaseServerClient
-  crew:     { id: string; org_id: string }
+  crew:     { id: string; org_id: string; locale: CrewLocale }
 }
 
 export type CrewAuthResult =
@@ -39,7 +41,7 @@ export async function requireCrewMember(): Promise<CrewAuthResult> {
   // and a real read failure is the only thing left in `error`.
   const crewRes = await supabase
     .from('crew_members')
-    .select('id, org_id')
+    .select('id, org_id, locale')
     .eq('user_id', user.id)
     .eq('is_active', true)
     .maybeSingle()
@@ -73,5 +75,5 @@ export async function requireCrewMember(): Promise<CrewAuthResult> {
   setActorContext(user.id)
   setTenantContext({ orgId: crew.org_id, role: 'crew' })
 
-  return { ok: true, user, supabase, crew }
+  return { ok: true, user, supabase, crew: { ...crew, locale: toCrewLocale(crew.locale) } }
 }

@@ -1141,6 +1141,7 @@ export type Database = {
           invite_sent_at: string | null
           invite_token: string | null
           is_active: boolean
+          locale: string
           name: string
           notes: string | null
           org_id: string
@@ -1168,6 +1169,7 @@ export type Database = {
           invite_sent_at?: string | null
           invite_token?: string | null
           is_active?: boolean
+          locale?: string
           name: string
           notes?: string | null
           org_id: string
@@ -1195,6 +1197,7 @@ export type Database = {
           invite_sent_at?: string | null
           invite_token?: string | null
           is_active?: boolean
+          locale?: string
           name?: string
           notes?: string | null
           org_id?: string

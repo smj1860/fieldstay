@@ -72,6 +72,7 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
+export type CrewLocale          = 'en' | 'es'
 export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
 export type VendorAutoAssignMode = 'suggest' | 'disabled'
 export type SuggestionStatus     = 'pending' | 'accepted' | 'overridden' | 'dismissed'
@@ -361,6 +362,13 @@ export interface CrewMember {
    * Governs only what the engine PROPOSES; manual assignment is unaffected.
    */
   auto_assign_eligible: boolean
+  /**
+   * Preferred UI language for the crew PWA. NOT NULL DEFAULT 'en'
+   * (20260910125639) — opt-in, so existing crew keep English until they
+   * explicitly switch. Written only via createServiceClient({ crew }); see
+   * that migration's comment for why no new RLS policy was added.
+   */
+  locale:             CrewLocale
   notes:              string | null
   home_zip:           string | null
   home_lat:           number | null
