@@ -60,8 +60,14 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // Fonts: self + Google Fonts CDN if used
     "font-src 'self' data: https://fonts.gstatic.com",
 
-    // Frames: Stripe hosted elements only
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+    // Frames: Stripe hosted elements, plus both Thumbtack widget hosts
+    // (RequestFlowModal's iframe — lib/integrations/thumbtack.ts's
+    // ThumbtackEnvironment type). Both are listed rather than templated from
+    // THUMBTACK_ENVIRONMENT because this CSP is built once per request, not
+    // keyed off which Thumbtack environment happens to be configured, and an
+    // extra allowed frame source costs nothing a misconfigured single one
+    // wouldn't also cost.
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://thumbtack.com https://staging-partner.thumbtack.com",
 
     // Workers: blob: required for Supabase Realtime and some WASM usage
     "worker-src 'self' blob:",
