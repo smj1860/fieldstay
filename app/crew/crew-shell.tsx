@@ -4,7 +4,9 @@ import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
 import { DexieProvider }           from '@/lib/dexie/context'
-import { CrewContext }              from '@/lib/crew/crew-context'
+import { CrewContext, useCrewContext } from '@/lib/crew/crew-context'
+import { useCrewT }                 from '@/lib/crew/i18n'
+import { setCrewLocale }            from './settings/actions'
 import type { CrewLocale }          from '@/types/database'
 import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
@@ -17,6 +19,7 @@ import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
+import { Button }                   from '@/components/ui/Button'
 import { MULTI_CREW_START_FAQ }     from '@/lib/faq-content'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -538,6 +541,8 @@ function SyncStatus() {
 function CrewFaqPanel({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onClose={onClose} title="FieldStay Crew App — FAQ" mobileSheet>
+      <LanguageToggle />
+
       {FAQ_ITEMS.map((item, i) => (
         <FaqItem key={i} question={item.q} answer={item.a} />
       ))}
@@ -551,6 +556,59 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
         </p>
       </div>
     </Dialog>
+  )
+}
+
+function LanguageToggle() {
+  const { crewLocale } = useCrewContext()
+  const t = useCrewT()
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const choose = (next: CrewLocale) => {
+    if (next === crewLocale || isPending) return
+    setError(null)
+    startTransition(async () => {
+      const result = await setCrewLocale(next)
+      if (result.error) { setError(result.error); return }
+      router.refresh()
+    })
+  }
+
+  return (
+    <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        {t('language')}
+      </p>
+      <div className="flex gap-2" role="group" aria-label={t('language')}>
+        <Button
+          type="button"
+          variant={crewLocale === 'en' ? 'primary' : 'secondary'}
+          disabled={isPending}
+          aria-pressed={crewLocale === 'en'}
+          onClick={() => choose('en')}
+          className="flex-1"
+        >
+          {t('languageEn')}
+        </Button>
+        <Button
+          type="button"
+          variant={crewLocale === 'es' ? 'primary' : 'secondary'}
+          disabled={isPending}
+          aria-pressed={crewLocale === 'es'}
+          onClick={() => choose('es')}
+          className="flex-1"
+        >
+          {t('languageEs')}
+        </Button>
+      </div>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }} role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }
 
