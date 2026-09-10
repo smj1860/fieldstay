@@ -8,10 +8,10 @@ import { STR_OPERATIONS_FAQ } from '@/lib/faq-content'
 import { BRACKETS, MAX_SELF_SERVE_PROPERTIES, monthlyCostCents } from '@/lib/stripe/brackets'
 import {
   CREDIT_PER_SPONSOR_CENTS,
-  MAX_SPONSORS_PER_ORG,
-  MAX_SPONSOR_CREDIT_CENTS,
   SPONSOR_PRICE_CENTS,
+  sponsorsToCoverPlan,
 } from '@/lib/guidebook/sponsor-economics'
+import { MAX_SPONSORS_PER_PROPERTY } from '@/lib/guidebook/assignment-constants'
 import {
   BOUNDARIES, DEFINITION, PILLARS, SELF_SERVE_CEILING, TURNOVER_STEPS,
 } from '@/app/short-term-rental-operations-software/capabilities'
@@ -94,14 +94,51 @@ describe('pricing claims match the real graduated schedule', () => {
 })
 
 describe('sponsor economics match the code that computes the credit', () => {
-  it('the FAQ quotes the real sponsor price, credit and slot ceiling', () => {
+  it('the FAQ quotes the real sponsor price and credit', () => {
     const answer = STR_OPERATIONS_FAQ.find((f) => f.q.includes('pay for itself'))?.a
     expect(answer, 'the self-funding FAQ entry was renamed or removed').toBeTruthy()
 
     expect(answer).toContain(`$${SPONSOR_PRICE_CENTS / 100}/month`)
     expect(answer).toContain(`$${CREDIT_PER_SPONSOR_CENTS / 100}/month`)
-    expect(answer).toContain(`${MAX_SPONSORS_PER_ORG} local`)
-    expect(answer).toContain(`$${MAX_SPONSOR_CREDIT_CENTS / 100}/month back`)
+  })
+
+  it('states the break-even portfolio using figures the schedule actually produces', () => {
+    // The claim is "a 5-property portfolio has room for the 20 sponsors that
+    // cover a 5-property plan". Both halves are derived — the display cap and
+    // the bracket schedule — so a change to either fails here rather than
+    // leaving a plausible-looking sentence that is quietly false.
+    const answer = STR_OPERATIONS_FAQ.find((f) => f.q.includes('pay for itself'))!.a
+
+    const properties = 5
+    const roster     = properties * MAX_SPONSORS_PER_PROPERTY
+    const needed     = sponsorsToCoverPlan(monthlyCostCents(properties)!)
+
+    expect(roster, 'a full roster no longer covers a 5-property plan').toBeGreaterThanOrEqual(needed)
+    expect(answer).toContain(`${MAX_SPONSORS_PER_PROPERTY} sponsors`)
+    expect(answer).toContain(`${needed} sponsors`)
+    expect(answer).toContain(`${properties}-property`)
+  })
+
+  it('claims NO ceiling on sponsor count — the 6-slot cap is gone', () => {
+    // 20260909234738_uncap_guidebook_sponsor_slots.sql dropped
+    // CHECK (slot_number BETWEEN 1 AND 6). Copy still promising "up to 6" or a
+    // "$30 maximum" would be describing a product that no longer exists, and
+    // understating the program to exactly the largest prospects.
+    const answer = STR_OPERATIONS_FAQ.find((f) => f.q.includes('pay for itself'))!.a
+    expect(answer).toMatch(/no limit on how many/i)
+    expect(answer).not.toMatch(/up to 6 (local )?(business )?sponsors/i)
+    expect(answer).not.toMatch(/\$30\/month back/i)
+
+    const page = read(PAGE)
+    expect(page, 'the page still advertises a 6-sponsor ceiling').not.toMatch(/6 (local )?sponsors/i)
+  })
+
+  it('says the credit is bounded by the plan cost, not by a sponsor count', () => {
+    // The cap is real and worth stating plainly: the bill floors at zero and
+    // the surplus is not carried forward. A page implying unlimited credit
+    // would be promising a payout the billing code deliberately does not make.
+    const answer = STR_OPERATIONS_FAQ.find((f) => f.q.includes('pay for itself'))!.a
+    expect(answer).toMatch(/only ceiling is your own bill|capped .* plan cost|reaches zero/i)
   })
 
   it('the credit is described as starting at the FIRST sponsor, with no threshold', () => {
@@ -119,6 +156,13 @@ describe('sponsor economics match the code that computes the credit', () => {
     expect(paidFor, 'the third pillar was renamed').toBeTruthy()
     expect(paidFor!.claim).toContain(`$${SPONSOR_PRICE_CENTS / 100}`)
     expect(paidFor!.claim).toContain(`$${CREDIT_PER_SPONSOR_CENTS / 100}`)
+    expect(paidFor!.claim, 'the pillar still implies a sponsor ceiling').toMatch(/no cap on how many/i)
+
+    // The curation boundary has to survive uncapping, or the page is selling
+    // an ad wall it does not build.
+    const curation = paidFor!.items.find((c) => c.title.includes('curated'))
+    expect(curation, 'the guest-curation item was dropped when the cap lifted').toBeTruthy()
+    expect(curation!.body).toContain(String(MAX_SPONSORS_PER_PROPERTY))
 
     // capabilities.ts must not restate a money figure as a literal — the
     // whole point of importing from sponsor-economics.ts.

@@ -42,20 +42,31 @@ export const CREDIT_PER_SPONSOR_CENTS = 500
 export const SPONSOR_PRICE_CENTS = 1500
 
 /**
- * The hard ceiling on active sponsors per organization.
+ * ⚠️ THERE IS NO LONGER A SPONSOR CEILING — deliberately no constant here.
  *
- * Enforced in the DATABASE, not by application policy: guidebook_sponsors has
- * `slot_number INTEGER NOT NULL CHECK (slot_number BETWEEN 1 AND 6)` plus
- * `UNIQUE(org_id, slot_number)` (20260627043346_guidebook_foundation.sql), so
- * a seventh row cannot be written whatever the calling code believes.
+ * `guidebook_sponsors` used to carry `CHECK (slot_number BETWEEN 1 AND 6)`,
+ * dropped by 20260909234738_uncap_guidebook_sponsor_slots.sql. An org may now
+ * sell as many sponsorships as it can find local businesses for.
  *
- * resolvePlanCredit()'s upper-bound reasoning depends on this — see its
- * docstring for what stops being true if the ceiling is ever lifted.
+ * The old ceiling was doing TWO jobs at once, and separating them is what made
+ * removing it safe:
+ *
+ *   1. Bounding the plan credit. At $5 per sponsor, 6 sponsors capped the
+ *      credit at $30 — under the cheapest possible subscription ($49), which
+ *      is what let resolvePlanCredit() stay a pure multiplication with no
+ *      knowledge of what the org pays. That job now belongs to the per-org cap
+ *      resolvePlanCredit() takes as an argument: the credit cannot exceed the
+ *      cost of the plan the org is actually on.
+ *   2. Keeping the guest-facing list curated. That job is UNCHANGED, and was
+ *      never really this constant's — MAX_SPONSORS_PER_PROPERTY (4, in
+ *      ./assignment-constants.ts) is what bounds how many sponsors a single
+ *      property SHOWS a guest. Selling 40 sponsorships across 40 properties
+ *      puts no more in front of any one guest than selling 4 did.
+ *
+ * Do not reintroduce an org-level ceiling constant here. If a limit is ever
+ * wanted again it belongs in the database as a real constraint, the way the
+ * old one was, rather than as a number application code hopes everyone reads.
  */
-export const MAX_SPONSORS_PER_ORG = 6
-
-/** The most any org can take off its bill through the sponsor program. */
-export const MAX_SPONSOR_CREDIT_CENTS = CREDIT_PER_SPONSOR_CENTS * MAX_SPONSORS_PER_ORG
 
 /**
  * Active sponsors required to unlock the guidebook permanently.
@@ -66,3 +77,23 @@ export const MAX_SPONSOR_CREDIT_CENTS = CREDIT_PER_SPONSOR_CENTS * MAX_SPONSORS_
  * got it replaced.
  */
 export const SPONSORS_TO_UNLOCK_GUIDEBOOK = 3
+
+/**
+ * How many active sponsors it takes to cover a plan of `planCostCents`
+ * entirely — the point at which the credit hits its cap and the org's
+ * FieldStay bill reaches zero.
+ *
+ * Exists so nothing has to hand-derive it. It is the number the guidebook UI
+ * shows as a target, and the one the marketing pages describe in words; both
+ * were the sort of figure that gets typed once, rounded wrong, and then
+ * contradicted by the invoice.
+ *
+ * Rounds UP: at $5 a sponsor, a $49 plan needs 10 sponsors, not 9.8. The
+ * final sponsor earns less than the full $5 because the cap clips it, which
+ * is the intended shape — the program pays for the software, it does not pay
+ * the customer.
+ */
+export function sponsorsToCoverPlan(planCostCents: number): number {
+  if (!Number.isFinite(planCostCents) || planCostCents <= 0) return 0
+  return Math.ceil(planCostCents / CREDIT_PER_SPONSOR_CENTS)
+}

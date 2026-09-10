@@ -10,52 +10,66 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 import { resolvePlanCredit, CREDIT_PER_SPONSOR_CENTS } from '@/lib/guidebook/helpers'
+import { monthlyCostCents } from '@/lib/stripe/brackets'
 
 // ============================================================================
-// Flat $5 per active sponsor, per month, from the first one.
+// Flat $5 per active sponsor, per month, from the first one — capped at the
+// cost of the plan the org is on.
 //
-// Replaced a two-step threshold (5 → $10, 6 → $25). The property worth pinning
-// is that the new shape has no cliffs: every additional sponsor is worth
-// exactly the same as the one before it.
+// Two shapes are pinned here, and they matter for different reasons:
+//
+//   * NO CLIFFS below the cap. This replaced a two-step threshold
+//     (5 → $10, 6 → $25) that paid nothing for a 4th sponsor; every
+//     additional sponsor must be worth exactly the same as the one before it.
+//   * A REAL CAP above it. Sponsors used to be bounded at 6 by
+//     guidebook_sponsors_slot_number_check, which kept the credit under $30
+//     and under the cheapest plan. 20260909234738_uncap_guidebook_sponsor_
+//     slots.sql removed that ceiling, so the cap is the only thing standing
+//     between an org with 40 sponsors and a credit larger than its invoice —
+//     which Stripe would carry forward as customer balance indefinitely
+//     rather than simply zeroing the bill.
 // ============================================================================
+
+/** A cap high enough never to bind — for the tests about the rate itself. */
+const UNCAPPED = 1_000_000
 
 describe('resolvePlanCredit', () => {
   it('pays a flat rate per sponsor', () => {
-    expect(resolvePlanCredit(1)).toBe(500)
-    expect(resolvePlanCredit(2)).toBe(1000)
-    expect(resolvePlanCredit(3)).toBe(1500)
-    expect(resolvePlanCredit(4)).toBe(2000)
-    expect(resolvePlanCredit(5)).toBe(2500)
-    expect(resolvePlanCredit(6)).toBe(3000)
+    expect(resolvePlanCredit(1, UNCAPPED)).toBe(500)
+    expect(resolvePlanCredit(2, UNCAPPED)).toBe(1000)
+    expect(resolvePlanCredit(3, UNCAPPED)).toBe(1500)
+    expect(resolvePlanCredit(4, UNCAPPED)).toBe(2000)
+    expect(resolvePlanCredit(5, UNCAPPED)).toBe(2500)
+    expect(resolvePlanCredit(6, UNCAPPED)).toBe(3000)
   })
 
   it('earns from the FIRST sponsor — the new boundary', () => {
     // Previously zero. One sponsor is the count the old table could not reward.
-    expect(resolvePlanCredit(1)).toBe(CREDIT_PER_SPONSOR_CENTS)
+    expect(resolvePlanCredit(1, UNCAPPED)).toBe(CREDIT_PER_SPONSOR_CENTS)
   })
 
   it('pays $15 at three sponsors — the guidebook-unlock milestone that used to pay nothing', () => {
-    expect(resolvePlanCredit(3)).toBe(1500)
+    expect(resolvePlanCredit(3, UNCAPPED)).toBe(1500)
   })
 
   it('pays nothing at zero sponsors', () => {
-    expect(resolvePlanCredit(0)).toBe(0)
+    expect(resolvePlanCredit(0, UNCAPPED)).toBe(0)
   })
 
   it('never returns a positive credit for a negative or absurd count', () => {
     // A negative count is unreachable through getActiveSponsorCount, but a
     // negative credit here would become a positive CHARGE on the invoice —
     // the handler posts `amount: -planCreditCents`.
-    expect(resolvePlanCredit(-1)).toBe(0)
-    expect(resolvePlanCredit(-1000)).toBe(0)
-    expect(resolvePlanCredit(Number.NEGATIVE_INFINITY)).toBe(0)
+    expect(resolvePlanCredit(-1, UNCAPPED)).toBe(0)
+    expect(resolvePlanCredit(-1000, UNCAPPED)).toBe(0)
+    expect(resolvePlanCredit(Number.NEGATIVE_INFINITY, UNCAPPED)).toBe(0)
   })
 
   it('has no cliffs — every sponsor is worth the same as the one before it', () => {
     // This is the whole point of the change. The old shape paid $0 for the
     // 4th sponsor and $15 for the 6th; a host could not predict either.
     for (let n = 1; n <= 6; n++) {
-      expect(resolvePlanCredit(n) - resolvePlanCredit(n - 1)).toBe(CREDIT_PER_SPONSOR_CENTS)
+      expect(resolvePlanCredit(n, UNCAPPED) - resolvePlanCredit(n - 1, UNCAPPED)).toBe(CREDIT_PER_SPONSOR_CENTS)
     }
   })
 
@@ -64,15 +78,52 @@ describe('resolvePlanCredit', () => {
     // 5 → $10, 6 → $25, everything else $0.
     const previous = (n: number) => (n >= 6 ? 2500 : n >= 5 ? 1000 : 0)
     for (let n = 0; n <= 6; n++) {
-      expect(resolvePlanCredit(n)).toBeGreaterThanOrEqual(previous(n))
+      expect(resolvePlanCredit(n, UNCAPPED)).toBeGreaterThanOrEqual(previous(n))
     }
   })
 
-  it('stays well under the cheapest monthly plan at the slot ceiling', () => {
-    // 6 is the schema cap (guidebook_sponsors_slot_number_check). $30 against
-    // a $49 minimum plan means the credit cannot exceed an invoice today —
-    // the assumption the handler's missing cap rests on.
-    expect(resolvePlanCredit(6)).toBe(3000)
-    expect(resolvePlanCredit(6)).toBeLessThan(4900)
+  it('never credits more than the plan costs', () => {
+    // The cap that became mandatory when the 6-sponsor ceiling was dropped.
+    // 40 sponsors earn $200; a 5-property plan costs $98. The org is credited
+    // $98 — its bill floors at zero and the surplus is NOT carried forward.
+    const fiveProperties = monthlyCostCents(5)!
+    expect(fiveProperties).toBe(9_800)
+    expect(resolvePlanCredit(40, fiveProperties)).toBe(fiveProperties)
+  })
+
+  it('credits the full earned amount whenever it fits under the plan cost', () => {
+    // The cap must not clip a credit that was always affordable — the common
+    // case, and the one a naive Math.min could get wrong by capping at the
+    // wrong figure.
+    const oneProperty = monthlyCostCents(1)!
+    expect(oneProperty).toBe(4_900)
+    expect(resolvePlanCredit(3, oneProperty)).toBe(1_500)
+  })
+
+  it('is exactly the plan cost at the break-even sponsor count, never a cent more', () => {
+    // The boundary. At $49 and $5/sponsor, 10 sponsors is $50 — the first
+    // count that exceeds a single-property plan.
+    const oneProperty = monthlyCostCents(1)!
+    expect(resolvePlanCredit(9,  oneProperty)).toBe(4_500)
+    expect(resolvePlanCredit(10, oneProperty)).toBe(oneProperty)
+    expect(resolvePlanCredit(99, oneProperty)).toBe(oneProperty)
+  })
+
+  it('credits nothing when the plan cost could not be resolved', () => {
+    // The handler passes null through as a skip rather than calling this, but
+    // a zero/negative/NaN cap reaching here must not be read as "unlimited".
+    // Crediting on an unknown cap is money out the door; skipping a cycle is
+    // recoverable.
+    expect(resolvePlanCredit(5, 0)).toBe(0)
+    expect(resolvePlanCredit(5, -100)).toBe(0)
+    expect(resolvePlanCredit(5, Number.NaN)).toBe(0)
+    expect(resolvePlanCredit(5, Number.POSITIVE_INFINITY)).toBe(0)
+  })
+
+  it('never returns a negative credit — the handler posts the NEGATION of this', () => {
+    // `amount: -planCreditCents`, so a negative here becomes a CHARGE.
+    for (const [count, cap] of [[40, 9_800], [1, 4_900], [0, 4_900], [-5, 4_900]] as const) {
+      expect(resolvePlanCredit(count, cap)).toBeGreaterThanOrEqual(0)
+    }
   })
 })

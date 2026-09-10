@@ -184,7 +184,11 @@ export const guidebookDailyMonitorOrg = inngest.createFunction(
 
         // current_period_end rides along so the handler has the idempotency
         // key without a second Stripe call.
-        return { stripeCustomerId: org.stripe_customer_id!, currentPeriodEnd: subscription.current_period_end }
+        return {
+          stripeCustomerId:     org.stripe_customer_id!,
+          currentPeriodEnd:     subscription.current_period_end,
+          stripeSubscriptionId: org.stripe_subscription_id!,
+        }
       })
 
       if (creditEvent) {

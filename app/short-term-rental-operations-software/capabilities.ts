@@ -25,11 +25,11 @@
 
 import {
   CREDIT_PER_SPONSOR_CENTS,
-  MAX_SPONSORS_PER_ORG,
-  MAX_SPONSOR_CREDIT_CENTS,
   SPONSOR_PRICE_CENTS,
+  sponsorsToCoverPlan,
 } from '@/lib/guidebook/sponsor-economics'
-import { MAX_SELF_SERVE_PROPERTIES } from '@/lib/stripe/brackets'
+import { MAX_SPONSORS_PER_PROPERTY } from '@/lib/guidebook/assignment-constants'
+import { MAX_SELF_SERVE_PROPERTIES, monthlyCostCents } from '@/lib/stripe/brackets'
 
 export interface Capability {
   title: string
@@ -48,6 +48,30 @@ export interface Pillar {
 }
 
 const dollars = (cents: number) => `$${cents / 100}`
+
+/**
+ * The smallest portfolio whose full sponsor roster covers its whole plan.
+ *
+ * Two independent limits meet here: a property may display
+ * MAX_SPONSORS_PER_PROPERTY sponsors, and it takes sponsorsToCoverPlan() of
+ * them to zero the bill. Below this size a host can sell every slot their
+ * guidebook has and still owe something; at and above it, a full roster
+ * covers the plan outright.
+ *
+ * SEARCHED rather than asserted, because the answer falls out of the bracket
+ * schedule and the display cap and would silently move if either changed —
+ * "5" typed here would be a claim with nothing holding it true.
+ */
+function firstFullyCoveredPortfolio(): number {
+  for (let n = 1; n <= MAX_SELF_SERVE_PROPERTIES; n++) {
+    const cost = monthlyCostCents(n)
+    if (cost === null) continue
+    if (n * MAX_SPONSORS_PER_PROPERTY >= sponsorsToCoverPlan(cost)) return n
+  }
+  return MAX_SELF_SERVE_PROPERTIES
+}
+
+const BREAK_EVEN_PROPERTIES = firstFullyCoveredPortfolio()
 
 /** The self-serve ceiling, stated once. */
 export const SELF_SERVE_CEILING = MAX_SELF_SERVE_PROPERTIES
@@ -157,30 +181,43 @@ export const PILLARS: Pillar[] = [
     tag:     'Software paid for',
     heading: 'Local businesses fund your guidebook. Literally.',
     claim:
-      `Your guest guidebook carries up to ${MAX_SPONSORS_PER_ORG} local sponsors. Each pays ` +
-      `${dollars(SPONSOR_PRICE_CENTS)} a month, and ${dollars(CREDIT_PER_SPONSOR_CENTS)} of that credits ` +
-      'straight against your FieldStay bill — from the first sponsor, with no threshold to clear.',
+      `Your guest guidebook carries local sponsors. Each pays ${dollars(SPONSOR_PRICE_CENTS)} a month, and ` +
+      `${dollars(CREDIT_PER_SPONSOR_CENTS)} of that credits straight against your FieldStay bill — from the ` +
+      'first sponsor, with no threshold to clear and no cap on how many you sign. Enough of them and your ' +
+      'bill reaches zero.',
     items: [
       {
         title: 'A turnkey sponsor media kit',
         body:
           'FieldStay generates the pitch — a print-ready one-pager for restaurants, activity companies and ' +
-          'rental shops — so selling a slot is a conversation, not a design project.',
+          'rental shops — so selling a slot is a conversation, not a design project. Every slot gets its own ' +
+          'link that previews the listing and lets the business subscribe on the spot.',
         source: 'guidebook_sponsors.media_kit_token',
       },
       {
-        title: `${dollars(SPONSOR_PRICE_CENTS)} per sponsor, ${dollars(CREDIT_PER_SPONSOR_CENTS)} back to you`,
+        title: `${dollars(SPONSOR_PRICE_CENTS)} per sponsor, ${dollars(CREDIT_PER_SPONSOR_CENTS)} back to you, no ceiling`,
         body:
-          'A flat one-third revenue share, paid as an automatic credit on your invoice every billing cycle. ' +
-          'No tiers, no minimum, no thresholds that pay nothing for the fourth sponsor.',
+          'A flat one-third revenue share, credited automatically on your invoice every billing cycle. No ' +
+          'tiers, no minimum, and no limit on sponsor count — the only cap is your own plan cost, because ' +
+          'the credit stops once your bill reaches zero rather than accruing a balance.',
         source: 'lib/guidebook/helpers.ts → resolvePlanCredit()',
       },
       {
-        title: `Up to ${dollars(MAX_SPONSOR_CREDIT_CENTS)} a month at ${MAX_SPONSORS_PER_ORG} sponsors`,
+        title: 'At scale, the software pays for itself outright',
         body:
-          `${MAX_SPONSORS_PER_ORG} is the hard ceiling, enforced in the database rather than by policy — kept ` +
-          'small on purpose so a guest sees a curated list of genuinely local recommendations, not an ad wall.',
-        source: 'guidebook_sponsors_slot_number_check',
+          `Each property shows up to ${MAX_SPONSORS_PER_PROPERTY} local businesses, so a portfolio of ` +
+          `${BREAK_EVEN_PROPERTIES} properties has room for ${BREAK_EVEN_PROPERTIES * MAX_SPONSORS_PER_PROPERTY} ` +
+          `sponsors — exactly what it takes to cover a ${BREAK_EVEN_PROPERTIES}-property plan in full. Past ` +
+          'that the ratio improves: bigger portfolios need fewer sponsors per property to reach zero.',
+        source: 'MAX_SPONSORS_PER_PROPERTY · sponsorsToCoverPlan()',
+      },
+      {
+        title: 'Guests still see a curated list, not an ad wall',
+        body:
+          `Selling more sponsorships never crowds a guest. How many you may sell is unbounded; how many any ` +
+          `single property DISPLAYS is ${MAX_SPONSORS_PER_PROPERTY}, chosen for that property. The two limits ` +
+          'are separate on purpose.',
+        source: 'lib/guidebook/assignment-constants.ts → MAX_SPONSORS_PER_PROPERTY',
       },
     ],
   },

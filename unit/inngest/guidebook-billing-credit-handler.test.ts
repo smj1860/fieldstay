@@ -4,11 +4,16 @@ vi.mock('@/lib/guidebook/helpers', () => ({
   getActiveSponsorCount: vi.fn(),
   // resolvePlanCredit is pure — re-implement its documented rule here rather
   // than pulling in the real module, keeping this test hermetic. Flat $5 per
-  // active sponsor; unit/lib/guidebook-plan-credit.test.ts covers the real one.
-  resolvePlanCredit: vi.fn((count: number) => Math.max(0, count) * 500),
+  // active sponsor, capped at the plan cost;
+  // unit/lib/guidebook-plan-credit.test.ts covers the real one.
+  resolvePlanCredit: vi.fn((count: number, planCostCents: number) =>
+    Math.min(Math.max(0, count) * 500, planCostCents)),
 }))
 vi.mock('@/lib/stripe/client', () => ({
-  stripe: { invoiceItems: { create: vi.fn() } },
+  stripe: {
+    invoiceItems:  { create: vi.fn() },
+    subscriptions: { retrieve: vi.fn() },
+  },
 }))
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
@@ -30,14 +35,33 @@ function creditEvent(overrides: Record<string, unknown> = {}) {
       orgId:            'org_1',
       stripeCustomerId: 'cus_1',
       currentPeriodEnd: 1_800_000_000,
+      // The handler re-retrieves this to resolve the plan cost that caps the
+      // credit — see the sponsor-uncapping change.
+      stripeSubscriptionId: 'sub_1',
       ...overrides,
     },
   }
 }
 
+/**
+ * The subscription the handler reads to derive the plan-cost cap.
+ *
+ * `quantity` is the org's property count and the interval decides whether the
+ * cap is the monthly or annual figure — both run through lib/stripe/brackets.ts
+ * in the handler. 5 properties is $98/mo, which is high enough not to bind on
+ * the small counts most of these tests use and low enough for the cap test
+ * below to reach.
+ */
+function mockSubscription(quantity = 5, interval: 'month' | 'year' = 'month') {
+  ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+    items: { data: [{ quantity, price: { recurring: { interval } } }] },
+  })
+}
+
 describe('guidebookBillingCreditHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSubscription()
   })
 
   it('posts a $25 invoice credit and audit-logs the 6-sponsor reward reason', async () => {
@@ -49,7 +73,7 @@ describe('guidebookBillingCreditHandler', () => {
       step:  makeStep(),
     })
 
-    expect(resolvePlanCredit).toHaveBeenCalledWith(6)
+    expect(resolvePlanCredit).toHaveBeenCalledWith(6, 9_800)
     expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
       expect.objectContaining({
         customer:    'cus_1',
@@ -64,10 +88,16 @@ describe('guidebookBillingCreditHandler', () => {
         orgId:      'org_1',
         action:     'billing.plan_credit.applied',
         targetType: 'organization',
-        metadata:   { reason: 'per_sponsor_credit', activeSponsorCount: 6, planCreditCents: 3000 },
+        metadata:   {
+          reason: 'per_sponsor_credit', activeSponsorCount: 6,
+          earnedCents: 3000, planCreditCents: 3000, planCostCents: 9_800, capped: false,
+        },
       }),
     )
-    expect(result).toEqual({ orgId: 'org_1', activeSponsorCount: 6, planCreditCents: 3000 })
+    expect(result).toEqual({
+      orgId: 'org_1', activeSponsorCount: 6, planCreditCents: 3000,
+      planCostCents: 9_800, capped: false,
+    })
   })
 
   it('posts a $25 invoice credit for 5 active sponsors — the one count whose amount is unchanged', async () => {
@@ -85,10 +115,16 @@ describe('guidebookBillingCreditHandler', () => {
     )
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: { reason: 'per_sponsor_credit', activeSponsorCount: 5, planCreditCents: 2500 },
+        metadata: {
+          reason: 'per_sponsor_credit', activeSponsorCount: 5,
+          earnedCents: 2500, planCreditCents: 2500, planCostCents: 9_800, capped: false,
+        },
       }),
     )
-    expect(result).toEqual({ orgId: 'org_1', activeSponsorCount: 5, planCreditCents: 2500 })
+    expect(result).toEqual({
+      orgId: 'org_1', activeSponsorCount: 5, planCreditCents: 2500,
+      planCostCents: 9_800, capped: false,
+    })
   })
 
   it('is a no-op at ZERO sponsors — never calls Stripe or writes an audit event', async () => {
@@ -168,5 +204,93 @@ describe('guidebookBillingCreditHandler', () => {
       invokeHandler(guidebookBillingCreditHandler, { event: creditEvent(), step: makeStep() }),
     ).rejects.toThrow('Request timed out')
     expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  // ── The plan-cost cap ───────────────────────────────────────────────────
+  //
+  // Added when 20260909234738_uncap_guidebook_sponsor_slots.sql removed the
+  // 6-sponsor ceiling. Until then the credit could not exceed the cheapest
+  // plan, so nothing here needed a cap at all.
+
+  it('caps the credit at the plan cost — an org cannot out-earn its own bill', async () => {
+    // 40 sponsors earn $200. A 5-property plan is $98. Stripe carries credit
+    // beyond the subtotal forward as customer balance indefinitely, so an
+    // uncapped credit would not merely zero the bill, it would discount every
+    // future invoice too.
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(40)
+    ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'ii_capped' })
+
+    const result = await invokeHandler(guidebookBillingCreditHandler, {
+      event: creditEvent(),
+      step:  makeStep(),
+    })
+
+    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 9_800)
+    expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: -9_800 }),
+      expect.anything(),
+    )
+    expect(result).toMatchObject({ planCreditCents: 9_800, capped: true })
+  })
+
+  it('says the plan is fully covered when the cap binds, rather than quoting a bare number', async () => {
+    // A host who signed 40 sponsors and sees "40 Sponsors — $98 off" with no
+    // explanation reads it as a billing bug.
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(40)
+    ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'ii_capped' })
+
+    await invokeHandler(guidebookBillingCreditHandler, { event: creditEvent(), step: makeStep() })
+
+    expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
+      expect.objectContaining({ description: expect.stringContaining('your full plan covered') }),
+      expect.anything(),
+    )
+  })
+
+  it('caps an ANNUAL subscription against the annual figure, not the monthly one', async () => {
+    // 5 properties annual is $980 (ten months for twelve). Capping an annual
+    // invoice at the MONTHLY cost would silently clip every annual org's
+    // credit to a twelfth of what it should be.
+    mockSubscription(5, 'year')
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(40)
+    ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'ii_annual' })
+
+    await invokeHandler(guidebookBillingCreditHandler, { event: creditEvent(), step: makeStep() })
+
+    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 98_000)
+  })
+
+  it('posts NOTHING when the plan cost cannot be resolved', async () => {
+    // Enterprise, a grandfathered price, or a subscription outside the
+    // published schedule. There is no trustworthy cap, and an over-credit is
+    // money out the door while a skipped cycle is recoverable.
+    ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: { data: [{ quantity: null, price: { recurring: { interval: 'month' } } }] },
+    })
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(40)
+
+    const result = await invokeHandler(guidebookBillingCreditHandler, {
+      event: creditEvent(),
+      step:  makeStep(),
+    })
+
+    expect(stripe.invoiceItems.create).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ skipped: true, reason: 'plan_cost_unresolved' })
+  })
+
+  it('posts NOTHING when the property count is above the self-serve schedule', async () => {
+    // monthlyCostCents() returns null past MAX_SELF_SERVE_PROPERTIES, which
+    // must read as "no cap available", never as zero or unlimited.
+    mockSubscription(500)
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(10)
+
+    const result = await invokeHandler(guidebookBillingCreditHandler, {
+      event: creditEvent(),
+      step:  makeStep(),
+    })
+
+    expect(stripe.invoiceItems.create).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ skipped: true, reason: 'plan_cost_unresolved' })
   })
 })

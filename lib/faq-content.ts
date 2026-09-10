@@ -352,12 +352,14 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
   {
     q: 'Can property management software pay for itself?',
     a:
-      'In FieldStay, partly and by design. Each property\'s guest guidebook can carry up to 6 local ' +
-      'business sponsors — restaurants, activity companies, rental shops. A sponsor pays $15/month for the ' +
+      'In FieldStay, yes — completely, at portfolio scale. Each property\'s guest guidebook carries local ' +
+      'business sponsors: restaurants, activity companies, rental shops. A sponsor pays $15/month for the ' +
       'placement and $5/month of that is credited automatically against your FieldStay invoice, starting ' +
-      'with the first sponsor and with no threshold to clear. Six sponsors is $30/month back. FieldStay ' +
-      'generates the print-ready pitch used to sell the slots. This is a revenue share, not a discount ' +
-      'code, and the credit applies every billing cycle the sponsor stays active.',
+      'with the first sponsor and with no threshold to clear. There is no limit on how many sponsors you ' +
+      'sign; the only ceiling is your own bill, because the credit stops once it reaches zero rather than ' +
+      'building a balance. A property displays up to 4 sponsors, so a 5-property portfolio has room for the ' +
+      '20 sponsors that cover a 5-property plan outright — and larger portfolios need fewer sponsors per ' +
+      'property to get there. FieldStay generates the print-ready pitch used to sell the slots.',
   },
   {
     q: 'What is the difference between a PMS and an operations platform?',
@@ -860,7 +862,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'gb-sponsors',
         question: 'How do guidebook sponsors work?',
         answer:
-          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages, and every active sponsor takes $5/month off your FieldStay bill — from the first one, with no thresholds. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial), which is a separate, non-monetary milestone from the credit. Add one at Guidebook → Sponsors → Add Sponsor.',
+          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages, and every active sponsor takes $5/month off your FieldStay bill — from the first one, with no thresholds and no limit on how many you sign. The credit is capped only by your own plan cost: it can take your bill to zero, but it does not build a balance beyond that. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial), which is a separate, non-monetary milestone from the credit. Add one at Guidebook → Sponsors → Add Sponsor.',
       },
       {
         id:       'gb-sponsor-credit-timing',
