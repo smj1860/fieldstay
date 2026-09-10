@@ -307,6 +307,45 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },
   OPENAI_API_KEY:            { tier: 'optional', schema: nonEmpty, why: 'support-bot knowledge base embeddings' },
 
+  // Thumbtack Request Flow Widget scaffolding — see lib/integrations/thumbtack.ts.
+  // Optional/feature-gated like the rest of this block: isThumbtackConfigured()
+  // hides every "Find a Pro" entry point until these are set, rather than
+  // shipping a broken CTA. THUMBTACK_ENVIRONMENT is the widget host
+  // ({{environment}} in Thumbtack's docs — staging-partner.thumbtack.com or
+  // thumbtack.com), not a secret, but lives here anyway so the four vars are
+  // configured (or not) together — it also selects which API/OAuth hosts
+  // resolveThumbtackEnvironment() resolves to (their Environments doc:
+  // api.thumbtack.com + auth.thumbtack.com for production,
+  // staging-api./staging-auth. for staging).
+  THUMBTACK_ENVIRONMENT: {
+    tier: 'optional', schema: httpUrl,
+    why: 'the {{environment}} host for Request Flow Widget URLs, the postMessage origin check, and which API/OAuth hosts to use',
+  },
+  // OAuth 2.0 client credentials — confirmed from Thumbtack's Environments
+  // doc (separate clientID/clientSecret per environment; using
+  // production credentials against staging, or vice versa, errors).
+  THUMBTACK_CLIENT_ID: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'OAuth2 client_credentials grant against THUMBTACK_ENVIRONMENT\'s auth host — see getThumbtackAccessToken()',
+  },
+  THUMBTACK_CLIENT_SECRET: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'OAuth2 client_credentials grant, paired with THUMBTACK_CLIENT_ID',
+  },
+  // Genuinely optional, unlike the two above: their Troubleshooting doc's
+  // proxy_oauth_failed entry implies an `audience` param is expected by at
+  // least some partner configurations, but names no default value and no
+  // account-specific value — omitted from the token request entirely unless
+  // set, since guessing one risks causing that exact error.
+  THUMBTACK_AUDIENCE: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'OAuth2 token request audience param — only send if a Thumbtack rep confirms this account needs one',
+  },
+  THUMBTACK_UTM_SOURCE: {
+    tier: 'optional', schema: prefixed('cma-'),
+    why: 'utm_source on every Request Flow URL; Thumbtack requires the cma- prefix on partner accounts',
+  },
+
   // ── Demo surface (all-or-nothing) ─────────────────────────────────────────
   DEMO_ENTRY_SECRET: {
     tier: 'optional', schema: z.string().min(32),

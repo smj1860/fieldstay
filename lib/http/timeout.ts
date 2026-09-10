@@ -30,6 +30,9 @@ export const SMS_TIMEOUT_MS = 10_000
 /** Kroger auth/product/cart API. */
 export const KROGER_TIMEOUT_MS = 15_000
 
+/** Thumbtack OAuth token exchange and partner API calls. */
+export const THUMBTACK_TIMEOUT_MS = 15_000
+
 /**
  * Anthropic messages API — item-name normalization inside the Kroger cart
  * builder's Inngest step. Generous relative to the others because it is a

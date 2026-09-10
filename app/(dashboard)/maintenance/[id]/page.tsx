@@ -8,6 +8,8 @@ import { unwrapJoin }                     from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { QuoteComparison }            from '@/components/work-orders/quote-comparison'
 import type { QuoteSummary, QuoteLineItem } from '@/components/work-orders/quote-comparison'
+import { isThumbtackConfigured }      from '@/lib/integrations/thumbtack'
+import { FindProOnThumbtackSection }  from '@/components/thumbtack/FindProOnThumbtackSection'
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -37,7 +39,7 @@ export default async function WorkOrderPage({ params }: Props) {
         vendor_rating, vendor_rating_notes,
         vendor_dispatch_email,
         created_at, updated_at,
-        properties ( name, address, city, state, access_instructions ),
+        properties ( name, address, city, state, zip, access_instructions ),
         vendors ( id, name, specialty, phone ),
         reported_by_crew:reported_by_crew_member_id ( name )
       `)
@@ -228,6 +230,17 @@ export default async function WorkOrderPage({ params }: Props) {
         workOrderStatus={wo.status}
         vendors={(orgVendors ?? []).map((v) => ({ id: v.id, name: v.name }))}
       />
+
+      {isThumbtackConfigured() && !vendor && wo.category && (
+        <div className="mt-4">
+          <FindProOnThumbtackSection
+            categoryKey={wo.category}
+            zipCode={property?.zip ?? null}
+            categoryLabel={`${wo.category.replace('_', ' ')} vendor`}
+            workOrderId={wo.id}
+          />
+        </div>
+      )}
     </div>
   )
 }

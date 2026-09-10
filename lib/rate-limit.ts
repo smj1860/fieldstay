@@ -197,6 +197,18 @@ export const integrationResyncLimiter = new Ratelimit({
   prefix:    'integration-resync',
 })
 
+// Manual "Find a Pro" search button (Crew, Maintenance, Work Order detail) —
+// same rationale as integrationResyncLimiter: nothing stops a PM from
+// mashing the button, and every search is a real call against Thumbtack's
+// partner API once searchThumbtackPros() is implemented. Keyed per user, not
+// per org, since the three surfaces don't share a natural per-org key.
+export const thumbtackSearchRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(10, '60 s'),
+  analytics: true,
+  prefix:    'rl:thumbtack-search',
+})
+
 // Proactive outbound budget for our own calls TO Hospitable's API (not an
 // inbound limit on FieldStay's endpoints, unlike the others in this file).
 // Hospitable's documented general API limit is ~60 requests/minute per

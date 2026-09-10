@@ -183,6 +183,7 @@ export type AuditAction =
   | 'inspection.started'
   | 'inspection.completed'
   | 'sync.incident.recorded'
+  | 'thumbtack.request_flow.completed'
 
 interface AuditParams {
   orgId?:         string
