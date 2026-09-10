@@ -36,6 +36,24 @@ import type { WoCategory, CrewRole } from '@/types/database'
 //     ThumbtackPro type is confirmed against Discovery Lite's schema, NOT
 //     against /businesses/search's — they may not be the same endpoint).
 //
+//     OPEN QUESTION as of Thumbtack's Widget Events doc: there is a THIRD
+//     candidate shape for "let a PM browse pros" — a "Pro List Widget", a
+//     separate embeddable iframe (sibling to the Request Flow Widget, not a
+//     REST endpoint) whose own postMessage events are confirmed:
+//     THUMBTACK_PL_SEARCH_RESULT ({ category, zip_code, number_of_pros } —
+//     NO pro-level data, just a result count) and THUMBTACK_PL_CLOSE, plus
+//     THUMBTACK_SP_PRO_VIEW/THUMBTACK_SP_CLOSE for its Service Page and the
+//     same THUMBTACK_RF_* events once a request starts from inside it. That
+//     PL_SEARCH_RESULT carries no pro data at all is the tell: Thumbtack's
+//     own widget renders the list internally, so this may mean the entire
+//     ThumbtackProCard / searchThumbtackPros() design here — fetch pros
+//     server-side, render FieldStay's own cards — is the wrong shape, and
+//     the real fix is a ProListModal iframe component (mirroring
+//     RequestFlowModal) once its embed URL and params are confirmed, not a
+//     REST call at all. Not resolved without Thumbtack confirming which of
+//     /businesses/search, Discovery Lite, and the Pro List Widget is the
+//     intended partner integration path — do not pick one by guessing.
+//
 // isThumbtackConfigured() gates every call site — CLAUDE.md's SMS_ENABLED
 // pattern: fail closed and hide the feature entirely rather than show a
 // broken CTA when unconfigured (see the four THUMBTACK_* entries in
