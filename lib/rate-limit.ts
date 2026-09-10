@@ -279,6 +279,30 @@ export const hostexApiHourlyLimiter = new Ratelimit({
   prefix:    'hostex-api-hourly',
 })
 
+// Proactive outbound budget for our own calls TO Lodgify's Public API, keyed
+// PER CONNECTION — Lodgify authenticates with a per-account API key, so one
+// org's initial sync cannot spend another's quota, the same reasoning as
+// hostexApiLimiter.
+//
+// 60/min is DELIBERATELY far below Lodgify's published ceiling (~750 calls per
+// minute), and that is not the usual 10%-headroom convention — it is a
+// deliberate under-spend while the real limit is unverified. Lodgify's own
+// docs are unreachable to automated fetches, and third-party reports describe
+// tighter effective limits than the published figure plus bare 429s with no
+// usable backoff guidance. A first sync that is slower than it needs to be
+// costs minutes; one that trips an undocumented ceiling on a prospect's
+// account costs the account.
+//
+// Raise it once a real connection has run a full backfill and the response
+// headers say what the true budget is — see
+// docs/Integrations/lodgify/ENABLEMENT.md.
+export const lodgifyApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(60, '60 s'),
+  analytics: true,
+  prefix:    'lodgify-api',
+})
+
 // Proactive outbound budget for our own calls TO Kroger's API — same
 // rationale as hospitableApiLimiter/OwnerRez's per-IP tracker above: all
 // FieldStay tenants share one Vercel deployment's outbound identity (one

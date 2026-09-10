@@ -37,6 +37,17 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
       },
     ],
   },
+  lodgify: {
+    description: 'Syncs your Lodgify properties and bookings, and posts booking revenue to owner ledgers automatically. Your Lodgify plan must include Public API access.',
+    fields: [
+      {
+        key:         'apiKey',
+        label:       'API Key',
+        placeholder: 'Find in Lodgify under Settings → Public API',
+        sensitive:   true,
+      },
+    ],
+  },
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty: {
   //   description: 'Syncs your Guesty listings and reservations automatically.',
@@ -64,6 +75,7 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
   hostex:     'Syncs properties and reservations from your Hostex account. Posts booking revenue to owner ledgers automatically.',
+  lodgify:    'Syncs properties and bookings from your Lodgify account, and posts booking revenue to owner ledgers automatically. Updates once daily — Lodgify webhooks are held off until their delivery contract is verified, so a change made there can take up to 24 hours to appear. Disconnecting removes FieldStay\u2019s copy of your API key; Lodgify has no way for us to revoke it, so rotate the key in Lodgify if you want it dead immediately.',
   kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 

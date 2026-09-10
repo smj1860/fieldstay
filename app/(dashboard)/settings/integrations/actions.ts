@@ -10,6 +10,7 @@ import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { tryUnwrap, reportQueryError } from '@/lib/supabase/unwrap'
 import { hostawayExchangeCredentials } from '@/lib/integrations/providers/hostaway'
+import { lodgifyVerifyApiKey } from '@/lib/integrations/providers/lodgify'
 
 export async function getSyncProgress(providerId: string): Promise<{
   propertiesFound: number | null
@@ -236,6 +237,25 @@ export async function triggerResync(
       })
       break
 
+    case 'lodgify':
+      // integration/lodgify.sync.requested, not the daily reconcile event: a
+      // manual resync should re-read PROPERTIES too (a renamed or newly-added
+      // listing), and re-post revenue for every confirmed stay rather than only
+      // new ones. lodgifyInitialSync is idempotent — properties upsert on
+      // (org_id, external_id, external_source), bookings the same, and
+      // handleBookingConfirmed dedups on source_reference_id — so "resync" is
+      // genuinely re-runnable and is what REPAIRS an org whose first sync
+      // failed partway.
+      await inngest.send({
+        name: 'integration/lodgify.sync.requested',
+        data: {
+          user_id:          connection.user_id,
+          org_id:           connection.org_id ?? membership.org_id,
+          external_user_id: connection.external_user_id ?? '',
+        },
+      })
+      break
+
     case 'kroger':
       // Kroger has no property/booking sync — this re-runs the nearest-store
       // lookup that picks preferred_retailer, in case the org's properties
@@ -406,21 +426,123 @@ export async function disconnectIntegration(
 }
 
 /**
- * Credential-entry connect flow for API-key-based providers (Hostaway).
+ * Credential-entry connect flow for API-key-based providers (Hostaway,
+ * Lodgify).
  *
- * Unlike the OAuth providers there is no browser redirect: the PM pastes an
- * Account ID and API Key, and this exchanges them for a Bearer token server-
- * side. Hostaway is the only provider on this path, so the finalize-connection
- * helper the OAuth callback uses does not fit — that helper starts from an
+ * Unlike the OAuth providers there is no browser redirect: the PM pastes
+ * credentials and this validates them server-side. The finalize-connection
+ * helper the OAuth callback uses does not fit — it starts from an
  * authorization code and a pending link row, neither of which exists here.
  *
- * The RAW API KEY IS NEVER STORED. hostawayExchangeCredentials trades it once
- * for a ~6-month Bearer token and only that token reaches the Vault, so a
- * database compromise cannot mint fresh tokens. The cost is that expiry needs a
- * human — see NON_REFRESHABLE_PROVIDERS in cron/integration-token-refresh.ts,
- * which emails the PM to reconnect rather than attempting a refresh that has
- * nothing to refresh from.
+ * ── WHAT REACHES THE VAULT, AND WHY IT DIFFERS BY PROVIDER ─────────────────
+ *
+ * Hostaway: the raw API key is NEVER stored. hostawayExchangeCredentials
+ * trades it once for a ~6-month Bearer token and only that token is kept, so a
+ * database compromise cannot mint fresh tokens. The cost is that expiry needs
+ * a human — see NON_REFRESHABLE_PROVIDERS in cron/integration-token-refresh.ts.
+ *
+ * Lodgify: the raw account API key IS what gets stored, because Lodgify offers
+ * nothing to exchange it for — no OAuth, no token endpoint, no per-integration
+ * credential of any kind. It is stored in Vault like every other secret here,
+ * but it is worth naming plainly that this is a long-lived, account-wide,
+ * non-expiring key that Lodgify also provides no way to revoke: disconnecting
+ * deletes our copy and nothing else. The PM is told to rotate it in Lodgify.
+ * That is a property of Lodgify's API, not a shortcut taken here.
  */
+
+/** Providers whose connect flow is PM-entered credentials rather than OAuth. */
+const API_KEY_CONNECT_PROVIDERS = new Set(['hostaway', 'lodgify'])
+
+/**
+ * A missing or malformed field the PM can fix by retyping. Its message is
+ * shown verbatim, unlike a provider error — which is why it is a distinct
+ * type rather than a string check.
+ */
+class CredentialInputError extends Error {}
+
+interface ApiKeyCredentialResult {
+  /** What goes into Vault. Not necessarily what the PM typed — see above. */
+  accessToken:     string
+  externalUserId:  string
+  /** Only for a credential that actually expires. */
+  expiresAt?:      string
+}
+
+async function exchangeApiKeyCredentials(
+  providerId:  string,
+  credentials: Record<string, string>,
+): Promise<ApiKeyCredentialResult> {
+  if (providerId === 'hostaway') {
+    const accountId = credentials.accountId?.trim()
+    const apiKey    = credentials.apiKey?.trim()
+    if (!accountId || !apiKey) throw new CredentialInputError('Account ID and API Key are both required')
+
+    const { accessToken, expiresAt, externalUserId } = await hostawayExchangeCredentials(accountId, apiKey)
+    return { accessToken, externalUserId, expiresAt }
+  }
+
+  const apiKey = credentials.apiKey?.trim()
+  if (!apiKey) throw new CredentialInputError('API Key is required')
+
+  // Verified BEFORE anything is stored: a key that cannot read a single
+  // property is not a connection, and storing it would produce an integration
+  // that looks connected and syncs nothing. No expiresAt — Lodgify keys do
+  // not expire.
+  const { externalUserId } = await lodgifyVerifyApiKey(apiKey)
+  return { accessToken: apiKey, externalUserId }
+}
+
+async function sendInitialSyncEvent(params: {
+  providerId:     string
+  userId:         string
+  orgId:          string
+  externalUserId: string
+}): Promise<void> {
+  const { inngest } = await import('@/lib/inngest/client')
+  const { providerId, userId, orgId, externalUserId } = params
+
+  if (providerId === 'hostaway') {
+    await inngest.send({
+      name: 'integration/hostaway.sync.requested',
+      data: { user_id: userId, org_id: orgId, provider_id: providerId, full_sync: true },
+    })
+    return
+  }
+
+  await inngest.send({
+    name: 'integration/lodgify.sync.requested',
+    data: { user_id: userId, org_id: orgId, external_user_id: externalUserId },
+  })
+}
+
+/**
+ * PM-facing copy for a failed connect.
+ *
+ * The provider's own error text is NEVER surfaced: hostawayExchangeCredentials
+ * includes the response body in its message, and that body echoes credentials
+ * often enough to matter.
+ *
+ * Lodgify's 403 gets its own sentence, and that distinction is the point.
+ * Lodgify gates the Public API on the account's PLAN, so a perfectly valid key
+ * on a Starter subscription is refused exactly like a bad one. "Invalid key"
+ * would send the PM to re-copy a key that was never the problem.
+ */
+function apiKeyConnectErrorMessage(providerId: string, message: string): string {
+  const lower = message.toLowerCase()
+
+  if (providerId === 'lodgify' && message.includes('403')) {
+    return 'Lodgify refused the key. The Public API is only available on Lodgify plans that include API access — check that yours does, then try again.'
+  }
+
+  if (message.includes('401') || message.includes('403') || lower.includes('invalid')) {
+    return providerId === 'lodgify'
+      ? 'Invalid API key — copy it again from Lodgify under Settings → Public API.'
+      : 'Invalid credentials — check your Account ID and API Key.'
+  }
+
+  return 'Connection failed. Please try again or contact support.'
+}
+
 export async function connectWithApiKey(
   providerId:  string,
   credentials: Record<string, string>
@@ -431,19 +553,13 @@ export async function connectWithApiKey(
   // client, and every id that reaches the exchange below must be one we
   // deliberately support on this path — an OAuth provider arriving here should
   // be refused, not handed PM-entered credentials.
-  if (providerId !== 'hostaway') {
+  if (!API_KEY_CONNECT_PROVIDERS.has(providerId)) {
     return { error: `${providerId} isn't available to connect yet.` }
   }
 
   try {
-    const accountId = credentials.accountId?.trim()
-    const apiKey    = credentials.apiKey?.trim()
-    if (!accountId || !apiKey) {
-      return { error: 'Account ID and API Key are both required' }
-    }
-
-    const { accessToken, expiresAt, externalUserId } =
-      await hostawayExchangeCredentials(accountId, apiKey)
+    const { accessToken, externalUserId, expiresAt } =
+      await exchangeApiKeyCredentials(providerId, credentials)
 
     await storeIntegrationToken({
       userId:         user.id,
@@ -470,8 +586,8 @@ export async function connectWithApiKey(
     if (!linked) {
       // The row exists and belongs to another org this user is also a member
       // of. Do NOT fire a sync attributed to this org — it would look for a
-      // token the connection does not hold.
-      return { error: 'That Hostaway account is already connected to a different organization.' }
+      // credential the connection does not hold.
+      return { error: `That ${getProvider(providerId).displayName} account is already connected to a different organization.` }
     }
 
     // provider_id only — never the Account ID, and obviously never the key.
@@ -484,28 +600,22 @@ export async function connectWithApiKey(
       metadata: { provider_id: providerId },
     })
 
-    const { inngest } = await import('@/lib/inngest/client')
-    await inngest.send({
-      name: 'integration/hostaway.sync.requested',
-      data: {
-        user_id:     user.id,
-        org_id:      membership.org_id,
-        provider_id: providerId,
-        full_sync:   true,
-      },
+    await sendInitialSyncEvent({
+      providerId,
+      userId:         user.id,
+      orgId:          membership.org_id,
+      externalUserId,
     })
 
     revalidatePath('/settings/integrations')
     return { success: true, externalUserId }
   } catch (err) {
-    // Never surface the provider's error text: hostawayExchangeCredentials
-    // includes the response body in its message, and that body is echoed
-    // credentials often enough to matter.
+    // A missing field is the PM's to fix and its message is shown verbatim.
+    // Everything else is mapped to fixed copy — never the provider's own text.
+    if (err instanceof CredentialInputError) return { error: err.message }
+
     const msg = err instanceof Error ? err.message : 'Connection failed'
     reportError(err, { site: 'serverAction.settings.integrations.connectWithApiKey', orgId: membership.org_id })
-    if (msg.includes('401') || msg.includes('403') || msg.toLowerCase().includes('invalid')) {
-      return { error: 'Invalid credentials — check your Account ID and API Key.' }
-    }
-    return { error: 'Connection failed. Please try again or contact support.' }
+    return { error: apiKeyConnectErrorMessage(providerId, msg) }
   }
 }

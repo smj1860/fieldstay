@@ -36,7 +36,7 @@ export type FieldStayEvents = {
       booking_id:  string
       property_id: string
       org_id:      string
-      source:      'ownerrez' | 'uplisting' | 'hospitable' | 'hostex' | 'hostaway'
+      source:      'ownerrez' | 'uplisting' | 'hospitable' | 'hostex' | 'hostaway' | 'lodgify'
       // Real total booking revenue, when the PMS reports one — populated
       // for 'hospitable' (📄 spec, pending financials:read), 'ownerrez'
       // (✅ confirmed live 2026-07-15, via charges[].owner_amount /
@@ -691,6 +691,52 @@ export type FieldStayEvents = {
       user_id:          string
       org_id:           string
       external_user_id: string
+    }
+  }
+
+  // ── Lodgify ───────────────────────────────────────────────────────────────
+  // Sent by connectWithApiKey once a PM's API key is verified and stored, and
+  // by the Settings "Trigger Resync" action. Consumed by lodgifyInitialSync,
+  // which re-reads PROPERTIES as well as bookings — that is the difference
+  // between a resync and the nightly sweep below.
+  'integration/lodgify.sync.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
+  // Per-connection booking sweep. Dispatched daily by
+  // lodgifyReservationReconcileCron. While Lodgify webhook registration stays
+  // gated off (see lib/integrations/providers/lodgify-webhook.ts) this is the
+  // ONLY ongoing sync a Lodgify connection gets, not a missed-webhook backstop.
+  'integration/lodgify.reservation_reconcile.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
+  // One inbound Lodgify delivery, authenticated by the 32-byte URL token at
+  // app/api/webhooks/lodgify/[token]. The route reads AT MOST a booking id out
+  // of the body and nothing else — Lodgify documents no webhook signature, so
+  // the payload is treated as an unauthenticated ping and every fact is
+  // re-read from the API by the handler.
+  'integration/lodgify.webhook.received': {
+    data: {
+      user_id:    string
+      org_id:     string
+      /** Lodgify's event name when the body carried one; '' otherwise. Logged only. */
+      event:      string
+      /**
+       * null when the delivery named no booking we could recognise — an
+       * unparseable body, or an id field spelled differently than
+       * lodgify.types.ts guesses. The handler sweeps a short recent window in
+       * that case rather than dropping the delivery.
+       */
+      booking_id: string | null
     }
   }
 

@@ -302,6 +302,13 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   // per-connection, captured into Vault/DB in Phase 2 — never a global env var.
   HOSTEX_CLIENT_ID:          { tier: 'optional', schema: nonEmpty, why: 'Hostex OAuth' },
   HOSTEX_CLIENT_SECRET:      { tier: 'optional', schema: nonEmpty, why: 'Hostex OAuth' },
+  // Lodgify needs no app-level credential at all — the PM supplies an account
+  // API key. This flag governs one thing: whether we REGISTER inbound webhooks
+  // on that PM's Lodgify account. Off (unset) until a live account confirms
+  // Lodgify's webhook contract; a connected org still syncs daily meanwhile.
+  // boolString, matching SMS_ENABLED: a typo'd 'TRUE' must fail the boot check
+  // rather than silently leaving the feature off with nobody the wiser.
+  LODGIFY_WEBHOOKS_ENABLED:  { tier: 'optional', schema: boolString, why: 'registers inbound webhooks on the PM Lodgify account; off until the webhook contract is verified' },
   TOMORROW_IO_API_KEY:       { tier: 'optional', schema: nonEmpty, why: 'weather signals for contextual guest SMS; throws when called unset' },
   ANTHROPIC_API_KEY:         { tier: 'optional', schema: prefixed('sk-ant-'), why: 'data-plate OCR and RepuGuard generation' },
   REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },

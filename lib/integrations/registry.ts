@@ -16,6 +16,7 @@ import { krogerProvider } from './providers/kroger'
 import { hostawayProvider } from './providers/hostaway'
 import { hospitableProvider } from './providers/hospitable'
 import { hostexProvider } from './providers/hostex'
+import { lodgifyProvider } from './providers/lodgify'
 // Future: import { guestyProvider } from './providers/guesty'
 
 const providers = new Map<string, IntegrationProvider>([
@@ -30,6 +31,14 @@ const providers = new Map<string, IntegrationProvider>([
   // Live: integration_providers.hostex.is_active flipped to true by
   // 20260816122829_activate_hostex_provider.sql once sync and webhooks shipped.
   ['hostex',     hostexProvider],
+  // HELD INACTIVE: integration_providers.lodgify.is_active is false, so
+  // neither PM-facing surface offers it. Registered here anyway because the
+  // adapter is what connectWithApiKey and the disconnect path resolve, and
+  // because the sync is complete — what is missing is a live Lodgify account
+  // to verify the response shapes and the webhook contract against. Flip the
+  // flag in its own commit once docs/Integrations/lodgify/ENABLEMENT.md is
+  // worked through, exactly as Hostex was.
+  ['lodgify',    lodgifyProvider],
   // ['guesty',   guestyProvider],
 ])
 
@@ -49,7 +58,7 @@ const providers = new Map<string, IntegrationProvider>([
  * Ordered most-established first, which is the order the connect surfaces
  * render them in.
  */
-export const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex', 'hostaway'] as const
+export const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex', 'hostaway', 'lodgify'] as const
 
 export type PmsProviderId = typeof PMS_PROVIDER_IDS[number]
 

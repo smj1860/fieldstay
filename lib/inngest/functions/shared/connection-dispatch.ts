@@ -2,7 +2,7 @@
 // ============================================================================
 // The dispatch-per-connection body shared by every PMS connection cron.
 //
-// Four crons across three providers are the same function with a handful of
+// Five crons across four providers are the same function with a handful of
 // strings changed: find every active connection for one provider, and send one
 // event per connection.
 //
@@ -10,6 +10,7 @@
 //   hospitable/reservation-reconcile-cron.ts
 //   hostex/reservation-reconcile-cron.ts
 //   hostaway/reservation-reconcile-cron.ts
+//   lodgify/reservation-reconcile-cron.ts
 //
 // This started as hospitable/connection-dispatch.ts, extracted when SonarQube
 // put the SECOND Hospitable copy at 43% duplicated. Hostex and Hostaway were
@@ -66,12 +67,13 @@ export type ConnectionDispatchEvent =
   | 'integration/hospitable.reservation_reconcile.requested'
   | 'integration/hostex.reservation_reconcile.requested'
   | 'integration/hostaway.reservation_reconcile.requested'
+  | 'integration/lodgify.reservation_reconcile.requested'
 
 export interface DispatchParams {
   step:   CronStep
   logger: CronLogger
   /** integration_connections.provider_id to scan for. */
-  provider: 'hospitable' | 'hostex' | 'hostaway'
+  provider: 'hospitable' | 'hostex' | 'hostaway' | 'lodgify'
   /** Names the RLS bypass — see ServiceRoleContext. */
   system: string
   /** fetchAllRows label, for pagination diagnostics. */
