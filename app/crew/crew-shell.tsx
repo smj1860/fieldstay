@@ -1,10 +1,13 @@
 'use client'
-import { useEffect, useRef, useState, useTransition, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition, useSyncExternalStore } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
 import { DexieProvider }           from '@/lib/dexie/context'
-import { CrewContext }              from '@/lib/crew/crew-context'
+import { CrewContext, useCrewContext } from '@/lib/crew/crew-context'
+import { useCrewT }                 from '@/lib/crew/i18n'
+import { setCrewLocale }            from './settings/actions'
+import type { CrewLocale }          from '@/types/database'
 import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -16,6 +19,7 @@ import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
+import { Button }                   from '@/components/ui/Button'
 import { MULTI_CREW_START_FAQ }     from '@/lib/faq-content'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -34,11 +38,13 @@ const PUSH_ENDPOINT = '/api/crew/push-subscribe' as const
 
 export function CrewShell({
   crewName,
+  crewLocale,
   userId,
   unreadCount,
   children,
 }: {
   crewName:     string
+  crewLocale:   CrewLocale
   userId:       string
   /** Server-rendered — see the note in CrewBottomNav. */
   unreadCount?: number | null
@@ -274,8 +280,13 @@ export function CrewShell({
     }
   }, [userId, signedOut])
 
+  const crewContextValue = useMemo(
+    () => ({ crewName, userId, crewLocale }),
+    [crewName, userId, crewLocale],
+  )
+
   return (
-    <CrewContext.Provider value={{ crewName, userId }}>
+    <CrewContext.Provider value={crewContextValue}>
     <DexieProvider userId={userId}>
       <div className="min-h-screen bg-canvas-themed flex flex-col max-w-lg mx-auto">
         {/* ── Branded header ─────────────────────────────────────────────── */}
@@ -535,6 +546,8 @@ function SyncStatus() {
 function CrewFaqPanel({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onClose={onClose} title="FieldStay Crew App — FAQ" mobileSheet>
+      <LanguageToggle />
+
       {FAQ_ITEMS.map((item, i) => (
         <FaqItem key={i} question={item.q} answer={item.a} />
       ))}
@@ -548,6 +561,61 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
         </p>
       </div>
     </Dialog>
+  )
+}
+
+function LanguageToggle() {
+  const { crewLocale } = useCrewContext()
+  const t = useCrewT()
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const choose = (next: CrewLocale) => {
+    if (next === crewLocale || isPending) return
+    setError(null)
+    startTransition(async () => {
+      const result = await setCrewLocale(next)
+      if (result.error) { setError(result.error); return }
+      router.refresh()
+    })
+  }
+
+  return (
+    <fieldset
+      style={{ border: 'none', padding: 0, margin: 0, marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}
+    >
+      <legend style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, padding: 0 }}>
+        {t('language')}
+      </legend>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant={crewLocale === 'en' ? 'primary' : 'secondary'}
+          disabled={isPending}
+          aria-pressed={crewLocale === 'en'}
+          onClick={() => choose('en')}
+          className="flex-1"
+        >
+          {t('languageEn')}
+        </Button>
+        <Button
+          type="button"
+          variant={crewLocale === 'es' ? 'primary' : 'secondary'}
+          disabled={isPending}
+          aria-pressed={crewLocale === 'es'}
+          onClick={() => choose('es')}
+          className="flex-1"
+        >
+          {t('languageEs')}
+        </Button>
+      </div>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }} role="alert">
+          {error}
+        </p>
+      )}
+    </fieldset>
   )
 }
 

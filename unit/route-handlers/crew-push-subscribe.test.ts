@@ -23,7 +23,7 @@ function mockAuthed(supabase: ReturnType<typeof makeSupabase>) {
     ok:       true,
     user:     { id: USER_ID },
     supabase: supabase as never,
-    crew:     { id: CREW_ID, org_id: ORG_ID },
+    crew:     { id: CREW_ID, org_id: ORG_ID, locale: 'en' },
   })
 }
 
