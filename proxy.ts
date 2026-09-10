@@ -69,7 +69,7 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // API + WebSocket connections. Sentry ingest host added for client-side
     // error/trace reporting (instrumentation-client.ts) — without this the
     // browser SDK's own requests get silently blocked by this same CSP.
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511737962364928.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511738488094720.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
 
     // Object/media: locked down entirely
     "object-src 'none'",
