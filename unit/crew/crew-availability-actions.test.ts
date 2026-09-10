@@ -13,7 +13,7 @@
 //    constraint — not on a client-generated primary key, so two devices
 //    toggling the same day cannot produce duplicate rows.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/crew-auth', () => ({ requireCrewMember: vi.fn() }))
@@ -21,6 +21,35 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { requireCrewMember } from '@/lib/crew-auth'
 import { saveCrewAvailability } from '@/app/crew/availability/actions'
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from '@/app/crew/availability/window'
+
+// ── Why the clock is frozen ────────────────────────────────────────────────
+//
+// saveCrewAvailability validates the requested date against a window measured
+// from `new Date()` — LOOKBACK_DAYS back, LOOKAHEAD_DAYS forward. Every case
+// below used one hardcoded date against that real clock, which is a time bomb
+// rather than a test: it passed for a month and then began failing on
+// 2026-09-10, the day TEST_DATE fell more than LOOKBACK_DAYS behind the real
+// "today". No code and no test had changed. Four cases went red at once, and
+// the failure reads as a broken action rather than an expired fixture.
+//
+// Freezing the clock — rather than deriving TEST_DATE from `new Date()` —
+// fixes it in the direction that keeps the fixture readable AND makes the
+// window a property of the test instead of the day it happens to run on.
+// A derived date would go green again but leave the boundary untested, which
+// is what let this sit here in the first place.
+//
+// Only Date is faked. Faking the whole timer set would stall the awaited
+// promises these cases depend on.
+const NOW       = new Date('2026-08-15T12:00:00Z')
+const TEST_DATE = '2026-08-10'
+
+/** `offsetDays` from the frozen NOW, as a YYYY-MM-DD string. */
+function dateOffsetFromNow(offsetDays: number): string {
+  const d = new Date(NOW)
+  d.setUTCDate(d.getUTCDate() + offsetDays)
+  return d.toISOString().slice(0, 10)
+}
 
 type Resp = { data?: unknown; error?: unknown }
 
@@ -51,7 +80,13 @@ function authAs(supabase: ReturnType<typeof makeSupabase>) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
   vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('saveCrewAvailability', () => {
@@ -60,7 +95,7 @@ describe('saveCrewAvailability', () => {
     authAs(supabase)
 
     const result = await saveCrewAvailability({
-      date: '2026-08-10', isAvailable: false, notes: 'family thing',
+      date: TEST_DATE, isAvailable: false, notes: 'family thing',
     })
 
     expect(result).toEqual({})
@@ -68,7 +103,7 @@ describe('saveCrewAvailability', () => {
     expect(upsert?.args[0]).toMatchObject({
       org_id:         'org_1',
       crew_member_id: 'crew_1',
-      available_date: '2026-08-10',
+      available_date: TEST_DATE,
       is_available:   false,
       notes:          'family thing',
     })
@@ -82,7 +117,7 @@ describe('saveCrewAvailability', () => {
     const supabase = makeSupabase({ data: null, error: null })
     authAs(supabase)
 
-    await saveCrewAvailability({ date: '2026-08-10', isAvailable: true, notes: null })
+    await saveCrewAvailability({ date: TEST_DATE, isAvailable: true, notes: null })
 
     const payload = supabase.calls.find((c) => c.method === 'upsert')?.args[0] as Record<string, unknown>
     expect(payload.org_id).toBe(CREW.org_id)
@@ -93,7 +128,7 @@ describe('saveCrewAvailability', () => {
     const supabase = makeSupabase()
     authAs(supabase)
 
-    await saveCrewAvailability({ id: 'avail_1', date: '2026-08-10', isAvailable: true, notes: null })
+    await saveCrewAvailability({ id: 'avail_1', date: TEST_DATE, isAvailable: true, notes: null })
 
     const eqs = supabase.calls.filter((c) => c.method === 'eq').map((c) => c.args)
     expect(eqs).toContainEqual(['id', 'avail_1'])
@@ -108,7 +143,7 @@ describe('saveCrewAvailability', () => {
     authAs(supabase)
 
     const result = await saveCrewAvailability({
-      id: 'someone_elses_row', date: '2026-08-10', isAvailable: true, notes: null,
+      id: 'someone_elses_row', date: TEST_DATE, isAvailable: true, notes: null,
     })
 
     expect(result.error).toBeTruthy()
@@ -118,7 +153,7 @@ describe('saveCrewAvailability', () => {
     const supabase = makeSupabase({ data: null, error: null })
     authAs(supabase)
 
-    await saveCrewAvailability({ date: '2026-08-10', isAvailable: false, notes: '   ' })
+    await saveCrewAvailability({ date: TEST_DATE, isAvailable: false, notes: '   ' })
 
     const payload = supabase.calls.find((c) => c.method === 'upsert')?.args[0] as Record<string, unknown>
     expect(payload.notes).toBeNull()
@@ -128,7 +163,7 @@ describe('saveCrewAvailability', () => {
     const supabase = makeSupabase({ data: null, error: { message: 'connection lost' } })
     authAs(supabase)
 
-    const result = await saveCrewAvailability({ date: '2026-08-10', isAvailable: false, notes: null })
+    const result = await saveCrewAvailability({ date: TEST_DATE, isAvailable: false, notes: null })
 
     expect(result.error).toBeTruthy()
   })
@@ -136,8 +171,52 @@ describe('saveCrewAvailability', () => {
   it('refuses when the crew profile cannot be verified', async () => {
     vi.mocked(requireCrewMember).mockResolvedValue({ ok: false, response: new Response(null) } as never)
 
-    const result = await saveCrewAvailability({ date: '2026-08-10', isAvailable: false, notes: null })
+    const result = await saveCrewAvailability({ date: TEST_DATE, isAvailable: false, notes: null })
 
     expect(result.error).toBeTruthy()
+  })
+
+  // ── The window itself ────────────────────────────────────────────────────
+  //
+  // Added after the frozen-clock fix above. The window had NO direct coverage:
+  // every case simply used a date that happened to sit inside it, so the only
+  // thing that ever exercised the boundary was the calendar rolling forward —
+  // which is how it came to be discovered as four unrelated-looking failures
+  // rather than one clear one. These pin both edges against the real
+  // constants, so a change to either is a deliberate act with a test to match.
+
+  it('accepts a date at the far edges of the window', async () => {
+    // The TRUE edges — exactly the range app/crew/availability/page.tsx
+    // renders. Asserting -(LOOKBACK_DAYS - 1) here instead would have written
+    // the off-by-one this found straight into the test: the earliest day the
+    // calendar offers was being refused. See the UTC-midnight note in
+    // actions.ts.
+    for (const offset of [-LOOKBACK_DAYS, 0, LOOKAHEAD_DAYS]) {
+      const supabase = makeSupabase({ data: null, error: null })
+      authAs(supabase)
+
+      const result = await saveCrewAvailability({
+        date: dateOffsetFromNow(offset), isAvailable: false, notes: null,
+      })
+
+      expect(result, `offset ${offset} should be inside the window`).toEqual({})
+    }
+  })
+
+  it('refuses a date beyond either edge, and never writes', async () => {
+    for (const offset of [-(LOOKBACK_DAYS + 1), LOOKAHEAD_DAYS + 1]) {
+      const supabase = makeSupabase({ data: null, error: null })
+      authAs(supabase)
+
+      const result = await saveCrewAvailability({
+        date: dateOffsetFromNow(offset), isAvailable: false, notes: null,
+      })
+
+      expect(result.error, `offset ${offset} should be rejected`).toBeTruthy()
+      expect(
+        supabase.calls.filter((c) => c.method === 'upsert'),
+        'a rejected date must not reach the database',
+      ).toEqual([])
+    }
   })
 })
