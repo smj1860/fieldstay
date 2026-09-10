@@ -103,6 +103,7 @@ function buildCsp(nonce: string | null, isDev: boolean) {
 // against the page files and against app/layout.tsx staying static.
 const PRERENDERED_ROUTES = new Set([
   '/',
+  '/short-term-rental-operations-software',
   '/dpa',
   '/hosts',
   '/strops',
@@ -260,6 +261,17 @@ const BYPASS_ROUTES = [
   '/pricing',
   '/enterprise',
   '/for-vendors',
+
+  // The category landing page — "short-term rental operations software".
+  // Same reasoning and same failure mode as every marketing page above. It is
+  // here rather than in PUBLIC_ROUTES for the reason the /dpa entry directly
+  // below spells out, which applies to a landing page too: a public route
+  // bounces an AUTHENTICATED visitor to /ops, so a customer sharing this URL
+  // with a logged-in colleague would send them to a dashboard instead of the
+  // page they were sent. It runs no auth check of its own — see the page's
+  // header comment for why that is deliberate — so nothing here needs a
+  // session either way.
+  '/short-term-rental-operations-software',
 
   // Data Processing Agreement. BYPASS rather than PUBLIC on purpose, and the
   // distinction matters for legal documents specifically: a public route

@@ -208,7 +208,15 @@ describe('guidebookDailyMonitorOrg (per-org handler)', () => {
 
     expect(step.sendEvent).toHaveBeenCalledWith('send-credit-evaluate', {
       name: 'guidebook/billing.credit.evaluate',
-      data: { orgId: 'org_1', stripeCustomerId: 'cus_1', currentPeriodEnd: periodEndUnix },
+      data: {
+        orgId:            'org_1',
+        stripeCustomerId: 'cus_1',
+        currentPeriodEnd: periodEndUnix,
+        // Rides along so the handler can resolve the plan cost that caps the
+        // credit without a second Supabase read — see the sponsor-uncapping
+        // change.
+        stripeSubscriptionId: 'sub_1',
+      },
     })
   })
 

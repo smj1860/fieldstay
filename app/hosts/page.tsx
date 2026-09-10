@@ -373,7 +373,7 @@ export default function HostsPage() {
               {
                 num: '01',
                 title: 'Self-Funding Guest Guidebook',
-                body: 'Local businesses sponsor a placement in your guest guidebook for $15/month each, and every active sponsor takes $5/month off your bill — from the first one. Six sponsors is $30/month back, more than half a Hosts plan, covered.',
+                body: 'Local businesses sponsor a placement in your guest guidebook for $15/month each, and every active sponsor takes $5/month off your bill — from the first one, with no limit on how many you sign. Each property shows up to 4, so a handful of listings with a full roster covers a meaningful slice of your plan; the credit is capped only by the bill itself.',
                 highlight: true,
               },
               {
