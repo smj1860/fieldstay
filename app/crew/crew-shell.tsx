@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState, useTransition, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition, useSyncExternalStore } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
@@ -280,8 +280,13 @@ export function CrewShell({
     }
   }, [userId, signedOut])
 
+  const crewContextValue = useMemo(
+    () => ({ crewName, userId, crewLocale }),
+    [crewName, userId, crewLocale],
+  )
+
   return (
-    <CrewContext.Provider value={{ crewName, userId, crewLocale }}>
+    <CrewContext.Provider value={crewContextValue}>
     <DexieProvider userId={userId}>
       <div className="min-h-screen bg-canvas-themed flex flex-col max-w-lg mx-auto">
         {/* ── Branded header ─────────────────────────────────────────────── */}
@@ -577,11 +582,13 @@ function LanguageToggle() {
   }
 
   return (
-    <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+    <fieldset
+      style={{ border: 'none', padding: 0, margin: 0, marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}
+    >
+      <legend style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, padding: 0 }}>
         {t('language')}
-      </p>
-      <div className="flex gap-2" role="group" aria-label={t('language')}>
+      </legend>
+      <div className="flex gap-2">
         <Button
           type="button"
           variant={crewLocale === 'en' ? 'primary' : 'secondary'}
@@ -608,7 +615,7 @@ function LanguageToggle() {
           {error}
         </p>
       )}
-    </div>
+    </fieldset>
   )
 }
 
