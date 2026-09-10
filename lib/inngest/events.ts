@@ -894,9 +894,14 @@ export type FieldStayEvents = {
 
   'guidebook/billing.credit.evaluate': {
     data: {
-      orgId:             string
-      stripeCustomerId:  string
-      currentPeriodEnd:  number  // Unix timestamp — used as idempotency key seed
+      orgId:                string
+      stripeCustomerId:     string
+      currentPeriodEnd:     number  // Unix timestamp — used as idempotency key seed
+      // The handler re-retrieves the subscription to resolve the org's plan
+      // cost, which is what caps the credit now that sponsors are unbounded.
+      // Passed rather than looked up from the org row so the handler needs no
+      // Supabase read of its own.
+      stripeSubscriptionId: string
     }
   }
 

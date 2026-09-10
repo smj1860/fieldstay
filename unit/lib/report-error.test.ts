@@ -131,3 +131,34 @@ describe('reportError — tags and extra', () => {
     expect((options as { extra: Record<string, unknown> }).extra.original_error).toBe('caller wins')
   })
 })
+
+// ============================================================================
+// Severity. reportError had no way to say "this is a signal, not a fault", so
+// every caller raised an error — including the ones whose own comments said
+// otherwise. The watchdog's slow-job report is literally introduced with "A
+// WARNING, not an error", and the Hospitable empty-teammate guard fires when a
+// guard WORKED and nothing was lost. Four of the seven unresolved Sentry
+// issues on 2026-09-06 were reports of that kind, sitting in the same list as
+// real crashes with nothing to filter one from the other.
+// ============================================================================
+describe('reportError — severity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('defaults to error, matching captureException on its own', () => {
+    reportError(new Error('boom'), { site: 'test.default' })
+    expect(captured()[0][1]).toMatchObject({ level: 'error' })
+  })
+
+  it('carries an explicit warning level through to Sentry', () => {
+    reportError(new Error('guard fired'), { site: 'test.guard', level: 'warning' })
+    expect(captured()[0][1]).toMatchObject({ level: 'warning' })
+  })
+
+  it('still reports the event — a warning is downgraded, never suppressed', () => {
+    reportError(new Error('guard fired'), { site: 'test.guard', level: 'warning' })
+    expect(captured()).toHaveLength(1)
+    expect((captured()[0][0] as Error).message).toBe('guard fired')
+  })
+})

@@ -48,6 +48,7 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // cookie lands on the right host.
 const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'Pricing',       href: '/pricing'     },
+  { label: 'STR Operations', href: '/short-term-rental-operations-software' },
   { label: 'Turnover App',  href: '/strops'      },
   { label: 'For Hosts',     href: '/hosts'       },
   { label: 'Enterprise',    href: '/enterprise'  },
@@ -361,10 +362,11 @@ export function HomepageContent() {
               your property&apos;s amenities and live weather. Guests opt in to receive their door
               code by text — the moment they submit their number, your opt-in rate is nearly
               complete. Local business sponsors pay $15/month for featured placement, and
-              every active sponsor takes $5/month off your FieldStay bill.
+              every active sponsor takes $5/month off your FieldStay bill — from the first
+              one, with no limit on how many you sign. Sign enough and the bill reaches zero.
             </p>
             <p className="text-xs text-white/30">
-              *Plan credits applied monthly based on active sponsor count.
+              *Plan credits applied monthly based on active sponsor count, capped at your plan cost.
             </p>
           </div>
         </div>

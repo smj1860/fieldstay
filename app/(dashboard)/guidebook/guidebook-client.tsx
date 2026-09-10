@@ -30,6 +30,16 @@ type Property = {
   amenities:  Json
 }
 
+/**
+ * How many slot rows to show an org that has not filled them yet.
+ *
+ * NOT a ceiling — see the slotCount derivation below. Six because that is
+ * what the schema used to permit and what the page has always looked like;
+ * an org with three sponsors should still see room to grow without having to
+ * discover a button first.
+ */
+const SLOT_FLOOR = 6
+
 const SLOT_TYPE_CONFIG: Record<GuidebookSlotType, { icon: LucideIcon; label: string }> = {
   morning_brew:      { icon: Sun,       label: 'Morning Brew' },
   dinner_pints:      { icon: Wine,      label: 'Dinner & Pints' },
@@ -269,6 +279,10 @@ export function GuidebookClient({
 }: Readonly<GuidebookClientProps>) {
   const [sponsors, setSponsors]       = useState<GuidebookSponsor[]>(initialSponsors)
   const [config, setConfig]           = useState<GuidebookConfiguration | null>(initialConfig)
+  // Rows the PM has added beyond the floor this session. Sponsors are
+  // unbounded, so this only ever grows; it resets on reload, by which point a
+  // slot the PM actually filled is reflected by highestOccupiedSlot instead.
+  const [extraSlots, setExtraSlots] = useState(0)
   const [editingSlot, setEditingSlot] = useState<number | null>(null)
   // Which sponsor's property list is open (bulk path), and which property's
   // sponsor list is open (override path). Never both.
@@ -348,6 +362,25 @@ export function GuidebookClient({
     return acc
   }, {})
 
+  // ── How many slot rows to render ────────────────────────────────────────
+  //
+  // Was a hardcoded [1, 2, 3, 4, 5, 6]. The database ceiling that justified it
+  // (guidebook_sponsors' CHECK slot_number BETWEEN 1 AND 6) was dropped by
+  // 20260909234738_uncap_guidebook_sponsor_slots.sql, and while it stood here
+  // a seventh sponsor was not merely uncapped-but-awkward — it was
+  // unreachable, because nothing rendered a row to add it from.
+  //
+  // Three inputs, in this order:
+  //   * SLOT_FLOOR keeps six empty rows visible for an org with no sponsors,
+  //     so the page still reads as a checklist to work through rather than a
+  //     blank panel with one button.
+  //   * the highest slot actually occupied, so a row is never hidden by the
+  //     floor — an org that reached slot 11 must still see slot 11.
+  //   * extraSlots, the rows the PM has explicitly asked for this session.
+  const highestOccupiedSlot = sponsors.reduce((max, s) => Math.max(max, s.slot_number), 0)
+  const slotCount  = Math.max(SLOT_FLOOR, highestOccupiedSlot) + extraSlots
+  const slotNumbers = Array.from({ length: slotCount }, (_, i) => i + 1)
+
   const editingSponsor = editingSlot !== null ? (sponsorsBySlot[editingSlot] ?? null) : null
 
   const assigningSponsor  = sponsors.find((s) => s.id === assigningSponsorId) ?? null
@@ -423,8 +456,14 @@ export function GuidebookClient({
           </div>
         </div>
 
+        {/* A fixed six pips used to BE the whole scale, because six was the
+            hard ceiling. Sponsors are unbounded now, so a full strip would
+            read as "done" to an org at 6 and look identical at 40 — the one
+            reading it must not lose. The strip still shows the first
+            SLOT_FLOOR, and anything past that is stated as a count rather
+            than silently dropped off the end. */}
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          {[1, 2, 3, 4, 5, 6].map((n) => (
+          {Array.from({ length: SLOT_FLOOR }, (_, i) => i + 1).map((n) => (
             <div
               key={n}
               style={{
@@ -434,6 +473,11 @@ export function GuidebookClient({
               }}
             />
           ))}
+          {activeSponsorCount > SLOT_FLOOR && (
+            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-green)', marginLeft: '2px' }}>
+              +{activeSponsorCount - SLOT_FLOOR}
+            </span>
+          )}
         </div>
       </div>
 
@@ -452,7 +496,7 @@ export function GuidebookClient({
               Sponsor Slots
             </h2>
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              {activeSponsorCount}/6 active
+              {activeSponsorCount} active
             </span>
           </div>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
@@ -462,7 +506,7 @@ export function GuidebookClient({
           </p>
         </div>
 
-        {[1, 2, 3, 4, 5, 6].map((slotNum) => {
+        {slotNumbers.map((slotNum) => {
           const sponsor   = sponsorsBySlot[slotNum]
           const statusCfg = sponsor ? STATUS_CONFIG[sponsor.status] : null
 
@@ -471,7 +515,7 @@ export function GuidebookClient({
               key={slotNum}
               style={{
                 display: 'flex', alignItems: 'center', padding: '16px 20px',
-                borderBottom: slotNum < 6 ? '1px solid var(--border)' : 'none',
+                borderBottom: slotNum < slotCount ? '1px solid var(--border)' : 'none',
                 gap: '16px',
               }}
             >
@@ -568,6 +612,25 @@ export function GuidebookClient({
             </div>
           )
         })}
+
+        {/* Sponsors are unbounded since 20260909234738_uncap_guidebook_sponsor_
+            slots.sql. Without this control the extra slots would exist in the
+            schema and be unreachable from the product — the ceiling would have
+            moved from the database into the UI, which is worse, because
+            nothing would say so. */}
+        <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'center' }}>
+          <button
+            type="button"
+            onClick={() => setExtraSlots((n) => n + 1)}
+            style={{
+              fontSize: '13px', fontWeight: '500', color: 'var(--text-secondary)',
+              backgroundColor: 'transparent', border: '1px dashed var(--border)',
+              borderRadius: 'var(--radius)', padding: '8px 16px', cursor: 'pointer',
+            }}
+          >
+            + Add another sponsor slot
+          </button>
+        </div>
       </div>
 
       {assignmentEnabled && (

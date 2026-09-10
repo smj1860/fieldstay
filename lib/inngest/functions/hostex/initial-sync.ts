@@ -25,7 +25,7 @@
 // ============================================================================
 
 import { inngest }             from '@/lib/inngest/client'
-import { NonRetriableError }   from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { translateSyncError }  from '@/lib/integrations/types'
 import { reportError }         from '@/lib/observability/report-error'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
@@ -86,7 +86,7 @@ export const hostexInitialSync = inngest.createFunction(
       // — must not spend an expired one.
       const getToken = async () => {
         const t = await getValidHostexToken(user_id)
-        if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
+        if (!t) throw reconnectRequired('No Hostex token found — reconnect required')
         return t
       }
 

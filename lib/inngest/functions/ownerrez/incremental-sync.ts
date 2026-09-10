@@ -48,8 +48,9 @@
 
 import { inngest }                      from '@/lib/inngest/client'
 import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
-import { NonRetriableError }            from 'inngest'
+import { rateLimitRetry }              from '@/lib/inngest/retry-after'
 import type { GetStepTools }            from 'inngest'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { OwnerRezApiClient }  from '@/lib/integrations/providers/ownerrez-api'
@@ -636,9 +637,10 @@ async function updateSyncCursor(
  * The three ways a connection sync fails, and what each one means for the
  * retry decision:
  *
- *   RateLimitError    → transient. Record it, RETHROW so Inngest retries with
- *                       backoff (the 5-minute budget window rolls well within
- *                       the retry schedule). Other connections are unaffected.
+ *   RateLimitError    → transient. Record it, then rethrow as a RetryAfterError
+ *                       so Inngest's next attempt lands when OwnerRez said to
+ *                       rather than wherever its generic backoff curve falls.
+ *                       Other connections are unaffected.
  *   TokenRevokedError → permanent until the PM reconnects. Mark the connection
  *                       revoked, notify, then throw NonRetriableError.
  *   anything else     → record status, count it against the circuit breaker,
@@ -656,7 +658,7 @@ async function handleConnectionSyncFailure(
   const humanError = translateSyncError(err)
 
   if (err instanceof RateLimitError) {
-    logger.warn(`[OwnerRez:${userId}] Rate limited (retry after ${err.retryAfter}s) — will retry with backoff`)
+    logger.warn(`[OwnerRez:${userId}] Rate limited (retry after ${err.retryAfter}s) — will retry after that interval`)
     reportError(err, { site: 'inngest.ownerrez-incremental-sync.sync-connection' })
 
     // Transient status only — don't flip the connection itself to 'error'.
@@ -666,7 +668,11 @@ async function handleConnectionSyncFailure(
       patch: { last_sync_status: 'rate_limited', last_sync_error: humanError },
     })
 
-    throw err
+    // Not `throw err`. A bare RateLimitError is a plain Error to Inngest, which
+    // then retries on its own exponential curve — ignoring the interval
+    // OwnerRez just supplied and, on a short window, spending the whole retry
+    // budget before it rolls. See lib/inngest/retry-after.ts.
+    throw rateLimitRetry(err)
   }
 
   if (err instanceof TokenRevokedError) {
@@ -696,7 +702,7 @@ async function handleConnectionSyncFailure(
     // MEDIUM-6: retrying only hits the same revoked token again. Raised after
     // the side effects above so this records as a distinct non-retriable
     // failure in Inngest's dashboard.
-    throw new NonRetriableError(humanError)
+    throw reconnectRequired(humanError)
   }
 
   logger.error(`[OwnerRez:${userId}] sync failed: ${err instanceof Error ? err.message : String(err)}`)

@@ -49,7 +49,23 @@ function invalidDateReason(date: string): string | null {
     return 'That date is not valid. Please reload and try again.'
   }
 
+  // Normalised to UTC MIDNIGHT before the window is derived, and that is the
+  // whole point rather than tidiness.
+  //
+  // `parsed` is always midnight (`${date}T00:00:00Z`). Leaving `today` at the
+  // current time-of-day made `min` midnight-minus-30-days PLUS the current
+  // clock time, so the earliest day the calendar renders —
+  // app/crew/availability/page.tsx builds its range from the same constants
+  // and stringifies to a DATE — compared as strictly less than `min` for all
+  // but the first instant of any UTC day, and was refused.
+  //
+  // A crew member tapping the leftmost day of their own calendar got "That
+  // date is outside the window you can request time off for." That is exactly
+  // the drift ./window.ts's docstring says sharing these constants prevents:
+  // the constants were shared, the COMPARISON was not — one side day-granular,
+  // the other timestamp-granular.
   const today = new Date()
+  today.setUTCHours(0, 0, 0, 0)
   const min   = new Date(today); min.setUTCDate(min.getUTCDate() - LOOKBACK_DAYS)
   const max   = new Date(today); max.setUTCDate(max.getUTCDate() + LOOKAHEAD_DAYS)
 

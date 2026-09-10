@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NonRetriableError } from 'inngest'
+import { NonRetriableError, RetryAfterError } from 'inngest'
 
 // ============================================================================
 // Regression tests for the 2026-08-17 production incident.
@@ -203,10 +203,30 @@ describe('hospIncrementalSync — rate limiting', () => {
     mock(resolveHospitableOwner).mockRejectedValue(new RateLimitError(5))
 
     const step = makeStep()
-    await expect(runSync(step)).rejects.toBeInstanceOf(RateLimitError)
+    await expect(runSync(step)).rejects.toBeInstanceOf(RetryAfterError)
 
     expect(resolveHospitableOwner).toHaveBeenCalledTimes(2)
     expect(step.sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands Inngest the provider's interval, not a generic backoff", async () => {
+    // THE SECOND HALF OF THE 2026-08-17 INCIDENT, still open until 2026-09-06.
+    // The handoff above rethrew a bare RateLimitError, which is a plain Error
+    // to Inngest — so "the correct next layer" retried on its own exponential
+    // curve, ignoring the number Hospitable had just supplied, and the run
+    // dead-lettered as `exhausted all retries: Rate limited — retry after 2s`.
+    //
+    // The TYPE is the assertion: a RateLimitError carries the interval in a
+    // field only we read, RetryAfterError carries it somewhere Inngest acts
+    // on. `retryAfter` is asserted in SECONDS because the constructor takes
+    // MILLISECONDS — passing the seconds straight through would schedule a 5ms
+    // wait for a 5s rate limit, which reads as fixed and is a retry storm.
+    mock(resolveHospitableOwner).mockRejectedValue(new RateLimitError(5))
+
+    await expect(runSync(makeStep())).rejects.toMatchObject({
+      name:       'RetryAfterError',
+      retryAfter: '5',
+    })
   })
 
   it('does not sleep at all on a clean call', async () => {

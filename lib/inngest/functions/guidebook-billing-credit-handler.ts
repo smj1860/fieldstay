@@ -1,6 +1,8 @@
 import { inngest } from '@/lib/inngest/client'
 import { getActiveSponsorCount, resolvePlanCredit } from '@/lib/guidebook/helpers'
+import { CREDIT_PER_SPONSOR_CENTS } from '@/lib/guidebook/sponsor-economics'
 import { stripe } from '@/lib/stripe/client'
+import { annualCostCents, monthlyCostCents } from '@/lib/stripe/brackets'
 import { logAuditEvent } from '@/lib/audit'
 
 export const guidebookBillingCreditHandler = inngest.createFunction(
@@ -10,25 +12,74 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
   },
   { event: 'guidebook/billing.credit.evaluate' },
   async ({ event, step }) => {
-    const { orgId, stripeCustomerId, currentPeriodEnd } = event.data
+    const { orgId, stripeCustomerId, currentPeriodEnd, stripeSubscriptionId } = event.data
 
     const activeSponsorCount = await step.run('count-active-sponsors', async () => {
       return getActiveSponsorCount(orgId)
     })
 
-    const planCreditCents = resolvePlanCredit(activeSponsorCount)
+    // ── The cap ──────────────────────────────────────────────────────────
+    //
+    // Sponsors are unbounded since
+    // 20260909234738_uncap_guidebook_sponsor_slots.sql, so the credit is
+    // limited by what the org actually pays instead. resolvePlanCredit()
+    // requires this rather than defaulting it — see its docstring for why the
+    // cap is mandatory the moment the 6-sponsor ceiling went.
+    //
+    // Derived from the subscription's QUANTITY through lib/stripe/brackets.ts,
+    // not from the Price object: FieldStay's platform Price is tiered, so it
+    // carries no `unit_amount` to read (the same trap
+    // promo-hospitable-award-lock.ts documents). Not from invoice lines
+    // either — those would have to exclude `invoiceitem` entries or
+    // double-count a credit already posted this period.
+    const planCostCents = await step.run('resolve-plan-cost', async () => {
+      const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId)
+      const item = subscription.items.data[0]
+      const quantity = item?.quantity
+
+      if (quantity == null) return null
+
+      // The bill being capped against is the one for THIS period, so an
+      // annual subscription caps against the annual figure.
+      const isAnnual = item.price?.recurring?.interval === 'year'
+      return isAnnual ? annualCostCents(quantity) : monthlyCostCents(quantity)
+    })
+
+    if (planCostCents == null) {
+      // Outside the published schedule (Enterprise, a grandfathered or
+      // dashboard-created price) or a subscription we could not read. There is
+      // no trustworthy cap, so post nothing: an over-credit is money out the
+      // door, a skipped cycle is recoverable.
+      return { skipped: true, reason: 'plan_cost_unresolved', activeSponsorCount }
+    }
+
+    const planCreditCents = resolvePlanCredit(activeSponsorCount, planCostCents)
 
     if (planCreditCents === 0) {
       return { skipped: true, reason: 'no_active_sponsors', activeSponsorCount }
     }
 
+    // What the sponsors earned before the cap. Compared against what is
+    // actually being posted to tell whether the cap bound — the rate comes
+    // from the shared constant rather than a literal, so a rate change cannot
+    // silently make this comparison wrong.
+    const earnedCents = activeSponsorCount * CREDIT_PER_SPONSOR_CENTS
+    const capped      = earnedCents > planCreditCents
+
     const posted = await step.run('post-plan-credit', async () => {
       // No tiers left to branch on — the credit is the sponsor count times a
-      // flat rate, so the label states the count and the amount it earned.
-      const reason      = 'per_sponsor_credit'
-      const creditLabel =
-        `${activeSponsorCount} Sponsor${activeSponsorCount === 1 ? '' : 's'} — ` +
-        `$${(planCreditCents / 100).toFixed(0)} off your FieldStay plan`
+      // flat rate, limited by the plan cost. The label states the count and
+      // either what it earned or that the plan is fully covered.
+      const reason      = capped ? 'per_sponsor_credit_capped' : 'per_sponsor_credit'
+      // When the cap binds, the label says so. A host who signed 40 sponsors
+      // and sees "40 Sponsors — $98 off" with no explanation reads it as a
+      // billing bug; naming it as the plan being fully covered is the same
+      // number told truthfully.
+      const plural  = activeSponsorCount === 1 ? '' : 's'
+      const dollars = (planCreditCents / 100).toFixed(0)
+      const creditLabel = capped
+        ? `${activeSponsorCount} Sponsor${plural} — your full plan covered ($${dollars})`
+        : `${activeSponsorCount} Sponsor${plural} — $${dollars} off your FieldStay plan`
 
       // Idempotency key is stable across retries: org + billing cycle period end.
       //
@@ -92,9 +143,12 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
         orgId,
         action:     'billing.plan_credit.applied',
         targetType: 'organization',
-        // Records what the credit was actually computed FROM, not just that
-        // one happened — with a flat rate the count is the whole story.
-        metadata:   { reason, activeSponsorCount, planCreditCents },
+        // Records what the credit was computed FROM, not just that one
+        // happened: with a cap in play the count alone no longer explains the
+        // amount, so the pre-cap figure and the cap itself are both kept.
+        // These are plan-level figures, not customer financial detail — no
+        // invoice ids, no payment instruments.
+        metadata:   { reason, activeSponsorCount, earnedCents, planCreditCents, planCostCents, capped },
       })
 
       return true
@@ -104,6 +158,6 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
       return { skipped: true, reason: 'credit_already_posted_this_period', activeSponsorCount }
     }
 
-    return { orgId, activeSponsorCount, planCreditCents }
+    return { orgId, activeSponsorCount, planCreditCents, planCostCents, capped }
   }
 )

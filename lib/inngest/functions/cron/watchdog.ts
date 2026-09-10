@@ -655,7 +655,14 @@ export const systemWatchdog = inngest.createFunction(
         .join('; ')
       logger.warn(`[watchdog] ${slow.length} job(s) slower than their norm: ${summary}`)
       reportError(new Error(`Watchdog: ${slow.length} scheduled job(s) slow — ${summary}`), {
-        site: 'inngest.system-watchdog.slow-jobs',
+        site:  'inngest.system-watchdog.slow-jobs',
+        // The comment above has said "a WARNING, not an error" since this was
+        // written; until reportError could carry a level it raised an error
+        // anyway, so slow-job reports sat in Sentry beside real crashes and
+        // could not be filtered out of one. Nothing is suppressed — the issue
+        // is still created, still searchable — but `level:warning` is now what
+        // it always claimed to be.
+        level: 'warning',
       })
     }
 

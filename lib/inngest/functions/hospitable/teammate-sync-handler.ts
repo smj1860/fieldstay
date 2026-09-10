@@ -133,6 +133,12 @@ export const hospTeammateSyncHandler = inngest.createFunction(
         reportError(new Error('Hospitable teammate sync returned zero teammates'), {
           site:  'inngest.hospitable-teammate-sync-handler.empty-result-guard',
           orgId: org_id,
+          // The guard WORKED — the roster is intact and this run declined to
+          // deactivate anyone. It still needs a human (a missing
+          // teammate:read scope looks identical to a genuinely empty team),
+          // but it is not a failure, and reporting it as one put it in the
+          // same Sentry bucket as crashes.
+          level: 'warning',
         })
         return 0
       }
