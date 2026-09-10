@@ -16,7 +16,7 @@ import type { WoCategory, CrewRole } from '@/types/database'
 //   - buildRequestFlowUrl() — fully implemented. The widget URL's shape is
 //     completely documented (Thumbtack's Widgets → Request Flow Widget doc):
 //     {{environment}}/embed/request-flow?category_pk=...&service_pk=...&
-//     zip_code=...&utm_medium=partnerships&utm_source=...
+//     zip_code=...&utm_medium=partnership&utm_source=...
 //   - getThumbtackAccessToken() — fully implemented. Thumbtack's Environments
 //     doc confirms standard OAuth2: a client_credentials grant against
 //     {authBase}/oauth2/token with a per-environment clientID/clientSecret.
@@ -35,6 +35,24 @@ import type { WoCategory, CrewRole } from '@/types/database'
 //     and query params, (2) the exact response schema (this file's
 //     ThumbtackPro type is confirmed against Discovery Lite's schema, NOT
 //     against /businesses/search's — they may not be the same endpoint).
+//
+//     OPEN QUESTION as of Thumbtack's Widget Events doc: there is a THIRD
+//     candidate shape for "let a PM browse pros" — a "Pro List Widget", a
+//     separate embeddable iframe (sibling to the Request Flow Widget, not a
+//     REST endpoint) whose own postMessage events are confirmed:
+//     THUMBTACK_PL_SEARCH_RESULT ({ category, zip_code, number_of_pros } —
+//     NO pro-level data, just a result count) and THUMBTACK_PL_CLOSE, plus
+//     THUMBTACK_SP_PRO_VIEW/THUMBTACK_SP_CLOSE for its Service Page and the
+//     same THUMBTACK_RF_* events once a request starts from inside it. That
+//     PL_SEARCH_RESULT carries no pro data at all is the tell: Thumbtack's
+//     own widget renders the list internally, so this may mean the entire
+//     ThumbtackProCard / searchThumbtackPros() design here — fetch pros
+//     server-side, render FieldStay's own cards — is the wrong shape, and
+//     the real fix is a ProListModal iframe component (mirroring
+//     RequestFlowModal) once its embed URL and params are confirmed, not a
+//     REST call at all. Not resolved without Thumbtack confirming which of
+//     /businesses/search, Discovery Lite, and the Pro List Widget is the
+//     intended partner integration path — do not pick one by guessing.
 //
 // isThumbtackConfigured() gates every call site — CLAUDE.md's SMS_ENABLED
 // pattern: fail closed and hide the feature entirely rather than show a
@@ -181,15 +199,15 @@ interface RequestFlowUrlParams {
  * pro's service_pk is already known (e.g. returned by /businesses/search)
  * and there's no need to re-derive it from Thumbtack's own requestFlowUrl.
  *
- * utm_medium is always 'partnerships' per Thumbtack's spec — not a caller
- * option.
+ * utm_medium is always 'partnership' per Thumbtack's RFW Parameters doc's
+ * Valid Values column — not a caller option.
  */
 export function buildRequestFlowUrl(params: RequestFlowUrlParams): string {
   const url = new URL('/embed/request-flow', params.environment)
   url.searchParams.set('category_pk', params.categoryPk)
   url.searchParams.set('service_pk', params.servicePk)
   if (params.zipCode) url.searchParams.set('zip_code', params.zipCode)
-  url.searchParams.set('utm_medium', 'partnerships')
+  url.searchParams.set('utm_medium', 'partnership')
   url.searchParams.set('utm_source', params.utmSource)
   for (const [key, value] of Object.entries(params.extraUtmParams ?? {})) {
     if (!key.startsWith('utm_')) {

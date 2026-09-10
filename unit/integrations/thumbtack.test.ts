@@ -40,7 +40,7 @@ describe('buildRequestFlowUrl', () => {
     expect(parsed.searchParams.get('category_pk')).toBe('cat_123')
     expect(parsed.searchParams.get('service_pk')).toBe('svc_456')
     expect(parsed.searchParams.get('zip_code')).toBe('90210')
-    expect(parsed.searchParams.get('utm_medium')).toBe('partnerships')
+    expect(parsed.searchParams.get('utm_medium')).toBe('partnership')
     expect(parsed.searchParams.get('utm_source')).toBe('cma-fieldstay')
   })
 
