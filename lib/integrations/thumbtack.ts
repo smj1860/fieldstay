@@ -16,7 +16,7 @@ import type { WoCategory, CrewRole } from '@/types/database'
 //   - buildRequestFlowUrl() — fully implemented. The widget URL's shape is
 //     completely documented (Thumbtack's Widgets → Request Flow Widget doc):
 //     {{environment}}/embed/request-flow?category_pk=...&service_pk=...&
-//     zip_code=...&utm_medium=partnerships&utm_source=...
+//     zip_code=...&utm_medium=partnership&utm_source=...
 //   - getThumbtackAccessToken() — fully implemented. Thumbtack's Environments
 //     doc confirms standard OAuth2: a client_credentials grant against
 //     {authBase}/oauth2/token with a per-environment clientID/clientSecret.
@@ -181,15 +181,15 @@ interface RequestFlowUrlParams {
  * pro's service_pk is already known (e.g. returned by /businesses/search)
  * and there's no need to re-derive it from Thumbtack's own requestFlowUrl.
  *
- * utm_medium is always 'partnerships' per Thumbtack's spec — not a caller
- * option.
+ * utm_medium is always 'partnership' per Thumbtack's RFW Parameters doc's
+ * Valid Values column — not a caller option.
  */
 export function buildRequestFlowUrl(params: RequestFlowUrlParams): string {
   const url = new URL('/embed/request-flow', params.environment)
   url.searchParams.set('category_pk', params.categoryPk)
   url.searchParams.set('service_pk', params.servicePk)
   if (params.zipCode) url.searchParams.set('zip_code', params.zipCode)
-  url.searchParams.set('utm_medium', 'partnerships')
+  url.searchParams.set('utm_medium', 'partnership')
   url.searchParams.set('utm_source', params.utmSource)
   for (const [key, value] of Object.entries(params.extraUtmParams ?? {})) {
     if (!key.startsWith('utm_')) {
