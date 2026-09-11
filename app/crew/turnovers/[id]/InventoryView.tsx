@@ -7,6 +7,8 @@ import type { TurnoverRow } from '@/lib/dexie/schema'
 import type { TurnoverActions } from './use-turnover-actions'
 import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
 import { needsRestock } from '@/lib/inventory/stock-status'
+import { useCrewContext } from '@/lib/crew/crew-context'
+import { localizedContent } from '@/lib/crew/content-locale'
 
 export function InventoryView({
   turnover,
@@ -23,6 +25,7 @@ export function InventoryView({
     countedSoFar, countedTotal,
     toggleInventoryConfirm, inventoryConfirmSyncFailed, actionError, isCancelled,
   } = actions
+  const { crewLocale } = useCrewContext()
 
   return (
     <div className="mt-2">
@@ -58,10 +61,11 @@ export function InventoryView({
                       par_level:               item.par_level,
                       first_count_recorded_at: qty === undefined ? null : 'counted',
                     })
+                    const itemLabel = localizedContent(crewLocale, item.name, item.name_es)
                     return (
                       <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-primary-themed truncate">{item.name}</p>
+                          <p className="text-sm font-medium text-primary-themed truncate">{itemLabel}</p>
                           <p className="text-xs text-muted-themed">
                             Par {item.par_level} {item.unit}
                             {isLow && (
@@ -74,7 +78,7 @@ export function InventoryView({
                             onClick={() => handleCountChange(item.id, (qty ?? 0) - 1)}
                             className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                             style={{ width: 48, height: 48 }}
-                            aria-label={`Decrease ${item.name}`}
+                            aria-label={`Decrease ${itemLabel}`}
                           >
                             <Minus className="w-3.5 h-3.5" />
                           </button>
@@ -113,7 +117,7 @@ export function InventoryView({
                               inputs[idx + 1]?.focus()
                             }}
                             data-inv-count-input
-                            aria-label={`${item.name} count`}
+                            aria-label={`${itemLabel} count`}
                             className="w-12 text-center text-sm font-semibold text-primary-themed border border-themed rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                             style={{ height: 48 }}
                           />
@@ -121,7 +125,7 @@ export function InventoryView({
                             onClick={() => handleCountChange(item.id, (qty ?? 0) + 1)}
                             className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                             style={{ width: 48, height: 48 }}
-                            aria-label={`Increase ${item.name}`}
+                            aria-label={`Increase ${itemLabel}`}
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>

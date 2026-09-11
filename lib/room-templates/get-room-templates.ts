@@ -4,9 +4,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export interface RoomTemplateWithItems {
   id:          string
   name:        string
+  nameEs:      string | null
   autoInclude: boolean
   isSystem:    boolean
-  items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }>
+  items: Array<{ id: string; task: string; task_es: string | null; requires_photo: boolean; notes: string }>
 }
 
 /**
@@ -21,7 +22,7 @@ export async function getRoomTemplatesForOrg(
 ): Promise<RoomTemplateWithItems[]> {
   const { data: rooms, error } = await supabase
     .from('room_templates')
-    .select(`id, name, auto_include, is_system, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+    .select(`id, name, name_es, auto_include, is_system, room_template_items ( id, task, task_es, requires_photo, notes, sort_order )`)
     .eq('org_id', orgId)
     .order('name')
 
@@ -38,6 +39,7 @@ export async function getRoomTemplatesForOrg(
   return (rooms ?? []).map((room) => ({
     id:          room.id as string,
     name:        room.name as string,
+    nameEs:      room.name_es as string | null,
     autoInclude: room.auto_include as boolean,
     isSystem:    room.is_system as boolean,
     items: [...(room.room_template_items ?? [])]
@@ -45,6 +47,7 @@ export async function getRoomTemplatesForOrg(
       .map((item) => ({
         id:             item.id as string,
         task:           item.task as string,
+        task_es:        item.task_es as string | null,
         requires_photo: item.requires_photo as boolean,
         notes:          (item.notes as string | null) ?? '',
       })),

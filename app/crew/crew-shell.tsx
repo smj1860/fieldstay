@@ -427,12 +427,13 @@ export function CrewShell({
  */
 function CrewBottomNav({ unreadCount, onHelpClick }: Readonly<{ unreadCount: number; onHelpClick: () => void }>) {
   const pathname = usePathname()
+  const t = useCrewT()
 
   const tabs = [
-    { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
-    { href: '/crew/assets',       label: 'Assets',        icon: Wrench },
-    { href: '/crew/availability', label: 'Time Off',     icon: CalendarDays },
-    { href: '/crew/messages',     label: 'Messages',     icon: MessageSquare, badge: unreadCount },
+    { href: '/crew',              label: t('navAssignments'), icon: CalendarCheck },
+    { href: '/crew/assets',       label: t('navAssets'),      icon: Wrench },
+    { href: '/crew/availability', label: t('navTimeOff'),     icon: CalendarDays },
+    { href: '/crew/messages',     label: t('navMessages'),    icon: MessageSquare, badge: unreadCount },
   ]
 
   return (
@@ -467,7 +468,7 @@ function CrewBottomNav({ unreadCount, onHelpClick }: Readonly<{ unreadCount: num
         className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-muted-themed hover:text-secondary-themed transition-colors"
       >
         <HelpCircle className="w-5 h-5" />
-        Help
+        {t('navHelp')}
       </button>
     </nav>
   )
@@ -489,6 +490,7 @@ function SyncStatus() {
   // that; the real value is synced in as soon as the client mounts.
   const online = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
   const [showInfo, setShowInfo] = useState(false)
+  const t = useCrewT()
 
   if (online) return null
   return (
@@ -499,14 +501,14 @@ function SyncStatus() {
         style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
       >
         <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
-        Offline
+        {t('offlinePill')}
       </button>
 
       {showInfo && (
         <Dialog
           open
           onClose={() => setShowInfo(false)}
-          title="You're offline"
+          title={t('offlineDialogTitle')}
           mobileSheet
           maxWidthClassName="max-w-sm"
           footer={
@@ -515,7 +517,7 @@ function SyncStatus() {
               className="w-full py-3 rounded-xl text-sm font-semibold"
               style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
             >
-              Got it
+              {t('offlineGotIt')}
             </button>
           }
         >
@@ -527,13 +529,11 @@ function SyncStatus() {
               <WifiOff className="w-5 h-5" />
             </span>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Working from cached data
+              {t('offlineWorkingFromCache')}
             </p>
           </div>
           <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
-            Your assignments and checklists are saved on your device.
-            You can complete turnovers and check off tasks without a
-            signal — everything syncs automatically when you reconnect.
+            {t('offlineBody')}
           </p>
         </Dialog>
       )}
@@ -544,17 +544,20 @@ function SyncStatus() {
 // ── Info / FAQ bottom sheet ────────────────────────────────────────────────────
 
 function CrewFaqPanel({ onClose }: { onClose: () => void }) {
+  const { crewLocale } = useCrewContext()
+  const t = useCrewT()
+
   return (
-    <Dialog open onClose={onClose} title="FieldStay Crew App — FAQ" mobileSheet>
+    <Dialog open onClose={onClose} title={t('faqTitle')} mobileSheet>
       <LanguageToggle />
 
-      {FAQ_ITEMS.map((item, i) => (
+      {faqItems(crewLocale).map((item, i) => (
         <FaqItem key={i} question={item.q} answer={item.a} />
       ))}
 
       <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-          Need help?{' '}
+          {t('faqNeedHelp')}{' '}
           <a href="mailto:help@fieldstay.app" style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
             help@fieldstay.app
           </a>
@@ -646,7 +649,11 @@ function FaqItem({ question, answer }: { question: string; answer: string }) {
   )
 }
 
-const FAQ_ITEMS = [
+function faqItems(locale: CrewLocale): { q: string; a: string }[] {
+  return locale === 'es' ? FAQ_ITEMS_ES : FAQ_ITEMS_EN
+}
+
+const FAQ_ITEMS_EN = [
   {
     q: 'What do the icons on checklist items mean?',
     a: 'The note icon on a checklist item means your property manager has added specific instructions for that task. Tap it to read what they need done — it could be details about a specific area, a known quirk of the property, or a special request from the owner.',
@@ -722,5 +729,84 @@ const FAQ_ITEMS = [
   {
     q: 'Will taking a lot of photos while offline fill up my phone’s storage?',
     a: 'The app automatically resizes and compresses every photo before saving it, so a full day of checklist and asset photos takes up far less space than the originals would. You don’t need to manage this yourself.',
+  },
+]
+
+const FAQ_ITEMS_ES = [
+  {
+    q: '¿Qué significan los íconos en los elementos de la lista de verificación?',
+    a: 'El ícono de nota en un elemento de la lista significa que tu gerente de propiedad agregó instrucciones específicas para esa tarea. Tócalo para leer lo que necesitan que hagas — puede ser detalles sobre un área específica, una particularidad conocida de la propiedad, o una solicitud especial del propietario.',
+  },
+  {
+    q: '¿Por qué la app me pide instalarla y activar las notificaciones?',
+    a: 'Instalar la app agrega un ícono de FieldStay a tu pantalla de inicio — igual que cualquier app de App Store o Google Play. Activar las notificaciones significa que sabrás en el momento en que se te asigne una nueva rotación u orden de trabajo, sin tener que abrir la app para revisar.',
+  },
+  {
+    q: '¿La app funciona sin servicio celular o WiFi?',
+    a: 'Sí. FieldStay Crew Ops está diseñada para funcionar sin conexión. Si estás en una propiedad sin señal, la app seguirá funcionando normalmente — puedes completar listas de verificación, contar inventario y tomar fotos. Todo se sincroniza automáticamente cuando vuelves a tener conexión.',
+  },
+  {
+    q: '¿Por qué fotografiamos las etiquetas del fabricante y las placas de datos de los electrodomésticos?',
+    a: 'Tres razones. Primero, usamos esa información para crear una guía de recursos para los huéspedes (por ejemplo, cómo operar el lavavajillas). Segundo, saber la antigüedad y el modelo de los electrodomésticos ayuda al propietario a planificar reemplazos antes de que se conviertan en emergencias costosas. Tercero, construimos una base de datos de servicio para que, cuando un proveedor reciba una orden de trabajo, ya tenga la marca, el modelo y el número de serie — lo que significa pedidos de piezas y reparaciones más rápidos.',
+  },
+  {
+    q: '¿Qué es un nivel par (par level) y por qué importa?',
+    a: 'Un nivel par es la cantidad mínima de un artículo — toallas de papel, bolsas de basura, cápsulas de detergente — que debe haber disponible antes de reordenar. Tú eres quien ve estos artículos en cada rotación, lo que hace que tu conteo sea el dato más preciso que tenemos. Si un nivel par parece demasiado bajo o demasiado alto para una propiedad, avísale a tu gerente — tu aporte cambia directamente lo que se ordena.',
+  },
+  {
+    q: '¿Qué pasa si el inventario se está contando en la unidad incorrecta?',
+    a: 'Avísale a tu gerente usando el campo de notas en ese artículo de inventario (preferido), o envíale un mensaje dentro de la app. La unidad importa porque tu conteo se usa para completar automáticamente un pedido de reabastecimiento — si la unidad es incorrecta, se pide la cantidad equivocada.',
+  },
+  {
+    q: '¿Por qué importa tanto la precisión del inventario?',
+    a: 'Los números que ingresas se usan para llenar un carrito de compras real o generar una orden de compra para reabastecer la propiedad. Un conteo inexacto significa que se pide demasiado (desperdicio) o muy poco (el próximo huésped llega y encuentra los estantes vacíos). Tu conteo es el dato directo que alimenta ese proceso.',
+  },
+  {
+    q: '¿Exactamente qué se guarda cuando no tengo señal?',
+    a: 'Los toques en la lista de verificación, las notas de la cuadrilla, las fotos, los conteos de inventario, iniciar o completar una rotación, completar una orden de trabajo, los mensajes a tu equipo de operaciones y las solicitudes de tiempo libre se guardan en tu teléfono al instante y se sincronizan automáticamente cuando vuelves a tener conexión. Lo único que necesita conexión es LEER mensajes anteriores — el historial de tu conversación se carga en vivo, así que puede aparecer vacío hasta que vuelvas a tener cobertura.',
+  },
+  {
+    q: '¿Cómo sé si algo todavía no se ha sincronizado?',
+    a: 'Aparece una etiqueta de "Sin conexión" en la parte superior de la pantalla cuando tu teléfono no tiene conexión — eso es normal y no hay de qué preocuparse, y no se pierde nada mientras se muestra. Si algo realmente no pudo guardarse en FieldStay, aparece un panel rojo de "no se sincronizó" en la parte superior de cada pantalla que enumera exactamente lo que quedó atascado, con un botón de Reintentar todo. Tócalo cuando vuelvas a tener cobertura.',
+  },
+  {
+    q: '¿Necesito mantener la app abierta para que las cosas se sincronicen, o pasa en segundo plano?',
+    a: 'Mantén la app abierta (o vuelve a abrirla) cuando vuelvas a tener cobertura. Revisa si hay conexión en el momento en que recuperas señal y luego cada 30 segundos mientras está abierta, pero no se sincroniza mientras está completamente cerrada en segundo plano. Si terminas un trabajo sin señal, vuelve a abrir la app cuando estés en un lugar con servicio.',
+  },
+  {
+    q: '¿Perderé mi trabajo si cierro la app, reinicio mi teléfono, o se cierra inesperadamente mientras estoy sin conexión?',
+    a: 'No — todo se guarda en tu teléfono a medida que avanzas, no solo se mantiene en la memoria. Volver a abrir la app retoma justo donde lo dejaste. Lo único que sí borra tu trabajo guardado es cerrar sesión, así que no cierres sesión hasta que estés seguro de que todo se ha sincronizado.',
+  },
+  {
+    q: '¿Puedo cerrar sesión mientras todavía tengo trabajo sin sincronizar?',
+    a: 'La app te avisará primero. Si intentas cerrar sesión con algo todavía sin sincronizar, te mostrará cuántos elementos hay y te pedirá que confirmes — cerrar sesión de todas formas borra todo lo guardado en ese dispositivo, incluido lo que no se haya sincronizado. Si no estás seguro, mantente conectado hasta que estés en un lugar con mejor señal y vuelve a intentarlo.',
+  },
+  {
+    q: 'Terminé una rotación en mi teléfono — ¿puedo verla en otro teléfono o tablet más tarde?',
+    a: 'No hasta que se sincronice. El trabajo sin conexión se guarda en el dispositivo específico donde lo ingresaste, así que no aparecerá en ningún otro lugar — incluido el panel de tu gerente — hasta que ese dispositivo tenga conexión y lo envíe.',
+  },
+  {
+    q: 'Mi compañero y yo estamos dividiendo una rotación. Si uno de nosotros no tiene señal, ¿veremos los toques de lista de verificación del otro?',
+    a: 'No en tiempo real — cada uno verá solo lo que está en su propio teléfono hasta que el que está sin conexión se reconecte. En el momento en que se reconecta, automáticamente obtiene el estado más reciente, así que no se pierde nada, simplemente se pone al día en lugar de actualizarse en vivo.',
+  },
+  {
+    q: 'Dos miembros de la cuadrilla están asignados a la misma rotación — ¿por qué solo uno de ellos vio el trabajo de Iniciar rotación?',
+    a: 'Esto es normal. Una rotación tiene un solo estado compartido (Asignada → En progreso → Completa) — no se rastrea por separado para cada miembro de la cuadrilla. El primer miembro asignado que toque Iniciar rotación la mueve a En progreso para todos, y el botón desaparece entonces de la pantalla de los demás miembros asignados. Esto ocurre con más frecuencia cuando la cuadrilla se divide y trabaja distintas partes de la misma propiedad al mismo tiempo. Solo se necesita un toque — el otro miembro de la cuadrilla no necesita hacer nada diferente, ya que todos los miembros asignados ya tienen acceso completo a la lista de verificación y al inventario sin importar quién tocó Iniciar.',
+  },
+  {
+    q: '¿Me notificarán si me asignan un nuevo trabajo mientras estoy sin conexión?',
+    a: 'No, las notificaciones necesitan conexión para llegar. Verás cualquier asignación nueva en el momento en que tu teléfono se reconecte — no se pierde, solo se retrasa hasta entonces.',
+  },
+  {
+    q: 'Envié un mensaje sin señal — ¿se envió?',
+    a: 'Está guardado y esperando. Un mensaje que envías sin señal muestra un ícono de reloj y "Enviando cuando tengas señal", y se envía por sí solo en el momento en que vuelves a tener cobertura — no necesitas volver a escribirlo ni reenviarlo. Si en algún momento realmente no puede entregarse, pasa al panel rojo de "no se sincronizó" en la parte superior de la pantalla. Los mensajes anteriores en la conversación solo se cargan cuando tienes conexión, así que el hilo de arriba puede verse vacío mientras estás sin conexión.',
+  },
+  {
+    q: 'Llegué a una propiedad sin señal y una pantalla no carga / muestra una página de error — ¿qué pasó?',
+    a: 'Cada pantalla necesita cargarse una vez mientras tienes señal antes de estar disponible sin conexión. Si vas directo a una zona sin cobertura sin abrir la app antes, una página que no has visitado todavía en ese dispositivo puede no cargar. Abre la app y entra a tus asignaciones mientras todavía tienes servicio — en la oficina, en el camino, donde sea — antes de perder la señal por el día.',
+  },
+  {
+    q: '¿Tomar muchas fotos sin conexión llenará el almacenamiento de mi teléfono?',
+    a: 'La app redimensiona y comprime automáticamente cada foto antes de guardarla, así que un día completo de fotos de listas de verificación y bienes ocupa mucho menos espacio del que ocuparían los originales. No necesitas gestionar esto tú mismo.',
   },
 ]

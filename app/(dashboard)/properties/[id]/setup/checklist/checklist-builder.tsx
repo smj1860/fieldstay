@@ -7,15 +7,17 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
+import { numberedRoomLabel, numberedRoomLabelEs } from '@/lib/checklists/room-label'
 
-interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
-interface Section { tempId: string; id?: string; name: string; roomTemplateId?: string | null; items: Item[] }
+interface Item { tempId: string; id?: string; task: string; taskEs?: string | null; requires_photo: boolean; notes: string }
+interface Section { tempId: string; id?: string; name: string; nameEs?: string | null; roomTemplateId?: string | null; items: Item[] }
 
 interface RoomTemplateOption {
   id: string
   name: string
+  nameEs?: string | null
   autoInclude: boolean
-  items: Array<{ task: string; requires_photo: boolean; notes: string | null }>
+  items: Array<{ task: string; task_es?: string | null; requires_photo: boolean; notes: string | null }>
 }
 
 function makeId() {
@@ -84,11 +86,13 @@ function toSavePayload(sections: Section[]) {
   return sections.map((s, si) => ({
     id:   s.id,
     name: s.name,
+    name_es: s.nameEs ?? null,
     sort_order: si,
     room_template_id: s.roomTemplateId ?? null,
     items: s.items.map((item, ii) => ({
       id:             item.id,
       task:           item.task,
+      task_es:        item.taskEs ?? null,
       requires_photo: item.requires_photo,
       notes:          item.notes,
       sort_order:     ii,
@@ -139,7 +143,7 @@ const DEFAULT_SECTIONS: Section[] = [
   },
 ]
 
-function buildInitialSections(template: { checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null): Section[] {
+function buildInitialSections(template: { checklist_template_sections?: Array<{ id: string; name: string; name_es?: string | null; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; task_es?: string | null; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null): Section[] {
   if (!template?.checklist_template_sections?.length) return DEFAULT_SECTIONS
 
   return [...template.checklist_template_sections]
@@ -148,6 +152,7 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
       tempId: makeId(),
       id: s.id,
       name: s.name,
+      nameEs: s.name_es ?? null,
       roomTemplateId: s.room_template_id ?? null,
       items: [...(s.checklist_template_items ?? [])]
         .sort((a, b) => a.sort_order - b.sort_order)
@@ -155,20 +160,23 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
           tempId: makeId(),
           id: item.id,
           task: item.task,
+          taskEs: item.task_es ?? null,
           requires_photo: item.requires_photo,
           notes: item.notes ?? '',
         })),
     }))
 }
 
-function makeSectionFromRoom(room: RoomTemplateOption, label: string): Section {
+function makeSectionFromRoom(room: RoomTemplateOption, label: string, labelEs?: string | null): Section {
   return {
     tempId: makeId(),
     name: label,
+    nameEs: labelEs ?? room.nameEs ?? null,
     roomTemplateId: room.id,
     items: room.items.map((item) => ({
       tempId: makeId(),
       task: item.task,
+      taskEs: item.task_es ?? null,
       requires_photo: item.requires_photo,
       notes: item.notes ?? '',
     })),
@@ -349,8 +357,9 @@ export function ChecklistBuilder({
         if (targetCount <= 0) continue
         const currentCount = next.filter((s) => s.roomTemplateId === room.id).length
         for (let i = currentCount + 1; i <= targetCount; i++) {
-          const label = targetCount > 1 ? `${room.name} ${i}` : room.name
-          next.push(makeSectionFromRoom(room, label))
+          const label   = numberedRoomLabel(room.name, targetCount, i)
+          const labelEs = numberedRoomLabelEs(room.nameEs ?? null, targetCount, i)
+          next.push(makeSectionFromRoom(room, label, labelEs))
         }
       }
       return next

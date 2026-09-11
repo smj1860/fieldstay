@@ -26,6 +26,8 @@ function assertCanManage(role: string): string | null {
 // its fields.
 export type RoomTemplateItemInput = {
   task: string
+  /** PM-entered Spanish translation. Empty string means "no translation yet". */
+  task_es: string
   requires_photo: boolean
   notes: string
   sort_order: number
@@ -74,7 +76,8 @@ export async function createRoomTemplate(
 
 export async function renameRoomTemplate(
   roomTemplateId: string,
-  name: string
+  name: string,
+  nameEs?: string
 ): Promise<{ error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgMember()
@@ -84,12 +87,13 @@ export async function renameRoomTemplate(
 
     const trimmed = name.trim()
     if (!trimmed) return { error: 'Room name is required.' }
+    const trimmedEs = nameEs?.trim() || null
 
     // A client-supplied id must be confirmed to belong to this org before we
     // touch it — the id alone is not proof of ownership.
     const { data, error } = await supabase
       .from('room_templates')
-      .update({ name: trimmed, updated_at: new Date().toISOString() })
+      .update({ name: trimmed, name_es: trimmedEs, updated_at: new Date().toISOString() })
       .eq('id', roomTemplateId)
       .eq('org_id', membership.org_id)
       .select('id')
@@ -107,7 +111,7 @@ export async function renameRoomTemplate(
       action:     'room_template.renamed',
       targetType: 'room_template',
       targetId:   roomTemplateId,
-      metadata:   { name: trimmed },
+      metadata:   { name: trimmed, name_es: trimmedEs },
     })
 
     revalidateRoomTemplateSurfaces()

@@ -63,7 +63,11 @@ export interface ChecklistInstanceItemRow {
   instance_id:           string
   turnover_id:           string
   section_name:          string
+  /** Spanish translation of section_name, for the crew app's Spanish locale. '' when none. */
+  section_name_es:       string
   task:                  string
+  /** Spanish translation of task, for the crew app's Spanish locale. '' when none. */
+  task_es:               string
   is_completed:          number
   completed_at:          string | null
   completed_by_crew_id:  string
@@ -92,6 +96,8 @@ export interface InventoryItemRow {
   property_id:      string
   org_id:           string
   name:             string
+  /** Spanish translation of name, for the crew app's Spanish locale. '' when none. */
+  name_es:          string
   category:         string
   unit:             string
   par_level:        number

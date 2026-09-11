@@ -30,25 +30,30 @@ import type { MutationTable } from '@/lib/dexie/schema'
 import { retryAllFailedMutations, discardFailedMutation } from '@/lib/dexie/helpers'
 import { retryFailedPhotoUploads, discardPendingPhoto } from '@/lib/dexie/photo-sync'
 import { STALLED_NETWORK_ATTEMPTS } from '@/lib/dexie/net'
+import { useCrewT, formatStalledHeadline, formatFailedHeadline, formatDiscardBody, type CrewDictKey } from '@/lib/crew/i18n'
+import { useCrewContext } from '@/lib/crew/crew-context'
 
-/** Human label for every mutation type that can dead-letter. Exhaustive over MutationTable. */
-const MUTATION_LABELS: Record<MutationTable, string> = {
-  checklist_instance_items: 'Checklist task update',
-  checklist_instances:      'Checklist completion confirmation',
-  turnovers:                'Turnover update',
-  inventory_counts:         'Inventory count',
-  work_order_reports:       'Work order request',
-  property_assets:          'Appliance details',
-  crew_work_orders:         'Work order completion',
-  messages:                 'Message to your operations team',
+/** i18n dictionary key for the label of every mutation type that can dead-letter. Exhaustive over MutationTable. */
+const MUTATION_LABELS: Record<MutationTable, CrewDictKey> = {
+  checklist_instance_items: 'syncChecklistTaskUpdate',
+  checklist_instances:      'syncChecklistCompletionConfirm',
+  turnovers:                'syncTurnoverUpdate',
+  inventory_counts:         'syncInventoryCount',
+  work_order_reports:       'syncWorkOrderRequest',
+  property_assets:          'syncApplianceDetails',
+  crew_work_orders:         'syncWorkOrderCompletion',
+  messages:                 'syncMessageToOps',
 }
 
-function mutationLabel(table: string): string {
-  return MUTATION_LABELS[table as MutationTable] ?? 'Saved change'
+function mutationLabel(table: string, t: (key: CrewDictKey) => string): string {
+  const key = MUTATION_LABELS[table as MutationTable]
+  return t(key ?? 'syncSavedChange')
 }
 
 export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
   const db = useDexieDb()
+  const t = useCrewT()
+  const { crewLocale } = useCrewContext()
 
   // Index-backed (`failed` is stored 0/1 — IndexedDB cannot index a boolean).
   // These are live queries on tables that are written on every checklist tick
@@ -94,13 +99,13 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
   const entries: SyncFailureEntry[] = [
     ...failedMutations.map((m) => ({
       key:     `mutation-${m.id}`,
-      label:   mutationLabel(m.table),
+      label:   mutationLabel(m.table, t),
       detail:  m.lastError ?? '',
       discard: () => discardFailedMutation(userId, m.id as number),
     })),
     ...failedPhotos.map((p) => ({
       key:     `photo-${p.id}`,
-      label:   'Photo',
+      label:   t('syncPhoto'),
       detail:  p.last_error ?? '',
       discard: () => discardPendingPhoto(userId, p),
     })),
@@ -116,14 +121,17 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
       entries={entries}
       stalledCount={stalledMutations.length + stalledPhotos.length}
       onRetryAll={retryAll}
-      stalledHint={
-        'Your work is saved on this phone and will keep retrying on its own. ' +
-        'If this stays here, move somewhere with better signal before you finish for the day.'
-      }
-      failedHint={
-        'This work is saved on your phone but hasn’t reached FieldStay. ' +
-        'Tap retry once you have signal.'
-      }
+      stalledHint={t('syncStalledHint')}
+      failedHint={t('syncFailedHint')}
+      stalledHeadline={(count) => formatStalledHeadline(crewLocale, count)}
+      failedHeadline={(count) => formatFailedHeadline(crewLocale, count)}
+      discardAriaLabel={(label) => `${t('syncDiscardAriaPrefix')} ${label}`}
+      retryAllLabel={t('syncRetryAll')}
+      retryingLabel={t('syncRetrying')}
+      discardTitle={t('syncDiscardTitle')}
+      discardBody={(label) => formatDiscardBody(crewLocale, label)}
+      keepLabel={t('syncKeepIt')}
+      discardLabel={t('syncDiscard')}
     />
   )
 }

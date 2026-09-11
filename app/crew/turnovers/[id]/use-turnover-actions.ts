@@ -422,7 +422,7 @@ export function useTurnoverActions(id: string) {
       setPendingConfirm({
         message:
           `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
-          `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')}). Confirm checklist complete anyway?`,
+          `(${missingAssetTypes.map((t) => assetTypeDisplayName(t)).join(', ')}). Confirm checklist complete anyway?`,
         onConfirm: () => void confirmChecklistComplete(userId, instance.id, crewMemberId, confirming),
       })
       return
@@ -578,7 +578,7 @@ export function useTurnoverActions(id: string) {
     if (missingAssetTypes.length > 0) {
       warnings.push(
         `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
-        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')})`
+        `(${missingAssetTypes.map((t) => assetTypeDisplayName(t)).join(', ')})`
       )
     }
     if (warnings.length > 0) {

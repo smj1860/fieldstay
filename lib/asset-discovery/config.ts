@@ -1,4 +1,4 @@
-import type { AssetType, WoCategory } from '@/types/database'
+import type { AssetType, CrewLocale, WoCategory } from '@/types/database'
 
 /**
  * Master Asset List for Progressive Asset Discovery. Crews are prompted to
@@ -52,14 +52,63 @@ export const ASSET_TYPE_DISPLAY_NAMES: Partial<Record<AssetType, string>> = {
   thermostat:               'Thermostat',
 }
 
-export const ASSET_DISCOVERY_SECTION = 'Asset Discovery'
+/**
+ * Spanish siblings — used only by the crew app's UI (locale is a crew_members
+ * preference, never a dashboard concept). Every other caller (the PM
+ * dashboard, the server-side discovery engine) keeps getting English via
+ * assetTypeDisplayName()'s default, unaffected by this.
+ */
+export const ASSET_TYPE_DISPLAY_NAMES_ES: Partial<Record<AssetType, string>> = {
+  hvac:                     'Aire acondicionado (HVAC)',
+  water_heater:             'Calentador de agua',
+  electrical_panel:         'Panel eléctrico',
+  water_shutoff_valve:      'Válvula de cierre de agua',
+  well_pump:                'Bomba de pozo y tanque de presión',
+  solar_inverter:           'Inversor solar',
+  whole_home_water_filter:  'Filtro de agua de toda la casa',
+  generator:                'Generador',
+  pool_pump:                'Bomba de la piscina',
+  hot_tub:                  'Equipo del jacuzzi',
+  heated_tile_system:       'Sistema de piso radiante',
+  refrigerator:             'Refrigerador',
+  oven_range:               'Estufa y horno',
+  dishwasher:               'Lavavajillas',
+  microwave:                'Microondas',
+  range_hood_vent:          'Campana extractora',
+  coffee_station:           'Estación de café y Nespresso',
+  toaster_oven:             'Horno tostador de mostrador',
+  ice_maker:                'Máquina de hielo',
+  garbage_disposal:         'Triturador de basura',
+  trash_compactor:          'Compactador de basura',
+  washer:                   'Lavadora',
+  dryer:                    'Secadora',
+  wifi_router:              'Router Wi-Fi',
+  smart_lock:               'Cerradura inteligente',
+  fire_extinguisher:        'Extintor',
+  thermostat:               'Termostato',
+}
 
-export function assetTypeDisplayName(assetType: AssetType): string {
+export const ASSET_DISCOVERY_SECTION = 'Asset Discovery'
+/**
+ * Spanish sibling of ASSET_DISCOVERY_SECTION — stored as
+ * checklist_instance_items.section_name_es on every system-mandated asset
+ * discovery item, independent of the viewer's own locale (a turnover can be
+ * worked by crew in either language).
+ */
+export const ASSET_DISCOVERY_SECTION_ES = 'Inventario de bienes'
+
+export function assetTypeDisplayName(assetType: AssetType, locale: CrewLocale = 'en'): string {
+  if (locale === 'es') return ASSET_TYPE_DISPLAY_NAMES_ES[assetType] ?? ASSET_TYPE_DISPLAY_NAMES[assetType] ?? assetType
   return ASSET_TYPE_DISPLAY_NAMES[assetType] ?? assetType
 }
 
 export function discoveryTaskLabel(assetType: AssetType): string {
   return `Capture asset details: ${assetTypeDisplayName(assetType)}`
+}
+
+/** Spanish sibling of discoveryTaskLabel — stored as task_es. */
+export function discoveryTaskLabelEs(assetType: AssetType): string {
+  return `Capturar detalles del bien: ${assetTypeDisplayName(assetType, 'es')}`
 }
 
 /**

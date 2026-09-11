@@ -119,7 +119,7 @@ const EXCEPTIONS: Record<string, string> = {
   // short-circuits only on a PO that actually has line items, that a header
   // with zero items is repaired rather than declared done, and that both
   // writes throw instead of being discarded.
-  'lib/inngest/functions/checklist-broadcast.ts:165':
+  'lib/inngest/functions/checklist-broadcast.ts:170':
     "SAFE, and newly visible rather than newly broken. This insert was passing "
     + 'only because the word `onConflict` appears in a COMMENT 85 lines above it, '
     + 'which NEARBY_PROTECTION matched before this scan started stripping comments '

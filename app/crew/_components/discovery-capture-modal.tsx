@@ -13,6 +13,8 @@ import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useCrewContext } from '@/lib/crew/crew-context'
+import { useCrewT } from '@/lib/crew/i18n'
 import type { AssetType } from '@/types/database'
 
 // ── Discovery Capture Modal ──────────────────────────────────────────────────
@@ -47,6 +49,8 @@ export function DiscoveryCaptureModal({
   onCaptured?: () => void
 }) {
   const db = useDexieDb()
+  const t = useCrewT()
+  const { crewLocale } = useCrewContext()
   const [make,       setMake]       = useState('')
   const [model,      setModel]      = useState('')
   const [photoFile,  setPhotoFile]  = useState<File | null>(null)
@@ -106,7 +110,7 @@ export function DiscoveryCaptureModal({
       onCaptured?.()
       setSuccess(true)
     } catch (err: unknown) {
-      setError((err as Error).message || 'Could not save. Check your connection and try again.')
+      setError((err as Error).message || t('discoveryErrorGeneric'))
     } finally {
       setSubmitting(false)
     }
@@ -115,7 +119,7 @@ export function DiscoveryCaptureModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!make.trim() && !model.trim() && !photoFile) {
-      setError('Add a make/model, a photo, or mark this as not applicable.')
+      setError(t('discoveryErrorRequired'))
       return
     }
     setSubmitting(true)
@@ -175,7 +179,7 @@ export function DiscoveryCaptureModal({
       onCaptured?.()
       setSuccess(true)
     } catch (err: unknown) {
-      setError((err as Error).message || 'Could not save. Check your connection and try again.')
+      setError((err as Error).message || t('discoveryErrorGeneric'))
     } finally {
       setSubmitting(false)
     }
@@ -185,12 +189,12 @@ export function DiscoveryCaptureModal({
     <Dialog
       open
       onClose={onClose}
-      title={success ? 'Saved' : `Capture: ${assetTypeDisplayName(assetType)}`}
+      title={success ? t('discoveryTitleSaved') : `${t('discoveryCapturePrefix')} ${assetTypeDisplayName(assetType, crewLocale)}`}
       maxWidthClassName="max-w-sm"
       mobileSheet
       footer={
         success ? (
-          <Button onClick={onClose} className="w-full">Done</Button>
+          <Button onClick={onClose} className="w-full">{t('done')}</Button>
         ) : (
           <div className="w-full space-y-3">
             <button
@@ -200,7 +204,7 @@ export function DiscoveryCaptureModal({
               className="w-full py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ background: 'var(--accent-amber)', color: 'var(--bg-page)' }}
             >
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save'}
+              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('actionSaving')}</> : t('actionSave')}
             </button>
             <button
               type="button"
@@ -208,7 +212,7 @@ export function DiscoveryCaptureModal({
               onClick={handleMarkNa}
               className="w-full py-2.5 rounded-xl border border-themed text-sm font-medium text-secondary-themed disabled:opacity-50"
             >
-              This property doesn&apos;t have one
+              {t('discoveryNotApplicable')}
             </button>
           </div>
         )
@@ -218,9 +222,7 @@ export function DiscoveryCaptureModal({
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
           <p className="text-sm text-muted-themed">
-            {scanQueued
-              ? "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment."
-              : 'Asset details saved.'}
+            {scanQueued ? t('discoverySuccessScanQueued') : t('discoverySuccessSimple')}
           </p>
         </div>
       ) : (
@@ -239,15 +241,15 @@ export function DiscoveryCaptureModal({
           )}
           <form id="discovery-capture-form" onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label htmlFor="discovery-make" className="label text-primary-themed">Make</label>
+              <label htmlFor="discovery-make" className="label text-primary-themed">{t('discoveryMake')}</label>
               <Input id="discovery-make" type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
             </div>
             <div>
-              <label htmlFor="discovery-model" className="label text-primary-themed">Model</label>
+              <label htmlFor="discovery-model" className="label text-primary-themed">{t('discoveryModel')}</label>
               <Input id="discovery-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
             </div>
             <div>
-              <label htmlFor="discovery-photo" className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
+              <label htmlFor="discovery-photo" className="label text-primary-themed">{t('discoveryPhotoLabel')}</label>
               <input
                 id="discovery-photo"
                 type="file"

@@ -531,6 +531,12 @@ export interface ChecklistTemplateSection {
   room_template_id:       string | null
   room_synced_at:         string | null
   created_at:             string
+  /**
+   * PM-entered Spanish translation of `name`, for the crew app's Spanish
+   * locale. Optional — falls back to `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                string | null
 }
 
 export interface ChecklistTemplateItem {
@@ -542,6 +548,12 @@ export interface ChecklistTemplateItem {
   notes:          string | null
   sort_order:     number
   created_at:     string
+  /**
+   * Copied from room_template_items.task_es via apply-master-template.ts.
+   * Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:        string | null
 }
 
 // Reusable, org-scoped room modules ("Standard Bedroom") a property's
@@ -555,6 +567,13 @@ export interface RoomTemplate {
   is_system:    boolean
   created_at:   string
   updated_at:   string
+  /**
+   * PM-entered Spanish translation of `name`, copied into
+   * checklist_template_sections.name_es when this room template is applied
+   * to a property. Optional — falls back to `name` when null. Added by
+   * 20260910235127_add_room_templates_name_es.sql.
+   */
+  name_es:      string | null
 }
 
 // Org-scoped editable copy of inventory_catalog, seeded on first touch
@@ -576,6 +595,12 @@ export interface OrgInventoryCatalogItem {
   is_consumable:             boolean
   created_at:                string
   updated_at:                string
+  /**
+   * Copied from inventory_catalog.name_es when the org's catalog is first
+   * seeded, then independently PM-editable. Optional — falls back to `name`
+   * when null. Added by 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                   string | null
 }
 
 // Org-scoped editable copy of maintenance_catalog_items, seeded on first
@@ -603,6 +628,12 @@ export interface RoomTemplateItem {
   notes:            string | null
   sort_order:       number
   created_at:       string
+  /**
+   * PM-entered Spanish translation of `task`, for the crew app's Spanish
+   * locale. Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:          string | null
 }
 
 export interface PlatformStaff {
@@ -736,6 +767,18 @@ export interface ChecklistInstanceItem {
   asset_discovery_type:  string | null
   created_at:            string
   updated_at:            string
+  /**
+   * Snapshot of checklist_template_items.task_es at turnover-creation time.
+   * Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:               string | null
+  /**
+   * Snapshot of checklist_template_sections.name_es at turnover-creation
+   * time. Optional — falls back to `section_name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  section_name_es:       string | null
 }
 
 export interface ChecklistItemSignal {
@@ -768,6 +811,12 @@ export interface InventoryCatalogItem {
   /** False for equipment/linens — see lib/inventory/stock-status.ts. */
   is_consumable:     boolean
   created_at:        string
+  /**
+   * Platform-maintained Spanish translation of `name`, seeded for the full
+   * catalog. Optional — falls back to `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:           string | null
 }
 
 /**
@@ -822,6 +871,13 @@ export interface InventoryItem {
   first_count_recorded_at: string | null
   created_at:              string
   updated_at:              string
+  /**
+   * Copied from the source template/catalog item via
+   * lib/inventory/apply-standard-to-property.ts. Optional — falls back to
+   * `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                 string | null
 }
 
 export interface InventoryCount {
@@ -1477,6 +1533,13 @@ export interface InventoryTemplateItem {
   sort_order:      number
   notes:           string | null
   preferred_brand: string | null
+  /**
+   * Copied from org_inventory_catalog.name_es via
+   * app/(dashboard)/templates/inventory/actions.ts. Optional — falls back to
+   * `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:         string | null
 }
 
 // Two disjoint subscriber shapes share this table: crew (crew_member_id set,

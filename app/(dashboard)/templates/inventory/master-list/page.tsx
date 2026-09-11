@@ -13,7 +13,7 @@ export default async function MasterListPage() {
 
   const { data: catalogItems, error } = await supabase
     .from('org_inventory_catalog')
-    .select('id, name, category, default_unit')
+    .select('id, name, name_es, category, default_unit')
     .eq('org_id', membership.org_id)
     .order('category')
     .order('name')
@@ -46,6 +46,7 @@ export default async function MasterListPage() {
         initialItems={(catalogItems ?? []).map((item) => ({
           id:           item.id,
           name:         item.name,
+          name_es:      item.name_es,
           category:     item.category,
           default_unit: item.default_unit,
         }))}

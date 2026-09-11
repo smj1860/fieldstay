@@ -577,8 +577,10 @@ export type Database = {
           photo_storage_path: string | null
           requires_photo: boolean
           section_name: string
+          section_name_es: string | null
           sort_order: number
           task: string
+          task_es: string | null
           turnover_id: string | null
           updated_at: string
         }
@@ -599,8 +601,10 @@ export type Database = {
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name: string
+          section_name_es?: string | null
           sort_order?: number
           task: string
+          task_es?: string | null
           turnover_id?: string | null
           updated_at?: string
         }
@@ -621,8 +625,10 @@ export type Database = {
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name?: string
+          section_name_es?: string | null
           sort_order?: number
           task?: string
+          task_es?: string | null
           turnover_id?: string | null
           updated_at?: string
         }
@@ -796,6 +802,7 @@ export type Database = {
           section_id: string
           sort_order: number
           task: string
+          task_es: string | null
           template_id: string
         }
         Insert: {
@@ -806,6 +813,7 @@ export type Database = {
           section_id: string
           sort_order?: number
           task: string
+          task_es?: string | null
           template_id: string
         }
         Update: {
@@ -816,6 +824,7 @@ export type Database = {
           section_id?: string
           sort_order?: number
           task?: string
+          task_es?: string | null
           template_id?: string
         }
         Relationships: [
@@ -840,6 +849,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          name_es: string | null
           requires_section_photo: boolean
           room_synced_at: string | null
           room_template_id: string | null
@@ -850,6 +860,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          name_es?: string | null
           requires_section_photo?: boolean
           room_synced_at?: string | null
           room_template_id?: string | null
@@ -860,6 +871,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          name_es?: string | null
           requires_section_photo?: boolean
           room_synced_at?: string | null
           room_template_id?: string | null
@@ -2401,6 +2413,7 @@ export type Database = {
           is_active: boolean
           is_consumable: boolean
           name: string
+          name_es: string | null
           par_mode: Database["public"]["Enums"]["par_mode"]
           smart_group: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2415,6 +2428,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name: string
+          name_es?: string | null
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2429,6 +2443,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name?: string
+          name_es?: string | null
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2581,6 +2596,7 @@ export type Database = {
           is_consumable: boolean
           low_stock_threshold_pct: number
           name: string
+          name_es: string | null
           notes: string | null
           org_id: string
           par_level: number
@@ -2606,6 +2622,7 @@ export type Database = {
           is_consumable?: boolean
           low_stock_threshold_pct?: number
           name: string
+          name_es?: string | null
           notes?: string | null
           org_id: string
           par_level?: number
@@ -2631,6 +2648,7 @@ export type Database = {
           is_consumable?: boolean
           low_stock_threshold_pct?: number
           name?: string
+          name_es?: string | null
           notes?: string | null
           org_id?: string
           par_level?: number
@@ -2681,6 +2699,7 @@ export type Database = {
           category: string | null
           id: string
           name: string
+          name_es: string | null
           notes: string | null
           par_level: number
           par_mode: Database["public"]["Enums"]["par_mode"]
@@ -2697,6 +2716,7 @@ export type Database = {
           category?: string | null
           id?: string
           name: string
+          name_es?: string | null
           notes?: string | null
           par_level?: number
           par_mode?: Database["public"]["Enums"]["par_mode"]
@@ -2713,6 +2733,7 @@ export type Database = {
           category?: string | null
           id?: string
           name?: string
+          name_es?: string | null
           notes?: string | null
           par_level?: number
           par_mode?: Database["public"]["Enums"]["par_mode"]
@@ -3306,6 +3327,7 @@ export type Database = {
           is_active: boolean
           is_consumable: boolean
           name: string
+          name_es: string | null
           org_id: string
           par_mode: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id: string | null
@@ -3323,6 +3345,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name: string
+          name_es?: string | null
           org_id: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
@@ -3340,6 +3363,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name?: string
+          name_es?: string | null
           org_id?: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
@@ -5054,6 +5078,7 @@ export type Database = {
           room_template_id: string
           sort_order: number
           task: string
+          task_es: string | null
         }
         Insert: {
           created_at?: string
@@ -5063,6 +5088,7 @@ export type Database = {
           room_template_id: string
           sort_order?: number
           task: string
+          task_es?: string | null
         }
         Update: {
           created_at?: string
@@ -5072,6 +5098,7 @@ export type Database = {
           room_template_id?: string
           sort_order?: number
           task?: string
+          task_es?: string | null
         }
         Relationships: [
           {
@@ -5090,6 +5117,7 @@ export type Database = {
           id: string
           is_system: boolean
           name: string
+          name_es: string | null
           org_id: string
           updated_at: string
         }
@@ -5099,6 +5127,7 @@ export type Database = {
           id?: string
           is_system?: boolean
           name: string
+          name_es?: string | null
           org_id: string
           updated_at?: string
         }
@@ -5108,6 +5137,7 @@ export type Database = {
           id?: string
           is_system?: boolean
           name?: string
+          name_es?: string | null
           org_id?: string
           updated_at?: string
         }

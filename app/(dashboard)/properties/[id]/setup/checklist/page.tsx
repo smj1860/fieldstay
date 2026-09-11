@@ -25,7 +25,7 @@ export default async function ChecklistPage({ params }: Props) {
   const [{ data: template, error: templateError }, { data: otherProperties, error: otherPropertiesError }, siblingTemplates, { data: roomTemplates, error: roomTemplatesError }] = await Promise.all([
     supabase
       .from('checklist_templates')
-      .select(`id, name, checklist_template_sections ( id, name, sort_order, room_template_id, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
+      .select(`id, name, checklist_template_sections ( id, name, name_es, sort_order, room_template_id, checklist_template_items ( id, task, task_es, requires_photo, notes, sort_order ) )`)
       .eq('property_id', property.id)
       .eq('is_default', true)
       .single(),
@@ -67,7 +67,7 @@ export default async function ChecklistPage({ params }: Props) {
     ),
     supabase
       .from('room_templates')
-      .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+      .select(`id, name, name_es, auto_include, room_template_items ( id, task, task_es, requires_photo, notes, sort_order )`)
       .eq('org_id', membership.org_id)
       .order('name'),
   ])
@@ -117,11 +117,13 @@ export default async function ChecklistPage({ params }: Props) {
         roomTemplates={(roomTemplates ?? []).map((room) => ({
           id:          room.id,
           name:        room.name,
+          nameEs:      room.name_es,
           autoInclude: room.auto_include,
           items: [...(room.room_template_items ?? [])]
             .sort((a, b) => a.sort_order - b.sort_order)
             .map((item) => ({
               task:           item.task,
+              task_es:        item.task_es,
               requires_photo: item.requires_photo,
               notes:          item.notes,
             })),
