@@ -74,6 +74,17 @@ async function fetchAssignedTurnoverIds(
   // syncs, so the device would delete a different set each time and thrash
   // instead of settling on one wrong answer. Range pagination REQUIRES a stable
   // sort to page correctly, so the ordering is load-bearing twice over.
+  // The PostgREST error is captured rather than discarded. `fetchAllPages`
+  // collapses any page failure to `null`, and reporting that as a bare
+  // `new Error('turnover_assignments fetch failed')` is what left this issue
+  // undiagnosable in production on 2026-09-11: no code, no message, so a 42501
+  // (a signed-out device — the same cause as the four dashboard issues in that
+  // minute) could not be told apart from a 500, a timeout, or a real RLS fault.
+  // reportError's describe() already renders a PostgrestError's message and
+  // code, and Sentry groups on that title, so passing the real error through
+  // also stops unrelated failures of this read collapsing into one issue.
+  let pageError: unknown = null
+
   const rows = await fetchAllPages<{ turnover_id: string }>(async (from, to) => {
     const res = await supabase
       .from('turnover_assignments')
@@ -82,11 +93,11 @@ async function fetchAssignedTurnoverIds(
       .order('turnover_id')
       .range(from, to)
     return { data: res.data as { turnover_id: string }[] | null, error: res.error }
-  })
+  }, (err) => { pageError = err })
 
   if (rows === null) {
-    console.error('[turnoverSync] turnover_assignments fetch failed')
-    reportError(new Error('turnover_assignments fetch failed'), {
+    console.error('[turnoverSync] turnover_assignments fetch failed:', pageError)
+    reportError(pageError ?? new Error('turnover_assignments fetch failed'), {
       site: 'dexie.sync.turnovers.assignments',
     })
     return null

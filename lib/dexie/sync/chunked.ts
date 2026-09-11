@@ -86,14 +86,27 @@ export async function fetchInChunksPaginated<TId, TRow>(
  * max_rows = 1000, a long-tenured cleaner's device would start erasing
  * turnovers that were still genuinely assigned — and, with no ORDER BY, a
  * different arbitrary 1000 each sync, so it would thrash rather than settle.
+ *
+ * `onError` exists because `null` names the OUTCOME and discards the CAUSE.
+ * fetchAssignedTurnoverIds reported a bare `new Error('turnover_assignments
+ * fetch failed')`, so when that read failed in production on 2026-09-11 the
+ * Sentry issue carried no code and no message — and a 42501 (which would have
+ * identified it instantly as a signed-out device, the same cause as the four
+ * dashboard issues in the same minute) was indistinguishable from a 500, a
+ * timeout, or a genuine RLS fault. The caller cannot recover what this function
+ * already had in hand, so hand it over rather than making it guess.
  */
 export async function fetchAllPages<TRow>(
   fetchPage: (from: number, to: number) => Promise<{ data: TRow[] | null; error: unknown }>,
+  onError?:  (error: unknown) => void,
 ): Promise<TRow[] | null> {
   const rows: TRow[] = []
   for (let from = 0; ; from += SUPABASE_MAX_ROWS) {
     const { data, error } = await fetchPage(from, from + SUPABASE_MAX_ROWS - 1)
-    if (error) return null
+    if (error) {
+      onError?.(error)
+      return null
+    }
     const page = data ?? []
     rows.push(...page)
     if (page.length < SUPABASE_MAX_ROWS) break

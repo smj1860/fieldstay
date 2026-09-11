@@ -53,6 +53,7 @@ import { reportError } from '@/lib/observability/report-error'
 import type { Vendor, WorkOrder } from '@/types/database'
 
 import { getDashboardDb } from './schema'
+import { hasUsableSession } from './session-gate'
 
 function canWarm(): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
@@ -62,7 +63,7 @@ function canWarm(): boolean {
 export interface MaintenanceBoardWarmResult {
   workOrders: number
   vendors:    number
-  skipped?:   'offline' | 'throttled'
+  skipped?:   'offline' | 'throttled' | 'unauthenticated'
 }
 
 const EMPTY: MaintenanceBoardWarmResult = { workOrders: 0, vendors: 0 }
@@ -99,6 +100,13 @@ export async function warmMaintenanceBoardForOffline(
 ): Promise<MaintenanceBoardWarmResult> {
   if (!canWarm()) return { ...EMPTY, skipped: 'offline' }
 
+  // Before the first query, not after it fails — see ./session-gate.ts. This
+  // warmer's `vendors` read was one of the four that 42501'd on 2026-09-11, and
+  // it is the one that carried an `org_id` tag (from a prop rendered while the
+  // session was still good), which is what made a signed-out tab look like a
+  // single org's RLS regression.
+  if (!(await hasUsableSession())) return { ...EMPTY, skipped: 'unauthenticated' }
+
   const db = getDashboardDb(userId, orgId)
 
   try {
@@ -133,7 +141,7 @@ export async function warmMaintenanceBoardForOffline(
     await db.sync_meta.put({ key: WARM_WATERMARK, value: new Date().toISOString() })
 
     if (error) {
-      reportError(error, { site: 'dexie.dashboard.warmMaintenanceBoard.workOrders', orgId })
+      reportError(error, { site: 'dexie.dashboard.warmMaintenanceBoard.workOrders', orgId, level: 'warning' })
       // A failed fetch is not evidence the board is empty — leave the cache as
       // it was rather than wiping a device that had a perfectly good copy.
       return { ...EMPTY, vendors }
@@ -183,7 +191,7 @@ async function cacheVendors(
       .limit(VENDOR_LIMIT)
 
     if (error) {
-      reportError(error, { site: 'dexie.dashboard.warmMaintenanceBoard.vendors', orgId })
+      reportError(error, { site: 'dexie.dashboard.warmMaintenanceBoard.vendors', orgId, level: 'warning' })
       return 0
     }
 
