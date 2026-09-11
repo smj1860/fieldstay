@@ -13,229 +13,139 @@ import type { CrewLocale } from '@/types/database'
  * Content that's per-org or free text (checklist items, inventory names,
  * work order descriptions) is handled separately via _es database columns,
  * not this dictionary — see the tasks tracked alongside this file.
+ *
+ * Keyed by dictionary key first, {en, es} second — not one flat object per
+ * locale — so each string's two translations sit on one line next to each
+ * other, and so the two locales aren't two structurally-identical blocks of
+ * object literals (which static-analysis duplicate-code detectors flag as
+ * copy-paste, since they tokenize the shape and not the string content).
  */
 const CREW_DICT = {
-  en: {
-    language:      'Language',
-    languageEn:    'English',
-    languageEs:    'Español',
+  language:      { en: 'Language', es: 'Idioma' },
+  languageEn:    { en: 'English', es: 'English' },
+  languageEs:    { en: 'Español', es: 'Español' },
 
-    navAssignments: 'Assignments',
-    navAssets:      'Assets',
-    navTimeOff:     'Time Off',
-    navMessages:    'Messages',
-    navHelp:        'Help',
+  navAssignments: { en: 'Assignments', es: 'Asignaciones' },
+  navAssets:      { en: 'Assets', es: 'Bienes' },
+  navTimeOff:     { en: 'Time Off', es: 'Tiempo libre' },
+  navMessages:    { en: 'Messages', es: 'Mensajes' },
+  navHelp:        { en: 'Help', es: 'Ayuda' },
 
-    dashboardWelcomePrefix:       'Welcome,',
-    dashboardLoading:             'Loading your assignments…',
-    dashboardLoadError:           "Couldn't load your assignments — check your connection and pull to refresh.",
-    dashboardCaughtUp:            "You're all caught up — no active assignments.",
-    dashboardTodaysTurnovers:     "Today's Turnovers",
-    dashboardUpcoming:            'Upcoming',
-    dashboardNoTodaysTurnovers:   "No today's turnovers",
-    dashboardNoUpcoming:          'No upcoming',
-    dashboardSendFeedback:        'Send feedback',
-    dashboardTravelTimePrefix:    'Total Travel Time:',
-    dashboardTravelTimeUnavailable: 'unavailable',
+  dashboardWelcomePrefix:       { en: 'Welcome,', es: 'Bienvenido,' },
+  dashboardLoading:             { en: 'Loading your assignments…', es: 'Cargando tus asignaciones…' },
+  dashboardLoadError:           { en: "Couldn't load your assignments — check your connection and pull to refresh.", es: 'No se pudieron cargar tus asignaciones — revisa tu conexión y desliza para actualizar.' },
+  dashboardCaughtUp:            { en: "You're all caught up — no active assignments.", es: 'Estás al día — no tienes asignaciones activas.' },
+  dashboardTodaysTurnovers:     { en: "Today's Turnovers", es: 'Rotaciones de hoy' },
+  dashboardUpcoming:            { en: 'Upcoming', es: 'Próximas' },
+  dashboardNoTodaysTurnovers:   { en: "No today's turnovers", es: 'Sin rotaciones para hoy' },
+  dashboardNoUpcoming:          { en: 'No upcoming', es: 'Sin próximas' },
+  dashboardSendFeedback:        { en: 'Send feedback', es: 'Enviar comentarios' },
+  dashboardTravelTimePrefix:    { en: 'Total Travel Time:', es: 'Tiempo total de viaje:' },
+  dashboardTravelTimeUnavailable: { en: 'unavailable', es: 'no disponible' },
 
-    feedbackTitle:       'Send feedback',
-    feedbackPrompt:      'What would make this app more helpful for your day-to-day work?',
-    feedbackPlaceholder: 'Share an idea, a frustration, or anything that would help…',
-    feedbackSubmit:      'Submit',
-    feedbackSending:     'Sending…',
-    feedbackDone:        'Done',
-    feedbackThankYou:    'Thank you!',
-    feedbackThankYouBody: 'Your feedback goes straight to the team that builds this app.',
-    feedbackGenericError: 'Something went wrong',
+  feedbackTitle:        { en: 'Send feedback', es: 'Enviar comentarios' },
+  feedbackPrompt:       { en: 'What would make this app more helpful for your day-to-day work?', es: '¿Qué haría que esta app fuera más útil para tu trabajo diario?' },
+  feedbackPlaceholder:  { en: 'Share an idea, a frustration, or anything that would help…', es: 'Comparte una idea, una frustración o cualquier cosa que ayudaría…' },
+  feedbackSubmit:       { en: 'Submit', es: 'Enviar' },
+  feedbackSending:      { en: 'Sending…', es: 'Enviando…' },
+  feedbackDone:         { en: 'Done', es: 'Listo' },
+  feedbackThankYou:     { en: 'Thank you!', es: '¡Gracias!' },
+  feedbackThankYouBody: { en: 'Your feedback goes straight to the team that builds this app.', es: 'Tus comentarios van directo al equipo que crea esta app.' },
+  feedbackGenericError: { en: 'Something went wrong', es: 'Algo salió mal' },
 
-    statusAssigned:   'Assigned',
-    statusInProgress: 'In Progress',
-    woBadge:          'WO',
-    scheduledPrefix:  'Scheduled',
-    propertyFallback: 'Property',
+  statusAssigned:   { en: 'Assigned', es: 'Asignado' },
+  statusInProgress: { en: 'In Progress', es: 'En progreso' },
+  woBadge:          { en: 'WO', es: 'OT' },
+  scheduledPrefix:  { en: 'Scheduled', es: 'Programado' },
+  propertyFallback: { en: 'Property', es: 'Propiedad' },
 
-    assetsBack:                   'Back',
-    assetsPlaceWorkOrder:         'Place a Work Order',
-    assetsAssetDiscovery:         'Asset Discovery',
-    assetsCapture:                'Capture',
-    assetsEveryAssetDiscovered:   'Every required asset has been discovered.',
+  assetsBack:                 { en: 'Back', es: 'Atrás' },
+  assetsPlaceWorkOrder:       { en: 'Place a Work Order', es: 'Solicitar una orden de trabajo' },
+  assetsAssetDiscovery:       { en: 'Asset Discovery', es: 'Inventario de bienes' },
+  assetsCapture:              { en: 'Capture', es: 'Capturar' },
+  assetsEveryAssetDiscovered: { en: 'Every required asset has been discovered.', es: 'Se han registrado todos los bienes requeridos.' },
 
-    actionSubmit:     'Submit',
-    actionSubmitting: 'Submitting…',
-    actionSave:       'Save',
-    actionSaving:     'Saving…',
+  actionSubmit:     { en: 'Submit', es: 'Enviar' },
+  actionSubmitting: { en: 'Submitting…', es: 'Enviando…' },
+  actionSave:       { en: 'Save', es: 'Guardar' },
+  actionSaving:     { en: 'Saving…', es: 'Guardando…' },
 
-    woModalTitlePlaced:      'Work Order Placed',
-    woModalPropertyLabel:    'Property',
-    woModalAssetLabel:       'Which asset?',
-    woModalAssetOther:       'Other / not listed',
-    woModalIssueLabel:       "What's the issue? *",
-    woModalIssuePlaceholder: 'e.g. Leaking faucet in master bath',
-    woModalEmergencyLabel:   'This is an emergency',
-    woModalErrorDescribe:    'Please describe the issue.',
-    woModalSuccessBody:      'Saved. The property manager will see this as soon as your phone has a connection.',
+  woModalTitlePlaced:      { en: 'Work Order Placed', es: 'Orden de trabajo enviada' },
+  woModalPropertyLabel:    { en: 'Property', es: 'Propiedad' },
+  woModalAssetLabel:       { en: 'Which asset?', es: '¿Qué bien?' },
+  woModalAssetOther:       { en: 'Other / not listed', es: 'Otro / no está en la lista' },
+  woModalIssueLabel:       { en: "What's the issue? *", es: '¿Cuál es el problema? *' },
+  woModalIssuePlaceholder: { en: 'e.g. Leaking faucet in master bath', es: 'ej. Grifo con fuga en el baño principal' },
+  woModalEmergencyLabel:   { en: 'This is an emergency', es: 'Esto es una emergencia' },
+  woModalErrorDescribe:    { en: 'Please describe the issue.', es: 'Por favor describe el problema.' },
+  woModalSuccessBody:      { en: 'Saved. The property manager will see this as soon as your phone has a connection.', es: 'Guardado. El gerente de la propiedad lo verá en cuanto tu teléfono tenga conexión.' },
 
-    discoveryTitleSaved:       'Saved',
-    discoveryCapturePrefix:    'Capture:',
-    discoveryPhotoLabel:       'Photo of the data plate / sticker (optional)',
-    discoveryNotApplicable:    "This property doesn't have one",
-    discoveryErrorGeneric:     'Could not save. Check your connection and try again.',
-    discoveryErrorRequired:    'Add a make/model, a photo, or mark this as not applicable.',
-    discoverySuccessScanQueued: "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment.",
-    discoverySuccessSimple:    'Asset details saved.',
+  discoveryTitleSaved:        { en: 'Saved', es: 'Guardado' },
+  discoveryCapturePrefix:     { en: 'Capture:', es: 'Capturar:' },
+  discoveryPhotoLabel:        { en: 'Photo of the data plate / sticker (optional)', es: 'Foto de la placa de datos / etiqueta (opcional)' },
+  discoveryNotApplicable:     { en: "This property doesn't have one", es: 'Esta propiedad no tiene uno' },
+  discoveryErrorGeneric:      { en: 'Could not save. Check your connection and try again.', es: 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.' },
+  discoveryErrorRequired:     { en: 'Add a make/model, a photo, or mark this as not applicable.', es: 'Agrega una marca/modelo, una foto, o márcalo como no aplicable.' },
+  discoverySuccessScanQueued: { en: "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment.", es: 'Bien guardado. Estamos leyendo la foto ahora — la marca y el modelo se completarán automáticamente en un momento.' },
+  discoverySuccessSimple:     { en: 'Asset details saved.', es: 'Detalles del bien guardados.' },
 
-    syncChecklistTaskUpdate:       'Checklist task update',
-    syncChecklistCompletionConfirm: 'Checklist completion confirmation',
-    syncTurnoverUpdate:            'Turnover update',
-    syncInventoryCount:            'Inventory count',
-    syncWorkOrderRequest:          'Work order request',
-    syncApplianceDetails:          'Appliance details',
-    syncWorkOrderCompletion:       'Work order completion',
-    syncMessageToOps:              'Message to your operations team',
-    syncSavedChange:               'Saved change',
-    syncPhoto:                     'Photo',
-    syncStalledHint: 'Your work is saved on this phone and will keep retrying on its own. '
+  syncChecklistTaskUpdate:         { en: 'Checklist task update', es: 'Actualización de tarea de la lista' },
+  syncChecklistCompletionConfirm:  { en: 'Checklist completion confirmation', es: 'Confirmación de lista completada' },
+  syncTurnoverUpdate:              { en: 'Turnover update', es: 'Actualización de rotación' },
+  syncInventoryCount:              { en: 'Inventory count', es: 'Conteo de inventario' },
+  syncWorkOrderRequest:            { en: 'Work order request', es: 'Solicitud de orden de trabajo' },
+  syncApplianceDetails:            { en: 'Appliance details', es: 'Detalles del electrodoméstico' },
+  syncWorkOrderCompletion:         { en: 'Work order completion', es: 'Finalización de orden de trabajo' },
+  syncMessageToOps:                { en: 'Message to your operations team', es: 'Mensaje a tu equipo de operaciones' },
+  syncSavedChange:                 { en: 'Saved change', es: 'Cambio guardado' },
+  syncPhoto:                       { en: 'Photo', es: 'Foto' },
+  syncStalledHint: {
+    en: 'Your work is saved on this phone and will keep retrying on its own. '
       + 'If this stays here, move somewhere with better signal before you finish for the day.',
-    syncFailedHint: 'This work is saved on your phone but hasn’t reached FieldStay. '
+    es: 'Tu trabajo está guardado en este teléfono y seguirá intentando enviarse solo. '
+      + 'Si esto sigue apareciendo, busca un lugar con mejor señal antes de terminar tu turno.',
+  },
+  syncFailedHint: {
+    en: 'This work is saved on your phone but hasn’t reached FieldStay. '
       + 'Tap retry once you have signal.',
+    es: 'Este trabajo está guardado en tu teléfono pero no ha llegado a FieldStay. '
+      + 'Toca reintentar cuando tengas señal.',
+  },
 
-    discoveryMake:  'Make',
-    discoveryModel: 'Model',
+  discoveryMake:  { en: 'Make', es: 'Marca' },
+  discoveryModel: { en: 'Model', es: 'Modelo' },
 
-    syncRetryAll:          'Retry all',
-    syncRetrying:          'Retrying…',
-    syncDiscardTitle:      'Discard this item?',
-    syncKeepIt:            'Keep it',
-    syncDiscard:           'Discard',
-    syncDiscardAriaPrefix: 'Discard',
+  syncRetryAll:          { en: 'Retry all', es: 'Reintentar todo' },
+  syncRetrying:          { en: 'Retrying…', es: 'Reintentando…' },
+  syncDiscardTitle:      { en: 'Discard this item?', es: '¿Descartar este elemento?' },
+  syncKeepIt:            { en: 'Keep it', es: 'Conservar' },
+  syncDiscard:           { en: 'Discard', es: 'Descartar' },
+  syncDiscardAriaPrefix: { en: 'Discard', es: 'Descartar' },
 
-    offlinePill:              'Offline',
-    offlineDialogTitle:       "You're offline",
-    offlineGotIt:             'Got it',
-    offlineWorkingFromCache:  'Working from cached data',
-    offlineBody: 'Your assignments and checklists are saved on your device. '
+  offlinePill:             { en: 'Offline', es: 'Sin conexión' },
+  offlineDialogTitle:      { en: "You're offline", es: 'Estás sin conexión' },
+  offlineGotIt:            { en: 'Got it', es: 'Entendido' },
+  offlineWorkingFromCache: { en: 'Working from cached data', es: 'Trabajando con datos guardados' },
+  offlineBody: {
+    en: 'Your assignments and checklists are saved on your device. '
       + 'You can complete turnovers and check off tasks without a '
       + 'signal — everything syncs automatically when you reconnect.',
-
-    faqTitle:    'FieldStay Crew App — FAQ',
-    faqNeedHelp: 'Need help?',
-
-    done: 'Done',
-  },
-  es: {
-    language:      'Idioma',
-    languageEn:    'English',
-    languageEs:    'Español',
-
-    navAssignments: 'Asignaciones',
-    navAssets:      'Bienes',
-    navTimeOff:     'Tiempo libre',
-    navMessages:    'Mensajes',
-    navHelp:        'Ayuda',
-
-    dashboardWelcomePrefix:       'Bienvenido,',
-    dashboardLoading:             'Cargando tus asignaciones…',
-    dashboardLoadError:           'No se pudieron cargar tus asignaciones — revisa tu conexión y desliza para actualizar.',
-    dashboardCaughtUp:            'Estás al día — no tienes asignaciones activas.',
-    dashboardTodaysTurnovers:     'Rotaciones de hoy',
-    dashboardUpcoming:            'Próximas',
-    dashboardNoTodaysTurnovers:   'Sin rotaciones para hoy',
-    dashboardNoUpcoming:          'Sin próximas',
-    dashboardSendFeedback:        'Enviar comentarios',
-    dashboardTravelTimePrefix:    'Tiempo total de viaje:',
-    dashboardTravelTimeUnavailable: 'no disponible',
-
-    feedbackTitle:       'Enviar comentarios',
-    feedbackPrompt:      '¿Qué haría que esta app fuera más útil para tu trabajo diario?',
-    feedbackPlaceholder: 'Comparte una idea, una frustración o cualquier cosa que ayudaría…',
-    feedbackSubmit:      'Enviar',
-    feedbackSending:     'Enviando…',
-    feedbackDone:        'Listo',
-    feedbackThankYou:    '¡Gracias!',
-    feedbackThankYouBody: 'Tus comentarios van directo al equipo que crea esta app.',
-    feedbackGenericError: 'Algo salió mal',
-
-    statusAssigned:   'Asignado',
-    statusInProgress: 'En progreso',
-    woBadge:          'OT',
-    scheduledPrefix:  'Programado',
-    propertyFallback: 'Propiedad',
-
-    assetsBack:                   'Atrás',
-    assetsPlaceWorkOrder:         'Solicitar una orden de trabajo',
-    assetsAssetDiscovery:         'Inventario de bienes',
-    assetsCapture:                'Capturar',
-    assetsEveryAssetDiscovered:   'Se han registrado todos los bienes requeridos.',
-
-    actionSubmit:     'Enviar',
-    actionSubmitting: 'Enviando…',
-    actionSave:       'Guardar',
-    actionSaving:     'Guardando…',
-
-    woModalTitlePlaced:      'Orden de trabajo enviada',
-    woModalPropertyLabel:    'Propiedad',
-    woModalAssetLabel:       '¿Qué bien?',
-    woModalAssetOther:       'Otro / no está en la lista',
-    woModalIssueLabel:       '¿Cuál es el problema? *',
-    woModalIssuePlaceholder: 'ej. Grifo con fuga en el baño principal',
-    woModalEmergencyLabel:   'Esto es una emergencia',
-    woModalErrorDescribe:    'Por favor describe el problema.',
-    woModalSuccessBody:      'Guardado. El gerente de la propiedad lo verá en cuanto tu teléfono tenga conexión.',
-
-    discoveryTitleSaved:       'Guardado',
-    discoveryCapturePrefix:    'Capturar:',
-    discoveryPhotoLabel:       'Foto de la placa de datos / etiqueta (opcional)',
-    discoveryNotApplicable:    'Esta propiedad no tiene uno',
-    discoveryErrorGeneric:     'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.',
-    discoveryErrorRequired:    'Agrega una marca/modelo, una foto, o márcalo como no aplicable.',
-    discoverySuccessScanQueued: 'Bien guardado. Estamos leyendo la foto ahora — la marca y el modelo se completarán automáticamente en un momento.',
-    discoverySuccessSimple:    'Detalles del bien guardados.',
-
-    syncChecklistTaskUpdate:       'Actualización de tarea de la lista',
-    syncChecklistCompletionConfirm: 'Confirmación de lista completada',
-    syncTurnoverUpdate:            'Actualización de rotación',
-    syncInventoryCount:            'Conteo de inventario',
-    syncWorkOrderRequest:          'Solicitud de orden de trabajo',
-    syncApplianceDetails:          'Detalles del electrodoméstico',
-    syncWorkOrderCompletion:       'Finalización de orden de trabajo',
-    syncMessageToOps:              'Mensaje a tu equipo de operaciones',
-    syncSavedChange:               'Cambio guardado',
-    syncPhoto:                     'Foto',
-    syncStalledHint: 'Tu trabajo está guardado en este teléfono y seguirá intentando enviarse solo. '
-      + 'Si esto sigue apareciendo, busca un lugar con mejor señal antes de terminar tu turno.',
-    syncFailedHint: 'Este trabajo está guardado en tu teléfono pero no ha llegado a FieldStay. '
-      + 'Toca reintentar cuando tengas señal.',
-
-    discoveryMake:  'Marca',
-    discoveryModel: 'Modelo',
-
-    syncRetryAll:          'Reintentar todo',
-    syncRetrying:          'Reintentando…',
-    syncDiscardTitle:      '¿Descartar este elemento?',
-    syncKeepIt:            'Conservar',
-    syncDiscard:           'Descartar',
-    syncDiscardAriaPrefix: 'Descartar',
-
-    offlinePill:              'Sin conexión',
-    offlineDialogTitle:       'Estás sin conexión',
-    offlineGotIt:             'Entendido',
-    offlineWorkingFromCache:  'Trabajando con datos guardados',
-    offlineBody: 'Tus asignaciones y listas de verificación están guardadas en tu dispositivo. '
+    es: 'Tus asignaciones y listas de verificación están guardadas en tu dispositivo. '
       + 'Puedes completar rotaciones y marcar tareas sin '
       + 'señal — todo se sincroniza automáticamente cuando te reconectas.',
-
-    faqTitle:    'FieldStay Crew App — Preguntas frecuentes',
-    faqNeedHelp: '¿Necesitas ayuda?',
-
-    done: 'Listo',
   },
-} as const satisfies Record<CrewLocale, Record<string, string>>
 
-export type CrewDictKey = keyof (typeof CREW_DICT)['en']
+  faqTitle:    { en: 'FieldStay Crew App — FAQ', es: 'FieldStay Crew App — Preguntas frecuentes' },
+  faqNeedHelp: { en: 'Need help?', es: '¿Necesitas ayuda?' },
 
-/** Pure lookup — no fallback needed since both locales carry every key (enforced by the `satisfies` above). */
+  done: { en: 'Done', es: 'Listo' },
+} as const satisfies Record<string, Record<CrewLocale, string>>
+
+export type CrewDictKey = keyof typeof CREW_DICT
+
+/** Pure lookup — no fallback needed since every key carries both locales (enforced by the `satisfies` above). */
 export function translateCrew(locale: CrewLocale, key: CrewDictKey): string {
-  return CREW_DICT[locale][key]
+  return CREW_DICT[key][locale]
 }
 
 export function useCrewT(): (key: CrewDictKey) => string {

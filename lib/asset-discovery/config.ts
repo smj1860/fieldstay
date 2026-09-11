@@ -22,71 +22,53 @@ export const REQUIRED_ASSET_TYPES: AssetType[] = [
   'thermostat',
 ]
 
-export const ASSET_TYPE_DISPLAY_NAMES: Partial<Record<AssetType, string>> = {
-  hvac:                     'HVAC',
-  water_heater:             'Water Heater',
-  electrical_panel:         'Electrical Panel',
-  water_shutoff_valve:      'Water Shut-off Valve',
-  well_pump:                'Well Pump & Bladder Tank',
-  solar_inverter:           'Solar Inverter',
-  whole_home_water_filter:  'Whole Home Water Filter',
-  generator:                'Generator',
-  pool_pump:                'Pool Pump',
-  hot_tub:                  'Hot Tub Equipment',
-  heated_tile_system:       'Heated Tile System',
-  refrigerator:             'Refrigerator',
-  oven_range:               'Stove & Oven',
-  dishwasher:               'Dishwasher',
-  microwave:                'Microwave',
-  range_hood_vent:          'Range Hood Vent',
-  coffee_station:           'Coffee & Nespresso Station',
-  toaster_oven:             'Countertop Toaster Oven',
-  ice_maker:                'Ice Maker',
-  garbage_disposal:         'Garbage Disposal',
-  trash_compactor:          'Trash Compactor',
-  washer:                   'Washer',
-  dryer:                    'Dryer',
-  wifi_router:              'Wi-Fi Router',
-  smart_lock:               'Smart Lock',
-  fire_extinguisher:        'Fire Extinguisher',
-  thermostat:               'Thermostat',
+/**
+ * One source of truth per asset type — {en, es} together, rather than two
+ * structurally-identical dictionaries — so a static-analysis duplicate-code
+ * detector (which tokenizes shape, not string content) doesn't see two
+ * copy-pasted blocks. `es` is used only by the crew app's UI (locale is a
+ * crew_members preference, never a dashboard concept); every other caller
+ * (the PM dashboard, the server-side discovery engine) keeps getting
+ * English via assetTypeDisplayName()'s default, unaffected by this.
+ */
+const ASSET_TYPE_NAMES: Partial<Record<AssetType, { en: string; es: string }>> = {
+  hvac:                     { en: 'HVAC',                        es: 'Aire acondicionado (HVAC)' },
+  water_heater:             { en: 'Water Heater',                es: 'Calentador de agua' },
+  electrical_panel:         { en: 'Electrical Panel',            es: 'Panel eléctrico' },
+  water_shutoff_valve:      { en: 'Water Shut-off Valve',        es: 'Válvula de cierre de agua' },
+  well_pump:                { en: 'Well Pump & Bladder Tank',    es: 'Bomba de pozo y tanque de presión' },
+  solar_inverter:           { en: 'Solar Inverter',              es: 'Inversor solar' },
+  whole_home_water_filter:  { en: 'Whole Home Water Filter',     es: 'Filtro de agua de toda la casa' },
+  generator:                { en: 'Generator',                   es: 'Generador' },
+  pool_pump:                { en: 'Pool Pump',                   es: 'Bomba de la piscina' },
+  hot_tub:                  { en: 'Hot Tub Equipment',           es: 'Equipo del jacuzzi' },
+  heated_tile_system:       { en: 'Heated Tile System',          es: 'Sistema de piso radiante' },
+  refrigerator:             { en: 'Refrigerator',                es: 'Refrigerador' },
+  oven_range:               { en: 'Stove & Oven',                es: 'Estufa y horno' },
+  dishwasher:               { en: 'Dishwasher',                  es: 'Lavavajillas' },
+  microwave:                { en: 'Microwave',                   es: 'Microondas' },
+  range_hood_vent:          { en: 'Range Hood Vent',             es: 'Campana extractora' },
+  coffee_station:           { en: 'Coffee & Nespresso Station',  es: 'Estación de café y Nespresso' },
+  toaster_oven:             { en: 'Countertop Toaster Oven',     es: 'Horno tostador de mostrador' },
+  ice_maker:                { en: 'Ice Maker',                   es: 'Máquina de hielo' },
+  garbage_disposal:         { en: 'Garbage Disposal',            es: 'Triturador de basura' },
+  trash_compactor:          { en: 'Trash Compactor',             es: 'Compactador de basura' },
+  washer:                   { en: 'Washer',                      es: 'Lavadora' },
+  dryer:                    { en: 'Dryer',                       es: 'Secadora' },
+  wifi_router:              { en: 'Wi-Fi Router',                es: 'Router Wi-Fi' },
+  smart_lock:               { en: 'Smart Lock',                  es: 'Cerradura inteligente' },
+  fire_extinguisher:        { en: 'Fire Extinguisher',           es: 'Extintor' },
+  thermostat:               { en: 'Thermostat',                  es: 'Termostato' },
 }
 
-/**
- * Spanish siblings — used only by the crew app's UI (locale is a crew_members
- * preference, never a dashboard concept). Every other caller (the PM
- * dashboard, the server-side discovery engine) keeps getting English via
- * assetTypeDisplayName()'s default, unaffected by this.
- */
-export const ASSET_TYPE_DISPLAY_NAMES_ES: Partial<Record<AssetType, string>> = {
-  hvac:                     'Aire acondicionado (HVAC)',
-  water_heater:             'Calentador de agua',
-  electrical_panel:         'Panel eléctrico',
-  water_shutoff_valve:      'Válvula de cierre de agua',
-  well_pump:                'Bomba de pozo y tanque de presión',
-  solar_inverter:           'Inversor solar',
-  whole_home_water_filter:  'Filtro de agua de toda la casa',
-  generator:                'Generador',
-  pool_pump:                'Bomba de la piscina',
-  hot_tub:                  'Equipo del jacuzzi',
-  heated_tile_system:       'Sistema de piso radiante',
-  refrigerator:             'Refrigerador',
-  oven_range:               'Estufa y horno',
-  dishwasher:               'Lavavajillas',
-  microwave:                'Microondas',
-  range_hood_vent:          'Campana extractora',
-  coffee_station:           'Estación de café y Nespresso',
-  toaster_oven:             'Horno tostador de mostrador',
-  ice_maker:                'Máquina de hielo',
-  garbage_disposal:         'Triturador de basura',
-  trash_compactor:          'Compactador de basura',
-  washer:                   'Lavadora',
-  dryer:                    'Secadora',
-  wifi_router:              'Router Wi-Fi',
-  smart_lock:               'Cerradura inteligente',
-  fire_extinguisher:        'Extintor',
-  thermostat:               'Termostato',
+function pluckAssetNames(locale: 'en' | 'es'): Partial<Record<AssetType, string>> {
+  return Object.fromEntries(
+    Object.entries(ASSET_TYPE_NAMES).map(([type, names]) => [type, names[locale]])
+  ) as Partial<Record<AssetType, string>>
 }
+
+export const ASSET_TYPE_DISPLAY_NAMES: Partial<Record<AssetType, string>> = pluckAssetNames('en')
+export const ASSET_TYPE_DISPLAY_NAMES_ES: Partial<Record<AssetType, string>> = pluckAssetNames('es')
 
 export const ASSET_DISCOVERY_SECTION = 'Asset Discovery'
 /**
