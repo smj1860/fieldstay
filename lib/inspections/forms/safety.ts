@@ -1,13 +1,35 @@
 // lib/inspections/forms/safety.ts
 //
 // Property Safety & Risk Mitigation Inspection — docs/INSPECTIONS_SPEC.md §12.1.
-// 45 top-level items across 7 sections. Runs 1× or 2× a year.
+// 54 top-level items across 7 sections. Runs 1× or 2× a year.
 //
-// Item 17a (gas line integrity) was added 2026-08-30, out of the spec's
-// original sequence — same convention as 14a/19a on Indoor: a lettered
-// suffix rather than renumbering everything after it. See CONCERN_KEY_MAP
-// in ./index.ts and EXPECTED_ROOT_ITEM_COUNTS for the other two places this
-// addition had to be reflected.
+// Items added out of the spec's original sequence carry a LETTERED SUFFIX
+// rather than renumbering everything after them — same convention as Indoor's
+// 14a/19a. 17a (gas line integrity) was the first, on 2026-08-30. The
+// ordinance-readiness pass on 2026-09-11 added 3b, 7f, 11a, 13a, 17b, 37a,
+// 38a, 40a and 40b, plus 7e inside the extinguisher repeat group. See
+// CONCERN_KEY_MAP in ./index.ts and EXPECTED_ROOT_ITEM_COUNTS for the other
+// two places such an addition has to be reflected.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT THE 2026-09-11 PASS WAS FOR
+//
+// §1 calls this form insurance evidence. It is also, in practice, the only
+// artifact a PM has when a city asks them to demonstrate a property is fit to
+// be licensed — and read against the ordinances that actually govern that
+// (IRC/NFPA-derived municipal STR codes), the form was passing properties that
+// would fail a pre-licensing inspection. Not because it asked the wrong
+// questions, but because it asked the right ones at the wrong SCOPE: alarms in
+// bedrooms rather than on every level; extinguishers described per unit with
+// nothing asking whether the set covers the building; a diagram posted with
+// nothing saying what is on it; "guardrails sound" with neither the 30in
+// trigger nor the 36in height that decide whether one is required at all.
+//
+// Every addition in that pass is a requirement a municipal inspector can cite,
+// not a best practice. Where the requirement is conditional (bars on windows,
+// a gas detector, an LP appliance) the item renders everywhere and is answered
+// N/A — never gated — because the walk before the permit inspection is
+// precisely the one that must not be silent about it.
 //
 // This is the form §1 calls insurance evidence, and the one whose findings an
 // insurer is most likely to read. Two consequences visible in the data below:
@@ -34,7 +56,7 @@ export const SAFETY_FORM: FormDefinition = {
     'Life-safety systems, utilities, structure, water and amenity risk controls. ' +
     'Performed once or twice a year and retained as the evidentiary record of the ' +
     "property's safety posture.",
-  version: 2,
+  version: 3,
   sections: [
     // ── 1 ────────────────────────────────────────────────────────────────────
     {
@@ -43,13 +65,13 @@ export const SAFETY_FORM: FormDefinition = {
       items: [
         {
           key:    'safety.fire.smoke_present',
-          prompt: 'Smoke detectors present in all bedrooms and hallways',
+          prompt: 'Smoke alarms in every bedroom, in the hallway outside each sleeping area, and on every level including basement and habitable attic',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'electrical', wo_priority: 'urgent',
           concern_key: 'smoke_detector_present',
           children: [{
             key:    'safety.fire.smoke_present_where',
-            prompt: 'Which room needs a smoke detector?',
+            prompt: 'Which room or level needs a smoke alarm?',
             response_type: 'text', show_when: 'fail',
             remediation: 'none', default_actions: [],
           }],
@@ -81,8 +103,30 @@ export const SAFETY_FORM: FormDefinition = {
           }],
         },
         {
+          // 3b. THE ITEM A PERMIT INSPECTOR CHECKS AND THIS FORM COULD NOT SEE.
+          //
+          // 1, 2 and 3 ask whether alarms are present, responding and in date —
+          // three true things a property can be while still failing its
+          // pre-licensing inspection, because most current ordinances also
+          // specify WHAT KIND of alarm and that they are interconnected. An
+          // interconnected set is the difference between a basement fire waking
+          // the upstairs bedrooms and not, which is why the codes moved.
+          //
+          // A work order rather than a purchase order even though the usual fix
+          // is bought rather than repaired: wireless-interconnect alarms are a
+          // retrofit somebody has to install and pair, and battery-only units
+          // in a jurisdiction that requires hardwiring are an electrician's
+          // visit. The inspector can add the Replace chip where the fix really
+          // is just a box of alarms.
+          key:    'safety.fire.smoke_interconnected',
+          prompt: 'Smoke alarms are hardwired or 10-year sealed-battery units, and interconnected so one sounding sounds them all',
+          remediation: 'work_order', default_actions: ['repair'],
+          wo_category: 'electrical', wo_priority: 'high',
+          concern_key: 'smoke_detector_interconnect',
+        },
+        {
           key:    'safety.fire.co_present',
-          prompt: 'CO detectors installed on every level with sleeping areas',
+          prompt: 'CO alarms on every level and within 10 ft of each sleeping area — required wherever there is a fuel-burning appliance, fireplace or attached garage',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'electrical', wo_priority: 'urgent',
           concern_key: 'co_detector_present',
@@ -127,6 +171,15 @@ export const SAFETY_FORM: FormDefinition = {
               remediation: 'none', default_actions: [],
             },
             {
+              // The RATING, asked per unit because it is printed per unit. A
+              // kitchen-sized BC aerosol can and a 5 lb ABC extinguisher both
+              // answer "yes" to charged and in date, and only one of them is
+              // the multi-purpose unit an ordinance names.
+              key:    'safety.fire.extinguisher_rating',
+              prompt: 'Rated 2-A:10-B:C or better (printed on the label)',
+              remediation: 'purchase_order', default_actions: ['replace'],
+            },
+            {
               key:    'safety.fire.extinguisher_charged',
               prompt: 'Fully charged',
               remediation: 'purchase_order', default_actions: ['replace'],
@@ -148,6 +201,20 @@ export const SAFETY_FORM: FormDefinition = {
               remediation: 'none', default_actions: [],
             },
           ],
+        },
+        {
+          // 7f. WHAT THE REPEAT GROUP CANNOT ASK.
+          //
+          // 7a–7e describe each extinguisher that exists. Nothing reads those
+          // rows and decides whether the SET of them covers the building — 7a
+          // is free text, so three good extinguishers in one garage pass every
+          // per-unit question and fail the ordinance. This is the one question
+          // about the arrangement rather than the equipment, and it is asked of
+          // the inspector because they are the one standing in the building.
+          key:    'safety.fire.extinguisher_coverage',
+          prompt: 'At least one extinguisher on every floor, one within 30 ft of the kitchen, each mounted visible and unobstructed',
+          remediation: 'work_order', default_actions: ['repair'],
+          wo_category: 'general', wo_priority: 'high',
         },
         {
           key:    'safety.fire.dryer_vent',
@@ -184,6 +251,21 @@ export const SAFETY_FORM: FormDefinition = {
           concern_key: 'egress_window',
         },
         {
+          // 11a. The second half of egress, and rare enough to be forgotten:
+          // 11 asks whether the window opens, this asks whether anything BOLTED
+          // OVER IT does. Bars, grilles and fixed insect screens are all common
+          // on ground-floor and lakefront properties, and a release needing a
+          // key or a screwdriver fails every ordinance that mentions them —
+          // the guest is asleep and the room is full of smoke.
+          //
+          // Most properties have none; it is answered N/A with a reason, the
+          // same as any other item whose subject is absent.
+          key:    'safety.fire.window_bars_release',
+          prompt: 'Security bars, grilles or fixed screens on bedroom windows release from inside without a key, tool or special knowledge',
+          remediation: 'work_order', default_actions: ['repair'],
+          wo_category: 'windows_doors', wo_priority: 'urgent',
+        },
+        {
           key:    'safety.fire.emergency_lighting',
           prompt: 'Emergency lighting / flashlights present and functional',
           remediation: 'purchase_order', default_actions: ['replace'],
@@ -195,8 +277,22 @@ export const SAFETY_FORM: FormDefinition = {
           }],
         },
         {
+          // The prompt names the CONTENTS because that is what a posted-map
+          // ordinance actually specifies, and because "a plan is posted" passed
+          // for a fire-escape sticker with no floor layout on it. The property
+          // ADDRESS belongs on it for a reason worth stating: a guest calling
+          // 911 from a house they arrived at in the dark frequently cannot say
+          // where they are.
           key:    'safety.fire.evacuation_plan',
-          prompt: 'Evacuation plan and emergency contacts posted where guests will see them',
+          prompt: 'Evacuation diagram posted at the main exit — floor layout, exit routes, extinguisher and first-aid locations, the property address, and emergency contacts',
+          remediation: 'purchase_order', default_actions: ['replace'],
+        },
+        {
+          // 13a. The diagram above points at this. An inspection that verifies
+          // the map and never verifies what the map promises is checking the
+          // paperwork rather than the property.
+          key:    'safety.fire.first_aid_kit',
+          prompt: 'First-aid kit stocked, in date, and where the posted diagram says it is',
           remediation: 'purchase_order', default_actions: ['replace'],
         },
       ],
@@ -247,6 +343,28 @@ export const SAFETY_FORM: FormDefinition = {
           concern_key: 'gas_line_integrity',
         },
         {
+          // 17b. 17 asks whether the appliances leak and 17a whether the line
+          // feeding them is sound. Neither asks whether anything would NOTICE
+          // a leak between two annual walks — the same gap the water section
+          // closed with its sensor and shut-off pair (26 and 27).
+          //
+          // THE MOUNTING HEIGHT IS IN THE PROMPT ON PURPOSE. Propane is heavier
+          // than air and pools at the floor; natural gas rises. A detector at
+          // the wrong height is installed, powered, tested and useless, and it
+          // is the single most common way this gets done wrong.
+          //
+          // Answered N/A at an all-electric property. Deliberately NOT gated on
+          // a property fact: a fact captured on completion only takes effect on
+          // the NEXT walk, so gating it would make the first walk at every
+          // property silent about gas detection — the walk most likely to be
+          // the one before a permit inspection.
+          key:    'safety.electrical_gas.gas_detector',
+          prompt: 'Combustible-gas detector fitted near each fuel-burning appliance — mounted low for propane, high for natural gas',
+          remediation: 'purchase_order', default_actions: ['replace'],
+          wo_priority: 'high',
+          concern_key: 'gas_detector',
+        },
+        {
           key:    'safety.electrical_gas.main_shutoff',
           prompt: 'Main water shut-off labelled, accessible, valve tool in place',
           remediation: 'work_order', default_actions: ['repair'],
@@ -270,7 +388,7 @@ export const SAFETY_FORM: FormDefinition = {
       items: [
         {
           key:    'safety.structural.handrails',
-          prompt: 'Handrails secure; treads slip-resistant and clear',
+          prompt: 'Handrail on every flight of four or more risers — graspable, secure, full length; treads slip-resistant and clear',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural', wo_priority: 'high',
           concern_key: 'handrail_secure',
@@ -291,7 +409,7 @@ export const SAFETY_FORM: FormDefinition = {
         },
         {
           key:    'safety.structural.deck_guardrail',
-          prompt: 'Deck and balcony guardrails sound; posts secure; spindle spacing compliant',
+          prompt: 'Guardrails wherever a walking surface sits more than 30in above grade — at least 36in high, spindles under 4in apart, posts and ledger secure',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural', wo_priority: 'urgent',
           asset_type: 'deck_structure',
@@ -422,6 +540,21 @@ export const SAFETY_FORM: FormDefinition = {
           per_unit: true, concern_key: 'exterior_lock',
         },
         {
+          // 37a. ALREADY ASKED ON OUTDOOR, AND THAT WAS THE PROBLEM.
+          //
+          // Outdoor is a per-property opt-in scheduled as ordinary recurring
+          // maintenance; Safety is the only form that runs at EVERY property
+          // (see lib/inspections/safety-template.ts). So an ordinance-mandated
+          // item living only on Outdoor is asked at the properties somebody
+          // remembered to schedule an Outdoor walk for. Anything a permit
+          // depends on belongs here, and shares a concern_key with its Outdoor
+          // twin so the two askings are one job.
+          key:    'safety.exterior_amenity.address_numbers',
+          prompt: 'House numbers legible from the street day and night — at least 4in high, contrasting with their background',
+          remediation: 'purchase_order', default_actions: ['replace'],
+          concern_key: 'address_visible',
+        },
+        {
           // ASKED ONCE, THEN IT DROPS OFF. `asks_property_fact` renders this
           // only while properties.has_security_system is NULL, and completion
           // writes the answer — so every property is asked on its first Safety
@@ -483,6 +616,15 @@ export const SAFETY_FORM: FormDefinition = {
           remediation: 'notify', default_actions: [],
         },
         {
+          // 38a. Holding a permit and DISPLAYING it are separately enforceable,
+          // and the listing half is the one that gets cited: most ordinances
+          // that require a permit number in the advertisement check it from a
+          // desk, on the platform, without visiting the property at all.
+          key:    'safety.permits.permit_number_displayed',
+          prompt: 'Permit or licence number displayed as the ordinance requires — posted inside and shown in every listing',
+          remediation: 'notify', default_actions: [],
+        },
+        {
           // The second clause matters more than the first: a standard
           // homeowner's policy that excludes short-term rental use is worse
           // than no policy, because the owner believes they are covered.
@@ -492,7 +634,26 @@ export const SAFETY_FORM: FormDefinition = {
         },
         {
           key:    'safety.permits.occupancy_limit',
-          prompt: 'Occupancy limit posted, and consistent with the listing',
+          prompt: 'Occupancy limit posted with the permit information, and consistent with both the listing and the permit',
+          remediation: 'notify', default_actions: [],
+        },
+        {
+          // 40a. Not life safety, and on the form anyway: these are PERMIT
+          // CONDITIONS in most jurisdictions that license short-term rentals,
+          // and a renewal denied over an unposted trash schedule costs the
+          // owner the season just as surely as a failed alarm test.
+          key:    'safety.permits.house_rules_posted',
+          prompt: 'Quiet hours, trash and recycling schedule, and parking limits posted as the permit conditions require',
+          remediation: 'notify', default_actions: [],
+        },
+        {
+          // 40b. The single most common non-structural revocation trigger: the
+          // ordinance requires a named local party reachable within a stated
+          // number of minutes, the PM changes phone number or the contact moves
+          // away, and nobody tells the county until a neighbour complains and
+          // the number rings out.
+          key:    'safety.permits.local_contact',
+          prompt: 'Local responsible party and 24-hour contact number current with the jurisdiction, and posted for guests and neighbours',
           remediation: 'notify', default_actions: [],
         },
       ],

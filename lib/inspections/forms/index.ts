@@ -19,7 +19,10 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  * TOP-LEVEL items only — children and repeat-group members are not counted,
  * matching how §12 numbers them.
  *
- *   safety   40 inspected items + a 2-item sign-off (declaration + signature)
+ *   safety   52 inspected items + a 2-item sign-off (declaration + signature).
+ *            40 as first specified, plus 17a and the nine ordinance-readiness
+ *            items added 2026-09-11 — all lettered off the item they follow,
+ *            so §12.1's original numbering still resolves
  *   indoor   52, which already includes its three sign-off items — §12.2
  *            numbers them 50–52
  *   outdoor  43 numbered + 3 unnumbered sign-off + 9 well items. 43 rather
@@ -29,8 +32,10 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  *            where the property actually has one
  */
 export const EXPECTED_ROOT_ITEM_COUNTS: Record<string, number> = {
-  safety:  45,   // 43 inspected items + the 2-item sign-off
-                 // (40 + the security-system capture/condition pair + 17a gas line integrity)
+  safety:  54,   // 52 inspected items + the 2-item sign-off
+                 // (40 + the security-system capture/condition pair + 17a gas
+                 //  line integrity + the nine ordinance-readiness items of
+                 //  2026-09-11: 3b, 7f, 11a, 13a, 17b, 37a, 38a, 40a, 40b)
   indoor:  52,
   outdoor: 55,   // 43 numbered + 3 sign-off + 9 well
 }
@@ -169,6 +174,10 @@ export const CONCERN_KEY_MAP: Record<string, ConcernEntry> = {
   },
 
   // ── Single-item: reserved names, no-ops for dedup today ───────────────────
+  address_visible: {
+    items: ['safety.exterior_amenity.address_numbers', 'outdoor.grounds.house_numbers'],
+    why:   'The same house numbers. Outdoor asks as curb appeal and arrival, Safety as the thing EMS reads at 2am — and Safety asks at all because it is the only form every property runs. One sign, one job.',
+  },
   smoke_detector_present: {
     items: ['safety.fire.smoke_present'],
     why:   'A MISSING detector, distinct from one that fails its test — installing and replacing are different jobs. Reserved for a future form that asks the same.',
@@ -176,6 +185,10 @@ export const CONCERN_KEY_MAP: Record<string, ConcernEntry> = {
   co_detector_present: {
     items: ['safety.fire.co_present'],
     why:   'The CO counterpart of smoke_detector_present, and separate from it: CO units are per-level, smoke units per-room.',
+  },
+  smoke_detector_interconnect: {
+    items: ['safety.fire.smoke_interconnected'],
+    why:   'Alarm TYPE and interconnection, which most current ordinances specify and which a present, responding, in-date alarm can still fail. Kept apart from _operational and _age because the fix is a retrofit of the whole set rather than one unit. Reserved; nothing else asks it today.',
   },
   smoke_detector_age: {
     items: ['safety.fire.smoke_age'],
@@ -196,6 +209,10 @@ export const CONCERN_KEY_MAP: Record<string, ConcernEntry> = {
   gas_line_integrity: {
     items: ['safety.electrical_gas.gas_line_integrity'],
     why:   'The supply line/meter/shut-off itself, distinct from gas_appliance_safe which is the appliances hanging off it — a corroded line and a leaking range are different repairs. Reserved; nothing else asks it today.',
+  },
+  gas_detector: {
+    items: ['safety.electrical_gas.gas_detector'],
+    why:   'Whether a gas leak would be NOTICED between walks, distinct from gas_appliance_safe and gas_line_integrity, which are whether one is happening now. A detector is a purchase; a leaking union is a plumber. Reserved; nothing else asks it today.',
   },
   sump_pump: {
     items: ['safety.water.sump_pump'],

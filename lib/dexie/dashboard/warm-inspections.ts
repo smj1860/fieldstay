@@ -247,7 +247,7 @@ async function cacheFormLibrary(
   const [forms, sections, items, properties] = await Promise.all([
     supabase.from('inspection_forms').select('*').eq('is_active', true).limit(50),
     supabase.from('inspection_form_sections').select('*').limit(500),
-    // Bounded well above the live 173. A truncated item list is the dangerous
+    // Bounded well above the live 186. A truncated item list is the dangerous
     // failure here: it renders as a form that is simply missing questions.
     supabase.from('inspection_form_items').select('*').limit(5000),
     supabase.from('properties').select('*').eq('org_id', orgId).order('name').limit(500),
