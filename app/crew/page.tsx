@@ -188,7 +188,7 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
   )
 }
 
-function EmptyColumn({ message }: { message: string }) {
+function EmptyColumn({ message }: Readonly<{ message: string }>) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
       <p className="text-xs text-muted-themed">{message}</p>
