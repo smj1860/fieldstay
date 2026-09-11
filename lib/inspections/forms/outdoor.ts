@@ -153,6 +153,7 @@ export const OUTDOOR_FORM: FormDefinition = {
           key:    'outdoor.grounds.house_numbers',
           prompt: 'House numbers visible from the road, day and night',
           remediation: 'purchase_order', default_actions: ['replace'],
+          concern_key: 'address_visible',
         },
         {
           // `exterior_pest`, deliberately NOT Indoor's `pest_activity`.
