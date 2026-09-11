@@ -48,12 +48,17 @@ let itemRows:       { data: unknown; error: unknown } = { data: [], error: null 
 let propertyRows:   { data: unknown; error: unknown } = { data: [], error: null }
 let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null }
 
+// See the sibling note in warm-maintenance-board.test.ts: getSession() performs
+// the refresh, so null models a session that has lapsed and cannot be renewed.
+let session: unknown = { access_token: 'jwt' }
+
 /**
  * A minimal PostgREST builder. Every filter returns `this`, so the chain under
  * test is exercised as written; only the terminal await differs by table.
  */
 function fakeSupabase() {
   return {
+    auth: { getSession: async () => ({ data: { session }, error: null }) },
     from(table: string) {
       const byTable: Record<string, () => { data: unknown; error: unknown }> = {
         inspections:              () => inspectionRows,
@@ -87,6 +92,7 @@ const { SHELL_CACHE } = await import('@/lib/pwa/cache-names')
 beforeEach(async () => {
   inspectionRows = { data: [], error: null }
   assetRows      = { data: [], error: null }
+  session        = { access_token: 'jwt' }
   // A library that caches by default, since almost every test needs one and
   // only the library-specific tests care about its contents.
   formRows     = { data: [{ id: 'f1', key: 'safety', version: 1, is_active: true, name: 'Safety' }], error: null }
@@ -291,6 +297,38 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
       .toMatchObject({ skipped: 'offline' })
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  // ── The 2026-09-11 false alarm ────────────────────────────────────────────
+  //
+  // Four Sentry issues in 1.1 seconds — 42501 on maintenance_schedules,
+  // inspection_forms, vendors and inspections — read as an RLS regression
+  // across four tables in one org. They were one tab whose session had lapsed:
+  // 42501 is a GRANT failure checked before RLS, `anon` holds no table grants,
+  // so every read of the pass failed the same way. The gate runs before the
+  // first query, and `force` must not bypass it — the inspections view passes
+  // force on every mount, which is exactly the mount a lapsed tab performs.
+  it('makes no query at all when the session has lapsed', async () => {
+    session        = null
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+    scheduleRows   = { data: [{ id: 'sched-1', org_id: ORG, creates: 'inspection' }], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', inspections: 0, formItems: 0, schedules: 0 })
+    const db = getDashboardDb(USER, ORG)
+    expect(await db.inspections.get('insp-1')).toBeUndefined()
+    expect(await db.maintenance_schedules.get('sched-1')).toBeUndefined()
+    // The route half is auth-gated too: an uncredentialed warm caches a login
+    // redirect, which is worse than caching nothing.
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a lapsed session does not bypass the gate via force', async () => {
+    session = null
+    expect(await warmInspectionsForOffline(USER, ORG, { force: true }))
+      .toMatchObject({ skipped: 'unauthenticated' })
+  })
+
 
   it('throttles, so mounting on every dashboard page is not a request storm', async () => {
     inspectionRows = { data: [inspection('insp-1')], error: null }

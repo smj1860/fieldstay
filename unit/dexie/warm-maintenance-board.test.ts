@@ -42,8 +42,15 @@ const workOrder = (id: string, over: Partial<WorkOrder> = {}): WorkOrder => ({
 let workOrderRows: { data: unknown; error: unknown } = { data: [], error: null }
 let vendorRows:    { data: unknown; error: unknown } = { data: [], error: null }
 
+// getSession() is what the warm's session gate asks, and it is not a storage
+// peek: supabase-js refreshes an expired token inside it and returns null when
+// that refresh fails. `null` here therefore models the real production case —
+// a tab whose session has lapsed and cannot be renewed.
+let session: unknown = { access_token: 'jwt' }
+
 function fakeSupabase() {
   return {
+    auth: { getSession: async () => ({ data: { session }, error: null }) },
     from(table: string) {
       const byTable: Record<string, () => { data: unknown; error: unknown }> = {
         work_orders: () => workOrderRows,
@@ -66,6 +73,7 @@ const { warmMaintenanceBoardForOffline } = await import('@/lib/dexie/dashboard/w
 beforeEach(async () => {
   workOrderRows = { data: [], error: null }
   vendorRows    = { data: [], error: null }
+  session       = { access_token: 'jwt' }
   vi.stubGlobal('navigator', { onLine: true })
 
   closeDashboardDb()
@@ -145,6 +153,32 @@ describe('warmMaintenanceBoardForOffline', () => {
   it('does nothing offline, and says so', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     expect(await warmMaintenanceBoardForOffline(USER, ORG)).toMatchObject({ skipped: 'offline' })
+  })
+
+  // ── The 2026-09-11 false alarm ────────────────────────────────────────────
+  // An expired session sends every read out as `anon`, which holds no table
+  // grants, so the whole pass returns 42501 — reported as an RLS regression
+  // rather than as the signed-out tab it is. The gate runs BEFORE the first
+  // query, so the count that matters is zero queries, not zero rows.
+  it('makes no query at all when the session has lapsed', async () => {
+    session = null
+    vendorRows = { data: [{ id: 'v-1', org_id: ORG, name: 'Ace' }], error: null }
+
+    const result = await warmMaintenanceBoardForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', workOrders: 0, vendors: 0 })
+    expect(await getDashboardDb(USER, ORG).vendors.get('v-1')).toBeUndefined()
+  })
+
+  it('does not let a lapsed session wipe a cache it cannot refresh', async () => {
+    const db = getDashboardDb(USER, ORG)
+    await db.vendors.put({ id: 'kept', org_id: ORG, name: 'Ace' } as never)
+
+    session = null
+    await warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    // Reconcile-by-absence never runs, so the device keeps the copy it had.
+    expect(await db.vendors.get('kept')).toBeTruthy()
   })
 
   it('throttles repeat warms', async () => {

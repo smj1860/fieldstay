@@ -57,6 +57,7 @@ import type {
 } from '@/types/database'
 
 import { getDashboardDb, type OpenConcernRow } from './schema'
+import { hasUsableSession } from './session-gate'
 
 /**
  * Ceiling on one warm pass.
@@ -88,7 +89,7 @@ export interface WarmResult {
   properties:  number
   /** §7 inspection schedules cached, so "what's due" survives losing signal. */
   schedules:   number
-  skipped?:    'offline' | 'throttled'
+  skipped?:    'offline' | 'throttled' | 'unauthenticated'
 }
 
 /**
@@ -104,6 +105,12 @@ export async function warmInspectionsForOffline(
   opts:   { force?: boolean } = {},
 ): Promise<WarmResult> {
   if (!canWarm()) return { ...EMPTY, skipped: 'offline' }
+
+  // Before the first query, not after it fails. An expired session sends every
+  // read below out as `anon`, and `anon` holds no table grants — so the whole
+  // pass 42501s and reports four times, which reads as an RLS regression rather
+  // than as the signed-out tab it is. See ./session-gate.ts.
+  if (!(await hasUsableSession())) return { ...EMPTY, skipped: 'unauthenticated' }
 
   const db = getDashboardDb(userId, orgId)
 
@@ -195,7 +202,7 @@ async function cacheInspectionSchedules(
       .limit(SCHEDULE_LIMIT)
 
     if (error) {
-      reportError(error, { site: 'dexie.dashboard.warmInspections.schedules' })
+      reportError(error, { site: 'dexie.dashboard.warmInspections.schedules', level: 'warning' })
       // Left alone rather than cleared, same as the open concerns: a failed
       // fetch is not evidence that nothing is scheduled, and wiping here would
       // hide every due walk from a device that had a perfectly good copy.
@@ -255,7 +262,7 @@ async function cacheFormLibrary(
 
   const failed = [forms, sections, items, properties].find((r) => r.error)
   if (failed?.error) {
-    reportError(failed.error, { site: 'dexie.dashboard.warmInspections.library' })
+    reportError(failed.error, { site: 'dexie.dashboard.warmInspections.library', level: 'warning' })
     return { formItems: 0, properties: 0 }
   }
 
@@ -327,7 +334,7 @@ async function fetchOpenInspections(orgId: string): Promise<Inspection[] | null>
     .limit(WARM_INSPECTION_LIMIT)
 
   if (error) {
-    reportError(error, { site: 'dexie.dashboard.warmInspections' })
+    reportError(error, { site: 'dexie.dashboard.warmInspections', level: 'warning' })
     return null
   }
   return (data ?? []) as unknown as Inspection[]
@@ -361,7 +368,7 @@ async function cacheInspectionsAndAssets(
     .limit(WARM_INSPECTION_LIMIT * 100)
 
   if (error) {
-    reportError(error, { site: 'dexie.dashboard.warmInspections.assets' })
+    reportError(error, { site: 'dexie.dashboard.warmInspections.assets', level: 'warning' })
     // The inspections are still worth caching without the assets: the fill
     // screen renders, and its own pull corrects the asset set on open.
     await db.inspections.bulkPut(inspections)
@@ -430,7 +437,7 @@ async function cacheOpenConcerns(
       .limit(OPEN_CONCERN_LIMIT)
 
     if (error) {
-      reportError(error, { site: 'dexie.dashboard.warmInspections.openConcerns' })
+      reportError(error, { site: 'dexie.dashboard.warmInspections.openConcerns', level: 'warning' })
       // Left alone rather than cleared. A failed fetch is not evidence that
       // nothing is open, and wiping the cache here would silently disable the
       // prompt for a device that had a perfectly good copy.

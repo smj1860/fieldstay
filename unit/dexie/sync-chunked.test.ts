@@ -217,6 +217,31 @@ describe('fetchAllPages', () => {
     expect(rows).toBeNull()
   })
 
+  it('hands the caller the error it would otherwise have to guess at', async () => {
+    // `null` names the outcome and discards the cause. fetchAssignedTurnoverIds
+    // reported a bare `new Error('turnover_assignments fetch failed')`, so when
+    // that read failed in production on 2026-09-11 the Sentry issue carried no
+    // code and no message — and a 42501 (a signed-out device) was
+    // indistinguishable from a 500, a timeout, or a real RLS fault.
+    const seen: unknown[] = []
+    const err = { message: 'permission denied for table turnover_assignments', code: '42501' }
+
+    const rows = await fetchAllPages<{ id: string }>(
+      () => Promise.resolve({ data: null, error: err }),
+      (e) => seen.push(e),
+    )
+
+    expect(rows).toBeNull()
+    expect(seen).toEqual([err])
+  })
+
+  it('does not call onError on a clean drain', async () => {
+    const seen: unknown[] = []
+    const { fetchPage } = pager(2_500)
+    await fetchAllPages<{ id: string }>(fetchPage, (e) => seen.push(e))
+    expect(seen).toEqual([])
+  })
+
   it('does not loop forever when a full page repeats', async () => {
     // Defensive: a page that never shortens would spin. Bounded by asserting
     // the helper advances `from` — a mock ignoring range would repeat.
