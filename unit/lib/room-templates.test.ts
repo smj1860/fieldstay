@@ -10,7 +10,7 @@ function makeSupabase(response: Resp) {
   const calls: { method: string; args: unknown[] }[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: any = {}
-  for (const m of ['select', 'eq', 'order']) {
+  for (const m of ['select', 'eq', 'order', 'limit']) {
     chain[m] = vi.fn((...args: unknown[]) => {
       calls.push({ method: m, args })
       return chain

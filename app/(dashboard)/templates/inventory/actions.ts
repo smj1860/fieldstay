@@ -7,6 +7,9 @@ import { reportError } from '@/lib/observability/report-error'
 import { unwrapList, isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import type { InventoryCategory, TablesUpdate } from '@/types/database'
 
+/** The org's own catalog — the platform seed plus any custom items, small by construction. */
+const CATALOG_LIMIT = 500
+
 // ── Master List (org_inventory_catalog) ─────────────────────────────────────
 
 export async function createCatalogItem(
@@ -286,6 +289,7 @@ export async function createInventoryTemplateFromCSV(
       .from('org_inventory_catalog')
       .select('name, name_es, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
+      .limit(CATALOG_LIMIT)
 
     if (catalogError) {
       console.error('[createInventoryTemplateFromCSV] catalog fetch', catalogError)

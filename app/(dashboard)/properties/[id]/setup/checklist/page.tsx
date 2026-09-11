@@ -9,6 +9,9 @@ import { fetchAllRows } from '@/lib/inngest/paginate'
 export const metadata: Metadata = { title: 'Turnover Checklist' }
 interface Props { params: Promise<{ id: string }> }
 
+/** The org's own room library — small by construction, but explicit rather than assumed. */
+const ROOM_TEMPLATE_LIMIT = 500
+
 /** One sibling property's checklist template, with just enough to count its sections. */
 interface SiblingTemplateRow {
   property_id:                 string | null
@@ -69,7 +72,8 @@ export default async function ChecklistPage({ params }: Props) {
       .from('room_templates')
       .select(`id, name, name_es, auto_include, room_template_items ( id, task, task_es, requires_photo, notes, sort_order )`)
       .eq('org_id', membership.org_id)
-      .order('name'),
+      .order('name')
+      .limit(ROOM_TEMPLATE_LIMIT),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx

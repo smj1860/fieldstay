@@ -6,6 +6,9 @@ import { MasterListEditor } from './master-list-editor'
 
 export const metadata: Metadata = { title: 'Inventory Master List — Templates — FieldStay' }
 
+/** The org's own catalog — the platform seed plus any custom items, small by construction. */
+const CATALOG_LIMIT = 500
+
 export default async function MasterListPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -17,6 +20,7 @@ export default async function MasterListPage() {
     .eq('org_id', membership.org_id)
     .order('category')
     .order('name')
+    .limit(CATALOG_LIMIT)
 
   if (error) console.error('[MasterListPage] catalog query failed', error)
 

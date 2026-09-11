@@ -1,6 +1,9 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+/** The org's own room library — small by construction, but explicit rather than assumed. */
+const ROOM_TEMPLATE_LIMIT = 500
+
 export interface RoomTemplateWithItems {
   id:          string
   name:        string
@@ -25,6 +28,7 @@ export async function getRoomTemplatesForOrg(
     .select(`id, name, name_es, auto_include, is_system, room_template_items ( id, task, task_es, requires_photo, notes, sort_order )`)
     .eq('org_id', orgId)
     .order('name')
+    .limit(ROOM_TEMPLATE_LIMIT)
 
   if (error) {
     console.error('[getRoomTemplatesForOrg]', error)
