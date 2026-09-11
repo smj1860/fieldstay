@@ -1,6 +1,7 @@
 import { Text, Section } from '@react-email/components'
 import { render } from '@react-email/render'
 import { EmailLayout } from './components/email-layout'
+import { monthlyCostCents } from '@/lib/stripe/brackets'
 
 interface Props {
   firstName:       string
@@ -8,6 +9,11 @@ interface Props {
   reactivateUrl:   string
   dataExpiresDate: string
 }
+
+// Quantity 1 is always in range (BRACKETS' first bracket always covers
+// property 1), so this never returns null — the `!` reflects that
+// contract, not an unchecked assumption.
+const startingPriceDollars = monthlyCostCents(1)! / 100
 
 export function TrialExpiredEmail({
   firstName,
@@ -36,10 +42,10 @@ export function TrialExpiredEmail({
       </Text>
 
       <Section style={planBox}>
-        <Text style={planBoxTitle}>Plans start at $199/month</Text>
+        <Text style={planBoxTitle}>Plans start at ${startingPriceDollars}/month</Text>
         <Text style={planBoxBody}>
-          1–15 properties · Unlimited crew · Full PMS sync ·
-          Inventory · Maintenance · Owner portal
+          Priced per property, from your first · Unlimited crew ·
+          Full PMS sync · Inventory · Maintenance · Owner portal
         </Text>
       </Section>
 

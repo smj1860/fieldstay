@@ -120,6 +120,12 @@ FieldStay uses a Progressive Web App (PWA) for the crew mobile experience. A PWA
 
 ---
 
+## Does the crew app support Spanish?
+
+Yes. Crew members can switch the crew app to Spanish themselves — the toggle lives in the crew app's own settings, so no property manager setup is required. Once switched, the app's navigation and menus, the in-app FAQ, and the checklist and inventory item text all display in Spanish. Switching back to English works the same way, at any time.
+
+---
+
 ## Two crew members are assigned to the same turnover — why did only one of them see the Start Turnover button work?
 
 This is expected, not a bug. A turnover has a single shared status (Assigned → In Progress → Complete) — it isn't tracked separately per crew member. Whichever assigned crew member taps **Start Turnover** first moves it to In Progress for everyone; the button then disappears from every other assigned crew member's screen, because as far as the turnover is concerned, it's already started.
