@@ -38,6 +38,7 @@ import {
   fetchOrgRoomTemplateData,
   type OrgRoomTemplateData,
 } from '@/lib/checklists/apply-master-template'
+import { numberedRoomLabel, numberedRoomLabelEs } from '@/lib/checklists/room-label'
 
 /** Cap on sections read back for one property's default template. */
 const SECTION_LIMIT = 500
@@ -55,6 +56,7 @@ export interface RoomCountSyncResult {
 interface PlannedSection {
   template_id:      string
   name:             string
+  name_es:          string | null
   room_template_id: string
   sort_order:       number
 }
@@ -94,7 +96,8 @@ function planMissingSections(
     for (let i = currentCount + 1; i <= target; i++) {
       planned.push({
         template_id:      templateId,
-        name:             target > 1 ? `${room.name} ${i}` : room.name,
+        name:             numberedRoomLabel(room.name, target, i),
+        name_es:          numberedRoomLabelEs(room.name_es, target, i),
         room_template_id: roomTemplateId,
         sort_order:       sortOrder++,
       })
@@ -172,6 +175,7 @@ export async function syncChecklistRoomCounts(
         section_id:     section.id as string,
         template_id:    templateId,
         task:           item.task,
+        task_es:        item.task_es,
         requires_photo: item.requires_photo,
         notes:          item.notes,
         sort_order:     item.sort_order,

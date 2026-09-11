@@ -9,6 +9,8 @@ import { retryFailedMutation } from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, TurnoverRow, ChecklistInstanceRow } from '@/lib/dexie/schema'
 import type { AssetType } from '@/types/database'
 import { DiscoveryCaptureModal } from '@/app/crew/_components/discovery-capture-modal'
+import { useCrewContext } from '@/lib/crew/crew-context'
+import { localizedContent } from '@/lib/crew/content-locale'
 import type { TurnoverActions } from './use-turnover-actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ export function ChecklistView({
     toggleChecklistConfirm, checklistConfirmSyncFailed, actionError,
     isCancelled,
   } = actions
+  const { crewLocale } = useCrewContext()
 
   return (
     <div className="mt-2">
@@ -87,7 +90,7 @@ export function ChecklistView({
           {Object.entries(sections).map(([sectionName, sectionItems]) => (
             <div key={sectionName} className="mb-4">
               <h3 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2 px-1">
-                {sectionName}
+                {localizedContent(crewLocale, sectionName, sectionItems[0]?.section_name_es ?? '')}
               </h3>
               <div className="bg-card-themed rounded-xl border border-themed divide-y divide-themed overflow-hidden">
                 {sectionItems.map((item: ChecklistItem) => (
@@ -229,6 +232,7 @@ function ChecklistItemRow({
     startAssetCapture, toggleItem, saveNote, openNote,
     registerItemInput, openItemPicker,
   } = actions
+  const { crewLocale } = useCrewContext()
 
   const needsPhoto = Boolean(item.requires_photo) && !item.photo_storage_path
   const uploading  = uploadingItemId === item.id
@@ -269,7 +273,7 @@ function ChecklistItemRow({
             className={cn('text-sm leading-snug', item.is_completed ? 'line-through' : 'text-primary-themed')}
             style={item.is_completed ? { color: 'var(--accent-green)' } : undefined}
           >
-            {item.task}
+            {localizedContent(crewLocale, item.task, item.task_es)}
           </p>
           <ItemStatusLines
             item={item}

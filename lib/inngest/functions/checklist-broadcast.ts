@@ -4,6 +4,7 @@ import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 interface TemplateItem {
   task:           string
+  task_es:        string | null
   requires_photo: boolean
   notes:          string | null
   sort_order:     number
@@ -11,6 +12,7 @@ interface TemplateItem {
 
 interface TemplateSection {
   name:                     string
+  name_es:                  string | null
   sort_order:               number
   requires_section_photo:   boolean | null
   checklist_template_items: TemplateItem[] | null
@@ -25,11 +27,12 @@ function templateSignature(sections: TemplateSection[]): string {
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((s) => ({
         name:                   s.name,
+        name_es:                s.name_es,
         sort_order:             s.sort_order,
         requires_section_photo: s.requires_section_photo ?? false,
         items: [...(s.checklist_template_items ?? [])]
           .sort((a, b) => a.sort_order - b.sort_order)
-          .map((i) => ({ task: i.task, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order })),
+          .map((i) => ({ task: i.task, task_es: i.task_es, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order })),
       }))
   )
 }
@@ -47,8 +50,8 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
         .select(`
           id, name,
           checklist_template_sections (
-            name, sort_order, requires_section_photo,
-            checklist_template_items (task, requires_photo, notes, sort_order)
+            name, name_es, sort_order, requires_section_photo,
+            checklist_template_items (task, task_es, requires_photo, notes, sort_order)
           )
         `)
         .eq('property_id', source_property_id)
@@ -100,8 +103,8 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
         const { data: existingSections, error: existingSectionsError } = await supabase
           .from('checklist_template_sections')
           .select(`
-            name, sort_order, requires_section_photo,
-            checklist_template_items (task, requires_photo, notes, sort_order)
+            name, name_es, sort_order, requires_section_photo,
+            checklist_template_items (task, task_es, requires_photo, notes, sort_order)
           `)
           .eq('template_id', newTemplate.id)
           .limit(200)
@@ -133,6 +136,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
             .insert({
               template_id:            newTemplate.id,
               name:                   section.name,
+              name_es:                section.name_es,
               sort_order:             section.sort_order,
               requires_section_photo: section.requires_section_photo ?? false,
             })
@@ -156,6 +160,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
             section_id:     newSection.id,
             template_id:    newTemplate.id,
             task:           item.task,
+            task_es:        item.task_es,
             requires_photo: item.requires_photo,
             notes:          item.notes,
             sort_order:     item.sort_order,

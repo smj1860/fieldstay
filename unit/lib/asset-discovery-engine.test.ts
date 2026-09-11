@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
-import { REQUIRED_ASSET_TYPES, ASSET_DISCOVERY_SECTION } from '@/lib/asset-discovery/config'
+import { REQUIRED_ASSET_TYPES, ASSET_DISCOVERY_SECTION, ASSET_DISCOVERY_SECTION_ES } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
 
 type Row = { asset_type: AssetType; make: string | null; model: string | null; photo_url: string | null; is_na: boolean }
@@ -114,7 +114,9 @@ describe('buildAssetDiscoveryItems', () => {
       {
         instance_id: 'instance_1', turnover_id: 'turnover_1',
         section_name: ASSET_DISCOVERY_SECTION,
+        section_name_es: ASSET_DISCOVERY_SECTION_ES,
         task: 'Capture asset details: HVAC',
+        task_es: 'Capturar detalles del bien: Aire acondicionado (HVAC)',
         requires_photo: false, photo_reason: null, notes: null,
         sort_order: 0, is_completed: false, is_mandatory: true, non_deletable: true,
         asset_discovery_type: 'hvac',
@@ -122,7 +124,9 @@ describe('buildAssetDiscoveryItems', () => {
       {
         instance_id: 'instance_1', turnover_id: 'turnover_1',
         section_name: ASSET_DISCOVERY_SECTION,
+        section_name_es: ASSET_DISCOVERY_SECTION_ES,
         task: 'Capture asset details: Water Heater',
+        task_es: 'Capturar detalles del bien: Calentador de agua',
         requires_photo: false, photo_reason: null, notes: null,
         sort_order: 1, is_completed: false, is_mandatory: true, non_deletable: true,
         asset_discovery_type: 'water_heater',

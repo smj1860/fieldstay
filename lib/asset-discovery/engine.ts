@@ -4,7 +4,9 @@ import type { AssetType } from '@/types/database'
 import {
   REQUIRED_ASSET_TYPES,
   ASSET_DISCOVERY_SECTION,
+  ASSET_DISCOVERY_SECTION_ES,
   discoveryTaskLabel,
+  discoveryTaskLabelEs,
 } from '@/lib/asset-discovery/config'
 
 interface ExistingAssetRow {
@@ -76,7 +78,9 @@ export function buildAssetDiscoveryItems(
     instance_id:           instanceId,
     turnover_id:           turnoverId,
     section_name:          ASSET_DISCOVERY_SECTION,
+    section_name_es:       ASSET_DISCOVERY_SECTION_ES,
     task:                  discoveryTaskLabel(assetType),
+    task_es:               discoveryTaskLabelEs(assetType),
     requires_photo:        false,
     photo_reason:          null,
     notes:                 null,

@@ -217,7 +217,7 @@ async function syncScopeReferenceData(
     (chunk, from, to) =>
       supabase
         .from('inventory_items')
-        .select('id, property_id, org_id, name, category, unit, par_level')
+        .select('id, property_id, org_id, name, name_es, category, unit, par_level')
         .in('property_id', chunk)
         .eq('is_active', true)
         .order('id')
@@ -232,7 +232,10 @@ async function syncScopeReferenceData(
   // type any more, so nothing can be pending to replay over these rows. A
   // count is staged locally and submitted as an inventory_counts row instead.
   if (inventory.length) {
-    await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
+    const normalizedInventory = (inventory as Array<Record<string, unknown>>).map((row) => ({
+      ...row, name_es: (row.name_es as string | null) ?? '',
+    }))
+    await db.inventory_items.bulkPut(normalizedInventory as InventoryItemRow[])
   }
   await rememberScope(userId, 'scope:inventory_items', propertyIds)
   return true
@@ -336,7 +339,7 @@ export async function pullChecklistsForTurnovers(
   const itemCursor = opts.force ? null : await getCursor(userId, 'cursor:checklist_items')
   const items = await fetchWithCursorSplit(
     supabase, 'checklist_instance_items',
-    'id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, asset_discovery_type, updated_at',
+    'id, instance_id, turnover_id, section_name, section_name_es, task, task_es, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, asset_discovery_type, updated_at',
     'turnover_id', knownIds, freshIds, itemCursor,
   )
   if (items === null) return
@@ -368,6 +371,8 @@ export async function pullChecklistsForTurnovers(
         crew_notes:            resolveCrewNotes(row, localById.get(row.id as string), thisCrewMemberId),
         photo_reason:          row.photo_reason ?? '',
         asset_discovery_type:  row.asset_discovery_type ?? '',
+        section_name_es:       row.section_name_es ?? '',
+        task_es:               row.task_es ?? '',
       }
     })
     await bulkPutShadowed(db.checklist_instance_items, userId, 'checklist_instance_items', normalized as ChecklistInstanceItemRow[])

@@ -636,8 +636,8 @@ export async function snapshotChecklist(
   if (!templateId) return
   const sectionsRes = await supabase
     .from('checklist_template_sections')
-    .select(`id, name, sort_order,
-      checklist_template_items ( id, task, requires_photo, notes, sort_order )`)
+    .select(`id, name, name_es, sort_order,
+      checklist_template_items ( id, task, task_es, requires_photo, notes, sort_order )`)
     .eq('template_id', templateId)
     .order('sort_order', { ascending: true })
     .limit(200)
@@ -671,13 +671,15 @@ export async function snapshotChecklist(
 
   const items = sections.flatMap((section) =>
     (section.checklist_template_items ?? []).map((item: {
-      task: string; requires_photo: boolean; notes: string | null; sort_order: number
+      task: string; task_es: string | null; requires_photo: boolean; notes: string | null; sort_order: number
     }) => {
       const signal = signalMap.get(`${section.name}|${item.task}`)
       const dynamicRequired = !!signal
       return {
         instance_id: instance.id, turnover_id: turnoverID, section_name: section.name,
+        section_name_es: section.name_es,
         task: item.task,
+        task_es: item.task_es,
         requires_photo: item.requires_photo || dynamicRequired,
         photo_reason: !item.requires_photo && dynamicRequired ? signal!.reason : null,
         notes: item.notes, sort_order: item.sort_order, is_completed: false,

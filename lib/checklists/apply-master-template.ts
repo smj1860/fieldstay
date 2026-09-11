@@ -5,6 +5,7 @@ import type { RoomTemplateItem } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { seedDefaultRoomTemplatesIfNeeded } from './seed-default-room-templates'
 import { unwrap, unwrapList, throwIfAnyQueryFailed, isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
+import { numberedRoomLabel, numberedRoomLabelEs } from '@/lib/checklists/room-label'
 
 /**
  * Applies the org's master checklist to a single property.
@@ -61,13 +62,15 @@ async function markChecklistStepComplete(propertyId: string, supabase: SupabaseC
 
 interface ComposedSection {
   name:           string
+  nameEs:         string | null
   roomTemplateId: string | null
-  items:          Array<{ task: string; requires_photo: boolean; notes: string | null; sort_order: number }>
+  items:          Array<{ task: string; taskEs: string | null; requires_photo: boolean; notes: string | null; sort_order: number }>
 }
 
 interface RoomTemplateRow {
   id:           string
   name:         string
+  name_es:      string | null
   auto_include: boolean
 }
 
@@ -115,7 +118,7 @@ export async function fetchOrgRoomTemplateData(
   // the bound a fact rather than a belief.
   const { data: roomTemplates, error: roomsErr } = await supabase
     .from('room_templates')
-    .select('id, name, auto_include')
+    .select('id, name, name_es, auto_include')
     .eq('org_id', orgId)
     .limit(ROOM_TEMPLATE_LIMIT)
   if (roomsErr) console.error('[fetchOrgRoomTemplateData] room_templates fetch failed:', roomsErr)
@@ -142,7 +145,7 @@ export async function fetchOrgRoomTemplateData(
     const items = await fetchAllRows(
       (from, to) => supabase
         .from('room_template_items')
-        .select('room_template_id, task, requires_photo, notes, sort_order')
+        .select('room_template_id, task, task_es, requires_photo, notes, sort_order')
         .in('room_template_id', [...templateIds])
         .order('sort_order')
         .order('room_template_id')
@@ -165,7 +168,7 @@ function toComposedItems(
   itemsByTemplate: Record<string, RoomTemplateItem[]>,
 ): ComposedSection['items'] {
   return (itemsByTemplate[templateId] ?? []).map((i) => ({
-    task: i.task, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order,
+    task: i.task, taskEs: i.task_es, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order,
   }))
 }
 
@@ -190,8 +193,9 @@ function addCountedSections(
   if (!room) return
 
   for (let i = 1; i <= count; i++) {
-    const label = count > 1 ? `${room.name} ${i}` : room.name
-    sections.push({ name: label, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
+    const label   = numberedRoomLabel(room.name, count, i)
+    const labelEs = numberedRoomLabelEs(room.name_es, count, i)
+    sections.push({ name: label, nameEs: labelEs, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
   }
 }
 
@@ -218,7 +222,7 @@ function composeSections(
   const sections: ComposedSection[] = []
 
   for (const room of rooms.filter((r) => r.auto_include)) {
-    sections.push({ name: room.name, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
+    sections.push({ name: room.name, nameEs: room.name_es, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
   }
 
   // Same numbering convention as the manual "Insert Rooms from Library"
@@ -316,6 +320,7 @@ async function insertComposedSections(
       .insert({
         template_id:       templateId,
         name:              section.name,
+        name_es:           section.nameEs,
         room_template_id:  section.roomTemplateId,
         sort_order:        i,
       })
@@ -334,6 +339,7 @@ async function insertComposedSections(
         section_id:     sectionRow.id,
         template_id:    templateId,
         task:           item.task,
+        task_es:        item.taskEs,
         requires_photo: item.requires_photo,
         notes:          item.notes,
         sort_order:     item.sort_order,

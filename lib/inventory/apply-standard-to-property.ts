@@ -40,6 +40,7 @@ export interface ApplyStandardResult {
 interface SourceItem {
   catalog_item_id: string | null
   name:            string
+  name_es:         string | null
   category:        string | null
   unit:            string | null
   par_level:       number
@@ -83,7 +84,7 @@ async function loadOrgTemplateItems(
   // a result that is in fact handled.
   const itemsRes = await supabase
     .from('inventory_template_items')
-    .select('catalog_item_id, name, category, unit, par_level, par_mode, smart_group, base_qty, preferred_brand')
+    .select('catalog_item_id, name, name_es, category, unit, par_level, par_mode, smart_group, base_qty, preferred_brand')
     .eq('template_id', tpl.data.id)
     .limit(TEMPLATE_ITEM_CAP)
   const items = unwrapList<SourceItem>(itemsRes,
@@ -91,7 +92,7 @@ async function loadOrgTemplateItems(
   return { templateId: tpl.data.id, items }
 }
 
-interface CatalogEmbed { name: string; category: string; default_unit: string }
+interface CatalogEmbed { name: string; name_es: string | null; category: string; default_unit: string }
 
 interface PlatformItemRow {
   catalog_item_id: string
@@ -112,7 +113,7 @@ async function loadPlatformTemplateItems(
 ): Promise<SourceItem[]> {
   const rowsRes = await supabase
     .from('platform_inventory_template_items')
-    .select('catalog_item_id, par_level, par_mode, smart_group, base_qty, preferred_brand, inventory_catalog(name, category, default_unit)')
+    .select('catalog_item_id, par_level, par_mode, smart_group, base_qty, preferred_brand, inventory_catalog(name, name_es, category, default_unit)')
     .eq('platform_inventory_template_id', platformTemplateId)
     .limit(TEMPLATE_ITEM_CAP)
   const rows = unwrapList<PlatformItemRow>(rowsRes,
@@ -126,6 +127,7 @@ async function loadPlatformTemplateItems(
     return [{
       catalog_item_id: r.catalog_item_id,
       name:            catalog.name,
+      name_es:         catalog.name_es,
       category:        catalog.category,
       unit:            catalog.default_unit,
       par_level:       r.par_level,
@@ -178,6 +180,7 @@ export async function applyStandardInventoryToProperty(
       // inventing one would claim a link that does not exist.
       source_template_id:      org?.templateId ?? null,
       name:                    i.name,
+      name_es:                 i.name_es,
       // Both columns are NOT NULL on inventory_items but nullable on the
       // template, so the fallbacks are the column defaults, not invented values.
       category:                toInventoryCategory(i.category),
