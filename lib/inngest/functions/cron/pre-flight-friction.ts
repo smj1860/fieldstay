@@ -3,6 +3,8 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { unwrapList }           from '@/lib/supabase/unwrap'
 import { frictionDateString, localDateFrom } from '@/lib/friction/date'
+import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
+import type { SeasonalProfile } from '@/types/database'
 import { reportError }          from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
 import { scoreCrewCandidates, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
@@ -126,7 +128,9 @@ interface ScoreableTurnover {
     lng:              number | string | null
     bedrooms:         number | null
     state:            string | null
-    seasonal_profile: string | null
+    zip:              string | null
+    /** Human override; NULL means derive from the ZIP. */
+    seasonal_profile: SeasonalProfile | null
   } | null
   turnover_assignments: { crew_member_id: string }[] | null
 }
@@ -269,7 +273,7 @@ export const preFlightFrictionForOrg = inngest.createFunction(
           .from('turnovers')
           .select(`
             id, property_id, checkout_datetime, checkin_datetime, is_same_day_turnover,
-            properties!inner ( lat, lng, bedrooms, state, seasonal_profile ),
+            properties!inner ( lat, lng, bedrooms, state, zip, seasonal_profile ),
             turnover_assignments ( crew_member_id )
           `)
           .eq('org_id', orgId)
@@ -517,7 +521,11 @@ interface FrictionRowInput {
 function componentsFor(input: FrictionRowInput): FrictionComponents {
   const { turnover, baselines, forecasts, turnoverDate } = input
   const property = firstOf(turnover.properties)
-  const profile  = property?.seasonal_profile ?? 'none'
+  // The profile describes a MARKET, so it is derived from the ZIP unless a
+  // human has deliberately overridden it. Resolved here rather than stored on
+  // the property: expanding the ZIP table then reaches every existing property
+  // on the next run, with no backfill and no write path to keep in sync.
+  const profile  = resolveSeasonalProfile(property?.seasonal_profile, property?.zip)
   const date     = localDateFrom(turnoverDate)
 
   const crewIds  = (turnover.turnover_assignments ?? []).map((a) => a.crew_member_id)

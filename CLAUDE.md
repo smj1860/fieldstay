@@ -510,13 +510,37 @@ pre_flight_friction         — one scored row per turnover per day, written by
                               by unit/guardrails/friction-local-events-seam.test.ts.
                               A rescore does NOT overturn a PM decision unless the
                               severity got WORSE (nextStatus() in the cron)
-properties.seasonal_profile — enum seasonal_profile, NOT NULL DEFAULT 'none'. The
-                              DESTINATION-TYPE axis (lake/ski/coastal/foliage/urban).
+properties.seasonal_profile — NULLABLE OVERRIDE ONLY (20260912132651). NULL, the
+                              normal case, means "derive the market profile from the
+                              ZIP" via lib/scoring/seasonal-market.ts; a non-null value
+                              is a deliberate human correction and wins. It is nullable
+                              precisely so a chosen 'none' and an unset row stay
+                              distinguishable — otherwise the derivation silently
+                              overrules a human every night (same reason
+                              properties.sponsor_assignment_mode exists).
+                              The DESTINATION-TYPE axis (lake/ski/coastal/foliage/urban).
                               Spring break is the GEOGRAPHY axis and keys off
                               properties.state instead — do NOT add a 'spring_break'
-                              value here, that conflation was tried and reverted.
-                              An unset profile must contribute 0, never a guess
+                              value here, that conflation was tried and reverted
 ```
+
+**The seasonal profile is DERIVED FROM THE ZIP, at scoring time.** It describes a
+MARKET, not a house — a cabin in Breckenridge follows the ski calendar whether or
+not it is slopeside — so no PM is ever asked to classify a property, which is the
+whole promise of the product. Two rules:
+
+- **Resolved at read time, never written into the property on save.** Three paths
+  already create a property (`createProperty`, `lib/properties/upsert-normalized.ts`,
+  the geocoding backfill cron) and wiring a derivation into each is the drift this
+  codebase keeps paying for. Deriving at read time also means adding a market to the
+  table reaches every existing property on the next 2am run — no backfill, nothing
+  to remember.
+- **`ZIP_SEASONAL_PROFILE` is keyed on FIVE-DIGIT ZIPs, never three-digit prefixes,
+  and is partial by design.** 804xx is Breckenridge AND suburban Boulder; a prefix
+  would score a Boulder rental as ski every day for four and a half months. An
+  unmapped ZIP returns `'none'` and contributes 0 — the honest absence. Adding a
+  market needs a real basis, never a guess from a neighbouring ZIP: a wrong profile
+  does not fail loudly, it scores a property against the wrong calendar for months.
 
 Two rules the scoring library carries that are not obvious from the schema:
 
@@ -527,10 +551,12 @@ Two rules the scoring library carries that are not obvious from the schema:
   than an honest absence, and the whole feature exists to take upkeep OFF the
   PM. If it is ever built the mechanism is a paid demand-intelligence API or a
   public schedule pull.
-- **`properties.state` is free text**, and live rows hold both `AL` and
-  `Alabama` for the same state. `springBreakScore` normalises through
-  `normalizeStateCode()` for exactly that reason — a region table keyed only on
-  two-letter codes silently scored 0 for most of the real portfolio.
+- **`properties.state` and `properties.zip` are both free text**, and the live
+  columns prove it: `AL` and `Alabama` for the same state; `36850-3722`,
+  `TX 78703` and NULL in the ZIP column. `springBreakScore` normalises through
+  `normalizeStateCode()` and the ZIP lookup through `normalizeZip()` for exactly
+  that reason — either table keyed on the raw string silently scores 0 for most
+  of the real portfolio.
 
 ### Supporting
 ```

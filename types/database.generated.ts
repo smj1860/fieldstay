@@ -4363,7 +4363,9 @@ export type Database = {
           pets_allowed: boolean | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct: number | null
-          seasonal_profile: Database["public"]["Enums"]["seasonal_profile"]
+          seasonal_profile:
+            | Database["public"]["Enums"]["seasonal_profile"]
+            | null
           setup_steps_completed: Json
           smoking_allowed: boolean | null
           sponsor_assignment_mode: string
@@ -4411,7 +4413,9 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
-          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"]
+          seasonal_profile?:
+            | Database["public"]["Enums"]["seasonal_profile"]
+            | null
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -4459,7 +4463,9 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
-          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"]
+          seasonal_profile?:
+            | Database["public"]["Enums"]["seasonal_profile"]
+            | null
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string

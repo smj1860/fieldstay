@@ -79,6 +79,10 @@ export type CrewLocale          = 'en' | 'es'
  * properties.state instead, because a lake house in Alabama and one in New
  * Hampshire share a destination type and share no spring-break window at all.
  * Do not add a 'spring_break' value here.
+ *
+ * Normally DERIVED from the property's ZIP rather than stored — see
+ * lib/scoring/seasonal-market.ts. properties.seasonal_profile holds only a
+ * human override.
  */
 export type SeasonalProfile     = 'none' | 'summer_lake' | 'fall_foliage' | 'ski' | 'coastal_summer' | 'year_round_urban'
 export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
@@ -274,8 +278,12 @@ export interface Property {
    * 20260823170441.
    */
   external_missing_since:  string | null
-  /** NOT NULL DEFAULT 'none' — an unclassified property contributes 0 friction. */
-  seasonal_profile:        SeasonalProfile
+  /**
+   * OVERRIDE ONLY, nullable (20260912132651). NULL — the normal case — means
+   * "derive the market profile from the ZIP" (lib/scoring/seasonal-market.ts).
+   * A non-null value is a deliberate human correction and wins.
+   */
+  seasonal_profile:        SeasonalProfile | null
   created_at:              string
   updated_at:              string
 }
