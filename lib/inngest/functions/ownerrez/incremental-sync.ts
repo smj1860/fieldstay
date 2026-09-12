@@ -4,8 +4,9 @@
  * Two functions:
  *
  * 1. ownerRezIncrementalSync — DISPATCHER. Triggered by:
- *     - Inngest cron:  hourly (0 * * * *) — reliability backstop, sweeps
- *                      every active connection
+ *     - Inngest cron:  hourly at :13 — reliability backstop, sweeps every
+ *                      active connection. The minute is deliberate; see the
+ *                      stagger note above the cron trigger below.
  *     - Webhook event: integration/ownerrez.sync.requested — scoped to the
  *                      one connection the webhook belongs to when
  *                      ownerrez.ts's handleWebhookEvent resolved it (falls
@@ -228,7 +229,39 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   [
-    { cron: '0 * * * *' },
+    // ── :13, NOT :00 — the stagger note, referenced from ical-sync.ts and
+    // cron/integration-token-refresh.ts ───────────────────────────────────
+    //
+    // Three platform-wide dispatchers used to fire at exactly the same instant
+    // every hour — this one, ical-sync-all, and integration-token-refresh-cron
+    // — and they were, in that order, the three slowest jobs in the system:
+    //
+    //   ownerrez-incremental-sync       p50 15.0s   p95 94.6s
+    //   ical-sync-all                   p50 11.4s   p95 77.8s
+    //   integration-token-refresh-cron  p50  6.5s   p95 40.0s
+    //   hostaway-incremental-sync-cron  p50  2.1s   p95  6.0s   ← cron '7 * * * *'
+    //
+    // Hostaway's dispatcher is the control: structurally identical to this one
+    // (fetch connections, fan out per connection) and seven times faster, its
+    // only material difference being that it does not fire at :00. Measured
+    // platform-wide over four weeks, p95 for jobs starting at :00 climbed
+    // 35.7s → 51.3s while p95 for every other start minute stayed flat around
+    // 15s. Whatever was getting worse was shared, not any one job's.
+    //
+    // The cost is NOT waiting for a concurrency slot — the watchdog measures
+    // that separately and reports it as "+Ns queued", which these runs did not
+    // carry. It is per-step orchestration: every step boundary is a round trip
+    // back into one Vercel /api/inngest endpoint, and at :00 three dispatchers
+    // plus all of their per-tenant fan-out arrive there at once. The watchdog's
+    // own comment records Inngest tracing a 43s run as 3s on our server and 29s
+    // in orchestration.
+    //
+    // So the minutes are spread deliberately and must stay distinct: :07
+    // hostaway, :13 here, :26 ical, :41 token-refresh. None of the four depends
+    // on running at a particular minute — this one's cursor is a timestamp,
+    // ical's feeds carry their own, and token-refresh's 90-minute window is
+    // deliberately wider than its 60-minute cadence.
+    { cron: '13 * * * *' },
     { event: 'integration/ownerrez.sync.requested' as const },
     { event: 'ownerrez/sync.now.requested' as const },
   ],
@@ -241,7 +274,21 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     const scopedUserId = event?.data && 'user_id' in event.data ? event.data.user_id : undefined
     logger.info('ownerrez-incremental-sync triggered', { scoped: Boolean(scopedUserId) })
 
-    const connections = await step.run('fetch-connections', async () => {
+    // ONE step, not two. This dispatcher does almost nothing — a single query,
+    // a Redis GET per connection, one event send — yet its p50 (15.0s) ran
+    // HIGHER than the handler that does all the real work
+    // (ownerrez-connection-sync, p50 6.6s). The work was never the cost; the
+    // step boundaries were. Each boundary is a round trip back into one Vercel
+    // /api/inngest endpoint, and the circuit filter used to spend a whole extra
+    // one to do a single Redis read. Merging it into the fetch is safe
+    // precisely BECAUSE the filter is not the enforcement point (see below).
+    //
+    // The step id is new rather than reused: a run in flight across the deploy
+    // finds no memoized value under it and simply re-runs the read, which is
+    // idempotent. Reusing 'fetch-connections' with a changed return SHAPE is
+    // the combination that would hand such a run an array where it now expects
+    // an object.
+    const { total, syncable } = await step.run('fetch-syncable-connections', async () => {
       const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
       // PLATFORM-WIDE when unscoped — every org with a live OwnerRez
       // connection, not one tenant's. At max_rows = 1000 PostgREST returns the
@@ -249,7 +296,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       // past that stops syncing while the cron still reports success. The
       // error was discarded outright too: a failed read became "no active
       // connections" and the whole tick was skipped silently.
-      return await fetchAllRows<{ id: string; user_id: string; org_id: string | null; external_user_id: string | null }>(
+      const connections = await fetchAllRows<{ id: string; user_id: string; org_id: string | null; external_user_id: string | null }>(
         (from, to) => {
           let query = supabase
             .from('integration_connections')
@@ -265,11 +312,37 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         },
         { label: 'ownerrez-incremental-sync.connections' },
       )
+
+      // Circuit breaker, per connection. This replaces a single global check
+      // that returned early for the WHOLE tick — one org's expired token used
+      // to stop every other org from syncing. Each connection is filtered on
+      // its own breaker, so a failing tenant is skipped and healthy tenants
+      // proceed. ownerRezConnectionSync re-checks its own breaker too (a run
+      // queued before the breaker opened must not pile onto a degraded API),
+      // so this is an optimisation to avoid dispatching no-op runs, not the
+      // enforcement point.
+      //
+      // PARALLEL, not a `for` loop. Upstash is HTTP, so a serial loop costs one
+      // round trip per connection — invisible at today's single connection and
+      // linear in tenants after that, which is exactly the shape that degrades
+      // quietly until it is the incident. isCircuitOpen never throws.
+      const openFlags = await Promise.all(connections.map((c) => isCircuitOpen(logger, c.id)))
+
+      // `total` is carried out so the two empty cases stay distinguishable:
+      // nobody is connected, versus everybody is broken. They are different
+      // operational facts and used to be different log lines; collapsing them
+      // into "syncable.length === 0" would lose the second one.
+      return { total: connections.length, syncable: connections.filter((_, i) => !openFlags[i]) }
     })
 
-    if (!connections.length) {
+    if (!total) {
       logger.info('[OwnerRez] No active connections to sync')
       return { dispatched: 0 }
+    }
+
+    if (!syncable.length) {
+      logger.warn('[OwnerRez] Every active connection has an open circuit breaker — skipping tick')
+      return { dispatched: 0, circuit_open: true }
     }
 
     // The new-property diff costs one full getProperties() per connection —
@@ -279,26 +352,6 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     const checkNewProperties = scopedUserId
       ? true
       : new Date().getUTCHours() === NEW_PROPERTY_DIFF_UTC_HOUR
-
-    // Circuit breaker, per connection. This replaces a single global check
-    // that returned early for the WHOLE tick — one org's expired token used to
-    // stop every other org from syncing. Each connection is now filtered on its
-    // own breaker, so a failing tenant is skipped and healthy tenants proceed.
-    // ownerRezConnectionSync re-checks its own breaker too (a run queued before
-    // the breaker opened must not pile onto a degraded API), so this is an
-    // optimisation to avoid dispatching no-op runs, not the enforcement point.
-    const syncable = await step.run('filter-open-circuits', async () => {
-      const open: string[] = []
-      for (const conn of connections) {
-        if (await isCircuitOpen(logger, conn.id)) open.push(conn.id)
-      }
-      return connections.filter((c) => !open.includes(c.id))
-    })
-
-    if (!syncable.length) {
-      logger.warn('[OwnerRez] Every active connection has an open circuit breaker — skipping tick')
-      return { dispatched: 0, circuit_open: true }
-    }
 
     await step.sendEvent(
       'fan-out-connection-syncs',

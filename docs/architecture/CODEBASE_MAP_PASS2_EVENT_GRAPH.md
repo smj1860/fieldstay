@@ -370,7 +370,9 @@ Any provider's sync failure
                                                 per 4h per connection
 ```
 
-`ical-sync.ts` runs both as an hourly cron (`0 * * * *`) and as a
+`ical-sync.ts` runs both as an hourly cron (`26 * * * *` — the hourly
+dispatchers are staggered across the hour on purpose; see the note in
+`lib/inngest/functions/ownerrez/incremental-sync.ts`) and as a
 listener on `ical/sync.all.requested` (fired manually from
 `bookings/actions.ts` and `turnovers/actions.ts`) — same handler, two
 trigger paths, matching the OwnerRez incremental-sync pattern above. It
