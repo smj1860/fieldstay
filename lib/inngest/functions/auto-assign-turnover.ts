@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { haversineKm, proximityScore } from '@/lib/scoring/geo'
+import { scoreCrewCandidates, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
@@ -244,54 +244,13 @@ export const autoAssignTurnover = inngest.createFunction(
     if (!context) return { skipped: true, reason: 'disabled or no candidates' }
 
     const scored = await step.run('score-candidates', async () => {
+      // The scorer itself lives in lib/scoring/crew-candidates.ts. It was
+      // inline here until the Friction Forecaster's Smart Fix needed the same
+      // ranking: a second copy would have let the board's suggestion and the
+      // exceptions panel's Smart Fix drift into recommending different people
+      // for the same turnover, each looking correct in isolation.
       const { isSameDay, property, crew, familiarCrewIds, workloadMap } = context
-
-      const weights = isSameDay
-        ? { proximity: 0.40, reliability: 0.30, capacity: 0.15, workload: 0.10, familiarity: 0.05 }
-        : { familiarity: 0.30, reliability: 0.25, workload: 0.20, proximity: 0.15, capacity: 0.10 }
-
-      const maxWorkload = Math.max(...(Object.values(workloadMap) as number[]), 1)
-      const familiarSet = new Set(familiarCrewIds)
-
-      return crew
-        .map((c) => {
-          const proximity =
-            c.home_lat && c.home_lng && property.lat && property.lng
-              ? proximityScore(haversineKm(
-                  Number(c.home_lat), Number(c.home_lng),
-                  Number(property.lat), Number(property.lng),
-                ))
-              : 0.5
-
-          // reliability_score/capacity_score are numeric columns already scaled 0–1
-          // (e.g. 1.000 = 100%), NOT 0–100 despite the old code's /100 implying a
-          // percentage scale. PostgREST also returns numeric columns as strings, so
-          // coerce explicitly rather than relying on implicit arithmetic coercion.
-          const reliability = c.reliability_score !== null ? Number(c.reliability_score) : 0.7
-          const capacity    = c.capacity_score    !== null ? Number(c.capacity_score)    : 0.7
-          const workload    = 1 - (workloadMap[c.id] ?? 0) / maxWorkload
-          const familiarity = familiarSet.has(c.id) ? 1.0 : 0.0
-
-          const score = isSameDay
-            ? proximity   * weights.proximity   +
-              reliability * weights.reliability  +
-              capacity    * weights.capacity     +
-              workload    * weights.workload     +
-              familiarity * weights.familiarity
-            : familiarity * weights.familiarity  +
-              reliability * weights.reliability  +
-              workload    * weights.workload     +
-              proximity   * weights.proximity    +
-              capacity    * weights.capacity
-
-          return {
-            crew_member_id: c.id,
-            name:           c.name,
-            score,
-            breakdown:      { proximity, reliability, capacity, workload, familiarity },
-          }
-        })
-        .sort((a, b) => b.score - a.score)
+      return scoreCrewCandidates({ isSameDay, property, crew, familiarCrewIds, workloadMap })
     })
 
     if (!scored.length) {
@@ -315,15 +274,7 @@ export const autoAssignTurnover = inngest.createFunction(
 
     const top = scored[0]!
 
-    const reasons: string[] = []
-    if (top.breakdown.familiarity === 1)  reasons.push('knows this property')
-    if (top.breakdown.proximity   > 0.7)  reasons.push('nearby')
-    if (top.breakdown.reliability > 0.8)  reasons.push('high reliability')
-    if (top.breakdown.workload    > 0.8)  reasons.push('light schedule')
-
-    const reasoning = reasons.length
-      ? `${top.name} — ${reasons.join(', ')}`
-      : top.name
+    const reasoning = crewSuggestionReasoning(top)
 
     const acted = await step.run('act-on-mode', async () => {
       const supabase = createServiceClient({ system: 'inngest:auto-assign-turnover' })

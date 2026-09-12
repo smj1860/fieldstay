@@ -392,6 +392,13 @@ crew_availability           — crew marks available/unavailable by date. NOT in
                               open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
+crew_speed_baselines        — rolling 90-DAY avg minutes-per-bedroom per crew member
+                              (never a lifetime average — matches
+                              FAMILIARITY_WINDOW_DAYS). Written ONLY by the friction
+                              cron's first step; SELECT-only for org members, no
+                              PM write path. Crew under 3 completed turnovers in the
+                              window get NO row — the scorer falls back to the org
+                              median rather than skipping the turnover
 ```
 
 ### Work Orders
@@ -486,6 +493,44 @@ reservation_messages        — automated guest messaging (superseded guest_mess
                               guest_messages_sent, dropped by 20260611000006)
 reviews / review_responses  — guest reviews + PM responses
 ```
+
+### Friction Forecaster
+```
+pre_flight_friction         — one scored row per turnover per day, written by
+                              cron-pre-flight-friction (~2am CT, fanned out one
+                              event per org), read by the /ops exceptions panel.
+                              UNIQUE(turnover_id) is the upsert conflict target.
+                              severity: none|high|critical, status:
+                              flagged|resolved|dismissed. score_breakdown ALWAYS
+                              carries every FrictionComponents key, INCLUDING
+                              `localEvents: 0` — that key is the seam a future
+                              local-events scorer plugs into, and dropping it while
+                              it is zero makes "scored at zero" and "predates the
+                              scorer" indistinguishable in stored history. Enforced
+                              by unit/guardrails/friction-local-events-seam.test.ts.
+                              A rescore does NOT overturn a PM decision unless the
+                              severity got WORSE (nextStatus() in the cron)
+properties.seasonal_profile — enum seasonal_profile, NOT NULL DEFAULT 'none'. The
+                              DESTINATION-TYPE axis (lake/ski/coastal/foliage/urban).
+                              Spring break is the GEOGRAPHY axis and keys off
+                              properties.state instead — do NOT add a 'spring_break'
+                              value here, that conflation was tried and reverted.
+                              An unset profile must contribute 0, never a guess
+```
+
+Two rules the scoring library carries that are not obvious from the schema:
+
+- **Never add an LLM call or a traffic/events vendor to this module.** It is a
+  pure deterministic scorer on purpose — auditable, free, and no "why did the
+  AI say 94%" support burden. Local events are deliberately NOT built rather
+  than faked with a PM-entered table: a mechanism nobody maintains is worse
+  than an honest absence, and the whole feature exists to take upkeep OFF the
+  PM. If it is ever built the mechanism is a paid demand-intelligence API or a
+  public schedule pull.
+- **`properties.state` is free text**, and live rows hold both `AL` and
+  `Alabama` for the same state. `springBreakScore` normalises through
+  `normalizeStateCode()` for exactly that reason — a region table keyed only on
+  two-letter codes silently scored 0 for most of the real portfolio.
 
 ### Supporting
 ```

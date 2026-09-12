@@ -113,6 +113,7 @@ const ENUM_MAP = {
   compliance_doc_type:  'ComplianceDocType',
   contact_pref:         'ContactPref',
   crew_role:            'CrewRole',
+  seasonal_profile:     'SeasonalProfile',
   ical_source:          'IcalSource',
   inspection_action:    'InspectionAction',
   inspection_remediation: 'InspectionRemediation',

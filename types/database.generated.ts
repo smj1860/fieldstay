@@ -1232,6 +1232,45 @@ export type Database = {
           },
         ]
       }
+      crew_speed_baselines: {
+        Row: {
+          avg_minutes_per_bedroom: number
+          computed_at: string
+          crew_member_id: string
+          org_id: string
+          sample_size: number
+        }
+        Insert: {
+          avg_minutes_per_bedroom: number
+          computed_at?: string
+          crew_member_id: string
+          org_id: string
+          sample_size: number
+        }
+        Update: {
+          avg_minutes_per_bedroom?: number
+          computed_at?: string
+          crew_member_id?: string
+          org_id?: string
+          sample_size?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_speed_baselines_crew_member_id_fkey"
+            columns: ["crew_member_id"]
+            isOneToOne: true
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_speed_baselines_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       crew_sync_incidents: {
         Row: {
           client_incident_id: string
@@ -4132,6 +4171,83 @@ export type Database = {
         }
         Relationships: []
       }
+      pre_flight_friction: {
+        Row: {
+          computed_at: string
+          failure_probability: number
+          id: string
+          org_id: string
+          property_id: string
+          score_breakdown: Json
+          severity: string
+          smart_fix_crew_id: string | null
+          smart_fix_reasoning: string | null
+          status: string
+          turnover_date: string
+          turnover_id: string
+          updated_at: string
+        }
+        Insert: {
+          computed_at?: string
+          failure_probability: number
+          id?: string
+          org_id: string
+          property_id: string
+          score_breakdown: Json
+          severity?: string
+          smart_fix_crew_id?: string | null
+          smart_fix_reasoning?: string | null
+          status?: string
+          turnover_date: string
+          turnover_id: string
+          updated_at?: string
+        }
+        Update: {
+          computed_at?: string
+          failure_probability?: number
+          id?: string
+          org_id?: string
+          property_id?: string
+          score_breakdown?: Json
+          severity?: string
+          smart_fix_crew_id?: string | null
+          smart_fix_reasoning?: string | null
+          status?: string
+          turnover_date?: string
+          turnover_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pre_flight_friction_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_smart_fix_crew_id_fkey"
+            columns: ["smart_fix_crew_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_turnover_id_fkey"
+            columns: ["turnover_id"]
+            isOneToOne: true
+            referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       processed_webhooks: {
         Row: {
           processed_at: string
@@ -4247,6 +4363,7 @@ export type Database = {
           pets_allowed: boolean | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct: number | null
+          seasonal_profile: Database["public"]["Enums"]["seasonal_profile"]
           setup_steps_completed: Json
           smoking_allowed: boolean | null
           sponsor_assignment_mode: string
@@ -4294,6 +4411,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -4341,6 +4459,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -6999,6 +7118,13 @@ export type Database = {
         | "semi_annual"
         | "annual"
       schedule_type: "routine" | "seasonal"
+      seasonal_profile:
+        | "none"
+        | "summer_lake"
+        | "fall_foliage"
+        | "ski"
+        | "coastal_summer"
+        | "year_round_urban"
       support_category: "faq" | "technical" | "account_specific"
       support_message_role: "user" | "assistant" | "human"
       sync_status: "pending" | "success" | "error"
@@ -7337,6 +7463,14 @@ export const Constants = {
         "annual",
       ],
       schedule_type: ["routine", "seasonal"],
+      seasonal_profile: [
+        "none",
+        "summer_lake",
+        "fall_foliage",
+        "ski",
+        "coastal_summer",
+        "year_round_urban",
+      ],
       support_category: ["faq", "technical", "account_specific"],
       support_message_role: ["user", "assistant", "human"],
       sync_status: ["pending", "success", "error"],

@@ -1241,4 +1241,23 @@ export type FieldStayEvents = {
       org_id: string
     }
   },
+
+  /**
+   * One org's turnovers need a pre-flight friction score. Fanned out by
+   * cron-pre-flight-friction so each tenant's rollup + scoring + weather
+   * lookups are their own retry boundary and one slow org cannot spend the
+   * whole platform's runway before the 7am dashboard read.
+   *
+   * Carries the date the dispatcher resolved rather than letting each handler
+   * re-read the clock: the cron fires at 07:00 UTC, two hours from midnight
+   * CT, so a retry that crossed midnight UTC would otherwise score a
+   * different day than the one that was dispatched.
+   */
+  'friction/pre_flight.requested': {
+    data: {
+      org_id:        string
+      /** YYYY-MM-DD, the turnover date being scored. */
+      turnover_date: string
+    }
+  },
 }

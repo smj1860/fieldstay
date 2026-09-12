@@ -73,6 +73,14 @@ export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintena
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
 export type CrewLocale          = 'en' | 'es'
+/**
+ * Destination type, NOT geography. The friction forecaster's seasonal
+ * component keys its fixed MM-DD windows off this; spring break is keyed off
+ * properties.state instead, because a lake house in Alabama and one in New
+ * Hampshire share a destination type and share no spring-break window at all.
+ * Do not add a 'spring_break' value here.
+ */
+export type SeasonalProfile     = 'none' | 'summer_lake' | 'fall_foliage' | 'ski' | 'coastal_summer' | 'year_round_urban'
 export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
 export type VendorAutoAssignMode = 'suggest' | 'disabled'
 export type SuggestionStatus     = 'pending' | 'accepted' | 'overridden' | 'dismissed'
@@ -266,6 +274,8 @@ export interface Property {
    * 20260823170441.
    */
   external_missing_since:  string | null
+  /** NOT NULL DEFAULT 'none' — an unclassified property contributes 0 friction. */
+  seasonal_profile:        SeasonalProfile
   created_at:              string
   updated_at:              string
 }
@@ -2190,6 +2200,51 @@ export interface PromoHospitableLaunchCounter {
  * The hand-written interfaces are what can drift, so they are what is checked.
  * Add an entry in the same commit that adds a table + its interface.
  */
+/**
+ * One pre-flight friction assessment per turnover, written by the 2am
+ * `cron-pre-flight-friction` run and read by the /ops exceptions panel.
+ *
+ * `severity` and `status` are plain TEXT with CHECK constraints rather than
+ * Postgres enums, matching turnovers.suggestion_status — the drift gate only
+ * compares real `CREATE TYPE ... AS ENUM` types, so the unions below are
+ * documentation plus compile-time help, not something CI verifies.
+ */
+export interface PreFlightFriction {
+  id:                  string
+  org_id:              string
+  turnover_id:         string
+  property_id:         string
+  turnover_date:       string
+  /** 0.000-1.000. Clamped at 1 by computeFrictionScore — the weight maxes sum to more. */
+  failure_probability: number
+  /**
+   * Every FrictionComponents key, always — including `localEvents: 0`, which
+   * has no scorer yet. The key is the seam; omitting it would make "not
+   * scored" and "scored at zero" indistinguishable in stored history.
+   */
+  score_breakdown:     Record<string, number>
+  severity:            'none' | 'high' | 'critical'
+  status:              'flagged' | 'resolved' | 'dismissed'
+  smart_fix_crew_id:   string | null
+  smart_fix_reasoning: string | null
+  computed_at:         string
+  updated_at:          string
+}
+
+/**
+ * Rolling 90-day minutes-per-bedroom average per crew member. Written only by
+ * the friction cron's first step (service role); PM-readable, never
+ * PM-writable. A crew member below the minimum sample size has NO row — the
+ * scorer falls back to an org median rather than skipping the turnover.
+ */
+export interface CrewSpeedBaseline {
+  crew_member_id:          string
+  org_id:                  string
+  avg_minutes_per_bedroom: number
+  sample_size:             number
+  computed_at:             string
+}
+
 export interface HandWrittenRowMap {
   profiles:                            Profile
   organizations:                       Organization
@@ -2243,6 +2298,8 @@ export interface HandWrittenRowMap {
   org_sms_templates:                   OrgSmsTemplate
   assignment_outcomes:                 AssignmentOutcome
   vendor_assignment_outcomes:          VendorAssignmentOutcome
+  pre_flight_friction:                 PreFlightFriction
+  crew_speed_baselines:                CrewSpeedBaseline
   crew_feedback:                       CrewFeedback
   crew_sync_incidents:                 CrewSyncIncident
   checklist_item_signals:              ChecklistItemSignal
