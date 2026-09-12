@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs'
 import { assertServerEnv } from './lib/env'
+import { shouldDropSentryEvent } from '@/lib/observability/sentry-filters'
 
 /**
  * Trace sampling: 100% is right for pre-launch and for preview/staging, where
@@ -23,22 +24,6 @@ function resolveTracesSampleRate(): number {
 }
 
 const tracesSampleRate = resolveTracesSampleRate()
-
-/**
- * Next.js signals redirect() and notFound() by THROWING a control-flow error
- * that the framework catches upstream. Server Actions here wrap their bodies
- * in try/catch (see the reportError convention), so an ordinary
- * requireOrgMember() redirect to /login or /onboarding lands in the catch and
- * would be reported as an application error. Those are not failures — left
- * unfiltered they would be the single largest source of noise in this
- * project's Sentry, and alert fatigue makes every other signal worthless.
- */
-function isNextControlFlow(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false
-  const digest = (err as { digest?: unknown }).digest
-  return typeof digest === 'string' &&
-    (digest.startsWith('NEXT_REDIRECT') || digest === 'NEXT_NOT_FOUND')
-}
 
 // Sentry owns the OpenTelemetry tracer-provider registration for both
 // traces and errors — this replaced an earlier @vercel/otel registerOTel()
@@ -80,7 +65,9 @@ export async function register() {
     integrations: [Sentry.consoleLoggingIntegration({ levels: ['error', 'warn'] })],
 
     beforeSend(event: Sentry.ErrorEvent, hint: Sentry.EventHint): Sentry.ErrorEvent | null {
-      return isNextControlFlow(hint.originalException) ? null : event
+      // Both predicates live in lib/observability/sentry-filters.ts — a leaf
+      // module, so they are unit-testable without booting this file.
+      return shouldDropSentryEvent(hint.originalException) ? null : event
     },
   }
 

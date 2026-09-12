@@ -49,8 +49,8 @@ const HOUR_MS = 3_600_000
  * not assumed — and each budget is roughly 2x the period so one missed or
  * slow run does not page anyone:
  *
- *   ownerrez-incremental-sync          0 * * * *      hourly
- *   integration-token-refresh-cron     0 * * * *      hourly
+ *   ownerrez-incremental-sync          13 * * * *     hourly
+ *   integration-token-refresh-cron     41 * * * *     hourly
  *   cron-metrics-snapshot              slash-30       every 30 min
  *   hostex-reservation-reconcile-cron  0 8 * * *      daily
  *   hospitable-teammate-sync-cron      0 9 * * *      daily
