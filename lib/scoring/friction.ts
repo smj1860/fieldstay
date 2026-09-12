@@ -431,22 +431,56 @@ const SPRING_BREAK_REGION_WINDOWS: Record<SpringBreakRegion, { startMD: string; 
 const SPRING_BREAK_WEIGHT = 0.10
 
 /**
- * Only destinations where spring break actually drives leisure travel.
+ * Ski's reduced rate, and the reason it is reduced rather than equal.
  *
- * `ski` is left OUT deliberately rather than silently included: spring skiing
- * overlaps the ski profile's own Nov-Mar window, so whether a March booking
- * should count once (seasonal) or twice (seasonal + spring break) is a product
- * call, not a default to bury in code. fall_foliage, year_round_urban and none
- * get nothing — spring break is not their travel timing.
+ * Spring break genuinely lifts a ski property — it falls inside the season and
+ * fills the resort. But the `seasonal` component is ALREADY paying that
+ * property 0.15 on these dates, because they sit inside the Nov-Mar ski
+ * window. A full 0.10 on top would charge the same March week twice: once for
+ * being ski season and again for being the busiest part of it. Half rate is
+ * the INCREMENT — what spring break adds over an ordinary in-season week —
+ * which is the only part not already counted.
+ *
+ * This is the same double-counting the interaction tiers exist to prevent,
+ * arriving through a different door: there, two calendar facts about one date;
+ * here, one date counted by two components.
  */
-const SPRING_BREAK_ELIGIBLE_PROFILES = new Set(['summer_lake', 'coastal_summer'])
+const SKI_SPRING_BREAK_WEIGHT = 0.05
+
+/**
+ * Per-profile spring-break treatment. A profile absent from this map gets
+ * nothing — fall_foliage, year_round_urban and none are not spring-break
+ * travel timing.
+ *
+ * `requireSeasonActive` is what makes ski's entry mean "spring break WITHIN
+ * ski season" rather than "ski properties, in spring break". Several regional
+ * windows run into April (west_coast to 04-10, northeast to 04-15) while the
+ * ski window closes 03-31, and a ski property in mid-April is out of season
+ * with lifts closing — it should score nothing, not a bonus. summer_lake and
+ * coastal_summer have no such requirement: their season is months away in
+ * March, so their spring-break lift stands entirely on its own and nothing
+ * else is counting it.
+ */
+interface SpringBreakProfileRule {
+  weight:              number
+  /** Only score inside the profile's own seasonal window. */
+  requireSeasonActive: boolean
+}
+
+const SPRING_BREAK_PROFILE_RULES: Record<string, SpringBreakProfileRule> = {
+  summer_lake:    { weight: SPRING_BREAK_WEIGHT,     requireSeasonActive: false },
+  coastal_summer: { weight: SPRING_BREAK_WEIGHT,     requireSeasonActive: false },
+  ski:            { weight: SKI_SPRING_BREAK_WEIGHT, requireSeasonActive: true  },
+}
 
 export function springBreakScore(
   state:   string | null,
   profile: string,
   date:    Date,
 ): number {
-  if (!SPRING_BREAK_ELIGIBLE_PROFILES.has(profile)) return 0
+  const rule = SPRING_BREAK_PROFILE_RULES[profile]
+  if (!rule) return 0
+  if (rule.requireSeasonActive && !isSeasonalWindowActive(profile, date)) return 0
 
   const code = normalizeStateCode(state)
   if (!code) return 0
@@ -458,7 +492,7 @@ export function springBreakScore(
   if (!region) return 0
 
   const window = SPRING_BREAK_REGION_WINDOWS[region]
-  return withinMD(monthDay(date), window.startMD, window.endMD) ? SPRING_BREAK_WEIGHT : 0
+  return withinMD(monthDay(date), window.startMD, window.endMD) ? rule.weight : 0
 }
 
 // ── Component: compounding interaction (tiered, mutually exclusive) ─────────

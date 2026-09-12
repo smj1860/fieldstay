@@ -273,9 +273,38 @@ describe('springBreakScore', () => {
     expect(springBreakScore('AL', 'fall_foliage',     date)).toBe(0)
     expect(springBreakScore('AL', 'year_round_urban', date)).toBe(0)
     expect(springBreakScore('AL', 'none',             date)).toBe(0)
-    // ski is deliberately excluded — spring skiing overlaps its own window
-    // and whether to count it twice is a product call, not a code default.
-    expect(springBreakScore('AL', 'ski',              date)).toBe(0)
+  })
+
+  it('scores ski at HALF rate, and only inside ski season', () => {
+    // The seasonal component is already paying a ski property 0.15 on these
+    // dates. Half rate is the INCREMENT spring break adds over an ordinary
+    // in-season week — the part not already counted.
+    const inSeason = day(2026, 3, 25) // inside ski (11-15..03-31) and west_coast spring break
+    expect(isSeasonalWindowActive('ski', inSeason)).toBe(true)
+    expect(springBreakScore('CO', 'ski', inSeason)).toBeCloseTo(0.05, 10)
+    // Half of what an eligible summer profile gets on the same date.
+    expect(springBreakScore('CO', 'ski', inSeason))
+      .toBeCloseTo(springBreakScore('CA', 'summer_lake', inSeason) / 2, 10)
+  })
+
+  it('gives a ski property nothing once the season closes, mid-break', () => {
+    // west_coast spring break runs to 04-10 but ski season ends 03-31. A ski
+    // property in April is out of season with lifts closing — it must score
+    // nothing, not a bonus.
+    const afterSeason = day(2026, 4, 5)
+    expect(isSeasonalWindowActive('ski', afterSeason)).toBe(false)
+    expect(springBreakScore('CO', 'ski', afterSeason)).toBe(0)
+    // The window itself is still open — proving the season gate is what
+    // zeroed it, not the date falling outside spring break.
+    expect(springBreakScore('CA', 'summer_lake', afterSeason)).toBeCloseTo(0.10, 10)
+  })
+
+  it('does not apply the season gate to the summer profiles', () => {
+    // Their season is months away in March, so their spring-break lift stands
+    // on its own and nothing else is counting it.
+    const march = day(2026, 3, 10)
+    expect(isSeasonalWindowActive('summer_lake', march)).toBe(false)
+    expect(springBreakScore('AL', 'summer_lake', march)).toBeCloseTo(0.10, 10)
   })
 
   it('derives upper_south from south_gulf by a shift, not a second literal', () => {
