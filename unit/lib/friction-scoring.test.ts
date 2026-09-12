@@ -239,13 +239,30 @@ describe('springBreakScore', () => {
     expect(springBreakScore('NY', eligible, day(2026, 1, 15))).toBe(0)
   })
 
-  it('returns 0 for AK and HI rather than guessing a region', () => {
-    // Deliberately unmapped: HI is a spring-break DESTINATION for every
-    // mainland region at once rather than an origin market with one window,
-    // and AK has no clean regional analog.
+  it('scores AK and HI on the west_coast window, by both spellings', () => {
+    // Both run mid-March to the first week of April, which is west_coast's
+    // 03-18..04-10 band. Both spellings, because properties.state is free text.
     for (const state of ['AK', 'HI', 'Alaska', 'Hawaii']) {
-      expect(springBreakScore(state, eligible, day(2026, 3, 20))).toBe(0)
+      expect(springBreakScore(state, eligible, day(2026, 3, 20))).toBeCloseTo(0.10, 10)
+      expect(springBreakScore(state, eligible, day(2026, 4, 10))).toBeCloseTo(0.10, 10)
+      // Outside the band on both sides — they follow west_coast, not a wider
+      // window of their own.
+      expect(springBreakScore(state, eligible, day(2026, 3, 17))).toBe(0)
+      expect(springBreakScore(state, eligible, day(2026, 4, 11))).toBe(0)
     }
+  })
+
+  it('returns 0 for a state value that is not a US state', () => {
+    // Every state and DC is mapped now, so this is the only remaining
+    // fall-through — and properties.state is free text, so it is reachable.
+    expect(springBreakScore('Atlantis', eligible, day(2026, 3, 20))).toBe(0)
+    expect(springBreakScore('', eligible, day(2026, 3, 20))).toBe(0)
+    expect(springBreakScore(null, eligible, day(2026, 3, 20))).toBe(0)
+  })
+
+  it('still gates AK and HI on the destination profile', () => {
+    expect(springBreakScore('HI', 'fall_foliage', day(2026, 3, 20))).toBe(0)
+    expect(springBreakScore('AK', 'none',         day(2026, 3, 20))).toBe(0)
   })
 
   it('gates on the destination profile', () => {

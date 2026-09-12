@@ -293,18 +293,24 @@ type SpringBreakRegion =
   | 'northeast'  | 'southwest'      | 'upper_south'
 
 /**
- * PARTIAL BY DESIGN. AK and HI are absent, and that is not an oversight to be
- * quietly filled in: the model assumes a state's own school calendar drives
- * its residents leaving for spring break. Hawaii is a spring-break
- * DESTINATION for every mainland region at once rather than an origin market
- * with one window, and Alaska has no clean regional analog. Both fall through
- * to 0, which is honest; a guessed region would be wrong in a specific, known
- * way. Revisit only when there is a real customer property in either.
+ * Every US state plus DC is mapped. There is no fall-through-to-zero case left
+ * for a real property, which is deliberate — see the AK/HI note below.
  *
  * Mountain West (CO/ID/MT/WY/UT) maps onto west_coast — the same window, not
  * a new region. Southwest (AZ/NM/NV) is its own region because it draws from
  * the South (via Texas) and the West Coast (via California) at their
  * respective different times.
+ *
+ * AK and HI map onto west_coast too, and this is NOT the "guess a region for
+ * an unmapped state" that the rest of this table warns against. It is a
+ * stated observation — both run mid-March to the first week of April — matched
+ * to the region whose window already covers that band: west_coast is
+ * 03-18..04-10, where northeast runs a week later and midwest_plains ends too
+ * early. The earlier reasoning for leaving them out was about Hawaii being a
+ * spring-break DESTINATION rather than an origin market; that argument was
+ * about which market's calendar to use, and a directly observed window
+ * supersedes it. Anything beyond these two needs the same kind of evidence —
+ * a window someone has actually observed, not a nearby state's.
  */
 const STATE_SPRING_BREAK_REGION: Record<string, SpringBreakRegion> = {
   AL: 'south_gulf', AR: 'south_gulf', FL: 'south_gulf', GA: 'south_gulf',
@@ -325,7 +331,10 @@ const STATE_SPRING_BREAK_REGION: Record<string, SpringBreakRegion> = {
   DE: 'northeast', MD: 'northeast', DC: 'northeast', // DC is not a state, but properties.state may hold it
 
   VA: 'upper_south', WV: 'upper_south',
-  // AK, HI intentionally absent — see above.
+
+  // Mid-March to the first week of April, which is west_coast's window. See
+  // the note above — an observed window, not an inferred one.
+  AK: 'west_coast', HI: 'west_coast',
 }
 
 /**
@@ -334,9 +343,9 @@ const STATE_SPRING_BREAK_REGION: Record<string, SpringBreakRegion> = {
  * out than abbreviated. Without this map the region lookup above would miss
  * the majority of the real portfolio and score 0 with no symptom.
  *
- * This is spelling normalisation, NOT a coverage extension: every state is
- * listed so any spelling resolves to its code, and a code with no region entry
- * (AK, HI) still falls through to 0 exactly as intended.
+ * This is spelling normalisation, not a coverage decision: every state is
+ * listed here so any spelling resolves to its code, and which codes carry a
+ * spring-break region is decided in STATE_SPRING_BREAK_REGION above.
  */
 const STATE_NAME_TO_CODE: Record<string, string> = {
   alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
@@ -443,7 +452,10 @@ export function springBreakScore(
   if (!code) return 0
 
   const region = STATE_SPRING_BREAK_REGION[code]
-  if (!region) return 0 // unmapped state — see the PARTIAL BY DESIGN note
+  // Every US state and DC is mapped, so this is reached only by a
+  // properties.state value that is not a US state at all — free-text
+  // column, so that is a real input, not an impossible one.
+  if (!region) return 0
 
   const window = SPRING_BREAK_REGION_WINDOWS[region]
   return withinMD(monthDay(date), window.startMD, window.endMD) ? SPRING_BREAK_WEIGHT : 0
