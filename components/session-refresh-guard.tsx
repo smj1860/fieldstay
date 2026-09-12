@@ -13,24 +13,20 @@ const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password',
   '/reset-password', '/accept-invite', '/crew-invite', '/owner',
   '/work-orders']
 
-/**
- * The marketing home page, and ONLY it.
- *
- * `'/'` used to live in the prefix list above, and since every absolute path
- * begins with `'/'`, `startsWith` made isPublicPath() return true for
- * literally every route in the app. The redirect half of this component —
- * every branch that sends a lapsed session back to login — had therefore never
- * executed once since it was written. It is why the 2026-09-11 tab could sit
- * signed out on /maintenance for 10.5 hours: even had a wake signal fired, the
- * guard would have decided /maintenance was a public page and done nothing.
- *
- * A prefix also needs a segment boundary, or `/loginhelp` would count as
- * `/login`. Hence `${p}/` rather than a bare startsWith.
- */
-const PUBLIC_EXACT = ['/']
-
 function isPublicPath(pathname: string): boolean {
-  if (PUBLIC_EXACT.includes(pathname)) return true
+  // The marketing home page, and ONLY it — an equality check, never a prefix.
+  //
+  // `'/'` used to sit in the list above and be matched with `startsWith`, and
+  // since every absolute path begins with `'/'`, isPublicPath() returned true
+  // for literally every route in the app. The redirect half of this component —
+  // every branch that sends a lapsed session back to login — had therefore
+  // never executed once since it was written. It is why the 2026-09-11 tab
+  // could sit signed out on /maintenance for 10.5 hours: even had a wake signal
+  // fired, the guard would have called /maintenance public and done nothing.
+  if (pathname === '/') return true
+
+  // A prefix needs a segment boundary too, or `/loginhelp` would count as
+  // `/login`. Hence `${p}/` rather than a bare startsWith.
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
