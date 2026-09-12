@@ -15,7 +15,8 @@ import { render, waitFor } from '@testing-library/react'
 // listened for. The dashboard warmers did listen for 'online', which is why
 // they re-ran on the dead session and produced the errors.
 //
-// These tests cover that gap and the race that closing it introduces.
+// These tests cover that gap, the race that closing it introduces, and the
+// isPublicPath bug that made the redirect dead code in the first place.
 // ============================================================================
 
 const push = vi.fn()
@@ -23,7 +24,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
 
 let session: unknown = { access_token: 'jwt' }
 let refreshError: unknown = null
-const getSession    = vi.fn(async () => ({ data: { session }, error: null }))
+const getSession     = vi.fn(async () => ({ data: { session }, error: null }))
 const refreshSession = vi.fn(async () => ({ data: { session }, error: refreshError }))
 
 vi.mock('@/lib/supabase/client', () => ({
@@ -32,8 +33,19 @@ vi.mock('@/lib/supabase/client', () => ({
 
 const { SessionRefreshGuard } = await import('@/components/session-refresh-guard')
 
-function setPathname(pathname: string) {
+/** Mount the guard as if the browser were sitting on `pathname`. */
+function mountOn(pathname: string) {
   globalThis.history.replaceState({}, '', pathname)
+  return render(<SessionRefreshGuard />)
+}
+
+/**
+ * The two wake signals, named. The component listens for both; a machine
+ * coming back from sleep can deliver either, or both at once.
+ */
+const wake = {
+  online:     () => globalThis.dispatchEvent(new Event('online')),
+  foreground: () => document.dispatchEvent(new Event('visibilitychange')),
 }
 
 beforeEach(() => {
@@ -42,33 +54,31 @@ beforeEach(() => {
   refreshSession.mockClear()
   session      = { access_token: 'jwt' }
   refreshError = null
-  setPathname('/maintenance')
 })
 
 describe('SessionRefreshGuard — wake signals', () => {
   it('refreshes when the network comes back', async () => {
     // The signal the 2026-09-11 tab actually received, and the only one it
     // received. Without this listener the guard never ran again all day.
-    render(<SessionRefreshGuard />)
+    mountOn('/maintenance')
 
-    globalThis.dispatchEvent(new Event('online'))
+    wake.online()
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1))
   })
 
   it('still refreshes when the tab is brought back to the foreground', async () => {
-    render(<SessionRefreshGuard />)
+    mountOn('/maintenance')
 
-    document.dispatchEvent(new Event('visibilitychange'))
+    wake.foreground()
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1))
   })
 
   it('stops listening for online once unmounted', async () => {
-    const { unmount } = render(<SessionRefreshGuard />)
-    unmount()
+    mountOn('/maintenance').unmount()
 
-    globalThis.dispatchEvent(new Event('online'))
+    wake.online()
 
     await Promise.resolve()
     expect(refreshSession).not.toHaveBeenCalled()
@@ -87,10 +97,10 @@ describe('SessionRefreshGuard — one refresh at a time', () => {
       return { data: { session }, error: null }
     })
 
-    render(<SessionRefreshGuard />)
+    mountOn('/maintenance')
 
-    globalThis.dispatchEvent(new Event('online'))
-    document.dispatchEvent(new Event('visibilitychange'))
+    wake.online()
+    wake.foreground()
 
     release()
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1))
@@ -100,84 +110,65 @@ describe('SessionRefreshGuard — one refresh at a time', () => {
   it('allows a later refresh once the in-flight one has settled', async () => {
     // The serialisation must be a gate, not a latch — a guard that only ever
     // refreshed once would be a slower version of the same bug.
-    render(<SessionRefreshGuard />)
+    mountOn('/maintenance')
 
-    globalThis.dispatchEvent(new Event('online'))
+    wake.online()
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1))
 
-    globalThis.dispatchEvent(new Event('online'))
+    wake.online()
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(2))
   })
 })
 
 describe('SessionRefreshGuard — where a dead session sends you', () => {
-  it('sends a PM back to the page they were on', async () => {
+  // ── One table, both answers ───────────────────────────────────────────────
+  //
+  // Protected and public routes are checked from a SINGLE list on purpose.
+  // '/' used to live in the prefix list and was matched with startsWith, and
+  // every absolute path begins with '/', so isPublicPath() returned true for
+  // every route in the app and this component's entire redirect half was dead
+  // code. A suite that only proved '/' is public would have passed against
+  // that bug; it is the pairing that catches it, so the pairing is structural
+  // here rather than a convention someone has to keep remembering.
+  const ROUTES: { pathname: string; redirectsTo: string | null; why: string }[] = [
+    { pathname: '/maintenance',            redirectsTo: '/login?next=%2Fmaintenance',
+      why: 'a PM goes back to the page they were on' },
+    { pathname: '/crew/assets/abc',        redirectsTo: '/login?next=/crew',
+      why: 'crew go to the crew entry point, not the crew URL they were on' },
+    { pathname: '/loginhelp',              redirectsTo: '/login?next=%2Floginhelp',
+      why: 'a bare startsWith would mistake this for the /login page' },
+    { pathname: '/',                       redirectsTo: null,
+      why: 'the marketing home page is genuinely public' },
+    { pathname: '/login',                  redirectsTo: null,
+      why: 'already somewhere they can sign in' },
+    { pathname: '/work-orders/some-token', redirectsTo: null,
+      why: 'a token-bearing child of a public section is still public' },
+  ]
+
+  it.each(ROUTES)('$pathname — $why', async ({ pathname, redirectsTo }) => {
     session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
+    mountOn(pathname)
 
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/login?next=%2Fmaintenance'))
-  })
+    wake.online()
 
-  it('sends crew to the crew entry point, not the crew URL they were on', async () => {
-    setPathname('/crew/assets/abc')
-    session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/login?next=/crew'))
+    await waitFor(() => expect(getSession).toHaveBeenCalled())
+    if (redirectsTo === null) {
+      expect(push).not.toHaveBeenCalled()
+    } else {
+      await waitFor(() => expect(push).toHaveBeenCalledWith(redirectsTo))
+    }
   })
 
   it('redirects when the session exists but can no longer be refreshed', async () => {
-    // The 2026-09-11 shape: a token is present, the server will not renew it.
-    // Reads then go out as `anon` and 42501 on every table.
+    // The 2026-09-11 shape, and the one the table above cannot express: a
+    // token IS present, so the early "no session" branch does not fire — the
+    // server simply will not renew it. Reads then go out as `anon` and 42501
+    // on every table.
     refreshError = { message: 'Invalid Refresh Token: Already Used' }
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
+    mountOn('/maintenance')
+
+    wake.online()
 
     await waitFor(() => expect(push).toHaveBeenCalledWith('/login?next=%2Fmaintenance'))
-  })
-
-  it('treats the home page as public but a dashboard route as protected', async () => {
-    // '/' lived in the prefix list and was matched with startsWith, so every
-    // absolute path in the app counted as public and this component's entire
-    // redirect half was dead code. The pair is the point: a check that only
-    // proved '/' is public would have passed before the fix too.
-    setPathname('/')
-    session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
-    await waitFor(() => expect(getSession).toHaveBeenCalled())
-    expect(push).not.toHaveBeenCalled()
-  })
-
-  it('does not mistake /loginhelp for the /login page', async () => {
-    // A bare startsWith has no segment boundary.
-    setPathname('/loginhelp')
-    session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/login?next=%2Floginhelp'))
-  })
-
-  it('still treats a token-bearing public child as public', async () => {
-    setPathname('/work-orders/some-token')
-    session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
-
-    await waitFor(() => expect(getSession).toHaveBeenCalled())
-    expect(push).not.toHaveBeenCalled()
-  })
-
-  it('leaves someone on a public page alone', async () => {
-    setPathname('/login')
-    session = null
-    render(<SessionRefreshGuard />)
-    globalThis.dispatchEvent(new Event('online'))
-
-    await waitFor(() => expect(getSession).toHaveBeenCalled())
-    expect(push).not.toHaveBeenCalled()
   })
 })
