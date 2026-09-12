@@ -129,8 +129,8 @@ interface ScoreableTurnover {
     bedrooms:         number | null
     state:            string | null
     zip:              string | null
-    /** Human override; NULL means derive from the ZIP. */
-    seasonal_profile: SeasonalProfile | null
+    /** Human override, an ARRAY; EMPTY means derive from the ZIP. */
+    seasonal_profile: SeasonalProfile[] | null
   } | null
   turnover_assignments: { crew_member_id: string }[] | null
 }
@@ -521,11 +521,13 @@ interface FrictionRowInput {
 function componentsFor(input: FrictionRowInput): FrictionComponents {
   const { turnover, baselines, forecasts, turnoverDate } = input
   const property = firstOf(turnover.properties)
-  // The profile describes a MARKET, so it is derived from the ZIP unless a
-  // human has deliberately overridden it. Resolved here rather than stored on
-  // the property: expanding the ZIP table then reaches every existing property
-  // on the next run, with no backfill and no write path to keep in sync.
-  const profile  = resolveSeasonalProfile(property?.seasonal_profile, property?.zip)
+  // The profiles describe a MARKET, so they are derived from the ZIP unless a
+  // human has deliberately overridden them. Resolved here rather than stored
+  // on the property: expanding the ZIP table then reaches every existing
+  // property on the next run, with no backfill and no write path to keep in
+  // sync. An ARRAY — a market can have more than one peak season, and the
+  // whole array is passed through rather than [0].
+  const profiles = resolveSeasonalProfile(property?.seasonal_profile, property?.zip)
   const date     = localDateFrom(turnoverDate)
 
   const crewIds  = (turnover.turnover_assignments ?? []).map((a) => a.crew_member_id)
@@ -539,9 +541,9 @@ function componentsFor(input: FrictionRowInput): FrictionComponents {
     weather:     forecast ? weatherScore(forecast) : 0,
     weekend:     weekendScore(date),
     holiday:     holidayScore(date),
-    seasonal:    seasonalScore(profile, date),
-    springBreak: springBreakScore(property?.state ?? null, profile, date),
-    interaction: interactionScore(profile, date),
+    seasonal:    seasonalScore(profiles, date),
+    springBreak: springBreakScore(property?.state ?? null, profiles, date),
+    interaction: interactionScore(profiles, date),
     // Never conditional, never omitted — see FrictionComponents.localEvents.
     localEvents: 0,
   }

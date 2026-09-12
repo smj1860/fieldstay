@@ -4363,9 +4363,7 @@ export type Database = {
           pets_allowed: boolean | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct: number | null
-          seasonal_profile:
-            | Database["public"]["Enums"]["seasonal_profile"]
-            | null
+          seasonal_profile: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed: Json
           smoking_allowed: boolean | null
           sponsor_assignment_mode: string
@@ -4413,9 +4411,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
-          seasonal_profile?:
-            | Database["public"]["Enums"]["seasonal_profile"]
-            | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -4463,9 +4459,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
-          seasonal_profile?:
-            | Database["public"]["Enums"]["seasonal_profile"]
-            | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -7126,10 +7120,9 @@ export type Database = {
       schedule_type: "routine" | "seasonal"
       seasonal_profile:
         | "none"
-        | "summer_lake"
+        | "summer_vacation"
         | "fall_foliage"
         | "ski"
-        | "coastal_summer"
         | "year_round_urban"
       support_category: "faq" | "technical" | "account_specific"
       support_message_role: "user" | "assistant" | "human"
@@ -7471,10 +7464,9 @@ export const Constants = {
       schedule_type: ["routine", "seasonal"],
       seasonal_profile: [
         "none",
-        "summer_lake",
+        "summer_vacation",
         "fall_foliage",
         "ski",
-        "coastal_summer",
         "year_round_urban",
       ],
       support_category: ["faq", "technical", "account_specific"],

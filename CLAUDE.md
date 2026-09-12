@@ -510,19 +510,31 @@ pre_flight_friction         — one scored row per turnover per day, written by
                               by unit/guardrails/friction-local-events-seam.test.ts.
                               A rescore does NOT overturn a PM decision unless the
                               severity got WORSE (nextStatus() in the cron)
-properties.seasonal_profile — NULLABLE OVERRIDE ONLY (20260912132651). NULL, the
-                              normal case, means "derive the market profile from the
-                              ZIP" via lib/scoring/seasonal-market.ts; a non-null value
-                              is a deliberate human correction and wins. It is nullable
-                              precisely so a chosen 'none' and an unset row stay
-                              distinguishable — otherwise the derivation silently
+properties.seasonal_profile — OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY,
+                              the normal case, means "derive the market profiles from
+                              the ZIP" via lib/scoring/seasonal-market.ts; a non-empty
+                              value is a deliberate human correction and wins, and
+                              ['none'] is a deliberate "no seasonality" DISTINCT from
+                              empty — without that gap the derivation silently
                               overrules a human every night (same reason
                               properties.sponsor_assignment_mode exists).
-                              The DESTINATION-TYPE axis (lake/ski/coastal/foliage/urban).
-                              Spring break is the GEOGRAPHY axis and keys off
-                              properties.state instead — do NOT add a 'spring_break'
-                              value here, that conflation was tried and reverted
+                              ARRAY because a property can genuinely carry more than
+                              one peak season: a Gatlinburg cabin has real summer park
+                              tourism AND a real fall-foliage run, and a scalar forced
+                              a false either/or.
+                              The DESTINATION-TYPE axis. Spring break is the GEOGRAPHY
+                              axis and keys off properties.state instead — do NOT add a
+                              'spring_break' value here, that conflation was tried and
+                              reverted
 ```
+
+**`summer_vacation` is ONE value for lake, coastal and summer-peaked mountain
+markets.** It replaced `summer_lake` + `coastal_summer` on 2026-09-12, which were
+never actually different — identical windows (05-25..09-05), identical weight
+(0.15), identical spring-break eligibility, so the split never affected behaviour.
+**Do not add a third summer type** (`summer_mountain` or similar); that redundancy
+is exactly what the consolidation removed, and collapsing the two is what finally
+made summer-peaked mountain markets expressible at all.
 
 **The seasonal profile is DERIVED FROM THE ZIP, at scoring time.** It describes a
 MARKET, not a house — a cabin in Breckenridge follows the ski calendar whether or
@@ -535,6 +547,12 @@ whole promise of the product. Two rules:
   codebase keeps paying for. Deriving at read time also means adding a market to the
   table reaches every existing property on the next 2am run — no backfill, nothing
   to remember.
+- **A ZIP maps to an ARRAY of profiles, and several legitimately map to two.**
+  The Smokies ZIPs (Gatlinburg/Pigeon Forge/Sevierville) carry
+  `['summer_vacation', 'fall_foliage']`. Where two of a property's windows cover the
+  same date, `matchedWindow()` takes the HIGHEST-scoring one and never the sum —
+  two profiles covering today describe one busy day, not two independent reasons
+  for it. `springBreakScore` does the same across profiles.
 - **`ZIP_SEASONAL_PROFILE` is keyed on FIVE-DIGIT ZIPs, never three-digit prefixes,
   and is partial by design.** 804xx is Breckenridge AND suburban Boulder; a prefix
   would score a Boulder rental as ski every day for four and a half months. An

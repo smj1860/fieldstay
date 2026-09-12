@@ -82,9 +82,15 @@ export type CrewLocale          = 'en' | 'es'
  *
  * Normally DERIVED from the property's ZIP rather than stored — see
  * lib/scoring/seasonal-market.ts. properties.seasonal_profile holds only a
- * human override.
+ * human override, and holds an ARRAY of these: a property can carry more than
+ * one peak season.
+ *
+ * `summer_vacation` is one value for lake, coastal AND summer-peaked mountain
+ * markets. It replaced `summer_lake` + `coastal_summer`, which had identical
+ * windows, weight and spring-break eligibility — the split never affected
+ * behaviour. Do not add a third summer type.
  */
-export type SeasonalProfile     = 'none' | 'summer_lake' | 'fall_foliage' | 'ski' | 'coastal_summer' | 'year_round_urban'
+export type SeasonalProfile     = 'none' | 'summer_vacation' | 'fall_foliage' | 'ski' | 'year_round_urban'
 export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
 export type VendorAutoAssignMode = 'suggest' | 'disabled'
 export type SuggestionStatus     = 'pending' | 'accepted' | 'overridden' | 'dismissed'
@@ -279,11 +285,13 @@ export interface Property {
    */
   external_missing_since:  string | null
   /**
-   * OVERRIDE ONLY, nullable (20260912132651). NULL — the normal case — means
-   * "derive the market profile from the ZIP" (lib/scoring/seasonal-market.ts).
-   * A non-null value is a deliberate human correction and wins.
+   * OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY — the normal case —
+   * means "derive the market profiles from the ZIP"
+   * (lib/scoring/seasonal-market.ts). A non-empty value is a deliberate human
+   * correction and wins; `['none']` is a deliberate "no seasonality" and is
+   * distinct from empty.
    */
-  seasonal_profile:        SeasonalProfile | null
+  seasonal_profile:        SeasonalProfile[]
   created_at:              string
   updated_at:              string
 }

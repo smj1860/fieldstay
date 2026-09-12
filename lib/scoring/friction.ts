@@ -45,7 +45,7 @@ export interface FrictionComponents {
   weekend:                number
   holiday:                number
   seasonal:               number
-  /** Region-keyed by property.state, gated to summer_lake/coastal_summer. */
+  /** Region-keyed by property.state, gated to the eligible profiles. */
   springBreak:            number
   /** Tiered: holiday x weekend x season > holiday x weekend > holiday x season > weekend x season. */
   interaction:            number
@@ -241,12 +241,22 @@ export function holidayScore(date: Date): number {
 
 interface SeasonalWindow { startMD: string; endMD: string; score: number }
 
+/**
+ * properties.seasonal_profile is an ARRAY, so every function in this section
+ * takes `profiles: string[]`. A property can genuinely carry more than one
+ * peak season — a Gatlinburg cabin has real summer park tourism AND a real
+ * fall-foliage run — and a scalar forced a false either/or between them.
+ *
+ * `summer_vacation` is one value covering lake, coastal and summer-peaked
+ * mountain markets. It replaced `summer_lake` + `coastal_summer`, which were
+ * never actually different: identical windows, identical weight, identical
+ * spring-break eligibility. Do not add a third summer type.
+ */
 const SEASONAL_WINDOWS: Record<string, SeasonalWindow[]> = {
   none:             [],
-  summer_lake:      [{ startMD: '05-25', endMD: '09-05', score: 0.15 }],
+  summer_vacation:  [{ startMD: '05-25', endMD: '09-05', score: 0.15 }],
   fall_foliage:     [{ startMD: '09-15', endMD: '11-05', score: 0.15 }],
   ski:              [{ startMD: '11-15', endMD: '03-31', score: 0.15 }],
-  coastal_summer:   [{ startMD: '05-25', endMD: '09-05', score: 0.15 }],
   // Flat year-round traffic is itself the signal, not a missing entry.
   year_round_urban: [],
 }
@@ -254,7 +264,7 @@ const SEASONAL_WINDOWS: Record<string, SeasonalWindow[]> = {
 // Spring break is deliberately NOT in this table — see springBreakScore. This
 // table is keyed by what KIND of destination a property is; spring-break
 // timing is driven by WHERE it is. Nesting one inside the other was tried and
-// reverted: it gave every summer_lake property one window regardless of state.
+// reverted: it gave every summer property one window regardless of state.
 
 function monthDay(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -269,21 +279,40 @@ function withinMD(md: string, startMD: string, endMD: string): boolean {
   return md >= startMD && md <= endMD
 }
 
-function matchedWindow(profile: string, date: Date): SeasonalWindow | null {
+/**
+ * The best window covering this date across ALL of the property's profiles.
+ *
+ * Takes the highest-scoring match rather than the first found, and returns ONE
+ * window rather than summing: two profiles whose windows both cover today (a
+ * ski property that also carries fall_foliage in November) describe the same
+ * day being busy, not two independent reasons for it. Summing them would
+ * double-count one fact — the same error the interaction tiers exist to
+ * prevent, arriving through a different door.
+ */
+function matchedWindow(profiles: string[], date: Date): SeasonalWindow | null {
   const md = monthDay(date)
-  return (SEASONAL_WINDOWS[profile] ?? []).find((w) => withinMD(md, w.startMD, w.endMD)) ?? null
+  let best: SeasonalWindow | null = null
+
+  for (const profile of profiles) {
+    for (const window of SEASONAL_WINDOWS[profile] ?? []) {
+      if (!withinMD(md, window.startMD, window.endMD)) continue
+      if (!best || window.score > best.score) best = window
+    }
+  }
+
+  return best
 }
 
 /**
- * Single source of truth for "is this property inside its seasonal window",
+ * Single source of truth for "is this property inside any seasonal window",
  * shared with interactionScore — the window-matching logic is not duplicated.
  */
-export function isSeasonalWindowActive(profile: string, date: Date): boolean {
-  return matchedWindow(profile, date) !== null
+export function isSeasonalWindowActive(profiles: string[], date: Date): boolean {
+  return matchedWindow(profiles, date) !== null
 }
 
-export function seasonalScore(profile: string, date: Date): number {
-  return matchedWindow(profile, date)?.score ?? 0
+export function seasonalScore(profiles: string[], date: Date): number {
+  return matchedWindow(profiles, date)?.score ?? 0
 }
 
 // ── Component: spring break (region-keyed, not profile-keyed) ───────────────
@@ -452,14 +481,18 @@ const SKI_SPRING_BREAK_WEIGHT = 0.05
  * nothing — fall_foliage, year_round_urban and none are not spring-break
  * travel timing.
  *
+ * With an ARRAY of profiles the rules are evaluated per profile and the
+ * HIGHEST applicable weight wins, never the sum: a property carrying both
+ * summer_vacation and ski is one property having one busy week, not two.
+ *
  * `requireSeasonActive` is what makes ski's entry mean "spring break WITHIN
  * ski season" rather than "ski properties, in spring break". Several regional
  * windows run into April (west_coast to 04-10, northeast to 04-15) while the
  * ski window closes 03-31, and a ski property in mid-April is out of season
- * with lifts closing — it should score nothing, not a bonus. summer_lake and
- * coastal_summer have no such requirement: their season is months away in
- * March, so their spring-break lift stands entirely on its own and nothing
- * else is counting it.
+ * with lifts closing — it should score nothing, not a bonus. summer_vacation has
+ * no such requirement: its season is months away in March, so its
+ * spring-break lift stands entirely on its own and nothing else is counting
+ * it.
  */
 interface SpringBreakProfileRule {
   weight:              number
@@ -468,19 +501,30 @@ interface SpringBreakProfileRule {
 }
 
 const SPRING_BREAK_PROFILE_RULES: Record<string, SpringBreakProfileRule> = {
-  summer_lake:    { weight: SPRING_BREAK_WEIGHT,     requireSeasonActive: false },
-  coastal_summer: { weight: SPRING_BREAK_WEIGHT,     requireSeasonActive: false },
-  ski:            { weight: SKI_SPRING_BREAK_WEIGHT, requireSeasonActive: true  },
+  summer_vacation: { weight: SPRING_BREAK_WEIGHT,     requireSeasonActive: false },
+  ski:             { weight: SKI_SPRING_BREAK_WEIGHT, requireSeasonActive: true  },
+}
+
+/**
+ * The weight a single profile would contribute, before the date is checked.
+ * Ski's own window gate is applied against SKI specifically — not against
+ * "any of this property's profiles is in season", which for a
+ * ['ski', 'fall_foliage'] property would wrongly let October satisfy it.
+ */
+function springBreakWeightFor(profile: string, date: Date): number {
+  const rule = SPRING_BREAK_PROFILE_RULES[profile]
+  if (!rule) return 0
+  if (rule.requireSeasonActive && !isSeasonalWindowActive([profile], date)) return 0
+  return rule.weight
 }
 
 export function springBreakScore(
-  state:   string | null,
-  profile: string,
-  date:    Date,
+  state:    string | null,
+  profiles: string[],
+  date:     Date,
 ): number {
-  const rule = SPRING_BREAK_PROFILE_RULES[profile]
-  if (!rule) return 0
-  if (rule.requireSeasonActive && !isSeasonalWindowActive(profile, date)) return 0
+  const weight = Math.max(0, ...profiles.map((p) => springBreakWeightFor(p, date)))
+  if (weight === 0) return 0
 
   const code = normalizeStateCode(state)
   if (!code) return 0
@@ -492,7 +536,7 @@ export function springBreakScore(
   if (!region) return 0
 
   const window = SPRING_BREAK_REGION_WINDOWS[region]
-  return withinMD(monthDay(date), window.startMD, window.endMD) ? rule.weight : 0
+  return withinMD(monthDay(date), window.startMD, window.endMD) ? weight : 0
 }
 
 // ── Component: compounding interaction (tiered, mutually exclusive) ─────────
@@ -515,10 +559,10 @@ const HOLIDAY_SEASON_WEIGHT         = 0.12
 const HOLIDAY_WEEKEND_WEIGHT        = 0.14
 const HOLIDAY_WEEKEND_SEASON_WEIGHT = 0.20
 
-export function interactionScore(profile: string, date: Date): number {
+export function interactionScore(profiles: string[], date: Date): number {
   const isWeekend        = weekendScore(date) > 0
   const isHoliday        = holidayScore(date) > 0
-  const isSeasonalActive = isSeasonalWindowActive(profile, date)
+  const isSeasonalActive = isSeasonalWindowActive(profiles, date)
 
   if (isHoliday && isWeekend && isSeasonalActive) return HOLIDAY_WEEKEND_SEASON_WEIGHT
   if (isHoliday && isWeekend)                     return HOLIDAY_WEEKEND_WEIGHT

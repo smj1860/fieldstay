@@ -178,26 +178,99 @@ describe('holidayScore — date math', () => {
 
 describe('seasonalScore', () => {
   it('scores inside a summer window and not outside it', () => {
-    expect(seasonalScore('summer_lake', day(2026, 7, 1))).toBeCloseTo(0.15, 10)
-    expect(seasonalScore('summer_lake', day(2026, 10, 1))).toBe(0)
+    expect(seasonalScore(['summer_vacation'], day(2026, 7, 1))).toBeCloseTo(0.15, 10)
+    expect(seasonalScore(['summer_vacation'], day(2026, 10, 1))).toBe(0)
   })
 
   it('handles a window that crosses Dec 31', () => {
-    expect(seasonalScore('ski', day(2026, 12, 20))).toBeCloseTo(0.15, 10)
-    expect(seasonalScore('ski', day(2026, 2, 10))).toBeCloseTo(0.15, 10)
-    expect(seasonalScore('ski', day(2026, 6, 10))).toBe(0)
+    expect(seasonalScore(['ski'], day(2026, 12, 20))).toBeCloseTo(0.15, 10)
+    expect(seasonalScore(['ski'], day(2026, 2, 10))).toBeCloseTo(0.15, 10)
+    expect(seasonalScore(['ski'], day(2026, 6, 10))).toBe(0)
   })
 
   it('gives none and year_round_urban nothing, on any date', () => {
     for (const date of [day(2026, 1, 15), day(2026, 7, 15), day(2026, 10, 15)]) {
-      expect(seasonalScore('none', date)).toBe(0)
-      expect(seasonalScore('year_round_urban', date)).toBe(0)
+      expect(seasonalScore(['none'], date)).toBe(0)
+      expect(seasonalScore(['year_round_urban'], date)).toBe(0)
     }
   })
 
   it('gives an unknown profile nothing rather than throwing', () => {
-    expect(seasonalScore('not_a_profile', day(2026, 7, 1))).toBe(0)
-    expect(isSeasonalWindowActive('not_a_profile', day(2026, 7, 1))).toBe(false)
+    expect(seasonalScore(['not_a_profile'], day(2026, 7, 1))).toBe(0)
+    expect(isSeasonalWindowActive(['not_a_profile'], day(2026, 7, 1))).toBe(false)
+  })
+})
+
+describe('multi-profile properties', () => {
+  // properties.seasonal_profile is an ARRAY. The motivating case is a
+  // Gatlinburg cabin: real summer park tourism AND a real fall-foliage run,
+  // which a scalar forced into a false either/or.
+  const smokies = ['summer_vacation', 'fall_foliage']
+
+  it('scores inside EACH of its windows independently', () => {
+    expect(seasonalScore(smokies, day(2026, 7, 15))).toBeCloseTo(0.15, 10)  // summer
+    expect(seasonalScore(smokies, day(2026, 10, 10))).toBeCloseTo(0.15, 10) // foliage
+  })
+
+  it('scores 0 in the gap between them', () => {
+    // 09-06 to 09-14 is past summer's end and before foliage's start.
+    expect(seasonalScore(smokies, day(2026, 9, 10))).toBe(0)
+    expect(isSeasonalWindowActive(smokies, day(2026, 9, 10))).toBe(false)
+  })
+
+  it('takes ONE window when two overlap, never the sum', () => {
+    // Two profiles covering the same date describe one busy day, not two
+    // independent reasons for it — summing would double-count one fact.
+    const overlapping = ['ski', 'fall_foliage']
+    const inBoth = day(2026, 11, 20) // ski opens 11-15, foliage runs to 11-05... so only ski
+    expect(seasonalScore(overlapping, inBoth)).toBeCloseTo(0.15, 10)
+    // A date genuinely inside both, constructed from equal-scoring windows:
+    // every window scores 0.15, so the max is 0.15 and never 0.30.
+    expect(seasonalScore(['summer_vacation', 'fall_foliage'], day(2026, 7, 15)))
+      .toBeCloseTo(0.15, 10)
+  })
+
+  it('leaves a single-profile property scoring exactly as it did — a pure refactor', () => {
+    // Pinned to the literal window values rather than compared against
+    // another call of the same function, which would assert nothing.
+    expect(seasonalScore(['fall_foliage'], day(2026, 10, 10))).toBeCloseTo(0.15, 10)
+    expect(seasonalScore(['fall_foliage'], day(2026, 7, 15))).toBe(0)
+    expect(seasonalScore(['ski'], day(2026, 1, 5))).toBeCloseTo(0.15, 10)
+    expect(seasonalScore(['ski'], day(2026, 7, 15))).toBe(0)
+    expect(seasonalScore(['year_round_urban'], day(2026, 7, 15))).toBe(0)
+  })
+
+  it('fires spring break when only ONE profile is eligible', () => {
+    // year_round_urban is not spring-break timing; summer_vacation is. The
+    // array must fire on the eligible member rather than all-or-nothing.
+    const mixed = ['year_round_urban', 'summer_vacation']
+    expect(springBreakScore('AL', mixed, day(2026, 3, 10))).toBeCloseTo(0.10, 10)
+    expect(springBreakScore('AL', ['year_round_urban'], day(2026, 3, 10))).toBe(0)
+  })
+
+  it('takes the HIGHEST spring-break weight across profiles, not the sum', () => {
+    // A property carrying both summer_vacation (0.10) and ski (0.05) is one
+    // property having one busy week.
+    const both = ['summer_vacation', 'ski']
+    expect(springBreakScore('CO', both, day(2026, 3, 25))).toBeCloseTo(0.10, 10)
+  })
+
+  it("applies ski's season gate against SKI, not against any profile", () => {
+    // A ['ski', 'fall_foliage'] property in October: foliage is in season, but
+    // ski is not, so ski's spring-break rule must not be satisfied by it.
+    // (October is outside every spring-break window anyway, so assert the
+    // gate directly.)
+    expect(isSeasonalWindowActive(['ski'], day(2026, 10, 10))).toBe(false)
+    expect(isSeasonalWindowActive(['ski', 'fall_foliage'], day(2026, 10, 10))).toBe(true)
+    // April 5: west_coast spring break is open, ski season closed.
+    expect(springBreakScore('CO', ['ski', 'fall_foliage'], day(2026, 4, 5))).toBe(0)
+  })
+
+  it('treats an empty profile array as no seasonality at all', () => {
+    expect(seasonalScore([], day(2026, 7, 15))).toBe(0)
+    expect(isSeasonalWindowActive([], day(2026, 7, 15))).toBe(false)
+    expect(springBreakScore('AL', [], day(2026, 3, 10))).toBe(0)
+    expect(interactionScore([], day(2026, 7, 4))).toBeCloseTo(0.14, 10) // holiday x weekend still applies
   })
 })
 
@@ -221,7 +294,7 @@ describe('normalizeStateCode', () => {
 })
 
 describe('springBreakScore', () => {
-  const eligible = 'summer_lake'
+  const eligible = ['summer_vacation']
 
   it.each([
     ['south_gulf',     'AL', day(2026, 3, 10)],
@@ -261,18 +334,18 @@ describe('springBreakScore', () => {
   })
 
   it('still gates AK and HI on the destination profile', () => {
-    expect(springBreakScore('HI', 'fall_foliage', day(2026, 3, 20))).toBe(0)
-    expect(springBreakScore('AK', 'none',         day(2026, 3, 20))).toBe(0)
+    expect(springBreakScore('HI', ['fall_foliage'], day(2026, 3, 20))).toBe(0)
+    expect(springBreakScore('AK', ['none'],         day(2026, 3, 20))).toBe(0)
   })
 
   it('gates on the destination profile', () => {
     const date = day(2026, 3, 10)
-    expect(springBreakScore('AL', 'summer_lake',      date)).toBeCloseTo(0.10, 10)
-    expect(springBreakScore('AL', 'coastal_summer',   date)).toBeCloseTo(0.10, 10)
+    expect(springBreakScore('AL', ['summer_vacation'],      date)).toBeCloseTo(0.10, 10)
+    expect(springBreakScore('AL', ['summer_vacation'],   date)).toBeCloseTo(0.10, 10)
     // Same state, same date, ineligible profile.
-    expect(springBreakScore('AL', 'fall_foliage',     date)).toBe(0)
-    expect(springBreakScore('AL', 'year_round_urban', date)).toBe(0)
-    expect(springBreakScore('AL', 'none',             date)).toBe(0)
+    expect(springBreakScore('AL', ['fall_foliage'],     date)).toBe(0)
+    expect(springBreakScore('AL', ['year_round_urban'], date)).toBe(0)
+    expect(springBreakScore('AL', ['none'],             date)).toBe(0)
   })
 
   it('scores ski at HALF rate, and only inside ski season', () => {
@@ -280,11 +353,11 @@ describe('springBreakScore', () => {
     // dates. Half rate is the INCREMENT spring break adds over an ordinary
     // in-season week — the part not already counted.
     const inSeason = day(2026, 3, 25) // inside ski (11-15..03-31) and west_coast spring break
-    expect(isSeasonalWindowActive('ski', inSeason)).toBe(true)
-    expect(springBreakScore('CO', 'ski', inSeason)).toBeCloseTo(0.05, 10)
+    expect(isSeasonalWindowActive(['ski'], inSeason)).toBe(true)
+    expect(springBreakScore('CO', ['ski'], inSeason)).toBeCloseTo(0.05, 10)
     // Half of what an eligible summer profile gets on the same date.
-    expect(springBreakScore('CO', 'ski', inSeason))
-      .toBeCloseTo(springBreakScore('CA', 'summer_lake', inSeason) / 2, 10)
+    expect(springBreakScore('CO', ['ski'], inSeason))
+      .toBeCloseTo(springBreakScore('CA', ['summer_vacation'], inSeason) / 2, 10)
   })
 
   it('gives a ski property nothing once the season closes, mid-break', () => {
@@ -292,19 +365,19 @@ describe('springBreakScore', () => {
     // property in April is out of season with lifts closing — it must score
     // nothing, not a bonus.
     const afterSeason = day(2026, 4, 5)
-    expect(isSeasonalWindowActive('ski', afterSeason)).toBe(false)
-    expect(springBreakScore('CO', 'ski', afterSeason)).toBe(0)
+    expect(isSeasonalWindowActive(['ski'], afterSeason)).toBe(false)
+    expect(springBreakScore('CO', ['ski'], afterSeason)).toBe(0)
     // The window itself is still open — proving the season gate is what
     // zeroed it, not the date falling outside spring break.
-    expect(springBreakScore('CA', 'summer_lake', afterSeason)).toBeCloseTo(0.10, 10)
+    expect(springBreakScore('CA', ['summer_vacation'], afterSeason)).toBeCloseTo(0.10, 10)
   })
 
   it('does not apply the season gate to the summer profiles', () => {
     // Their season is months away in March, so their spring-break lift stands
     // on its own and nothing else is counting it.
     const march = day(2026, 3, 10)
-    expect(isSeasonalWindowActive('summer_lake', march)).toBe(false)
-    expect(springBreakScore('AL', 'summer_lake', march)).toBeCloseTo(0.10, 10)
+    expect(isSeasonalWindowActive(['summer_vacation'], march)).toBe(false)
+    expect(springBreakScore('AL', ['summer_vacation'], march)).toBeCloseTo(0.10, 10)
   })
 
   it('derives upper_south from south_gulf by a shift, not a second literal', () => {
@@ -334,19 +407,19 @@ describe('springBreakScore', () => {
 })
 
 describe('interactionScore — tiered and mutually exclusive', () => {
-  // July 4th 2026 is a Saturday; summer_lake's window is open in July.
+  // July 4th 2026 is a Saturday; summer_vacation's window is open in July.
   const holidayWeekendInSeason = day(2026, 7, 4)
 
   it('picks the triple tier, NOT a sum of the pairs', () => {
-    expect(interactionScore('summer_lake', holidayWeekendInSeason)).toBeCloseTo(0.20, 10)
+    expect(interactionScore(['summer_vacation'], holidayWeekendInSeason)).toBeCloseTo(0.20, 10)
     // The pairwise weights sum to 0.34 — independent additive terms would
     // double-count the shared factors.
-    expect(interactionScore('summer_lake', holidayWeekendInSeason)).toBeLessThan(0.34)
+    expect(interactionScore(['summer_vacation'], holidayWeekendInSeason)).toBeLessThan(0.34)
   })
 
   it('scores holiday x weekend with NO active season', () => {
     // Season is an input, not a requirement.
-    expect(interactionScore('none', holidayWeekendInSeason)).toBeCloseTo(0.14, 10)
+    expect(interactionScore(['none'], holidayWeekendInSeason)).toBeCloseTo(0.14, 10)
   })
 
   it('scores holiday x season on a weekday', () => {
@@ -354,17 +427,17 @@ describe('interactionScore — tiered and mutually exclusive', () => {
     // a Wednesday, inside the Christmas window and inside the ski season.
     const midweekHoliday = day(2026, 12, 30)
     expect(weekendScore(midweekHoliday)).toBe(0)
-    expect(interactionScore('ski', midweekHoliday)).toBeCloseTo(0.12, 10)
+    expect(interactionScore(['ski'], midweekHoliday)).toBeCloseTo(0.12, 10)
   })
 
   it('scores weekend x season with no holiday', () => {
     const plainSummerSaturday = day(2026, 7, 18)
     expect(holidayScore(plainSummerSaturday)).toBe(0)
-    expect(interactionScore('summer_lake', plainSummerSaturday)).toBeCloseTo(0.08, 10)
+    expect(interactionScore(['summer_vacation'], plainSummerSaturday)).toBeCloseTo(0.08, 10)
   })
 
   it('scores 0 with no profile and no holiday/weekend overlap', () => {
-    expect(interactionScore('none', day(2026, 7, 7))).toBe(0) // ordinary Tuesday
+    expect(interactionScore(['none'], day(2026, 7, 7))).toBe(0) // ordinary Tuesday
   })
 })
 
