@@ -528,7 +528,26 @@ pre_flight_friction         — one scored row per turnover per day, written by
                               scorer" indistinguishable in stored history. Enforced
                               by unit/guardrails/friction-local-events-seam.test.ts.
                               A rescore does NOT overturn a PM decision unless the
-                              severity got WORSE (nextStatus() in the cron)
+                              severity got WORSE (nextStatus() in the cron).
+                              GRADED against reality by apply_friction_grading()
+                              (20260913111019, cron-friction-grading ~6am CT):
+                              actual_severity/actual_was_late/actual_completion_rate
+                              + one-shot graded_at. EVERY row is graded, never
+                              filtered by predicted severity — a turnover scored
+                              'none' that ran late is a FALSE NEGATIVE, false
+                              confidence given to a PM, and that matters more than a
+                              false positive that merely annoyed them. Read
+                              friction_forecast_calibration, which leads with RECALL
+                              for that reason and is service-role only (it aggregates
+                              every tenant; never grant it to authenticated).
+                              The grading gate requires assignment_outcomes.scored_at,
+                              NOT just completed_at: was_late is written only by
+                              apply_crew_score_recompute's claim step, so a completed
+                              turnover carries was_late = NULL until that cron runs,
+                              and NULL through the grading CASE lands in the ELSE as
+                              'none' — permanently, since graded_at is one-shot.
+                              This loop produces EVIDENCE, never a weight change:
+                              nothing in lib/scoring/friction.ts is auto-adjusted
 properties.seasonal_profile — OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY,
                               the normal case, means "derive the market profiles from
                               the ZIP" via lib/scoring/seasonal-market.ts; a non-empty

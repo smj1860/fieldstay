@@ -2252,6 +2252,21 @@ export interface PreFlightFriction {
   status:              'flagged' | 'resolved' | 'dismissed'
   smart_fix_crew_id:   string | null
   smart_fix_reasoning: string | null
+  /**
+   * The grading feedback loop (20260913111019). Written once by
+   * apply_friction_grading() from assignment_outcomes, comparing what the
+   * forecaster PREDICTED against what actually happened.
+   *
+   * EVERY row is graded, never filtered by predicted severity: a turnover
+   * scored 'none' that ran late is a FALSE NEGATIVE, which matters more than
+   * a false positive that merely annoyed a PM. `graded_at` is one-shot — an
+   * outcome does not change after it happens — and NULL means the outcome
+   * data is not complete yet, so a later run picks it up.
+   */
+  actual_severity:        'none' | 'high' | 'critical' | null
+  actual_was_late:        boolean | null
+  actual_completion_rate: number | null
+  graded_at:              string | null
   computed_at:         string
   updated_at:          string
 }
