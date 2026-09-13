@@ -13,7 +13,9 @@ import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { UpcomingInspections } from './upcoming-inspections'
+import { FrictionExceptions } from './friction-exceptions'
 import type { UpcomingInspection } from '@/lib/inspections/upcoming-for-dashboard'
+import type { FlaggedTurnover } from '@/lib/friction/flagged-for-dashboard'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -453,6 +455,7 @@ export function OpsSnapshot({
   todayDate,
   metrics,
   upcomingInspections,
+  frictionExceptions,
   showPmsRevenueNudge = false,
 }: Readonly<{
   turnovers:      OpsTurnover[]
@@ -464,6 +467,8 @@ export function OpsSnapshot({
   metrics?:       Metrics
   /** §9. Renders nothing when empty, so no flag is needed to hide the section. */
   upcomingInspections: UpcomingInspection[]
+  /** Today's flagged turnovers. Renders nothing when empty, same as above. */
+  frictionExceptions: FlaggedTurnover[]
   showPmsRevenueNudge?: boolean
 }>) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
@@ -648,6 +653,11 @@ export function OpsSnapshot({
           </div>
         </div>
       )}
+
+      {/* Pre-flight friction, above inspections: both are small lists that are
+          easy to scroll past, but this one is about TODAY and there are hours
+          left to act on it, where an inspection is due inside a month. */}
+      <FrictionExceptions rows={frictionExceptions} />
 
       {/* §9's Upcoming Inspections. Above the turnover accordion because it is
           a smaller, slower-moving list that is easy to scroll past, and an

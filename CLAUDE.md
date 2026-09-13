@@ -392,6 +392,13 @@ crew_availability           — crew marks available/unavailable by date. NOT in
                               open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
+crew_speed_baselines        — rolling 90-DAY avg minutes-per-bedroom per crew member
+                              (never a lifetime average — matches
+                              FAMILIARITY_WINDOW_DAYS). Written ONLY by the friction
+                              cron's first step; SELECT-only for org members, no
+                              PM write path. Crew under 3 completed turnovers in the
+                              window get NO row — the scorer falls back to the org
+                              median rather than skipping the turnover
 ```
 
 ### Work Orders
@@ -486,6 +493,88 @@ reservation_messages        — automated guest messaging (superseded guest_mess
                               guest_messages_sent, dropped by 20260611000006)
 reviews / review_responses  — guest reviews + PM responses
 ```
+
+### Friction Forecaster
+```
+pre_flight_friction         — one scored row per turnover per day, written by
+                              cron-pre-flight-friction (~2am CT, fanned out one
+                              event per org), read by the /ops exceptions panel.
+                              UNIQUE(turnover_id) is the upsert conflict target.
+                              severity: none|high|critical, status:
+                              flagged|resolved|dismissed. score_breakdown ALWAYS
+                              carries every FrictionComponents key, INCLUDING
+                              `localEvents: 0` — that key is the seam a future
+                              local-events scorer plugs into, and dropping it while
+                              it is zero makes "scored at zero" and "predates the
+                              scorer" indistinguishable in stored history. Enforced
+                              by unit/guardrails/friction-local-events-seam.test.ts.
+                              A rescore does NOT overturn a PM decision unless the
+                              severity got WORSE (nextStatus() in the cron)
+properties.seasonal_profile — OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY,
+                              the normal case, means "derive the market profiles from
+                              the ZIP" via lib/scoring/seasonal-market.ts; a non-empty
+                              value is a deliberate human correction and wins, and
+                              ['none'] is a deliberate "no seasonality" DISTINCT from
+                              empty — without that gap the derivation silently
+                              overrules a human every night (same reason
+                              properties.sponsor_assignment_mode exists).
+                              ARRAY because a property can genuinely carry more than
+                              one peak season: a Gatlinburg cabin has real summer park
+                              tourism AND a real fall-foliage run, and a scalar forced
+                              a false either/or.
+                              The DESTINATION-TYPE axis. Spring break is the GEOGRAPHY
+                              axis and keys off properties.state instead — do NOT add a
+                              'spring_break' value here, that conflation was tried and
+                              reverted
+```
+
+**`summer_vacation` is ONE value for lake, coastal and summer-peaked mountain
+markets.** It replaced `summer_lake` + `coastal_summer` on 2026-09-12, which were
+never actually different — identical windows (05-25..09-05), identical weight
+(0.15), identical spring-break eligibility, so the split never affected behaviour.
+**Do not add a third summer type** (`summer_mountain` or similar); that redundancy
+is exactly what the consolidation removed, and collapsing the two is what finally
+made summer-peaked mountain markets expressible at all.
+
+**The seasonal profile is DERIVED FROM THE ZIP, at scoring time.** It describes a
+MARKET, not a house — a cabin in Breckenridge follows the ski calendar whether or
+not it is slopeside — so no PM is ever asked to classify a property, which is the
+whole promise of the product. Two rules:
+
+- **Resolved at read time, never written into the property on save.** Three paths
+  already create a property (`createProperty`, `lib/properties/upsert-normalized.ts`,
+  the geocoding backfill cron) and wiring a derivation into each is the drift this
+  codebase keeps paying for. Deriving at read time also means adding a market to the
+  table reaches every existing property on the next 2am run — no backfill, nothing
+  to remember.
+- **A ZIP maps to an ARRAY of profiles, and several legitimately map to two.**
+  The Smokies ZIPs (Gatlinburg/Pigeon Forge/Sevierville) carry
+  `['summer_vacation', 'fall_foliage']`. Where two of a property's windows cover the
+  same date, `matchedWindow()` takes the HIGHEST-scoring one and never the sum —
+  two profiles covering today describe one busy day, not two independent reasons
+  for it. `springBreakScore` does the same across profiles.
+- **`ZIP_SEASONAL_PROFILE` is keyed on FIVE-DIGIT ZIPs, never three-digit prefixes,
+  and is partial by design.** 804xx is Breckenridge AND suburban Boulder; a prefix
+  would score a Boulder rental as ski every day for four and a half months. An
+  unmapped ZIP returns `'none'` and contributes 0 — the honest absence. Adding a
+  market needs a real basis, never a guess from a neighbouring ZIP: a wrong profile
+  does not fail loudly, it scores a property against the wrong calendar for months.
+
+Two rules the scoring library carries that are not obvious from the schema:
+
+- **Never add an LLM call or a traffic/events vendor to this module.** It is a
+  pure deterministic scorer on purpose — auditable, free, and no "why did the
+  AI say 94%" support burden. Local events are deliberately NOT built rather
+  than faked with a PM-entered table: a mechanism nobody maintains is worse
+  than an honest absence, and the whole feature exists to take upkeep OFF the
+  PM. If it is ever built the mechanism is a paid demand-intelligence API or a
+  public schedule pull.
+- **`properties.state` and `properties.zip` are both free text**, and the live
+  columns prove it: `AL` and `Alabama` for the same state; `36850-3722`,
+  `TX 78703` and NULL in the ZIP column. `springBreakScore` normalises through
+  `normalizeStateCode()` and the ZIP lookup through `normalizeZip()` for exactly
+  that reason — either table keyed on the raw string silently scores 0 for most
+  of the real portfolio.
 
 ### Supporting
 ```

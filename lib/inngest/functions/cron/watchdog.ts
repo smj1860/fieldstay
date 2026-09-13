@@ -83,6 +83,10 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   { id: 'cron-asset-health',                        maxSilentHours: 30 },
   { id: 'cron-maintenance-schedule-check',          maxSilentHours: 30 },
   { id: 'cron-daily-wrapup',                        maxSilentHours: 30 },
+  // The dispatcher only. Its per-org handler is event-driven fan-out and
+  // legitimately produces many same-tick runs — see the WATCHED_JOBS note at
+  // findDuplicatedCrons.
+  { id: 'cron-pre-flight-friction',                 maxSilentHours: 30 },
 ]
 
 /**

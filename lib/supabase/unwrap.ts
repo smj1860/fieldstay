@@ -1,6 +1,20 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
 
+/**
+ * A Postgres `numeric` column as PostgREST actually hands it back.
+ *
+ * The wire format is a STRING, not a number — Postgres numerics exceed what a
+ * JSON number can hold exactly, so PostgREST serialises them as text and the
+ * JS client passes that straight through. Reading one without `Number(...)`
+ * gives string concatenation where arithmetic was meant, silently: `score +
+ * weight` becomes "0.850.3" and scores every candidate identically.
+ *
+ * Named rather than written out at each field so the reason is visible where
+ * the field is declared instead of in one comment further down.
+ */
+export type PostgrestNumeric = number | string | null
+
 // ============================================================================
 // Deliberately NOT marked `import 'server-only'`, unlike most of lib/.
 //
