@@ -1,13 +1,13 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
-import { unwrapList }           from '@/lib/supabase/unwrap'
+import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { frictionDateString, localDateFrom } from '@/lib/friction/date'
 import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
 import { reportError }          from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
-import { scoreCrewCandidates, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
+import { scoreCrewCandidates, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
 import {
   computeFrictionScore, severityFromScore,
   crewDurationScore, weatherScore, weekendScore, holidayScore,
@@ -124,8 +124,8 @@ interface ScoreableTurnover {
   checkin_datetime:   string
   is_same_day_turnover: boolean | null
   properties: {
-    lat:              number | string | null
-    lng:              number | string | null
+    lat:              PostgrestNumeric
+    lng:              PostgrestNumeric
     bedrooms:         number | null
     state:            string | null
     zip:              string | null
@@ -352,11 +352,12 @@ export const preFlightFrictionForOrg = inngest.createFunction(
 // ── Context loaders ─────────────────────────────────────────────────────────
 
 interface CrewContext {
-  crew: {
-    id: string; name: string
-    home_lat: number | string | null; home_lng: number | string | null
-    reliability_score: number | string | null; capacity_score: number | string | null
-  }[]
+  /**
+   * CrewCandidate, not a re-declaration of it. These are the exact columns
+   * scoreCrewCandidates() reads, and writing them out again here meant two
+   * copies of one shape that only a compile error would ever reconcile.
+   */
+  crew: CrewCandidate[]
   /** crew_member_id -> upcoming assignment count. */
   workloadMap: Record<string, number>
   /** property_id -> crew who worked it inside the familiarity window. */
@@ -370,7 +371,7 @@ async function loadCrewContext(
   const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
   const propertyIds = [...new Set(turnovers.map((t) => t.property_id))]
 
-  const crew = await fetchAllRows<CrewContext['crew'][number]>(
+  const crew = await fetchAllRows<CrewCandidate>(
     (from, to) => supabase
       .from('crew_members')
       .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')

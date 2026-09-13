@@ -12,15 +12,16 @@
  */
 
 import { haversineKm, proximityScore } from '@/lib/scoring/geo'
+import type { PostgrestNumeric } from '@/lib/supabase/unwrap'
 
 /** The crew columns scoring actually reads. Callers may pass wider rows. */
 export interface CrewCandidate {
   id:                string
   name:              string
-  home_lat:          number | string | null
-  home_lng:          number | string | null
-  reliability_score: number | string | null
-  capacity_score:    number | string | null
+  home_lat:          PostgrestNumeric
+  home_lng:          PostgrestNumeric
+  reliability_score: PostgrestNumeric
+  capacity_score:    PostgrestNumeric
 }
 
 export interface CrewScoreBreakdown {
@@ -44,7 +45,7 @@ export interface CrewScoringInput {
    * window, so who can physically get there dominates who knows the property.
    */
   isSameDay:       boolean
-  property:        { lat: number | string | null; lng: number | string | null }
+  property:        { lat: PostgrestNumeric; lng: PostgrestNumeric }
   crew:            CrewCandidate[]
   familiarCrewIds: string[]
   /** crew_member_id -> upcoming assignment count. */
@@ -69,10 +70,11 @@ function candidateProximity(crew: CrewCandidate, property: CrewScoringInput['pro
 
 /**
  * reliability_score/capacity_score are numeric columns already scaled 0-1
- * (1.000 = 100%), NOT 0-100. PostgREST also returns numeric as STRINGS, so the
- * coercion is explicit rather than relying on arithmetic coercion.
+ * (1.000 = 100%), NOT 0-100. They arrive as PostgrestNumeric — a string on the
+ * wire — so the coercion is explicit rather than relying on arithmetic
+ * coercion.
  */
-function coerceScore(value: number | string | null): number {
+function coerceScore(value: PostgrestNumeric): number {
   return value !== null && value !== undefined ? Number(value) : DEFAULT_SCORE
 }
 
