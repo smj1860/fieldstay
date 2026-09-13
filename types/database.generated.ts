@@ -305,12 +305,14 @@ export type Database = {
       assignment_outcomes: {
         Row: {
           completed_at: string | null
+          completion_rate: number | null
           created_at: string
           crew_member_id: string
           duration_minutes: number | null
           id: string
           org_id: string
           override_reason: string | null
+          photo_compliance_rate: number | null
           pm_rating: number | null
           property_bedrooms: number | null
           property_id: string | null
@@ -326,12 +328,14 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          completion_rate?: number | null
           created_at?: string
           crew_member_id: string
           duration_minutes?: number | null
           id?: string
           org_id: string
           override_reason?: string | null
+          photo_compliance_rate?: number | null
           pm_rating?: number | null
           property_bedrooms?: number | null
           property_id?: string | null
@@ -347,12 +351,14 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          completion_rate?: number | null
           created_at?: string
           crew_member_id?: string
           duration_minutes?: number | null
           id?: string
           org_id?: string
           override_reason?: string | null
+          photo_compliance_rate?: number | null
           pm_rating?: number | null
           property_bedrooms?: number | null
           property_id?: string | null

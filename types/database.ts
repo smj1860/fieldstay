@@ -481,6 +481,15 @@ export interface AssignmentOutcome {
   completed_at:       string | null
   duration_minutes:   number | null
   pm_rating:          number | null
+  /**
+   * Automated quality signal (20260913042943), computed per TURNOVER and
+   * written identically to every crew member's row for it — not a per-person
+   * figure. NULL means not applicable (no checklist items / no completed
+   * photo-required items) and contributes exactly 0 to the reliability delta;
+   * 0 would read as "totally failed" for something that never happened.
+   */
+  completion_rate:       number | null
+  photo_compliance_rate: number | null
   property_bedrooms:  number | null
   was_late:           boolean | null
   was_missed:         boolean

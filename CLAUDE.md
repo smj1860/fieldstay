@@ -391,7 +391,26 @@ crew_availability           — crew marks available/unavailable by date. NOT in
                               cached but pulled on assigned-property-set change plus screen
                               open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
-                              checklist timestamps, pm_rating
+                              checklist timestamps, pm_rating, and the AUTOMATED
+                              quality signal completion_rate/photo_compliance_rate
+                              (20260913042943). Those two rate the TURNOVER, not the
+                              crew member: one figure per checklist instance written
+                              identically to every crew row for it — never filter the
+                              computation by completed_by_crew_id. NULL means NOT
+                              APPLICABLE (no checklist items / no completed
+                              photo-required items) and must contribute exactly 0 to
+                              the reliability delta; 0 would read as "totally failed"
+                              for something that never happened.
+                              **In apply_crew_score_recompute() the NULL check must be
+                              the FIRST CASE branch.** The obvious
+                              `COALESCE(CASE WHEN rate < 1.0 ... ELSE 0.01 END, 0)` is
+                              dead code that does the opposite: `NULL < 1.0` is NULL,
+                              not false, so the ELSE claims the row and "not
+                              applicable" collects the perfect-score bonus — measured
+                              live at 0.04, identical to a flawless turnover, and it
+                              moved a pm_rating-only row from 0.08 to 0.10, silently
+                              changing pm_rating's established behaviour. Enforced by
+                              unit/guardrails/null-is-not-a-score.test.ts
 crew_speed_baselines        — rolling 90-DAY avg minutes-per-bedroom per crew member
                               (never a lifetime average — matches
                               FAMILIARITY_WINDOW_DAYS). Written ONLY by the friction
