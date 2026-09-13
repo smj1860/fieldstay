@@ -56,6 +56,30 @@ const earlierRow = (crewId: string, turnoverId: string, checkin = CHECKIN) => ({
   turnovers: { id: turnoverId, property_id: 'prop_1', checkout_datetime: EARLIER, checkin_datetime: checkin },
 })
 
+const item = (isCompleted: boolean, completedAt: string | null = null) => ({
+  instance_id: 'inst_1',
+  is_completed: isCompleted,
+  completed_at: completedAt,
+})
+
+const HALF_DONE = [item(true, '2026-09-13T10:30:00.000Z'), item(false)]
+const ALL_DONE  = [item(true, '2026-09-13T10:30:00.000Z'), item(true, '2026-09-13T11:00:00.000Z')]
+
+/**
+ * Dana, with exactly one OTHER turnover earlier today, one checklist instance
+ * on it, and whatever item rows the caller wants against that instance.
+ * `instance: false` is the no-checklist-at-all case.
+ */
+const soloDay = (items: unknown[], opts: { instance?: boolean } = {}): Fixture => ({
+  target:  targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
+  earlier: { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
+  instances: {
+    data: opts.instance === false ? [] : [{ id: 'inst_1', turnover_id: 'tvr_earlier' }],
+    error: null,
+  },
+  items: { data: items, error: null },
+})
+
 describe('getCrewDayContext', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -66,15 +90,7 @@ describe('getCrewDayContext', () => {
   afterEach(() => vi.useRealTimers())
 
   it('returns only the crew member\'s OTHER earlier turnovers today', async () => {
-    const supabase = makeSupabase({
-      target:    targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
-      earlier:   { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
-      instances: { data: [{ id: 'inst_1', turnover_id: 'tvr_earlier' }], error: null },
-      items:     { data: [
-        { instance_id: 'inst_1', is_completed: true,  completed_at: '2026-09-13T10:30:00.000Z' },
-        { instance_id: 'inst_1', is_completed: false, completed_at: null },
-      ], error: null },
-    })
+    const supabase = makeSupabase(soloDay(HALF_DONE))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await getCrewDayContext('tvr_flagged', 'org_1')
@@ -108,12 +124,7 @@ describe('getCrewDayContext', () => {
   it('degrades gracefully when the checklist instance has zero items', async () => {
     // Not a throw, and not a fabricated 0 — no items means no progress SIGNAL,
     // which is a different claim from "nothing has been done".
-    const supabase = makeSupabase({
-      target:    targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
-      earlier:   { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
-      instances: { data: [{ id: 'inst_1', turnover_id: 'tvr_earlier' }], error: null },
-      items:     { data: [], error: null },
-    })
+    const supabase = makeSupabase(soloDay([]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const [ctx] = await getCrewDayContext('tvr_flagged', 'org_1')
@@ -121,11 +132,7 @@ describe('getCrewDayContext', () => {
   })
 
   it('degrades gracefully when there is no checklist instance at all', async () => {
-    const supabase = makeSupabase({
-      target:    targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
-      earlier:   { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
-      instances: { data: [], error: null },
-    })
+    const supabase = makeSupabase(soloDay([], { instance: false }))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const [ctx] = await getCrewDayContext('tvr_flagged', 'org_1')
@@ -134,15 +141,7 @@ describe('getCrewDayContext', () => {
 
   it('flags a turnover past its own checkin with an incomplete checklist', async () => {
     vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z')) // past CHECKIN
-    const supabase = makeSupabase({
-      target:    targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
-      earlier:   { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
-      instances: { data: [{ id: 'inst_1', turnover_id: 'tvr_earlier' }], error: null },
-      items:     { data: [
-        { instance_id: 'inst_1', is_completed: true,  completed_at: '2026-09-13T10:30:00.000Z' },
-        { instance_id: 'inst_1', is_completed: false, completed_at: null },
-      ], error: null },
-    })
+    const supabase = makeSupabase(soloDay(HALF_DONE))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const [ctx] = await getCrewDayContext('tvr_flagged', 'org_1')
@@ -151,15 +150,7 @@ describe('getCrewDayContext', () => {
 
   it('does NOT flag a COMPLETE turnover even when past its checkin', async () => {
     vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z'))
-    const supabase = makeSupabase({
-      target:    targetWithCrew([{ id: 'crew_1', name: 'Dana' }]),
-      earlier:   { data: [earlierRow('crew_1', 'tvr_earlier')], error: null },
-      instances: { data: [{ id: 'inst_1', turnover_id: 'tvr_earlier' }], error: null },
-      items:     { data: [
-        { instance_id: 'inst_1', is_completed: true, completed_at: '2026-09-13T10:30:00.000Z' },
-        { instance_id: 'inst_1', is_completed: true, completed_at: '2026-09-13T11:00:00.000Z' },
-      ], error: null },
-    })
+    const supabase = makeSupabase(soloDay(ALL_DONE))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const [ctx] = await getCrewDayContext('tvr_flagged', 'org_1')

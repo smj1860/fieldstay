@@ -2,6 +2,7 @@ import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
  * Ceilings on the three reads below.
@@ -30,16 +31,6 @@ export interface CrewDayContext {
   crewMemberId:           string
   crewMemberName:         string
   earlierTurnoversToday:  EarlierTurnoverStatus[]
-}
-
-/**
- * A PostgREST embed is an array for a to-many relation and an object for a
- * to-one, and the same select has returned both shapes across versions. Same
- * normalizer as pre-flight-friction.ts, for the same reason.
- */
-function firstOf<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null
-  return value ?? null
 }
 
 interface EarlierAssignmentRow {
@@ -148,13 +139,13 @@ export async function getCrewDayContext(
   if (earlier.length === 0) {
     return crewAssignments.map((a) => ({
       crewMemberId:          a.crew_member_id,
-      crewMemberName:        firstOf(a.crew_members)?.name ?? 'Unknown',
+      crewMemberName:        unwrapJoin(a.crew_members)?.name ?? 'Unknown',
       earlierTurnoversToday: [],
     }))
   }
 
   const earlierTurnoverIds = [
-    ...new Set(earlier.map((row) => firstOf(row.turnovers)?.id).filter((id): id is string => Boolean(id))),
+    ...new Set(earlier.map((row) => unwrapJoin(row.turnovers)?.id).filter((id): id is string => Boolean(id))),
   ]
 
   // ONE read for every checklist instance across all of those turnovers.
@@ -187,7 +178,7 @@ export async function getCrewDayContext(
 
   const now = Date.now()
 
-  function statusFor(turnover: NonNullable<ReturnType<typeof firstOf<{
+  function statusFor(turnover: NonNullable<ReturnType<typeof unwrapJoin<{
     id: string; property_id: string; checkout_datetime: string; checkin_datetime: string
   }>>>): EarlierTurnoverStatus {
     const instanceId = instanceByTurnover.get(turnover.id)
@@ -213,7 +204,7 @@ export async function getCrewDayContext(
 
   const byCrew = new Map<string, EarlierTurnoverStatus[]>()
   for (const row of earlier) {
-    const turnover = firstOf(row.turnovers)
+    const turnover = unwrapJoin(row.turnovers)
     if (!turnover) continue
     const list = byCrew.get(row.crew_member_id)
     if (list) list.push(statusFor(turnover))
@@ -222,7 +213,7 @@ export async function getCrewDayContext(
 
   return crewAssignments.map((a) => ({
     crewMemberId:          a.crew_member_id,
-    crewMemberName:        firstOf(a.crew_members)?.name ?? 'Unknown',
+    crewMemberName:        unwrapJoin(a.crew_members)?.name ?? 'Unknown',
     earlierTurnoversToday: byCrew.get(a.crew_member_id) ?? [],
   }))
 }
