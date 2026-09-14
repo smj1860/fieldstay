@@ -34,24 +34,46 @@ import { ROOT } from './scan'
 
 const MIGRATIONS = join(ROOT, 'supabase', 'migrations')
 
-/** The migration that owns apply_crew_score_recompute's quality terms. */
+/**
+ * Strips whole-line SQL comments.
+ *
+ * Not the shared TypeScript lexer in scan.ts — that one knows `//` and
+ * `/* *\/`, not SQL's `--`. Deliberately only drops lines whose FIRST
+ * non-whitespace is `--`, so a `--` appearing inside a string literal is never
+ * touched; that is the conservative half of the job and all this needs.
+ *
+ * It exists because the finder below was prose-matching and silently retargeted
+ * itself: the friction-grading migration (20260913111019) mentions
+ * apply_crew_score_recompute in ONE comment explaining why its gate requires
+ * scored_at, and that was enough for this guardrail to start checking the wrong
+ * file and fail. A guardrail that reads comments is the exact trap CLAUDE.md
+ * documents — it just caught itself.
+ */
+function sqlCode(src: string): string {
+  return src.split('\n').filter((line) => !/^\s*--/.test(line)).join('\n')
+}
+
+/** The migration that DEFINES apply_crew_score_recompute — not one that mentions it. */
 function qualitySignalMigration(): string {
+  const defining = /CREATE OR REPLACE FUNCTION public\.apply_crew_score_recompute/
+
   const file = readdirSync(MIGRATIONS)
     .filter((f) => f.endsWith('.sql'))
     .sort()
     .reverse()
     .find((f) => {
-      const src = readFileSync(join(MIGRATIONS, f), 'utf8')
-      return src.includes('apply_crew_score_recompute') && src.includes('completion_rate')
+      const code = sqlCode(readFileSync(join(MIGRATIONS, f), 'utf8'))
+      return defining.test(code) && code.includes('completion_rate')
     })
 
-  expect(file, 'no migration defines apply_crew_score_recompute with completion_rate').toBeDefined()
-  return readFileSync(join(MIGRATIONS, file!), 'utf8')
+  expect(file, 'no migration DEFINES apply_crew_score_recompute with completion_rate').toBeDefined()
+  return sqlCode(readFileSync(join(MIGRATIONS, file!), 'utf8'))
 }
 
 describe('guardrail: a NULL ratio scores nothing, not a bonus', () => {
-  // read(), not readCode(): the SQL comments here ARE part of what is being
-  // protected, and the assertions below target statements rather than prose.
+  // Comment-stripped: every assertion below targets a STATEMENT, and the
+  // migration's own prose describes the dead COALESCE shape it forbids — which
+  // a raw-source scan would read as the violation itself.
   const sql = qualitySignalMigration()
 
   it.each(['completion_rate', 'photo_compliance_rate'])(

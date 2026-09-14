@@ -4179,8 +4179,12 @@ export type Database = {
       }
       pre_flight_friction: {
         Row: {
+          actual_completion_rate: number | null
+          actual_severity: string | null
+          actual_was_late: boolean | null
           computed_at: string
           failure_probability: number
+          graded_at: string | null
           id: string
           org_id: string
           property_id: string
@@ -4194,8 +4198,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          actual_completion_rate?: number | null
+          actual_severity?: string | null
+          actual_was_late?: boolean | null
           computed_at?: string
           failure_probability: number
+          graded_at?: string | null
           id?: string
           org_id: string
           property_id: string
@@ -4209,8 +4217,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          actual_completion_rate?: number | null
+          actual_severity?: string | null
+          actual_was_late?: boolean | null
           computed_at?: string
           failure_probability?: number
+          graded_at?: string | null
           id?: string
           org_id?: string
           property_id?: string
@@ -6550,6 +6562,17 @@ export type Database = {
       }
     }
     Views: {
+      friction_forecast_calibration: {
+        Row: {
+          actual_friction_count: number | null
+          false_negatives: number | null
+          false_positives: number | null
+          precision: number | null
+          recall: number | null
+          total_graded: number | null
+        }
+        Relationships: []
+      }
       vendor_compliance_status: {
         Row: {
           active_doc_count: number | null
@@ -6593,6 +6616,7 @@ export type Database = {
         Returns: number
       }
       apply_crew_score_recompute: { Args: never; Returns: Json }
+      apply_friction_grading: { Args: never; Returns: Json }
       apply_inventory_counts: {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number

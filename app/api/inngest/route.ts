@@ -97,6 +97,7 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
 import { preFlightFriction, preFlightFrictionForOrg } from '@/lib/inngest/functions/cron/pre-flight-friction'
+import { frictionGrading } from '@/lib/inngest/functions/cron/friction-grading'
 
 // Vendor auto-suggestion
 import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
@@ -309,6 +310,7 @@ export const { GET, POST, PUT } = serve({
     crewScoreRecompute,
     preFlightFriction,
     preFlightFrictionForOrg,
+    frictionGrading,
 
     // Vendor auto-suggestion
     autoAssignVendor,

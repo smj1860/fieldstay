@@ -87,6 +87,7 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   // legitimately produces many same-tick runs — see the WATCHED_JOBS note at
   // findDuplicatedCrons.
   { id: 'cron-pre-flight-friction',                 maxSilentHours: 30 },
+  { id: 'cron-friction-grading',                    maxSilentHours: 30 },
 ]
 
 /**

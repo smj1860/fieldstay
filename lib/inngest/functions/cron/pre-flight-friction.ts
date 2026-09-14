@@ -2,6 +2,7 @@ import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { frictionDateString, localDateFrom } from '@/lib/friction/date'
 import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
@@ -144,17 +145,6 @@ interface BaselineRollup {
 
 // ── Rollup ──────────────────────────────────────────────────────────────────
 
-/**
- * A Supabase nested embed is an array when the relation is to-many and an
- * object when it is to-one, and PostgREST has returned both shapes for the
- * same select across versions. Normalising once here keeps the two readers
- * below from each guessing.
- */
-function firstOf<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null
-  return value ?? null
-}
-
 function median(values: number[]): number | null {
   if (!values.length) return null
   const sorted = [...values].sort((a, b) => a - b)
@@ -168,9 +158,9 @@ function collectDurationSamples(rows: CompletedDurationRow[]): Map<string, numbe
   const samples = new Map<string, number[]>()
 
   for (const row of rows) {
-    const turnover = firstOf(row.turnovers)
+    const turnover = unwrapJoin(row.turnovers)
     const minutes  = turnover?.crew_duration_minutes
-    const bedrooms = firstOf(turnover?.properties)?.bedrooms
+    const bedrooms = unwrapJoin(turnover?.properties)?.bedrooms
 
     // A zero/absent duration or bedroom count is not a fast turnover, it is a
     // missing measurement — including it would drag the baseline toward zero
@@ -418,7 +408,7 @@ async function loadCrewContext(
 
   const familiarByProperty: Record<string, string[]> = {}
   for (const row of history) {
-    const propertyId = firstOf(row.turnovers)?.property_id
+    const propertyId = unwrapJoin(row.turnovers)?.property_id
     if (!propertyId) continue
     const list = familiarByProperty[propertyId]
     if (list) { if (!list.includes(row.crew_member_id)) list.push(row.crew_member_id) }
@@ -443,8 +433,8 @@ async function loadForecasts(
 ): Promise<Record<string, DayForecast | null>> {
   const located = new Map<string, { lat: number; lng: number }>()
   for (const t of turnovers) {
-    const lat = Number(firstOf(t.properties)?.lat)
-    const lng = Number(firstOf(t.properties)?.lng)
+    const lat = Number(unwrapJoin(t.properties)?.lat)
+    const lng = Number(unwrapJoin(t.properties)?.lng)
     if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
       located.set(t.property_id, { lat, lng })
     }
@@ -521,7 +511,7 @@ interface FrictionRowInput {
 
 function componentsFor(input: FrictionRowInput): FrictionComponents {
   const { turnover, baselines, forecasts, turnoverDate } = input
-  const property = firstOf(turnover.properties)
+  const property = unwrapJoin(turnover.properties)
   // The profiles describe a MARKET, so they are derived from the ZIP unless a
   // human has deliberately overridden them. Resolved here rather than stored
   // on the property: expanding the ZIP table then reaches every existing
@@ -556,7 +546,7 @@ function componentsFor(input: FrictionRowInput): FrictionComponents {
  */
 function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string } | null {
   const { turnover, crewContext } = input
-  const property = firstOf(turnover.properties)
+  const property = unwrapJoin(turnover.properties)
   if (!crewContext.crew.length) return null
 
   const assigned = new Set((turnover.turnover_assignments ?? []).map((a) => a.crew_member_id))
