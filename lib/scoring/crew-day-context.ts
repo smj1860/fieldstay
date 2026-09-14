@@ -66,6 +66,35 @@ function foldProgress(
   return byInstance
 }
 
+interface ChecklistItemRow {
+  instance_id:  string
+  is_completed: boolean | null
+  completed_at: string | null
+}
+
+/**
+ * ONE read for every item across every instance. Bound to a named const before
+ * unwrapping, matching the two reads above — an `await` inlined as a call
+ * argument reads as a discarded PostgREST result to semgrep's
+ * `supabase-discarded-result` chokepoint, which cannot see through the
+ * explicit type argument on unwrapList.
+ */
+async function loadChecklistItems(
+  supabase: ReturnType<typeof createServiceClient>,
+  instances: { id: string }[],
+  orgId: string,
+): Promise<ChecklistItemRow[]> {
+  const res = await supabase
+    .from('checklist_instance_items')
+    .select('instance_id, is_completed, completed_at')
+    .in('instance_id', instances.map((i) => i.id))
+    .limit(MAX_CHECKLIST_ITEMS)
+
+  return unwrapList<ChecklistItemRow>(res, {
+    site: 'scoring.crew-day-context.checklistItems', orgId,
+  })
+}
+
 /**
  * STUB — READ-ONLY. Surfaces same-day cascading-delay context for a flagged
  * turnover's assigned crew: their OTHER turnovers scheduled earlier the same
@@ -165,16 +194,7 @@ export async function getCrewDayContext(
   // ONE read for every item across every instance, folded in memory.
   const progressByInstance = instances.length === 0
     ? new Map<string, ChecklistProgress>()
-    : foldProgress(
-        unwrapList<{ instance_id: string; is_completed: boolean | null; completed_at: string | null }>(
-          await supabase
-            .from('checklist_instance_items')
-            .select('instance_id, is_completed, completed_at')
-            .in('instance_id', instances.map((i) => i.id))
-            .limit(MAX_CHECKLIST_ITEMS),
-          { site: 'scoring.crew-day-context.checklistItems', orgId },
-        ),
-      )
+    : foldProgress(await loadChecklistItems(supabase, instances, orgId))
 
   const now = Date.now()
 
