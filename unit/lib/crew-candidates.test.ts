@@ -73,6 +73,55 @@ describe('scoreCrewCandidates', () => {
     expect(top!.breakdown.proximity).toBe(0.5)
   })
 
+  // ── Regression: the "0.000000" null-island sentinel ────────────────────
+  // home_lat/home_lng/lat/lng are PostgrestNumeric — PostgREST serialises a
+  // real numeric column value as a STRING, so a coordinate of exactly 0
+  // arrives as the non-empty string "0.000000". A bare `!value` falsy check
+  // is truthy for that string and lets it through as though it were a real
+  // coordinate, computing a proximity score against (0°, 0°) — off the coast
+  // of West Africa, nowhere near a US-based STR portfolio — instead of
+  // falling back to the neutral UNKNOWN_PROXIMITY the check exists to give.
+
+  it('treats a "0.000000" crew home coordinate as missing, not as a real location', () => {
+    const [top] = scoreCrewCandidates({
+      isSameDay: false, property: { lat: 32.5, lng: -85.9 },
+      crew: [crew({ id: 'zeroed', home_lat: '0.000000', home_lng: '0.000000' })],
+      familiarCrewIds: [], workloadMap: {},
+    })
+    expect(top!.breakdown.proximity).toBe(0.5)
+  })
+
+  it('treats a "0.000000" property coordinate as missing, not as a real location', () => {
+    const [top] = scoreCrewCandidates({
+      isSameDay: false, property: { lat: '0.000000', lng: '0.000000' },
+      crew: [crew({ id: 'a', home_lat: 32.5, home_lng: -85.9 })],
+      familiarCrewIds: [], workloadMap: {},
+    })
+    expect(top!.breakdown.proximity).toBe(0.5)
+  })
+
+  it('treats the literal number 0 the same way as the string sentinel', () => {
+    // Covers the other direction too: if a coordinate ever arrives as a raw
+    // JS number 0 rather than a string, it must be caught the same way.
+    const [top] = scoreCrewCandidates({
+      isSameDay: false, property: { lat: 32.5, lng: -85.9 },
+      crew: [crew({ id: 'zeroed', home_lat: 0, home_lng: 0 })],
+      familiarCrewIds: [], workloadMap: {},
+    })
+    expect(top!.breakdown.proximity).toBe(0.5)
+  })
+
+  it('still scores a genuine, non-zero coordinate normally', () => {
+    // Guards against overcorrecting into treating every coordinate as absent.
+    const property = { lat: 32.5, lng: -85.9 }
+    const [top] = scoreCrewCandidates({
+      isSameDay: false, property,
+      crew: [crew({ id: 'here', home_lat: 32.5, home_lng: -85.9 })],
+      familiarCrewIds: [], workloadMap: {},
+    })
+    expect(top!.breakdown.proximity).toBeGreaterThan(0.5)
+  })
+
   it('penalises the busiest crew member on workload, relatively', () => {
     const scored = scoreCrewCandidates({
       isSameDay: false, property: { lat: null, lng: null },

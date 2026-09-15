@@ -60,8 +60,30 @@ const UNKNOWN_PROXIMITY = 0.5
 /** A crew member with no score yet is treated as slightly-below-average, not unusable. */
 const DEFAULT_SCORE = 0.7
 
+/**
+ * True only for a real, present coordinate value.
+ *
+ * NOT a truthy check — home_lat/home_lng/lat/lng are PostgrestNumeric, which
+ * arrive over PostgREST as STRINGS (see coerceScore's comment below), so a
+ * real value of exactly 0 renders as the non-empty string "0.000000". A bare
+ * `!value` check is truthy for that string and lets it straight through as a
+ * genuine coordinate. And 0 is never a real one here: this is a US-based STR
+ * business, and (0°, 0°) — "null island", off the coast of West Africa — is
+ * what a failed geocode or an unset/miswritten column looks like once
+ * coerced to a number, not a location any crew member or property is
+ * actually at. Checked on the PARSED number, since a null check alone still
+ * lets the string sentinel through.
+ */
+function hasCoordinate(value: PostgrestNumeric): boolean {
+  if (value === null || value === undefined) return false
+  return Number(value) !== 0
+}
+
 function candidateProximity(crew: CrewCandidate, property: CrewScoringInput['property']): number {
-  if (!crew.home_lat || !crew.home_lng || !property.lat || !property.lng) return UNKNOWN_PROXIMITY
+  if (!hasCoordinate(crew.home_lat) || !hasCoordinate(crew.home_lng)
+    || !hasCoordinate(property.lat) || !hasCoordinate(property.lng)) {
+    return UNKNOWN_PROXIMITY
+  }
   return proximityScore(haversineKm(
     Number(crew.home_lat), Number(crew.home_lng),
     Number(property.lat),  Number(property.lng),
