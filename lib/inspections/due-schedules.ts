@@ -43,6 +43,26 @@ export function todayISO(now: Date = new Date()): string {
 }
 
 /**
+ * Schedule ids that already back an OPEN walk (started, not yet completed).
+ *
+ * Shared with lib/inspections/overdue-email.ts's selectOverdueForDigest for
+ * the same reason selectDueSchedules delegates to selectUpcomingSchedules
+ * rather than reimplementing the suppression rule: both surfaces answer "is
+ * this schedule still waiting", and a second implementation would drift — the
+ * monthly digest telling a PM a walk is overdue while someone is mid-walk on
+ * it right now is exactly the kind of drift this prevents.
+ */
+export function scheduleIdsWithOpenWalk(
+  inspections: readonly StartedInspectionInput[],
+): ReadonlySet<string> {
+  return new Set(
+    inspections
+      .filter((i) => !i.completed_at && i.source_schedule_id)
+      .map((i) => i.source_schedule_id as string),
+  )
+}
+
+/**
  * Active inspection schedules that are due on or before `today` and do not
  * already have a walk under way.
  *
@@ -94,11 +114,7 @@ export function selectUpcomingSchedules(
   today:       string,
   horizonDays: number,
 ): DueSchedule[] {
-  const walkInProgress = new Set(
-    inspections
-      .filter((i) => !i.completed_at && i.source_schedule_id)
-      .map((i) => i.source_schedule_id as string),
-  )
+  const walkInProgress = scheduleIdsWithOpenWalk(inspections)
 
   const horizon = addDaysISO(today, horizonDays)
 

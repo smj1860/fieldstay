@@ -116,6 +116,40 @@ describe('selectOverdueForDigest — once per month, but every month', () => {
   })
 })
 
+describe('selectOverdueForDigest — a schedule already mid-walk is not "still" overdue', () => {
+  // next_due_date only advances at COMPLETION (§7), so a walk started days or
+  // minutes ago still reads as due-in-the-past right up until sign-off.
+  // Without the open-walk set, the digest told a PM an inspection was overdue
+  // while someone was actively walking it — accurate about the date, wrong
+  // about the state.
+  it('is excluded when its id is in the open-walk set', () => {
+    expect(selectOverdueForDigest(
+      [candidate()], RUN_DATE, new Set(['sched-1']),
+    )).toEqual([])
+  })
+
+  it('is still reported when no walk is open for it', () => {
+    expect(selectOverdueForDigest(
+      [candidate()], RUN_DATE, new Set(['some-other-schedule']),
+    ).map((r) => r.id)).toEqual(['sched-1'])
+  })
+
+  it('defaults to reporting everything when the caller supplies no open-walk set at all', () => {
+    // Backward-compatible default, not a required parameter — a caller with
+    // no inspection data degrades to the pre-existing behaviour.
+    expect(selectOverdueForDigest([candidate()], RUN_DATE).map((r) => r.id)).toEqual(['sched-1'])
+  })
+
+  it('in a bulk digest, suppresses only the schedule that is actually mid-walk', () => {
+    const rows = selectOverdueForDigest(
+      [candidate({ id: 'sched-1' }), candidate({ id: 'sched-2' })],
+      RUN_DATE,
+      new Set(['sched-1']),
+    )
+    expect(rows.map((r) => r.id)).toEqual(['sched-2'])
+  })
+})
+
 describe('groupByOrg — one email per org', () => {
   it('bundles a whole portfolio into a single group', () => {
     // The scenario that forces this: applySafetyTemplate gives every property

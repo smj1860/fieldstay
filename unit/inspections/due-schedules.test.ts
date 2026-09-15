@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   dueLabel,
+  scheduleIdsWithOpenWalk,
   selectDueSchedules,
   selectUpcomingSchedules,
   todayISO,
@@ -128,6 +129,33 @@ function dateInZone(utcIso: string, offsetMinutes: number): Date {
     getTimezoneOffset:  () => offsetMinutes,
   })
 }
+
+describe('scheduleIdsWithOpenWalk', () => {
+  // The shared suppression rule selectUpcomingSchedules delegates to, and
+  // that lib/inspections/overdue-email.ts's selectOverdueForDigest now
+  // reuses too — one rule, so the "what is due" list and the overdue digest
+  // cannot drift on what counts as already-handled.
+  it('includes a schedule backing an open (uncompleted) inspection', () => {
+    const ids = scheduleIdsWithOpenWalk([inspection({ source_schedule_id: 'sched-1' })])
+    expect(ids.has('sched-1')).toBe(true)
+  })
+
+  it('excludes a schedule whose inspection has been completed', () => {
+    const ids = scheduleIdsWithOpenWalk([
+      inspection({ source_schedule_id: 'sched-1', completed_at: '2026-09-01T00:00:00Z' }),
+    ])
+    expect(ids.has('sched-1')).toBe(false)
+  })
+
+  it('ignores an ad-hoc walk with no schedule link', () => {
+    const ids = scheduleIdsWithOpenWalk([inspection({ source_schedule_id: null })])
+    expect(ids.size).toBe(0)
+  })
+
+  it('is empty for no inspections at all', () => {
+    expect(scheduleIdsWithOpenWalk([]).size).toBe(0)
+  })
+})
 
 describe('todayISO', () => {
   it('is the LOCAL calendar day west of Greenwich, not the UTC one', () => {

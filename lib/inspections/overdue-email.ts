@@ -63,6 +63,19 @@ const DAY_MS = 86_400_000
 export function selectOverdueForDigest<T extends OverdueCandidate>(
   candidates:  readonly T[],
   runDate:     string,
+  /**
+   * Schedules that already back an open walk (lib/inspections/due-schedules.ts's
+   * scheduleIdsWithOpenWalk). A schedule only advances next_due_date at
+   * COMPLETION, so a walk someone is mid-way through — started days ago, or
+   * minutes before this digest ran — still reads as due-in-the-past right up
+   * until sign-off. Without this, the digest told a PM an inspection was
+   * overdue while someone was actively walking it: accurate about the date,
+   * wrong about the state, and exactly the kind of inaccuracy that makes a
+   * PM stop trusting the digest and start re-checking work that was already
+   * happening. Defaults to none rather than required, so a caller with no
+   * inspection data degrades to the old behaviour rather than throwing.
+   */
+  openWalkScheduleIds: ReadonlySet<string> = new Set(),
 ): OverdueSelection<T>[] {
   const monthStart = firstOfMonth(runDate)
 
@@ -75,7 +88,9 @@ export function selectOverdueForDigest<T extends OverdueCandidate>(
       // overdue reappears next month by design — the month changes, so the
       // comparison stops matching. That is what makes this a digest rather
       // than a single notice that goes quiet while the problem persists.
-      && c.overdue_notified_month !== monthStart)
+      && c.overdue_notified_month !== monthStart
+      // Not already mid-walk — see the parameter doc above.
+      && !openWalkScheduleIds.has(c.id))
     .map((c) => ({
       ...c,
       next_due_date: c.next_due_date as string,
