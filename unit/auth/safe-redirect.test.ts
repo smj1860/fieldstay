@@ -49,8 +49,24 @@ describe('safeNextPath', () => {
     ['javascript scheme',      'javascript:alert(1)'],
     ['data scheme',            'data:text/html,<script>alert(1)</script>'],
     ['bare host',              'evil.example.com'],
+    // The origin check alone is not enough: `..` collapses against the
+    // sentinel's own root, so the ORIGIN comes back unchanged even though the
+    // resulting pathname starts with `//` — which a browser (or router.push())
+    // navigates as protocol-relative regardless of how it was constructed.
+    ['traversal into //',      '/..//evil.example.com'],
+    ['dot-traversal into //',  '/.//evil.example.com'],
   ])('rejects %s', (_label, value) => {
     expect(safeNextPath(value, FALLBACK)).toBe(FALLBACK)
+  })
+
+  // Pinned against the parser: confirms the traversal payload above really
+  // does produce a `//`-prefixed pathname when same-origin-checked against the
+  // sentinel — if the parser's behavior here ever changes, the rejection above
+  // is testing nothing.
+  it('the traversal-into-// form really does produce a protocol-relative pathname', () => {
+    const url = new URL('/..//evil.example.com', 'https://fieldstay.invalid')
+    expect(url.origin).toBe('https://fieldstay.invalid')
+    expect(`${url.pathname}${url.search}${url.hash}`).toBe('//evil.example.com')
   })
 
   // Pinned against the parser, not asserted from memory — if this ever stops

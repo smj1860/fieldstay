@@ -22,13 +22,15 @@ import { logAuditEvent } from '@/lib/audit'
 
 interface Call { table: string; method: string; args: unknown[] }
 
-function makeSupabase(invoiceRow: Record<string, unknown> | null) {
+function makeSupabase(invoiceRow: Record<string, unknown> | null, opts: { updateLosesRace?: boolean } = {}) {
   const calls: Call[] = []
+  let sawUpdate = false
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     const record = (method: string, args: unknown[]) => {
       calls.push({ table, method, args })
+      if (table === 'work_order_invoices' && method === 'update') sawUpdate = true
       return chain
     }
     chain.select = (...a: unknown[]) => record('select', a)
@@ -36,8 +38,17 @@ function makeSupabase(invoiceRow: Record<string, unknown> | null) {
     chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
 
-    chain.maybeSingle = () =>
-      Promise.resolve(table === 'work_order_invoices' ? { data: invoiceRow, error: null } : { data: null, error: null })
+    chain.maybeSingle = () => {
+      if (table === 'work_order_invoices') {
+        // The lookup .select().maybeSingle() (sawUpdate still false) returns
+        // the row as normal; the UPDATE's own .select().maybeSingle() — the
+        // optimistic-lock CAS result — returns zero rows when simulating a
+        // lost race.
+        if (sawUpdate && opts.updateLosesRace) return Promise.resolve({ data: null, error: null })
+        return Promise.resolve({ data: invoiceRow, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    }
     // Every write chain here ends without .select()/.maybeSingle() — the
     // builder itself is awaited, so it must be thenable.
     chain.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null })
@@ -172,6 +183,29 @@ describe('handleWorkOrderInvoiceRefunded', () => {
 
     const calls = (supabase as unknown as { calls: Call[] }).calls
     expect(calls.some((c) => c.method === 'update' || c.method === 'upsert')).toBe(false)
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  // ── Concurrent delivery race ─────────────────────────────────────────────
+  // Two genuinely concurrent deliveries can both read the SAME starting
+  // amount_refunded and both pass the out-of-order guard. The UPDATE must be
+  // an optimistic-lock CAS on that starting value — when it loses the race
+  // (another delivery already moved the row forward), the handler must throw
+  // rather than proceed to post a compensating credit computed from its now
+  // stale read.
+  it('throws instead of posting a stale credit when the update loses a concurrency race', async () => {
+    const supabase = makeSupabase(baseInvoice(), { updateLosesRace: true })
+
+    await expect(
+      handleWorkOrderInvoiceRefunded(supabase as never, charge({ amount_refunded: 5_000, amount_captured: 20_000 }))
+    ).rejects.toThrow(/race/i)
+
+    const calls = (supabase as unknown as { calls: Call[] }).calls
+    // The UPDATE itself was attempted (and lost), but nothing downstream of
+    // it — the credit and actual_cost writes — must have gone out.
+    expect(findCall(calls, 'work_order_invoices', 'update')).toBeDefined()
+    expect(calls.some((c) => c.table === 'owner_transactions' && c.method === 'upsert')).toBe(false)
+    expect(calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
     expect(logAuditEvent).not.toHaveBeenCalled()
   })
 

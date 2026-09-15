@@ -3,7 +3,7 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { frictionDateString, localDateFrom } from '@/lib/friction/date'
+import { frictionDateString, localDateFrom, frictionDayUtcBounds } from '@/lib/friction/date'
 import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
 import { reportError }          from '@/lib/observability/report-error'
@@ -80,12 +80,13 @@ export const preFlightFriction = inngest.createFunction(
 
     const orgIds = await step.run('find-orgs-with-turnovers-today', async () => {
       const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
+      const { startUtc, endUtc } = frictionDayUtcBounds(turnoverDate)
       return fetchDistinctOrgIds(
         (from, to) => supabase
           .from('turnovers')
           .select('org_id')
-          .gte('checkout_datetime', `${turnoverDate}T00:00:00Z`)
-          .lt('checkout_datetime', `${turnoverDate}T23:59:59.999Z`)
+          .gte('checkout_datetime', startUtc)
+          .lt('checkout_datetime', endUtc)
           .in('status', SCOREABLE_STATUSES)
           .order('org_id', { ascending: true })
           .range(from, to),
@@ -257,6 +258,7 @@ export const preFlightFrictionForOrg = inngest.createFunction(
     // ── 2. Today's turnovers ───────────────────────────────────────────────
     const turnovers = await step.run('fetch-todays-turnovers', async () => {
       const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
+      const { startUtc, endUtc } = frictionDayUtcBounds(turnoverDate)
 
       return fetchAllRows<ScoreableTurnover>(
         (from, to) => supabase
@@ -267,8 +269,8 @@ export const preFlightFrictionForOrg = inngest.createFunction(
             turnover_assignments ( crew_member_id )
           `)
           .eq('org_id', orgId)
-          .gte('checkout_datetime', `${turnoverDate}T00:00:00Z`)
-          .lt('checkout_datetime', `${turnoverDate}T23:59:59.999Z`)
+          .gte('checkout_datetime', startUtc)
+          .lt('checkout_datetime', endUtc)
           .in('status', SCOREABLE_STATUSES)
           .order('id', { ascending: true })
           .range(from, to),

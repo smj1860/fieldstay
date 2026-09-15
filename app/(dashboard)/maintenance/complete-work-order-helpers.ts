@@ -170,11 +170,76 @@ export async function advanceSchedulesAfterCompletion(
       .eq('org_id', orgId)
   }).filter((w): w is NonNullable<typeof w> => w !== null)
 
-  const results = await Promise.all(writes)
+  // allSettled, not all: a genuinely REJECTED write (a network-level throw
+  // under the fetch, not just a resolved `{error}`) must not abort visibility
+  // into every OTHER schedule's write, which Promise.all would do — some
+  // schedules would silently advance while others silently don't, with only
+  // one opaque thrown error reaching the caller and no indication which was
+  // which.
+  const results = await Promise.allSettled(writes)
   for (const result of results) {
-    if (result.error) {
-      console.error('[advanceSchedulesAfterCompletion] schedule advance failed', result.error)
-      reportError(result.error, { site: 'maintenance.advanceSchedulesAfterCompletion.write', orgId })
+    if (result.status === 'rejected') {
+      console.error('[advanceSchedulesAfterCompletion] schedule advance threw', result.reason)
+      reportError(result.reason, { site: 'maintenance.advanceSchedulesAfterCompletion.write', orgId })
+    } else if (result.value.error) {
+      console.error('[advanceSchedulesAfterCompletion] schedule advance failed', result.value.error)
+      reportError(result.value.error, { site: 'maintenance.advanceSchedulesAfterCompletion.write', orgId })
+    }
+  }
+}
+
+/** Attempts, with jittered backoff, before giving up on `inngest.send()`. */
+const INNGEST_SEND_ATTEMPTS = 3
+const INNGEST_SEND_BASE_DELAY_MS = 200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Send the `work-order/completed` batch, retrying a transient failure rather
+ * than losing the event outright. Safe to retry — and safe if Inngest
+ * actually received an earlier attempt this client never got confirmation
+ * for — because the downstream handler's `owner_transactions` write is an
+ * UPSERT keyed on `source_reference_id` (see handleWorkOrderCompleted),
+ * so a duplicate delivery is a no-op, not a double expense.
+ *
+ * Reports and swallows rather than throwing on final failure: this is called
+ * from `finalizeWorkOrderCompletion`, which by design must never let an
+ * Inngest outage make the completing UPDATE (already committed by the
+ * caller) look like it failed.
+ */
+async function sendCompletionEventWithRetry(
+  rows:  CompletedWorkOrderRow[],
+  orgId: string,
+): Promise<void> {
+  const events = rows.map((row) => ({
+    name: 'work-order/completed' as const,
+    data: {
+      work_order_id: row.id,
+      property_id:   row.property_id,
+      org_id:        row.org_id,
+      actual_cost:   row.actual_cost ?? row.estimated_cost ?? null,
+    },
+  }))
+
+  for (let attempt = 1; attempt <= INNGEST_SEND_ATTEMPTS; attempt++) {
+    try {
+      await inngest.send(events)
+      return
+    } catch (err) {
+      if (attempt === INNGEST_SEND_ATTEMPTS) {
+        console.error('[finalizeWorkOrderCompletion] inngest.send failed after retries', err)
+        reportError(err, {
+          site:  'maintenance.finalizeWorkOrderCompletion.send',
+          orgId,
+          extra: { work_order_ids: rows.map((r) => r.id).join(',') },
+        })
+        return
+      }
+      // eslint-disable-next-line no-restricted-properties -- retry jitter to desynchronise concurrent callers, not id/token generation
+      const jitter = Math.random() * INNGEST_SEND_BASE_DELAY_MS // NOSONAR -- timing jitter only
+      await sleep(INNGEST_SEND_BASE_DELAY_MS * 2 ** (attempt - 1) + jitter)
     }
   }
 }
@@ -185,6 +250,18 @@ export async function advanceSchedulesAfterCompletion(
  * Call this ONLY with rows a completing UPDATE actually returned — that is
  * what keeps a double-submit or a concurrent bulk completion from firing
  * `work-order/completed` twice for the same work order.
+ *
+ * Deliberately never throws. The completing UPDATE that produced `rows` has
+ * ALREADY committed by the time this runs — it is a separate write, not one
+ * transaction with this function — and every call site guards its own UPDATE
+ * with `.neq('status', 'completed')` so a retry can never re-claim the row.
+ * A side effect that throws out of here used to propagate to the caller's
+ * outer try/catch, which reported "Operation failed. Please try again." even
+ * though the work order WAS completed — telling the PM to retry an action
+ * that can no longer run, while the missed event/audit row/schedule advance
+ * stayed lost with nothing to surface it. Every step below is now isolated
+ * and self-reporting instead, so one failing step can never suppress or lose
+ * visibility into the others.
  */
 export async function finalizeWorkOrderCompletion(
   supabase: SupabaseClient,
@@ -196,17 +273,7 @@ export async function finalizeWorkOrderCompletion(
 
   // One event per work order so each gets its own Inngest retry path; sent as
   // a single batch so the fan-out is one round-trip, not one per row.
-  await inngest.send(
-    rows.map((row) => ({
-      name: 'work-order/completed' as const,
-      data: {
-        work_order_id: row.id,
-        property_id:   row.property_id,
-        org_id:        row.org_id,
-        actual_cost:   row.actual_cost ?? row.estimated_cost ?? null,
-      },
-    }))
-  )
+  await sendCompletionEventWithRetry(rows, orgId)
 
   const { error: updatesError } = await supabase.from('work_order_updates').insert(
     rows.map((row) => ({

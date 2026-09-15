@@ -5,6 +5,7 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { advanceSchedulesAfterCompletion } from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
+import { reportError } from '@/lib/observability/report-error'
 
 // ============================================================================
 // This function is the ONLY thing that moves a maintenance schedule forward
@@ -183,5 +184,72 @@ describe('advanceSchedulesAfterCompletion — the branches seasonal sits between
     ])
 
     expect(updatePayloads(supabase)).toEqual([])
+  })
+})
+
+describe('advanceSchedulesAfterCompletion — one write genuinely REJECTING must not hide the others', () => {
+  // Promise.all used to abort visibility into every OTHER schedule's write the
+  // instant ONE promise actually rejected (a network-level throw under the
+  // fetch, not merely a resolved `{error}`) — some schedules could silently
+  // advance while others silently didn't, with one opaque thrown error and no
+  // way to tell which was which. Promise.allSettled must let every write run
+  // to completion regardless of what any other one does.
+  it('still applies every OTHER schedule\'s update when one write rejects', async () => {
+    const applied: string[] = []
+    const REJECTING_ID = 's-boom'
+
+    // A minimal, purpose-built double: the shared stub's chain always
+    // resolves, so a genuine promise REJECTION needs its own thenable.
+    const supabase = {
+      from: (table: string) => {
+        if (table === 'maintenance_schedules') {
+          return {
+            select: () => ({
+              in: () => ({
+                eq: () => ({
+                  order: () => ({
+                    range: async () => ({
+                      data: [
+                        { id: REJECTING_ID, schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' },
+                        { id: 's-ok', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' },
+                      ],
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            }),
+            update: (payload: Record<string, unknown>) => ({
+              eq: (col1: string, id: string) => ({
+                eq: (_col2: string, _orgId: string) => {
+                  if (id === REJECTING_ID) {
+                    // A genuine rejection — e.g. a network-level throw under
+                    // the fetch — not a resolved `{ error }`.
+                    return Promise.reject(new Error('network blip'))
+                  }
+                  applied.push(id)
+                  return Promise.resolve({ data: null, error: null })
+                },
+              }),
+              _payload: payload,
+            }),
+          }
+        }
+        throw new Error(`unexpected table ${table}`)
+      },
+    }
+
+    await advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
+      { scheduleId: REJECTING_ID, workOrderSource: 'maintenance_schedule' },
+      { scheduleId: 's-ok', workOrderSource: 'maintenance_schedule' },
+    ])
+
+    // The non-rejecting schedule's write still went through.
+    expect(applied).toEqual(['s-ok'])
+    // The rejection was reported, not swallowed silently or left uncaught.
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'maintenance.advanceSchedulesAfterCompletion.write' }),
+    )
   })
 })

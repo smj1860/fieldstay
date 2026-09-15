@@ -1,3 +1,10 @@
+import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
+
+dayjs.extend(utc)
+dayjs.extend(timezone)
+
 /**
  * The operating day for friction scoring, in Central Time.
  *
@@ -33,4 +40,24 @@ export function frictionDateString(now: Date = new Date()): string {
 export function localDateFrom(ymd: string): Date {
   const [year, month, day] = ymd.split('-').map(Number) as [number, number, number]
   return new Date(year, month - 1, day)
+}
+
+/**
+ * UTC instant bounds `[start, end)` for a YYYY-MM-DD calendar day in
+ * FRICTION_TIMEZONE — for querying a `timestamptz` column (e.g.
+ * `checkout_datetime`) against the actual Chicago day `frictionDateString()`
+ * named, not the UTC day with the same digits.
+ *
+ * String-concatenating `Z` onto a Chicago-formatted date (`` `${ymd}T00:00:00Z` ``)
+ * is the exact bug `localDateFrom()`'s docstring already warns about, one file
+ * over: it tells Postgres those digits are UTC midnight, which is 5-6 hours
+ * off from real Chicago midnight (CDT/CST), so the query window silently
+ * misses late-evening turnovers and mis-dates early-evening ones. dayjs.tz()
+ * resolves the real UTC offset in effect on that specific date (DST-aware),
+ * rather than assuming a fixed one.
+ */
+export function frictionDayUtcBounds(ymd: string): { startUtc: string; endUtc: string } {
+  const start = dayjs.tz(ymd, FRICTION_TIMEZONE).startOf('day')
+  const end   = start.add(1, 'day')
+  return { startUtc: start.utc().toISOString(), endUtc: end.utc().toISOString() }
 }
