@@ -119,8 +119,15 @@ export async function subscribeToPush(
  *
  * The `existing` branch is gated on isOnline() because these are PWAs expected
  * to be offline: without it every app open in a dead zone throws here and
- * reports to Sentry, turning a real signal into noise. Skipping costs nothing —
- * the next online mount re-sends.
+ * reports to Sentry, turning a real signal into noise. Skipping costs nothing
+ * only if the app REMOUNTS once online — a real reload/reopen — and this is
+ * described as "the whole on-mount flow" precisely because a PWA is designed
+ * to stay open across connectivity blips without remounting at all. A device
+ * that goes offline before this runs, then regains connectivity within the
+ * SAME still-open session, would otherwise never re-trigger this function —
+ * the server-side row silently goes stale (or is never created) for the rest
+ * of that session. An `online` listener catches that same-session transition
+ * instead of depending on a remount that may never come.
  */
 export async function registerAndSyncPush(
   endpoint: PushSubscribeEndpoint,
@@ -129,7 +136,15 @@ export async function registerAndSyncPush(
 
   const existing = await registration.pushManager.getSubscription()
   if (existing) {
-    if (isOnline()) await syncPushSubscription(endpoint, existing)
+    if (isOnline()) {
+      await syncPushSubscription(endpoint, existing)
+    } else {
+      globalThis.addEventListener('online', () => {
+        syncPushSubscription(endpoint, existing).catch((err) => {
+          console.warn('[push] resync on reconnect failed:', err)
+        })
+      })
+    }
     return { registration, shouldPrompt: false }
   }
 
