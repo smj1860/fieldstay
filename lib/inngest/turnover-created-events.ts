@@ -24,6 +24,22 @@ export interface TurnoverCreatedEvent {
 }
 
 /**
+ * Keeps a single request's `.in('id', …)` list under the gateway's URL limit.
+ *
+ * PostgREST encodes `.in()` values straight into the query string, so an
+ * unbounded id array eventually produces a URL past a proxy's length limit
+ * and the request itself fails with a 414 — a REQUEST-side ceiling, distinct
+ * from and unaffected by the response-side pagination below. `fetchAllRows`
+ * bounds what comes BACK from one query; it does nothing to bound what goes
+ * OUT in that query's own `.in()` filter, so pairing it with an unchunked
+ * `turnoverIds` still sends the whole array on every page of every request.
+ * 100 UUIDs ≈ 3.7KB of query string — comfortably inside every proxy default
+ * — matching the same constant and reasoning as lib/dexie/sync/chunked.ts's
+ * IN_CHUNK_SIZE for the identical defect in the crew sync layer.
+ */
+const ID_CHUNK_SIZE = 100
+
+/**
  * Build the `turnover/created` events for a set of just-created turnovers.
  *
  * This existed as six byte-for-byte copies — booking-events, hospitable
@@ -42,6 +58,12 @@ export interface TurnoverCreatedEvent {
  * the tail of the import simply did not exist as far as the rest of the system
  * was concerned.
  *
+ * CHUNKED first, THEN paginated: `turnoverIds` is split into ID_CHUNK_SIZE
+ * batches so the `.in()` list itself never grows past the gateway's URL
+ * limit, and `fetchAllRows` still drains each chunk's own response in case a
+ * chunk's row count (bounded to ID_CHUNK_SIZE here, since `id` is the
+ * table's primary key) ever needs more than one page.
+ *
  * `.order('id')` gives fetchAllRows stable page boundaries.
  */
 export async function fetchTurnoverCreatedEvents(
@@ -51,15 +73,20 @@ export async function fetchTurnoverCreatedEvents(
 ): Promise<TurnoverCreatedEvent[]> {
   if (!turnoverIds.length) return []
 
-  const turnovers = await fetchAllRows<TurnoverRow>(
-    (from, to) => supabase
-      .from('turnovers')
-      .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-      .in('id', turnoverIds)
-      .order('id')
-      .range(from, to),
-    { label: 'turnover-created-events.turnovers' },
-  )
+  const turnovers: TurnoverRow[] = []
+  for (let i = 0; i < turnoverIds.length; i += ID_CHUNK_SIZE) {
+    const chunk = turnoverIds.slice(i, i + ID_CHUNK_SIZE)
+    const page = await fetchAllRows<TurnoverRow>(
+      (from, to) => supabase
+        .from('turnovers')
+        .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+        .in('id', chunk)
+        .order('id')
+        .range(from, to),
+      { label: 'turnover-created-events.turnovers' },
+    )
+    turnovers.push(...page)
+  }
 
   return turnovers.map((t) => ({
     name: 'turnover/created' as const,

@@ -66,6 +66,7 @@ import { createPmNotification } from '../helpers'
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
+import { reportError } from '@/lib/observability/report-error'
 import type { InspectionFormItem, PriorityLevel, WoCategory } from '@/types/database'
 
 /** One answer, joined to the routing its form item carried at capture. */
@@ -144,6 +145,23 @@ export const inspectionCompleted = inngest.createFunction(
         .limit(MAX_REMEDIATIONS)
 
       if (itemsError) throw new Error(`inspection_items load failed: ${itemsError.message}`)
+
+      if ((items ?? []).length === MAX_REMEDIATIONS) {
+        // The result set exactly filled the bound. Cannot tell from here
+        // whether that is coincidence or the "device fault" this constant's
+        // own comment names — but every failure past the cap silently never
+        // gets a work order, a PO line or a notification, with no separate
+        // pass ever catching what was skipped, so guessing "coincidence" is
+        // the wrong side to be wrong on. Same pattern as
+        // applySafetyTemplate's property cap.
+        reportError(
+          new Error(
+            `inspectionCompleted hit its ${MAX_REMEDIATIONS}-item cap for inspection ${inspection_id} ` +
+            `(org ${org_id}) — failures past this limit were silently never remediated`,
+          ),
+          { site: 'inngest.inspection-completed', orgId: org_id, level: 'warning', extra: { inspectionId: inspection_id } },
+        )
+      }
 
       const failed: FailedItem[] = []
       for (const item of items ?? []) {
