@@ -79,6 +79,7 @@ export async function POST(
       reason?: string
       already_completed?: boolean
       missing_count?: number
+      inspector_name?: string | null
     } | null
 
     if (!result?.ok) {
@@ -138,7 +139,18 @@ export async function POST(
       })
     }
 
-    return NextResponse.json({ ok: true, alreadyCompleted: !!result.already_completed })
+    return NextResponse.json({
+      ok: true,
+      alreadyCompleted: !!result.already_completed,
+      // Only meaningful on a replay: what was ACTUALLY recorded by the
+      // completion that already happened. The outbox drain can't otherwise
+      // distinguish "the server already has my exact payload" from "the
+      // server has some earlier queued attempt with different data" — an
+      // ack lost in flight, or a drain crash between the server call
+      // succeeding and the local mutation row being deleted, would
+      // otherwise read `already_completed: true` as unconditional success.
+      recordedInspectorName: result.already_completed ? (result.inspector_name ?? null) : undefined,
+    })
   } catch (err) {
     console.error('[inspections.submit]', err)
     reportError(err, { site: 'route.inspections.submit' })

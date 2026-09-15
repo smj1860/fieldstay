@@ -226,30 +226,23 @@ export async function rebaseSafetySchedules(
   const formId = await loadSafetyFormId(supabase)
   if (!formId) return { retimed: 0 }
 
-  const { error: freqError } = await supabase
-    .from('maintenance_schedules')
-    .update({ frequency: template.frequency })
-    .eq('org_id', orgId)
-    .eq('creates', 'inspection')
-    .eq('inspection_form_id', formId)
-
-  if (freqError) {
-    throw new Error(`safety cadence update failed for org ${orgId}: ${freqError.message}`)
-  }
-
   const todayIso = today.toISOString().slice(0, 10)
-  const { data: retimed, error: dateError } = await supabase
-    .from('maintenance_schedules')
-    .update({ next_due_date: rebasedSafetyDueDate(template, today) })
-    .eq('org_id', orgId)
-    .eq('creates', 'inspection')
-    .eq('inspection_form_id', formId)
-    .gt('next_due_date', todayIso)
-    .select('id')
 
-  if (dateError) {
-    throw new Error(`safety due-date rebase failed for org ${orgId}: ${dateError.message}`)
+  // One RPC, not two separate UPDATEs — a failure between "cadence saved"
+  // and "due dates rebased" used to leave frequency and next_due_date
+  // permanently disagreeing for every affected property until something
+  // re-triggered this whole call. See the migration's header comment.
+  const { data: retimed, error } = await supabase.rpc('rebase_safety_schedules', {
+    p_org_id:    orgId,
+    p_form_id:   formId,
+    p_frequency: template.frequency,
+    p_due_date:  rebasedSafetyDueDate(template, today),
+    p_today:     todayIso,
+  })
+
+  if (error) {
+    throw new Error(`safety cadence rebase failed for org ${orgId}: ${error.message}`)
   }
 
-  return { retimed: retimed?.length ?? 0 }
+  return { retimed: retimed ?? 0 }
 }

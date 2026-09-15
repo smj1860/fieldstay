@@ -32,6 +32,16 @@ export interface NormalizedBooking {
   // booking-events.ts otherwise falls back to. Providers with no such
   // field should map to null.
   actual_total_amount:   number | null
+  // True when the provider explicitly reported a genuinely-zero total (a
+  // comped/promotional stay), as opposed to simply not reporting a total at
+  // all — both collapse to `actual_total_amount: null` (booking-events.ts's
+  // hasPositiveAmount() already treats 0 same as "unknown, please estimate"),
+  // so without this flag a real $0 stay gets the SAME nights * avg_nightly_rate
+  // fabricated estimate as a stay whose price genuinely isn't known yet. Only
+  // set by mappers that can tell the two apart (Hostaway's totalPrice).
+  // Optional and undefined for every other provider — zero behavior change
+  // for them.
+  revenue_known_zero?:    boolean
 }
 
 /**

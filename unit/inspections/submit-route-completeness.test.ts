@@ -87,6 +87,32 @@ describe('inspections submit route — completeness backstop result', () => {
     expect(res.status).toBe(200)
     expect(sendMock).toHaveBeenCalledTimes(1)
     expect(auditMock).toHaveBeenCalledTimes(1)
+    // A genuine completion has nothing to compare a queued draft against.
+    const body = await res.json()
+    expect(body.recordedInspectorName).toBeUndefined()
+  })
+
+  it('surfaces what was actually recorded on a replay, so a mismatched local draft can be flagged', async () => {
+    // The outbox drain can't otherwise distinguish "the server already has
+    // my exact payload" from "the server has some earlier queued attempt
+    // with different data" — an ack lost in flight, or a drain crash
+    // between the server call succeeding and the local mutation row being
+    // deleted, would otherwise read already_completed:true as unconditional
+    // success with no way to detect the local draft has since diverged.
+    rpcMock.mockResolvedValue({
+      data: { ok: true, already_completed: true, inspector_name: 'Original Inspector' },
+      error: null,
+    })
+
+    const res = await POST(req({ ...VALID_BODY, inspectorName: 'Edited Later' }), { params })
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.alreadyCompleted).toBe(true)
+    expect(body.recordedInspectorName).toBe('Original Inspector')
+    // A replay must not re-fire the completion event or re-audit.
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(auditMock).not.toHaveBeenCalled()
   })
 })
 

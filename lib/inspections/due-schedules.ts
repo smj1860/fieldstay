@@ -36,10 +36,26 @@ export interface DueSchedule extends DueScheduleInput {
 
 const DAY_MS = 86_400_000
 
-/** Today as `YYYY-MM-DD` in the VIEWER's timezone — a due date is a local day. */
-export function todayISO(now: Date = new Date()): string {
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 10)
+/**
+ * Today as `YYYY-MM-DD` in the given IANA timezone — a due date is a local
+ * day, but "the viewer's" is a lie the OLD signature told: `getTimezoneOffset()`
+ * reflects the offset of the process EXECUTING the JS, not the browser that
+ * will read the result. Called with no `timeZone` from a Next.js Server
+ * Component (upcoming-for-dashboard.ts's default parameter) or an Inngest
+ * cron (inspection-overdue-email.ts), that offset is Vercel's Lambda/Edge
+ * runtime (UTC by default), not the PM's. A PM in Los Angeles viewing the
+ * dashboard in the evening is, from the server's perspective, already into
+ * "tomorrow" in UTC — a schedule due "today" per their own wall clock could
+ * drop off the horizon list a day early or under-count daysLate by one.
+ *
+ * Defaults to UTC — an honest "the server's own day," not a stand-in for
+ * "the viewer's". A caller that genuinely needs a specific viewer's local
+ * day (inspections-view.tsx, client-side) must pass one explicitly; there is
+ * no way to infer it server-side.
+ */
+export function todayISO(now: Date = new Date(), timeZone: string = 'UTC'): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(now) // en-CA formats as YYYY-MM-DD
 }
 
 /**

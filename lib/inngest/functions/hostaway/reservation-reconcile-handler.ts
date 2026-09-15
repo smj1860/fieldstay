@@ -54,6 +54,8 @@ import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 import { hostawaySyncLockKey } from './sync-lock'
+import { HostawayPaginationOverflowError } from '@/lib/integrations/providers/hostaway'
+import { reportError } from '@/lib/observability/report-error'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
@@ -151,6 +153,20 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
       },
       })
     } catch (err) {
+      if (err instanceof HostawayPaginationOverflowError) {
+        // Same reasoning as incremental-sync-handler.ts's mirrored catch —
+        // this window (arrivalFrom cutoff / review lookback) is unchanged
+        // between retries and between daily runs, so it fails identically
+        // forever without distinct alerting. Tag it so it doesn't blend into
+        // generic Sentry noise.
+        reportError(err, {
+          site:  'inngest.hostaway-reservation-reconcile-handler.pagination_overflow',
+          orgId: org_id,
+          extra: { entity: err.entity, rowsSoFar: err.rowsSoFar, maxPages: err.maxPages },
+        })
+        throw err
+      }
+
       if (!isProviderAuthFailure(err)) throw err
 
       // Decision in a step, send at the top level — see

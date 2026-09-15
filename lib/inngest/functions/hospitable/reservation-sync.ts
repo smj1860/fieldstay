@@ -98,9 +98,16 @@ export async function syncHospitableReservations(
   //     no longer discards windows 1-19 and restarts the whole fetch.
   const hospPropertyIds = Object.keys(propertyIdMap)
 
-  const windows = hospPropertyIds.length
-    ? hospReservationWindows(undefined, lookaheadMonths)
-    : []
+  // Memoized, not a plain expression: Inngest re-executes this function body
+  // from the top on every step transition/retry, and hospReservationWindows
+  // computes its range from Date.now() internally. Retries here can be
+  // minutes apart (rate-limit backoff against a shared 54 req/min budget),
+  // and a replay landing on the other side of a UTC midnight would recompute
+  // a DIFFERENT windows array than the one the prior tick planned against —
+  // orphaning already-memoized fetch-reservations-window-<date> steps and
+  // silently skipping part of the original lookahead range.
+  const windows = await step.run('plan-reservation-windows', async () =>
+    hospPropertyIds.length ? hospReservationWindows(undefined, lookaheadMonths) : [])
 
   const reservationsById = new Map<string, HospitableReservation>()
 

@@ -15,6 +15,7 @@
 // inspector did not fill this in" must not be read as "the payload is corrupt".
 
 import type { InspectionAction, InspectionRepeatAnswer, InspectionResult } from '@/types/database'
+import { MAX_REPEAT_INSTANCES } from '@/lib/inspections/resolve-form'
 
 /**
  * One answer, as the device queued it.
@@ -122,13 +123,16 @@ function parseItem(entry: unknown): SubmittedItem | null {
   const actions = parseActions(r.actions)
   if (actions === false) return null
 
-  const valueNumber = optionalInt(r.value_number)
+  // Matches inspection_items_value_number_range. Rejected here so the
+  // inspector gets a message instead of a CHECK violation surfacing as
+  // "could not submit".
+  const valueNumber = parseBoundedInt(r.value_number, 0, 999)
   if (valueNumber === false) return null
-  // Matches inspection_items_value_number_range. Rejected here so the inspector
-  // gets a message instead of a CHECK violation surfacing as "could not submit".
-  if (valueNumber !== null && (valueNumber < 0 || valueNumber > 999)) return null
 
-  const repeatIndex = optionalInt(r.repeat_index)
+  // Same reasoning as value_number: reject an out-of-range index (a
+  // malformed payload, an adversarial replay) here rather than let it reach
+  // whatever downstream logic assumes it is a real 1-based instance number.
+  const repeatIndex = parseBoundedInt(r.repeat_index, 1, MAX_REPEAT_INSTANCES)
   if (repeatIndex === false) return null
 
   const repeat = parseRepeatAnswer(r)
@@ -136,6 +140,14 @@ function parseItem(entry: unknown): SubmittedItem | null {
 
   const text = parseTextFields(r)
   if (text === false) return null
+
+  // §5's rule — a description is REQUIRED on fail — is enforced client-side
+  // by resolve-form.ts's findOutstanding() before the Review page lets an
+  // inspector sign off, but THIS is the actual trust boundary: a stale
+  // client build, a hand-crafted replay, or a client bug that lets Review's
+  // gate be bypassed can submit `{ result: 'fail', note: null }` otherwise.
+  // The resulting work order's title comes from this note.
+  if (result === 'fail' && !text.note?.trim()) return null
 
   return {
     form_item_id:    r.form_item_id,
@@ -245,4 +257,14 @@ function optionalInt(value: unknown): number | null | false {
   if (value === null || value === undefined) return null
   if (typeof value !== 'number' || !Number.isInteger(value)) return false
   return value
+}
+
+/** optionalInt() plus a [min, max] range check — rejected, not clamped, so
+ *  an out-of-range value surfaces as a rejected shape rather than silently
+ *  becoming a different number. */
+function parseBoundedInt(value: unknown, min: number, max: number): number | null | false {
+  const n = optionalInt(value)
+  if (n === false) return false
+  if (n !== null && (n < min || n > max)) return false
+  return n
 }

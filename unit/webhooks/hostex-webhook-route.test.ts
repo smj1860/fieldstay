@@ -212,4 +212,22 @@ describe('dispatch', () => {
     expect(res.status).toBe(200)
     expect(sendMock).not.toHaveBeenCalled()
   })
+
+  it('does not crash on a valid-JSON null body', async () => {
+    // request.json() succeeds for the literal `null` — payload.event would
+    // throw reading a property off null before the typeof guard on it ever
+    // gets to run, since evaluating that guard already requires evaluating
+    // payload.event.
+    stubSupabase({ connection: ACTIVE })
+    const res = await POST(req(null), { params })
+    expect(res.status).toBe(200)
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('does not crash on a valid-JSON, non-object body (a bare number/string)', async () => {
+    stubSupabase({ connection: ACTIVE })
+    const res = await POST(req(42), { params })
+    expect(res.status).toBe(200)
+    expect(sendMock).not.toHaveBeenCalled()
+  })
 })

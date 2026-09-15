@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { parseSubmitPayload, MAX_ITEMS, MAX_TEXT } from '@/lib/inspections/submit-payload'
+import { MAX_REPEAT_INSTANCES } from '@/lib/inspections/resolve-form'
 
 // ============================================================================
 // THE BIAS HERE IS ASYMMETRIC, AND ON PURPOSE.
@@ -123,6 +124,33 @@ describe('parseSubmitPayload — the value columns', () => {
   it('a text field of the wrong type is rejected, but absent is null', () => {
     expect(err(body({ items: [item({ note: 42 })] }))).toMatch(/Malformed/)
     expect(ok(body({ items: [item()] })).items[0]!.note).toBeNull()
+  })
+
+  it('a repeat index must be a whole number in [1, MAX_REPEAT_INSTANCES]', () => {
+    // Unlike value_number, this one had NO range check at all — an
+    // out-of-range index (a malformed payload, an adversarial replay) sailed
+    // through to the RPC as if it were a real 1-based instance number.
+    expect(ok(body({ items: [item({ repeat_index: 1 })] })).items[0]!.repeat_index).toBe(1)
+    expect(ok(body({ items: [item({ repeat_index: MAX_REPEAT_INSTANCES })] }))).toBeTruthy()
+    expect(err(body({ items: [item({ repeat_index: 0 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: -1 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: MAX_REPEAT_INSTANCES + 1 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: 2147483647 })] }))).toMatch(/Malformed/)
+    // Absent is still fine — most items aren't inside a repeat group.
+    expect(ok(body({ items: [item()] })).items[0]!.repeat_index).toBeNull()
+  })
+
+  it('rejects a fail result with no description — the actual trust boundary', () => {
+    // §5's rule is enforced client-side by resolve-form.ts's
+    // findOutstanding() before Review lets an inspector sign off — but THAT
+    // is bypassable (a stale build, a hand-crafted replay); THIS boundary is
+    // not. The resulting work order's title comes from this note.
+    expect(err(body({ items: [item({ result: 'fail', note: null })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ result: 'fail' })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ result: 'fail', note: '   ' })] }))).toMatch(/Malformed/)
+    expect(ok(body({ items: [item({ result: 'fail', note: 'cracked hose' })] }))).toBeTruthy()
+    // A non-fail result needs no description.
+    expect(ok(body({ items: [item({ result: 'pass', note: null })] }))).toBeTruthy()
   })
 
   it('carries every value column through unchanged', () => {
