@@ -83,25 +83,37 @@ export async function loadRemediationIndex(
   //
   // The per-item list is the only one that scales with data rather than with
   // the caller's cap, and it is bounded by failures across the walks in scope.
+  // .order('created_at', { ascending: false }) + a *3 headroom limit, not an
+  // exact 1:1 bet: the "one row per key" assumption below (a cancelled WO
+  // replaced by a new one, a retried request racing a unique constraint, a
+  // manually duplicated PO) can be violated, and without an ORDER BY Postgres
+  // is free to return the surviving rows in whatever order it finds
+  // convenient — not necessarily creation order. Newest-first plus
+  // indexWorkOrders/indexPurchaseOrders keeping only the FIRST row seen per
+  // key (below) makes "newest wins" deterministic instead of an array-order
+  // coin flip.
   const [byItemRes, byInspectionRes, poRes] = await Promise.all([
     failedItemIds.length === 0 ? emptyWoResult() : supabase
       .from('work_orders')
-      .select('wo_number, status, source_inspection_item_id, source_inspection_id')
+      .select('wo_number, status, source_inspection_item_id, source_inspection_id, created_at')
       .eq('org_id', orgId)
       .in('source_inspection_item_id', failedItemIds)
-      .limit(failedItemIds.length),
+      .order('created_at', { ascending: false })
+      .limit(failedItemIds.length * 3),
     supabase
       .from('work_orders')
-      .select('wo_number, status, source_inspection_item_id, source_inspection_id')
+      .select('wo_number, status, source_inspection_item_id, source_inspection_id, created_at')
       .eq('org_id', orgId)
       .in('source_inspection_id', inspectionIds)
-      .limit(inspectionIds.length),
+      .order('created_at', { ascending: false })
+      .limit(inspectionIds.length * 3),
     supabase
       .from('purchase_orders')
-      .select('id, status, source_inspection_id')
+      .select('id, status, source_inspection_id, created_at')
       .eq('org_id', orgId)
       .in('source_inspection_id', inspectionIds)
-      .limit(inspectionIds.length),
+      .order('created_at', { ascending: false })
+      .limit(inspectionIds.length * 3),
   ])
 
   if (!reportQueryError(byItemRes.error, { site: `${site}.workOrders`, orgId })) {
@@ -133,8 +145,14 @@ function emptyWoResult() {
 function indexWorkOrders(index: RemediationIndex, rows: WoRow[]): void {
   for (const wo of rows) {
     const entry = { kind: 'work_order' as const, reference: wo.wo_number, status: wo.status }
-    if (wo.source_inspection_item_id) index.byItem.set(wo.source_inspection_item_id, entry)
-    else if (wo.source_inspection_id) index.byInspection.set(wo.source_inspection_id, entry)
+    // Rows arrive newest-first (see the query above) — keep only the FIRST
+    // one seen per key so a stale/cancelled duplicate can never overwrite an
+    // already-indexed newer row.
+    if (wo.source_inspection_item_id) {
+      if (!index.byItem.has(wo.source_inspection_item_id)) index.byItem.set(wo.source_inspection_item_id, entry)
+    } else if (wo.source_inspection_id) {
+      if (!index.byInspection.has(wo.source_inspection_id)) index.byInspection.set(wo.source_inspection_id, entry)
+    }
   }
 }
 

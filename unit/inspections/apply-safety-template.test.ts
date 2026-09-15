@@ -263,57 +263,51 @@ describe('applySafetyTemplate — MAX_PROPERTIES cap-hit signal', () => {
 })
 
 describe('rebaseSafetySchedules', () => {
-  /** The double records `update` payloads and the filters each one carried. */
-  function makeUpdateClient(tables: Record<string, Table>) {
-    const updates: { patch: unknown; filters: [string, unknown][] }[] = []
+  // Both writes (frequency + next_due_date) now happen atomically inside the
+  // rebase_safety_schedules RPC — see 20260915158000_rebase_safety_schedules_
+  // atomic.sql — rather than as two separate, non-transactional UPDATEs a
+  // failure between could leave permanently disagreeing. The test boundary
+  // moves with it: what's observable from here is the RPC call's arguments
+  // and return value, not individual UPDATE filters.
+  function makeRpcClient(tables: Record<string, Table>, rpcResult: Table = {}) {
+    const rpcCalls: { fn: string; args: unknown }[] = []
     const client = {
       from(table: string) {
-        const filters: [string, unknown][] = []
         const builder: Record<string, unknown> = {}
         for (const m of ['select', 'order', 'limit']) builder[m] = () => builder
-        for (const m of ['eq', 'gt']) {
-          builder[m] = (col: string, val: unknown) => { filters.push([`${m}:${col}`, val]); return builder }
-        }
-        builder.update = (patch: unknown) => { updates.push({ patch, filters }); return builder }
+        for (const m of ['eq', 'gt']) builder[m] = () => builder
         builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve({
           data: tables[table]?.data ?? [], error: tables[table]?.error ?? null,
         }).then(resolve)
         return builder
       },
+      rpc(fn: string, args: unknown) {
+        rpcCalls.push({ fn, args })
+        return Promise.resolve({ data: rpcResult.data ?? null, error: rpcResult.error ?? null })
+      },
     } as unknown as SupabaseClient
-    return { client, updates }
+    return { client, rpcCalls }
   }
 
   const FORM_ONLY = { inspection_forms: FORMS }
 
-  it('moves the cadence on EVERY safety schedule', async () => {
-    const { client, updates } = makeUpdateClient(FORM_ONLY)
-    await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)
+  it('calls the atomic RPC with the org, form, cadence, due date and today scoped to this org\'s SAFETY form', async () => {
+    const { client, rpcCalls } = makeRpcClient(FORM_ONLY, { data: 2 })
+    const result = await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)
 
-    const freqUpdate = updates.find((u) => 'frequency' in (u.patch as object))!
-    expect(freqUpdate.patch).toEqual({ frequency: 'semi_annual' })
-    // Scoped to this org's SAFETY inspection schedules and nothing else — a
-    // missing form filter would retime the indoor and outdoor walks too.
-    expect(freqUpdate.filters).toContainEqual(['eq:org_id', ORG])
-    expect(freqUpdate.filters).toContainEqual(['eq:creates', 'inspection'])
-    expect(freqUpdate.filters).toContainEqual(['eq:inspection_form_id', 'form-safety'])
-    // And NO date filter: the cadence reaches overdue schedules too.
-    expect(freqUpdate.filters.some(([k]) => k.startsWith('gt:'))).toBe(false)
-  })
-
-  it('moves the DUE DATE only where it is still in the future', async () => {
-    // The clause carrying the weight. A date that is today or past means the
-    // walk is due or overdue and somebody may be driving to it — re-basing it
-    // would either cancel that or re-open a walk completed days ago, producing
-    // a duplicate inspection against one occurrence.
-    const { client, updates } = makeUpdateClient(FORM_ONLY)
-    await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)
-
-    const dateUpdate = updates.find((u) => 'next_due_date' in (u.patch as object))!
-    expect(dateUpdate.filters).toContainEqual(['gt:next_due_date', '2026-01-15'])
-    // 2026-01-15 with a March/September template — the next date that has not
-    // gone by.
-    expect(dateUpdate.patch).toEqual({ next_due_date: '2026-03-01' })
+    expect(rpcCalls).toHaveLength(1)
+    expect(rpcCalls[0]!.fn).toBe('rebase_safety_schedules')
+    expect(rpcCalls[0]!.args).toEqual({
+      p_org_id:    ORG,
+      p_form_id:   'form-safety',
+      p_frequency: 'semi_annual',
+      // 2026-01-15 with a March/September template — the next date that has
+      // not gone by.
+      p_due_date:  '2026-03-01',
+      p_today:     '2026-01-15',
+    })
+    // The RPC's own row count, not a second local computation.
+    expect(result).toEqual({ retimed: 2 })
   })
 
   it('re-bases FORWARD when today is inside a run month', async () => {
@@ -323,25 +317,21 @@ describe('rebaseSafetySchedules', () => {
     // so every future-dated schedule would come back instantly overdue for a
     // walk nobody was told about. Without this case the two are
     // interchangeable and swapping them breaks nothing.
-    const { client, updates } = makeUpdateClient(FORM_ONLY)
+    const { client, rpcCalls } = makeRpcClient(FORM_ONLY, { data: 0 })
     await rebaseSafetySchedules(client, ORG, TEMPLATE, new Date('2026-03-20T12:00:00Z'))
 
-    const dateUpdate = updates.find((u) => 'next_due_date' in (u.patch as object))!
-    expect(dateUpdate.patch).toEqual({ next_due_date: '2026-09-01' })
+    expect((rpcCalls[0]!.args as { p_due_date: string }).p_due_date).toBe('2026-09-01')
   })
 
   it('does nothing when the form library has not been seeded', async () => {
-    const { client, updates } = makeUpdateClient({ inspection_forms: { data: [] } })
+    const { client, rpcCalls } = makeRpcClient({ inspection_forms: { data: [] } })
     expect(await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)).toEqual({ retimed: 0 })
-    expect(updates).toHaveLength(0)
+    expect(rpcCalls).toHaveLength(0)
   })
 
-  it('THROWS when the cadence update errors', async () => {
-    const { client } = makeUpdateClient({
-      ...FORM_ONLY,
-      maintenance_schedules: { error: { message: 'deadlock detected' } },
-    })
+  it('THROWS when the RPC errors', async () => {
+    const { client } = makeRpcClient(FORM_ONLY, { error: { message: 'deadlock detected' } })
     await expect(rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY))
-      .rejects.toThrow(/cadence update failed/)
+      .rejects.toThrow(/cadence rebase failed/)
   })
 })

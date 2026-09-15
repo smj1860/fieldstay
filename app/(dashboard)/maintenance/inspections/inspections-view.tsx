@@ -120,7 +120,10 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
   // been offline for a week should still be able to tell that last Tuesday's
   // walk is now overdue.
   const dueSchedules = useMemo(
-    () => selectDueSchedules(schedules ?? [], inspections ?? [], todayISO()),
+    // todayISO() defaults to UTC — an explicit viewer-local timezone is
+    // required here, or a device west of UTC evening into "tomorrow" server-
+    // side would see this list built from the wrong day.
+    () => selectDueSchedules(schedules ?? [], inspections ?? [], todayISO(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone)),
     [schedules, inspections],
   )
 
