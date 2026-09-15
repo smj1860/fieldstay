@@ -6885,6 +6885,14 @@ export type Database = {
         Args: { p_new_asset: Json; p_old_asset_id: string; p_org_id: string }
         Returns: Json
       }
+      replace_property_sponsors: {
+        Args: {
+          p_org_id: string
+          p_property_id: string
+          p_sponsor_ids: string[]
+        }
+        Returns: undefined
+      }
       replace_room_template_items: {
         Args: { p_items: Json; p_room_template_id: string }
         Returns: number
@@ -6916,6 +6924,14 @@ export type Database = {
       set_default_platform_inventory_template: {
         Args: { p_template_id: string }
         Returns: undefined
+      }
+      set_sponsor_properties: {
+        Args: {
+          p_org_id: string
+          p_property_ids: string[]
+          p_sponsor_id: string
+        }
+        Returns: Json
       }
       storage_org_prefix: { Args: { object_name: string }; Returns: string }
       store_integration_refresh_token: {

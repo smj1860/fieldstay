@@ -205,6 +205,21 @@ describe('pagination', () => {
     expect((fetchMock.mock.calls[1]![0] as string)).toContain('offset=100')
   })
 
+  it('throws rather than silently truncating when a page comes back unparseable', async () => {
+    // Page 1 is a genuine full page; page 2's envelope is missing the
+    // `properties` key entirely (a mangled/malformed response, not a real
+    // short page). extract() returns undefined for it — the loop must not
+    // read that as "zero rows, we're done" and hand back page 1 alone as if
+    // it were the complete result.
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ id: i, title: `p${i}` }))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope({ properties: page1, total: 150 }))
+      .mockResolvedValueOnce(envelope({ totally_wrong_key: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchProperties('tok', USER)).rejects.toThrow(/unparseable/)
+  })
+
   it('does not trust `total` — a wrong count neither truncates nor loops', async () => {
     // total lies (says 1), but the first page is full, so the walk continues.
     const page1 = Array.from({ length: 100 }, (_, i) => ({ id: i, title: `p${i}` }))

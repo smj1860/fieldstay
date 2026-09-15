@@ -247,7 +247,22 @@ async function fetchAllPages<TRow>(
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const data  = await hostexFetch<unknown>(buildPath(page * PAGE_SIZE, PAGE_SIZE), token, userId)
-    const batch = extract(data) ?? []
+    const batch = extract(data)
+
+    // `extract` returning undefined means this page's envelope didn't match
+    // the expected shape — a malformed/mangled response, not "zero rows".
+    // `?? []` here would read that identically to a genuine short final page
+    // and silently truncate the whole collection at whatever page failed to
+    // parse. That is exactly the empty-fetch-looks-like-zero-rows failure
+    // class this codebase's absence-reconciliation guardrail exists to catch
+    // (see CLAUDE.md) — one layer removed, at the per-page level instead of
+    // the whole-fetch level. Only a genuinely empty array may end the loop.
+    if (batch === undefined) {
+      throw new Error(
+        `Hostex ${label} page ${page} (offset ${page * PAGE_SIZE}) returned an ` +
+        `unparseable payload — refusing to treat it as end-of-data`
+      )
+    }
 
     rows.push(...batch)
     if (batch.length < PAGE_SIZE) return rows
