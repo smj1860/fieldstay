@@ -107,6 +107,28 @@ describe('rebaseParFromTarget', () => {
       expect(Number.isFinite(r.par_level)).toBe(true)
     }
   })
+
+  it('rounds a FRACTIONAL target UP before inverting — smartFormulaPar can never resolve to a fraction', () => {
+    // par_level is a plain unconstrained numeric column, so a PM can type 2.5
+    // for a smart item. smartFormulaPar (the forward direction) always wraps
+    // its result in Math.ceil(), which by construction can only ever return a
+    // whole number — so a base_qty computed against a fractional target would
+    // round-trip to a DIFFERENT number on the very next recompute, silently
+    // contradicting the number the PM just set. Rounding here, once, up front,
+    // is what keeps par_level and the re-based base_qty in agreement.
+    const r = rebaseParFromTarget(2.5, { smart_group: 'bathroom_essential' }, prop())
+    expect(r.par_mode).toBe('smart')
+    expect(r.par_level).toBe(3)
+    expect(Number.isInteger(r.par_level)).toBe(true)
+    // And the round trip through resolvePar lands on that same whole number,
+    // not a value that drifts on the next recompute.
+    expect(resolvePar(asItem('bathroom_essential', r.base_qty, r.par_level), prop(), null).par).toBe(3)
+  })
+
+  it('rounds up, not to the nearest whole number — "2.5" means at least 2.5', () => {
+    const r = rebaseParFromTarget(2.1, { smart_group: 'guest_consumable' }, prop())
+    expect(r.par_level).toBe(3)
+  })
 })
 
 describe('smartScaleFactor', () => {

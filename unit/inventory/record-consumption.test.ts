@@ -188,6 +188,31 @@ describe('recordConsumptionFromCount', () => {
     expect(rows[0].rate).toBeCloseTo(0.25, 10)
   })
 
+  it('filters bookings by calendar DATE, not the raw timestamptz string', async () => {
+    // checkin_date/checkout_date are DATE columns; submitted_at is a
+    // timestamptz ISO string ('2026-08-11T00:00:00Z'). Forwarding it as-is
+    // to .lt()/.gt() makes Postgres resolve the comparison via an implicit
+    // date<->timestamptz cast, which is time-of-day- and session-timezone-
+    // dependent right at the boundary day — a count submitted at 11pm vs.
+    // 1am on the same calendar day could include or exclude a booking that
+    // checks in/out that exact day. Slicing to the calendar date first is
+    // what makes the comparison match what a human reading two dates expects.
+    const { client, from } = scenario(
+      [{ inventory_item_id: 'i-1', quantity_counted: 20 }],
+      [{ inventory_item_id: 'i-1', quantity_counted: 10 }],
+    )
+    await recordConsumptionFromCount(client, { countId: CNT, propertyId: PROP, orgId: ORG })
+
+    const bookingsIndex = from.mock.calls.findIndex((c) => c[0] === 'bookings')
+    const bookingsChain = from.mock.results[bookingsIndex]!.value as {
+      lt: ReturnType<typeof vi.fn>
+      gt: ReturnType<typeof vi.fn>
+    }
+    // CURR.submitted_at = '2026-08-11T00:00:00Z', PREV.submitted_at = '2026-08-01T00:00:00Z'
+    expect(bookingsChain.lt).toHaveBeenCalledWith('checkin_date', '2026-08-11')
+    expect(bookingsChain.gt).toHaveBeenCalledWith('checkout_date', '2026-08-01')
+  })
+
   it('never reads inventory_items — the sibling handler overwrites it', async () => {
     const { client, from } = scenario(
       [{ inventory_item_id: 'i-1', quantity_counted: 20 }],

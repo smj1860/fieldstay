@@ -119,6 +119,16 @@ export async function recordConsumptionFromCount(
   // consistent when a property's metadata is incomplete.
   const capacity = prop.data.max_guests && prop.data.max_guests > 0 ? prop.data.max_guests : 2
 
+  // checkin_date/checkout_date are DATE columns; submitted_at is a timestamptz
+  // ISO string. Comparing them directly forwards a literal that Postgres
+  // resolves via an implicit date<->timestamptz cast, which is time-of-day-
+  // and session-timezone-dependent right at the boundary day — a count
+  // submitted at 11pm vs. 1am on the same calendar day can include or exclude
+  // a booking that checks in/out that exact day. Slicing to the calendar date
+  // on both sides compares what a human reading two dates would expect.
+  const currDateOnly = curr.data.submitted_at.slice(0, 10)
+  const prevDateOnly = prev.data.submitted_at.slice(0, 10)
+
   const bookingsRes = await supabase
     .from('bookings')
     .select('checkin_date, checkout_date')
@@ -126,8 +136,8 @@ export async function recordConsumptionFromCount(
     .eq('org_id', orgId)
     .eq('status', 'confirmed')
     .eq('is_block', false)
-    .lt('checkin_date', curr.data.submitted_at)
-    .gt('checkout_date', prev.data.submitted_at)
+    .lt('checkin_date', currDateOnly)
+    .gt('checkout_date', prevDateOnly)
     .limit(BOOKING_CAP)
   const bookings = unwrapList<BookingRow>(bookingsRes, ctx)
 
@@ -167,6 +177,11 @@ export async function recordConsumptionFromCount(
 
   if (!samples.length) return { recorded: 0, reason: 'no_positive_deltas' }
 
+  // A same-batch duplicate inventory_item_id (a client race writing the same
+  // item twice, a bug in the count-submission upsert) is safe to send as-is:
+  // record_consumption_samples() (20260915154000) deduplicates by
+  // (inventory_item_id, org_id) and averages before its ON CONFLICT DO UPDATE,
+  // rather than raising 21000 and losing every other sample in the batch.
   const { data, error } = await supabase.rpc('record_consumption_samples', { p_rows: samples })
   if (error) throw error
 
