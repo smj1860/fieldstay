@@ -18,6 +18,21 @@ import type { IntegrationProvider } from '@/lib/integrations/types'
 import { parseCidrAllowlist, validateBasicAuthWebhook } from '@/lib/integrations/webhook-verification'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
+/**
+ * Thrown by the three fetchers below (listings/reservations/reviews) when a
+ * paginated walk exceeds MAX_PAGES. Distinguished from a generic Error so a
+ * caller can report it distinctly from a transient network blip — nothing
+ * about this condition self-heals on retry, since the query window
+ * (activitySince/arrivalFrom cursor) is unchanged between attempts and every
+ * retry refetches the identical oversized window and fails identically.
+ */
+export class HostawayPaginationOverflowError extends Error {
+  constructor(readonly entity: string, readonly rowsSoFar: number, readonly maxPages: number) {
+    super(`[Hostaway] ${entity} pagination exceeded ${maxPages} pages (${rowsSoFar} so far) — refusing to return a partial result`)
+    this.name = 'HostawayPaginationOverflowError'
+  }
+}
+
 // Exact field names from Hostaway API GET /v1/listings response
 export interface HostawayListing {
   id:                   number
@@ -248,10 +263,7 @@ export async function hostawayFetchListings(
       // THROW rather than break — see the note on hospFetchProperties. A
       // partial listing set returned as complete is indistinguishable from a
       // shrunken portfolio to everything downstream.
-      throw new Error(
-        `[Hostaway] listings pagination exceeded ${MAX_PAGES} pages ` +
-        `(${listings.length} so far) — refusing to return a partial result`
-      )
+      throw new HostawayPaginationOverflowError('listings', listings.length, MAX_PAGES)
     }
 
     const res = await fetch(
@@ -308,10 +320,7 @@ export async function hostawayFetchReservations(
   while (true) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      throw new Error(
-        `[Hostaway] reservations pagination exceeded ${MAX_PAGES} pages ` +
-        `(${reservations.length} so far) — refusing to return a partial result`
-      )
+      throw new HostawayPaginationOverflowError('reservations', reservations.length, MAX_PAGES)
     }
 
     // ⚠️ `dateFrom` was what this sent, and it is NOT a parameter Hostaway's
@@ -353,7 +362,15 @@ export async function hostawayFetchReservations(
     offset += LIMIT
   }
 
-  return reservations
+  // Unlike hostawayFetchReviews (sortBy: 'id' + sortOrder: 'asc', proven
+  // stable across pages by its own comment), this endpoint gets only a
+  // single sortOrder field set to a column name with no accompanying
+  // sortBy/direction, and there is no live Hostaway account to verify page-
+  // to-page stability against. If the API is free to reorder mid-walk, an
+  // offset walk can repeat rows across a page boundary — dedupe defensively
+  // rather than trust an unverified guarantee.
+  const seen = new Set<number>()
+  return reservations.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
 }
 
 /**
@@ -389,10 +406,7 @@ export async function hostawayFetchReviews(
       // THROW rather than break — same reasoning as the listings and
       // reservations fetchers. A partial set returned as complete is
       // indistinguishable from a shrunken one to everything downstream.
-      throw new Error(
-        `[Hostaway] reviews pagination exceeded ${MAX_PAGES} pages ` +
-        `(${reviews.length} so far) — refusing to return a partial result`
-      )
+      throw new HostawayPaginationOverflowError('reviews', reviews.length, MAX_PAGES)
     }
 
     const params = new URLSearchParams({

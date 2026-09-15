@@ -108,6 +108,15 @@ export interface HostawayReservationSyncParams {
  */
 export function hostawayHistoryCutoff(historyMonths: number): string {
   const from = new Date()
+  // Pin to day 1 BEFORE changing the month. setMonth() only changes the
+  // month component and leaves day-of-month unchanged; if the target month
+  // is shorter than today's day-of-month, it overflows into the FOLLOWING
+  // month instead of clamping (e.g. on the 31st, "one month back" into a
+  // 28/29/30-day month rolls forward a few days) — silently narrowing this
+  // lookback window by up to 3 days on exactly those dates. Rounding the
+  // cutoff DOWN (a very slightly wider window) is the safe direction for a
+  // lower bound; the pre-fix behavior rounded it up, silently narrowing it.
+  from.setDate(1)
   from.setMonth(from.getMonth() - historyMonths)
   // YYYY-MM-DD — what the API expects.
   return from.toISOString().slice(0, 10)

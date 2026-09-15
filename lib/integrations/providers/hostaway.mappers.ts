@@ -217,6 +217,16 @@ export function extractHostawayActualTotal(res: HostawayReservation): number | n
  * checkin_time/checkout_time are what the turnover generator should use.
  */
 export function hostawayReservationToNormalized(res: HostawayReservation): NormalizedBooking {
+  // res.id is typed as a required number, but that's a compile-time fiction
+  // against a REST response this mapper cannot verify at runtime. A missing/
+  // null id would otherwise become the literal string "undefined" via
+  // String(undefined) — exactly the column the upsert conflicts on
+  // (onConflict: 'org_id,external_id,external_source') — silently colliding
+  // with the next malformed row instead of failing loudly.
+  if (res.id === undefined || res.id === null) {
+    throw new Error('[Hostaway] reservation payload missing id — refusing to map')
+  }
+
   return {
     external_id:          String(res.id),
     property_external_id: res.listingId !== undefined && res.listingId !== null
@@ -236,6 +246,12 @@ export function hostawayReservationToNormalized(res: HostawayReservation): Norma
     stay_type:   'guest_stay',
 
     actual_total_amount: extractHostawayActualTotal(res),
+    // optionalAmount() treats totalPrice <= 0 as absent, so a genuinely free
+    // (comped/promo) stay collapses to the same actual_total_amount: null as
+    // one Hostaway simply didn't report a price for — the pipeline must not
+    // treat the two alike, or a $0 stay gets a fabricated nights *
+    // avg_nightly_rate estimate posted as if it were real revenue.
+    revenue_known_zero: typeof res.totalPrice === 'number' && Number.isFinite(res.totalPrice) && res.totalPrice === 0,
   }
 }
 
@@ -296,6 +312,13 @@ function hostawayDateToIso(value: string | null | undefined): string | null {
 export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHostawayReview | null {
   if (review.isCancelled) return null
   if (review.type !== 'guest-to-host') return null
+
+  // Same missing-id guard as hostawayReservationToNormalized above — see its
+  // comment. Thrown, not dropped: a corrupted external_id ("undefined") would
+  // silently collide with the next malformed row under the same upsert key.
+  if (review.id === undefined || review.id === null) {
+    throw new Error('[Hostaway] review payload missing id — refusing to map')
+  }
 
   const rating = typeof review.rating === 'number' && Number.isFinite(review.rating)
     ? review.rating

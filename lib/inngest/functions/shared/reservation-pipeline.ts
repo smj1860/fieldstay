@@ -158,8 +158,16 @@ export async function runReservationPipeline(
         }
 
         // Only a confirmed, paying-guest stay posts revenue — not a tentative
-        // request, a cancellation, or the owner's own stay.
-        if (normalized.status === 'confirmed' && normalized.stay_type === 'guest_stay') {
+        // request, a cancellation, or the owner's own stay. A stay a provider
+        // mapper KNOWS was genuinely $0 (revenue_known_zero, e.g. Hostaway's
+        // comped bookings) is excluded too — otherwise booking-events.ts can't
+        // tell "we don't know the price yet" from "we know it was free" and
+        // fabricates a nights * avg_nightly_rate estimate for a real $0 stay.
+        if (
+          normalized.status === 'confirmed' &&
+          normalized.stay_type === 'guest_stay' &&
+          !normalized.revenue_known_zero
+        ) {
           revenueEligible.push(normalized.external_id)
         }
 
