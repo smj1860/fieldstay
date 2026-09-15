@@ -352,3 +352,4 @@ jobs:
       - run: node scripts/check-type-drift.mjs
       - run: node scripts/check-migration-ledger.mjs
       - run: node scripts/check-stripe-price-drift.mjs
+      - run: node scripts/check-property-defaults-drift.mjs

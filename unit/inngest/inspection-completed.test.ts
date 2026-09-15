@@ -89,8 +89,13 @@ interface ClientOpts {
   /** Which named predecessors are still in an open status. */
   stillOpenWorkOrderIds?: string[]
   openPredecessorError?: { message: string }
-  /** Recurrence notes already on those work orders, for the replay case. */
-  existingUpdates?: { work_order_id: string; notes: string }[]
+  /**
+   * dedupe_key values that would already collide against
+   * work_order_updates_dedupe_key_idx — simulates the plain unique index an
+   * upsert({ onConflict: 'dedupe_key', ignoreDuplicates: true }) collides
+   * against on a replay (real DB-level dedup, not an in-memory read).
+   */
+  existingDedupeKeys?: string[]
   /** Occupying bookings in the next occurrence's month — the vacancy nudge. */
   bookings?: { checkin_date: string; checkout_date: string }[]
   /** Completed turnovers at this property, newest first — the last-cleaner walk. */
@@ -134,7 +139,7 @@ function listRead(table: string, selected: string, opts: ClientOpts): QueryResul
   switch (table) {
     case 'inspection_items':      return ok(opts.failedItems ?? [])
     case 'work_orders':           return workOrdersRead(selected, opts)
-    case 'work_order_updates':    return ok(opts.existingUpdates ?? [])
+    case 'work_order_updates':    return ok([])
     case 'bookings':              return ok(opts.bookings ?? [])
     case 'turnover_assignments':  return ok(opts.turnoverAssignments ?? [])
     case 'crew_members':          return ok(opts.crewMembers ?? [])
@@ -150,6 +155,7 @@ function listRead(table: string, selected: string, opts: ClientOpts): QueryResul
 
 function makeClient(opts: ClientOpts) {
   const writes: { table: string; rows: unknown[] }[] = []
+  const upsertCalls: { table: string; onConflict?: string; ignoreDuplicates?: boolean }[] = []
   // Ordering is a contract with Postgres that an in-memory double cannot
   // simulate — it can only be observed. Without this, a test asserting "the
   // oldest predecessor wins" passes on whatever order the fixture array
@@ -210,6 +216,21 @@ function makeClient(opts: ClientOpts) {
           then: (r: (v: unknown) => unknown) => Promise.resolve(result).then(r),
         }
       }
+      // Real DB-level dedup: a row whose dedupe_key already exists is
+      // silently skipped by ignoreDuplicates against the unique index —
+      // simulated here by filtering it out of `writes` rather than by an
+      // in-memory `seen` read, since nothing in the fixed code reads
+      // work_order_updates back before deciding what to write.
+      builder.upsert = (rows: unknown, options?: { onConflict?: string; ignoreDuplicates?: boolean }) => {
+        upsertCalls.push({ table, onConflict: options?.onConflict, ignoreDuplicates: options?.ignoreDuplicates })
+        const arr = Array.isArray(rows) ? rows : [rows]
+        const toInsert = options?.ignoreDuplicates
+          ? arr.filter((r) => !(opts.existingDedupeKeys ?? [])
+              .includes((r as Record<string, unknown>).dedupe_key as string))
+          : arr
+        if (toInsert.length > 0) writes.push({ table, rows: toInsert })
+        return { then: (r: (v: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(r) }
+      }
 
       builder.then = (resolve: (v: unknown) => unknown) =>
         Promise.resolve(listRead(table, selected, opts)).then(resolve)
@@ -218,7 +239,7 @@ function makeClient(opts: ClientOpts) {
     },
   }
 
-  return { client, writes, orderBys }
+  return { client, writes, orderBys, upsertCalls }
 }
 
 function ctx() {
@@ -698,8 +719,12 @@ describe('inspectionCompleted — the repeat answer', () => {
   })
 
   it('does not post the same recurrence note twice on a replay', async () => {
-    // work_order_updates has no dedupe column to collide against, so the note
-    // text is deterministic and a replay recognises its own earlier write.
+    // A real DB-level guarantee, not an in-memory read-then-write `seen` set:
+    // dedupe_key = 'recurrence:' + inspection_items.id, upserted against the
+    // plain unique index with ignoreDuplicates. That protects a genuinely
+    // CONCURRENT run of the same event, not just a sequential replay — an
+    // in-memory `seen` set built from a SELECT only ever protects the latter,
+    // since two concurrent runs both read the same pre-write snapshot.
     const first = makeClient({
       inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
       failedItems: [sameIssue()],
@@ -707,13 +732,17 @@ describe('inspectionCompleted — the repeat answer', () => {
     })
     vi.mocked(createServiceClient).mockReturnValue(first.client as never)
     await invokeHandler(inspectionCompleted, ctx())
-    const posted = first.writes.find((w) => w.table === 'work_order_updates')!.rows[0] as { notes: string }
+    const posted = first.writes.find((w) => w.table === 'work_order_updates')!.rows[0] as { dedupe_key: string }
+    expect(posted.dedupe_key).toBe('recurrence:item-1')
+    expect(first.upsertCalls).toContainEqual({
+      table: 'work_order_updates', onConflict: 'dedupe_key', ignoreDuplicates: true,
+    })
 
     const replay = makeClient({
       inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
       failedItems: [sameIssue()],
       stillOpenWorkOrderIds: [OPEN_WO],
-      existingUpdates: [{ work_order_id: OPEN_WO, notes: posted.notes }],
+      existingDedupeKeys: [posted.dedupe_key],
     })
     vi.mocked(createServiceClient).mockReturnValue(replay.client as never)
 

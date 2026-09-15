@@ -90,15 +90,30 @@ describe('graduated pricing bracket schedule', () => {
     expect(annualCostCents(151)).toBeNull()
   })
 
-  it('marginalRateCentsFor reports the anchor for quantity 1 and each bracket rate above it', () => {
-    expect(marginalRateCentsFor(1)).toBe(4_900)
-    expect(marginalRateCentsFor(2)).toBe(1_300)
-    expect(marginalRateCentsFor(4)).toBe(1_300)
-    expect(marginalRateCentsFor(5)).toBe(1_000)
-    expect(marginalRateCentsFor(16)).toBe(800)
-    expect(marginalRateCentsFor(51)).toBe(600)
-    expect(marginalRateCentsFor(150)).toBe(600)
+  // CLAUDE.md's own reference table documents this as "the rate the NEXT
+  // property would cost — display only", so quantity=4's answer must be
+  // bracket 3's $10 (what property 5 — the one about to be added — costs),
+  // never bracket 2's $13 (what property 4 itself was billed at). A PM
+  // deciding "should I add one more" at exactly a boundary is the one moment
+  // this number matters most, and the two readings genuinely differ there.
+  it('marginalRateCentsFor reports what the NEXT property would cost, not the current bracket', () => {
+    expect(marginalRateCentsFor(0)).toBe(4_900)   // the very first property
+    expect(marginalRateCentsFor(1)).toBe(1_300)   // adding #2 costs $13, not the $49 anchor #1 was
+    expect(marginalRateCentsFor(3)).toBe(1_300)   // #4 is still in the 2-4 bracket
+    expect(marginalRateCentsFor(4)).toBe(1_000)   // #5 crosses into the 5-15 bracket — the boundary case
+    expect(marginalRateCentsFor(14)).toBe(1_000)
+    expect(marginalRateCentsFor(15)).toBe(800)    // #16 crosses into 16-50
+    expect(marginalRateCentsFor(49)).toBe(800)
+    expect(marginalRateCentsFor(50)).toBe(600)    // #51 crosses into 51-150
+    expect(marginalRateCentsFor(149)).toBe(600)   // #150 is the last sellable property
+    expect(marginalRateCentsFor(150)).toBeNull()  // #151 would be Enterprise, no marginal rate
     expect(marginalRateCentsFor(151)).toBeNull()
+  })
+
+  it('marginalRateCentsFor rejects a negative or non-integer quantity', () => {
+    expect(marginalRateCentsFor(-1)).toBeNull()
+    expect(marginalRateCentsFor(1.5)).toBeNull()
+    expect(marginalRateCentsFor(NaN)).toBeNull()
   })
 
   describe('bracketBreakdown', () => {

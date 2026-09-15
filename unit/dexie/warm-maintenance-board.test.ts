@@ -48,15 +48,26 @@ let vendorRows:    { data: unknown; error: unknown } = { data: [], error: null }
 // SELECT is still in flight.
 let onWorkOrdersRead: (() => Promise<void>) | null = null
 
+// Same idea, for the vendors query — which runs BEFORE the mid-pass session
+// re-check, so a test can use it to simulate the session lapsing between the
+// vendors fetch and the work_orders fetch.
+let onVendorsRead: (() => Promise<void>) | null = null
+
 // getSession() is what the warm's session gate asks, and it is not a storage
 // peek: supabase-js refreshes an expired token inside it and returns null when
 // that refresh fails. `null` here therefore models the real production case —
 // a tab whose session has lapsed and cannot be renewed.
 let session: unknown = { access_token: 'jwt' }
+let sessionCalls = 0
 
 function fakeSupabase() {
   return {
-    auth: { getSession: async () => ({ data: { session }, error: null }) },
+    auth: {
+      getSession: async () => {
+        sessionCalls++
+        return { data: { session }, error: null }
+      },
+    },
     from(table: string) {
       const byTable: Record<string, () => { data: unknown; error: unknown }> = {
         work_orders: () => workOrderRows,
@@ -66,7 +77,9 @@ function fakeSupabase() {
       const builder: Record<string, unknown> = {}
       for (const m of ['select', 'eq', 'in', 'order', 'limit']) builder[m] = () => builder
       builder.then = (resolve: (v: unknown) => unknown) => {
-        const hook = table === 'work_orders' ? onWorkOrdersRead : null
+        const hook = table === 'work_orders' ? onWorkOrdersRead
+          : table === 'vendors' ? onVendorsRead
+          : null
         return (hook ? hook() : Promise.resolve()).then(() => resolve(result()))
       }
       return builder
@@ -83,7 +96,9 @@ beforeEach(async () => {
   workOrderRows    = { data: [], error: null }
   vendorRows       = { data: [], error: null }
   onWorkOrdersRead = null
+  onVendorsRead    = null
   session          = { access_token: 'jwt' }
+  sessionCalls     = 0
   vi.stubGlobal('navigator', { onLine: true })
 
   closeDashboardDb()
@@ -226,5 +241,97 @@ describe('warmMaintenanceBoardForOffline', () => {
     await warmMaintenanceBoardForOffline(USER, ORG)
     workOrderRows = { data: [workOrder('wo-2')], error: null }
     expect((await warmMaintenanceBoardForOffline(USER, ORG, { force: true })).workOrders).toBe(1)
+  })
+
+  // A session that is fine when the pass starts but lapses between the
+  // vendors query and the work_orders query is a different failure than "no
+  // session at all" — the flaky-connection case the mid-pass re-check exists
+  // for. Without it, the work_orders query would go out anyway and 'wo-1'
+  // would land in the cache despite the lapsed session.
+  it('bails mid-pass when the session lapses AFTER vendors warm but before work orders fetch', async () => {
+    vendorRows    = { data: [{ id: 'v-1', org_id: ORG, name: 'Ace' }], error: null }
+    workOrderRows = { data: [workOrder('wo-1')], error: null }
+    onVendorsRead = async () => { session = null }
+
+    const result = await warmMaintenanceBoardForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', workOrders: 0 })
+    // Vendors warmed before the lapse and are kept.
+    expect(result.vendors).toBe(1)
+    expect(await getDashboardDb(USER, ORG).work_orders.get('wo-1')).toBeUndefined()
+    expect(sessionCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  // React Strict Mode's mount/cleanup/remount double-invoke, and a tablet
+  // reconnecting right as the layout mounts, both call this before either call
+  // has written the watermark. Without the in-flight map, both would read
+  // isDue() as false and run a full pass each.
+  it('two un-forced calls started back to back share ONE pass', async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null }
+
+    const first  = warmMaintenanceBoardForOffline(USER, ORG)
+    const second = warmMaintenanceBoardForOffline(USER, ORG)
+
+    expect(second).toBe(first)
+
+    const before = sessionCalls
+    await Promise.all([first, second])
+    // One pass makes two session checks (top + mid-pass) — a second
+    // concurrent pass would double this.
+    expect(sessionCalls - before).toBeLessThanOrEqual(2)
+  })
+
+  it('a FORCED call does not join an un-forced pass already in flight, and each forced call gets its own run', async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null }
+
+    const background = warmMaintenanceBoardForOffline(USER, ORG)
+    const forcedA     = warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+    const forcedB     = warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    // force always starts a new run rather than joining ANY existing one —
+    // the in-flight map exists to dedupe accidental double-mounts, not to
+    // throttle a deliberate re-warm.
+    expect(forcedA).not.toBe(background)
+    expect(forcedB).not.toBe(forcedA)
+
+    await Promise.all([background, forcedA, forcedB])
+  })
+
+  // The `.finally()` cleanup only deletes the map entry when it still points
+  // at ITS OWN run: `if (inFlight.get(key) === run)`. This is what stops an
+  // OLDER call's cleanup from evicting a NEWER call's still-running entry.
+  // Exercised by making the first forced call finish before the second one
+  // does, then confirming a third (un-forced) call still JOINS the second
+  // rather than starting a redundant fourth pass because the map entry was
+  // wiped out from under it.
+  it("an older forced call's cleanup does not evict a newer forced call's still-running entry", async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null }
+
+    // A queue rather than two nullable variables — avoids TS narrowing a
+    // closure-mutated `let` back to `never` across the `await` below, and
+    // reads just as clearly: releases[0] is the first read to arrive, [1]
+    // the second.
+    const releases: Array<() => void> = []
+    onWorkOrdersRead = () => new Promise<void>((resolve) => { releases.push(resolve) })
+
+    const forcedA = warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+    const forcedB = warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    // Both calls have several real (non-microtask) awaits ahead of the
+    // work_orders read — the session check and the Dexie/IndexedDB queries —
+    // so the gate isn't installed synchronously. Poll with a macrotask tick
+    // rather than assuming a fixed number of microtask flushes gets there.
+    while (releases.length < 1) await new Promise((r) => setTimeout(r, 0))
+    releases[0]!()
+    await forcedA
+
+    // forcedB is still pending (its release not yet called). A plain call
+    // now must JOIN it, not start a third pass.
+    const third = warmMaintenanceBoardForOffline(USER, ORG)
+    expect(third).toBe(forcedB)
+
+    while (releases.length < 2) await new Promise((r) => setTimeout(r, 0))
+    releases[1]!()
+    await Promise.all([forcedB, third])
   })
 })

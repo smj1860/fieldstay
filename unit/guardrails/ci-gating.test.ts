@@ -51,6 +51,7 @@ const INSTALL_FREE_SCRIPTS = [
   'scripts/check-db-invariants.mjs',
   'scripts/check-type-drift.mjs',
   'scripts/check-migration-ledger.mjs',
+  'scripts/check-property-defaults-drift.mjs',
 ]
 
 describe('guardrail: lint warning ratchet', () => {

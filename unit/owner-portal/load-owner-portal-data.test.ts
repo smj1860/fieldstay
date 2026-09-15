@@ -6,9 +6,13 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { loadOwnerPortalData } from '@/app/owner/[token]/load-owner-portal-data'
 import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 
 interface QueuedByTable {
   [table: string]: unknown[]
@@ -305,5 +309,33 @@ describe('loadOwnerPortalData', () => {
     expect(projection?.items.some((i) => i.property_id === 'prop_9')).toBe(false)
     expect(projection?.total_low).toBe(100)
     expect(projection?.total_high).toBe(200)
+  })
+
+  it('falls back to the single property AND reports the collapse when every id in property_ids resolves to nothing', async () => {
+    // Every id in property_ids was since deleted/reassigned out of the org —
+    // a real, reachable state, not a query error. Before this fix the
+    // fallback to a single property was silent: an owner who should see a
+    // combined multi-property statement would see one property with nothing
+    // anywhere distinguishing that from "this owner really only has one".
+    const supabase = makeSupabase({
+      owner_portal_tokens: [{
+        data: portalTokenRow({ is_multi: true, property_ids: ['prop_1', 'prop_2'] }),
+        error: null,
+      }],
+      properties:          [{ data: [], error: null }],
+      owner_transactions:  [{ data: [], error: null }],
+      bookings:            [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await loadOwnerPortalData('valid-token', undefined, undefined)
+
+    expect(result?.status).toBe('ok')
+    if (result?.status !== 'ok') throw new Error('expected ok')
+    expect(result.data.portfolioProperties.map((p) => p.id)).toEqual(['prop_1'])
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'owner-portal.portfolioProperties', orgId: ORG_ID }),
+    )
   })
 })

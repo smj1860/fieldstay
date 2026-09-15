@@ -92,6 +92,19 @@ export interface WarmResult {
   skipped?:    'offline' | 'throttled' | 'unauthenticated'
 }
 
+// One in-flight run per (userId, orgId) — a concurrent caller AWAITS the
+// already-running pass instead of starting a second one. Two entirely
+// plausible sequences would otherwise both read isDue() as false before
+// either has written the watermark: React Strict Mode's mount/cleanup/
+// remount double-invoke, and a tablet reconnecting right as the layout
+// mounts (the mount call and the 'online' listener's call landing in the
+// same tick). The end state was very likely self-consistent either way, but
+// it doubled outbound requests against exactly the flaky connection this
+// feature is built around, and let two concurrent reconcile-by-absence
+// transactions interleave. Same pattern inspection-photos.ts's
+// drainInspectionPhotos already uses for the same reason.
+const inFlight = new Map<string, Promise<WarmResult>>()
+
 /**
  * Pulls every open inspection into the local cache and warms its page.
  *
@@ -99,10 +112,30 @@ export interface WarmResult {
  * only makes it reachable without a network, and a device that misses a warm is
  * no worse off than before this existed.
  */
-export async function warmInspectionsForOffline(
+export function warmInspectionsForOffline(
   userId: string,
   orgId:  string,
   opts:   { force?: boolean } = {},
+): Promise<WarmResult> {
+  const key = `${userId}-${orgId}`
+  // A forced call (the one deliberate re-warm this page does on mount) must
+  // still run even if a throttled background pass happens to be in flight —
+  // but it joins rather than starting a THIRD concurrent pass if another
+  // forced call is already running.
+  const existing = inFlight.get(key)
+  if (existing && !opts.force) return existing
+
+  const run = runWarm(userId, orgId, opts).finally(() => {
+    if (inFlight.get(key) === run) inFlight.delete(key)
+  })
+  inFlight.set(key, run)
+  return run
+}
+
+async function runWarm(
+  userId: string,
+  orgId:  string,
+  opts:   { force?: boolean },
 ): Promise<WarmResult> {
   if (!canWarm()) return { ...EMPTY, skipped: 'offline' }
 
@@ -129,6 +162,15 @@ export async function warmInspectionsForOffline(
     // not do.
     const schedules = await cacheInspectionSchedules(db, orgId)
 
+    // Re-checked, not just at the top: this pass makes five-plus sequential/
+    // parallel round-trips (cacheFormLibrary's own Promise.all of four
+    // queries, then this, then the three below), and on the flaky/high-
+    // latency connection this whole feature is built around, a token can
+    // expire mid-pass. A later query going out unauthenticated 42501s —
+    // exactly the incident ./session-gate.ts documents, just narrowed to
+    // whichever tail queries ran after expiry instead of all of them.
+    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, skipped: 'unauthenticated' }
+
     const inspections = await fetchOpenInspections(orgId)
     if (inspections === null) return { ...EMPTY, ...library, schedules }
 
@@ -142,6 +184,8 @@ export async function warmInspectionsForOffline(
       const routes = await warmRoutes(['/maintenance/inspections'])
       return { ...EMPTY, ...library, schedules, routes }
     }
+
+    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, skipped: 'unauthenticated' }
 
     await cacheInspectionsAndAssets(db, orgId, inspections)
     await cacheOpenConcerns(db, orgId, [...new Set(inspections.map((i) => i.property_id))])

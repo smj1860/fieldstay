@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { reportError } from '@/lib/observability/report-error'
 
 // THE OWNER PORTAL'S ONLY AUTH, in one place.
 //
@@ -172,6 +173,19 @@ export async function resolvePortalScope(
     res as PostgrestResult<PortalOwnerProperty[]>,
     { site: 'owner-portal.portfolioProperties', orgId: owner.org_id },
   )
+
+  // A legitimate zero — every id in a stale property_ids array was since
+  // deleted or reassigned out of the org — silently collapses this token
+  // back to a single property with no signal anywhere: isMulti's downgrade
+  // never reaches the returned PortalScope, and `primary` is not even
+  // guaranteed to be one of the ids the token actually authorized. An owner
+  // who should see 3 properties on a combined statement link would see 1,
+  // indistinguishable from "this owner really only has one property."
+  if (props.length === 0) {
+    reportError(new Error('multi-property owner token resolved to zero live properties'), {
+      site: 'owner-portal.resolvePortalScope', orgId: owner.org_id, level: 'warning',
+    })
+  }
 
   const properties = props.length > 0 ? props : [primary]
   return {

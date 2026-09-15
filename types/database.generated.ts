@@ -6262,6 +6262,7 @@ export type Database = {
       work_order_updates: {
         Row: {
           created_at: string
+          dedupe_key: string | null
           id: string
           notes: string | null
           org_id: string
@@ -6273,6 +6274,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           notes?: string | null
           org_id: string
@@ -6284,6 +6286,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           notes?: string | null
           org_id?: string
@@ -6857,6 +6860,7 @@ export type Database = {
         Args: { p_entity: string; p_user_ids: string[] }
         Returns: undefined
       }
+      property_defaults_report: { Args: never; Returns: Json }
       purge_expired_audit_events: { Args: never; Returns: Json }
       read_integration_refresh_token: {
         Args: { p_provider_id: string; p_user_id: string }
@@ -6869,6 +6873,16 @@ export type Database = {
       read_property_door_code: {
         Args: { p_org_id: string; p_property_id: string }
         Returns: string
+      }
+      rebase_safety_schedules: {
+        Args: {
+          p_due_date: string
+          p_form_id: string
+          p_frequency: Database["public"]["Enums"]["schedule_frequency"]
+          p_org_id: string
+          p_today: string
+        }
+        Returns: number
       }
       recompute_vendor_scores: { Args: never; Returns: number }
       record_consumption_samples: { Args: { p_rows: Json }; Returns: number }

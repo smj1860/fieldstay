@@ -195,7 +195,7 @@ export default function PricingCards({ tiers, annual, signupHref }: Readonly<Pri
                       from{' '}
                     </span>
                     <span className={`text-3xl font-bold ${primaryText}`}>
-                      ${annual ? plan.annual!.toLocaleString() : plan.monthly}
+                      ${annual ? plan.annual!.toLocaleString() : plan.monthly!.toLocaleString()}
                     </span>
                     <span className={`mb-1 text-sm ${mutedText}`}>
                       {annual ? '/yr' : '/mo'}

@@ -52,13 +52,35 @@ let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null 
 // the refresh, so null models a session that has lapsed and cannot be renewed.
 let session: unknown = { access_token: 'jwt' }
 
+// When set, each getSession() call SHIFTS the next value off this queue
+// instead of reading the standing `session` var above — lets a test model a
+// session that is valid for the pass's first check and lapses partway
+// through, without disturbing every other test's simpler `session` toggle.
+// The last value repeats once the queue is exhausted.
+let sessionSequence: unknown[] | null = null
+let sessionCalls = 0
+
+// Fires exactly when the `inspections` SELECT's response is being read — lets
+// a test hold one call's pass open at a controlled point, the same way
+// warm-maintenance-board.test.ts's onWorkOrdersRead does.
+let onInspectionsRead: (() => Promise<void>) | null = null
+
 /**
  * A minimal PostgREST builder. Every filter returns `this`, so the chain under
  * test is exercised as written; only the terminal await differs by table.
  */
 function fakeSupabase() {
   return {
-    auth: { getSession: async () => ({ data: { session }, error: null }) },
+    auth: {
+      getSession: async () => {
+        sessionCalls++
+        if (sessionSequence) {
+          const next = sessionSequence.length > 1 ? sessionSequence.shift() : sessionSequence[0]
+          return { data: { session: next }, error: null }
+        }
+        return { data: { session }, error: null }
+      },
+    },
     from(table: string) {
       const byTable: Record<string, () => { data: unknown; error: unknown }> = {
         inspections:              () => inspectionRows,
@@ -74,7 +96,10 @@ function fakeSupabase() {
       for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit']) {
         builder[m] = () => builder
       }
-      builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result()).then(resolve)
+      builder.then = (resolve: (v: unknown) => unknown) => {
+        const hook = table === 'inspections' ? onInspectionsRead : null
+        return (hook ? hook() : Promise.resolve()).then(() => resolve(result()))
+      }
       return builder
     },
   }
@@ -90,9 +115,12 @@ const { warmInspectionsForOffline } = await import('@/lib/dexie/dashboard/warm-i
 const { SHELL_CACHE } = await import('@/lib/pwa/cache-names')
 
 beforeEach(async () => {
-  inspectionRows = { data: [], error: null }
-  assetRows      = { data: [], error: null }
-  session        = { access_token: 'jwt' }
+  inspectionRows    = { data: [], error: null }
+  assetRows         = { data: [], error: null }
+  session           = { access_token: 'jwt' }
+  sessionSequence   = null
+  sessionCalls      = 0
+  onInspectionsRead = null
   // A library that caches by default, since almost every test needs one and
   // only the library-specific tests care about its contents.
   formRows     = { data: [{ id: 'f1', key: 'safety', version: 1, is_active: true, name: 'Safety' }], error: null }
@@ -329,6 +357,25 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
       .toMatchObject({ skipped: 'unauthenticated' })
   })
 
+  // A session that is fine at the TOP of the pass but lapses before the
+  // mid-pass query is a different failure than the all-or-nothing case above
+  // — this is the flaky-connection case the mid-pass re-check exists for. The
+  // queue's second entry (null) is what the second hasUsableSession() call
+  // reads; without that re-check, fetchOpenInspections would run anyway and
+  // 'insp-1' would land in the cache despite the lapsed session.
+  it('bails mid-pass when the session lapses AFTER the form library warms but before inspections fetch', async () => {
+    sessionSequence = [{ access_token: 'jwt' }, null]
+    inspectionRows  = { data: [inspection('insp-1')], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', inspections: 0 })
+    // The library warm, which ran BEFORE the session lapsed, is still kept —
+    // only the tail of the pass is abandoned.
+    expect(result.formItems).toBeGreaterThan(0)
+    expect(await getDashboardDb(USER, ORG).inspections.get('insp-1')).toBeUndefined()
+    expect(sessionCalls).toBeGreaterThanOrEqual(2)
+  })
 
   it('throttles, so mounting on every dashboard page is not a request storm', async () => {
     inspectionRows = { data: [inspection('insp-1')], error: null }
@@ -364,5 +411,85 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
     inspectionRows = { data: [inspection('insp-1')], error: null }
 
     expect((await warmInspectionsForOffline(USER, ORG)).inspections).toBe(1)
+  })
+})
+
+describe('warmInspectionsForOffline — concurrent callers', () => {
+  // React Strict Mode's mount/cleanup/remount double-invoke, and a tablet
+  // reconnecting right as the layout mounts, both call this before either
+  // call has written the watermark. Without the in-flight map, both would
+  // read isDue() as false and run a full pass each — doubling outbound
+  // requests on the flaky connection this feature exists for, and letting
+  // two reconcile-by-absence transactions interleave.
+  it('two un-forced calls started back to back share ONE pass', async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    const first  = warmInspectionsForOffline(USER, ORG)
+    const second = warmInspectionsForOffline(USER, ORG)
+
+    // Same promise, not just an equivalent result — the second call never
+    // started its own pass at all.
+    expect(second).toBe(first)
+
+    const sessionCallsBefore = sessionCalls
+    await Promise.all([first, second])
+    // Exactly the calls one pass makes (the top check plus mid-pass
+    // re-checks) — a second concurrent pass would double this.
+    expect(sessionCalls - sessionCallsBefore).toBeLessThanOrEqual(3)
+  })
+
+  it('a FORCED call does not join an un-forced pass already in flight, and each forced call gets its own run', async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    const background = warmInspectionsForOffline(USER, ORG)
+    const forcedA     = warmInspectionsForOffline(USER, ORG, { force: true })
+    const forcedB     = warmInspectionsForOffline(USER, ORG, { force: true })
+
+    // force always starts a new run rather than joining ANY existing one —
+    // the in-flight map exists to dedupe accidental double-mounts, not to
+    // throttle a deliberate re-warm.
+    expect(forcedA).not.toBe(background)
+    expect(forcedB).not.toBe(forcedA)
+
+    await Promise.all([background, forcedA, forcedB])
+  })
+
+  // The `.finally()` cleanup only deletes the map entry when it still points
+  // at ITS OWN run: `if (inFlight.get(key) === run)`. This is what stops an
+  // OLDER call's cleanup from evicting a NEWER call's still-running entry —
+  // exercised here by making the first forced call finish before the second
+  // one does, then confirming a third (un-forced) call still JOINS the
+  // second rather than starting a redundant fourth pass because the map
+  // entry was wiped out from under it.
+  it("an older forced call's cleanup does not evict a newer forced call's still-running entry", async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    // A queue rather than two nullable variables — avoids TS narrowing a
+    // closure-mutated `let` back to `never` across the `await` below, and
+    // reads just as clearly: releases[0] is the first read to arrive, [1]
+    // the second.
+    const releases: Array<() => void> = []
+    onInspectionsRead = () => new Promise<void>((resolve) => { releases.push(resolve) })
+
+    const forcedA = warmInspectionsForOffline(USER, ORG, { force: true })
+    const forcedB = warmInspectionsForOffline(USER, ORG, { force: true })
+
+    // Both calls have several real (non-microtask) awaits ahead of the
+    // inspections read — the session checks, the form-library Promise.all,
+    // the schedule query — so the gate isn't installed synchronously. Poll
+    // with a macrotask tick rather than assuming a fixed number of microtask
+    // flushes gets there.
+    while (releases.length < 1) await new Promise((r) => setTimeout(r, 0))
+    releases[0]!()
+    await forcedA
+
+    // forcedB is still pending (its release not yet called). A plain call
+    // now must JOIN it, not start a third pass.
+    const third = warmInspectionsForOffline(USER, ORG)
+    expect(third).toBe(forcedB)
+
+    while (releases.length < 2) await new Promise((r) => setTimeout(r, 0))
+    releases[1]!()
+    await Promise.all([forcedB, third])
   })
 })

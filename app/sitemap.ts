@@ -20,7 +20,12 @@ import { marketingOrigin } from '@/lib/marketing'
 // same decision, and the two are meant to be read together.
 // ============================================================================
 
-const PAGES: ReadonlyArray<{
+// Exported so unit/guardrails/marketing-pages-crawlable.test.ts can assert
+// every PUBLIC_MARKETING_PAGES entry appears here too — the two lists used to
+// be independent hand-maintained duplicates with nothing coupling them, so a
+// new marketing page could pass the crawlability guardrail while staying
+// silently absent from the sitemap XML robots.ts advertises.
+export const PAGES: ReadonlyArray<{
   path:       string
   priority:   number
   changeFreq: MetadataRoute.Sitemap[number]['changeFrequency']

@@ -27,6 +27,23 @@ import type { AssetType } from '@/types/database'
 // One modal, so the two entry points cannot drift into capturing different
 // things.
 
+/**
+ * The storage-key extension for a captured photo's filename.
+ *
+ * `name.split('.').pop() || 'jpg'` looks right but is not: `'photo'.split('.')`
+ * is `['photo']`, and `.pop()` on that returns the truthy string `'photo'` —
+ * so the `|| 'jpg'` fallback never fires for a filename with no dot at all: it
+ * only fires on an EMPTY filename. Some capture pipelines (certain Android
+ * WebViews, some `capture="environment"` implementations, a File built from a
+ * blob with no conventional name) hand back exactly that — a name with no
+ * extension — which without this check becomes a storage key like
+ * `smart_lock-<uuid>.photo` instead of `.jpg`.
+ */
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : 'jpg'
+}
+
 export function DiscoveryCaptureModal({
   propertyId,
   orgId,
@@ -149,7 +166,7 @@ export function DiscoveryCaptureModal({
       let photoPath: string | null = null
 
       if (photoFile) {
-        const ext     = photoFile.name.split('.').pop() || 'jpg'
+        const ext     = fileExtension(photoFile.name)
         const path    = orgScopedStoragePath(orgId, 'asset-discovery', propertyId, `${assetType}-${crypto.randomUUID()}.${ext}`)
         const blobKey = `photo-asset-${assetId}`
 

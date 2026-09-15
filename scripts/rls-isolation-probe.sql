@@ -232,7 +232,14 @@ DECLARE
   v_n   bigint;
 BEGIN
   FOR v_tbl IN SELECT tbl FROM probe_tables ORDER BY tbl LOOP
-    EXECUTE format('SELECT count(*) FROM public.%I WHERE org_id <> $1', v_tbl)
+    -- NULL-inclusive: SQL three-valued logic makes `org_id <> $1` evaluate to
+    -- NULL (not TRUE) for a row with org_id IS NULL, so a plain <> comparison
+    -- is blind to it in both this ground-truth phase and the foreign_seen
+    -- phase below — an RLS regression that leaks org_id IS NULL rows
+    -- platform-wide would report a clean pass. A visible NULL-org_id row is
+    -- still an information disclosure worth catching even though it isn't
+    -- literally "another tenant's" row.
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE org_id IS NULL OR org_id <> $1', v_tbl)
       INTO v_n USING v_org;
     INSERT INTO probe_results VALUES ('ground_truth', v_tbl, v_n);
 
@@ -297,7 +304,11 @@ BEGIN
     INSERT INTO probe_results VALUES ('own', v_tbl, v_n);
     v_own_total := v_own_total + v_n;
 
-    EXECUTE format('SELECT count(*) FROM public.%I WHERE org_id <> $1', v_tbl)
+    -- Same NULL-inclusive fix as the ground-truth phase above — a foreign
+    -- row with org_id IS NULL would otherwise be invisible to this leak
+    -- check too, so it could neither inflate ground_truth nor ever be
+    -- required to be non-zero here.
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE org_id IS NULL OR org_id <> $1', v_tbl)
       INTO v_n USING v_org;
     INSERT INTO probe_results VALUES ('foreign_seen', v_tbl, v_n);
     IF v_n > 0 THEN

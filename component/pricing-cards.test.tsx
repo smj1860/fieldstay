@@ -75,3 +75,32 @@ describe('PricingCards calculator — non-integer property counts', () => {
     expect(priceText()).not.toMatch(/\$0(?!\d)/)
   })
 })
+
+// ============================================================================
+// The annual branch of a tier card's price called .toLocaleString()
+// (comma-formats thousands); the monthly branch did not — `plan.monthly` was
+// rendered via raw template-literal coercion. Invisible today because every
+// tier's floor-computed monthly figure stays under 1,000, but
+// monthlyCostCents(150) (the true schedule ceiling) is already 1,068 — a
+// future rebracketing that pushes a tier's displayed monthly past 999 would
+// render $1068 next to a comma-formatted $10,680 annual figure on the same
+// toggle.
+// ============================================================================
+describe('PricingCards tier cards — monthly/annual number formatting parity', () => {
+  const FOUR_DIGIT_TIERS: PricingTier[] = [
+    { name: 'Portfolio', description: '', monthly: 1068, annual: 10680, annualSavings: 2136, properties: '51-150', highlight: false, features: [] },
+  ]
+
+  it('comma-formats a four-digit monthly price the same way the annual price already is', () => {
+    render(<PricingCards tiers={FOUR_DIGIT_TIERS} annual={false} signupHref="/signup" />)
+
+    expect(screen.getByText('$1,068')).toBeInTheDocument()
+    expect(screen.queryByText('$1068')).not.toBeInTheDocument()
+  })
+
+  it('still comma-formats the annual price on the same toggle', () => {
+    render(<PricingCards tiers={FOUR_DIGIT_TIERS} annual={true} signupHref="/signup" />)
+
+    expect(screen.getByText('$10,680')).toBeInTheDocument()
+  })
+})

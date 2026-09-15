@@ -7,7 +7,12 @@ vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
 }))
 
-import { accountDeletion, ORG_PURGE_TABLES } from '@/lib/inngest/functions/account-deletion'
+import {
+  accountDeletion,
+  ORG_PURGE_TABLES,
+  ORG_TABLES_WITHOUT_CASCADE,
+  ORG_TABLES_BLOCKING_CASCADE,
+} from '@/lib/inngest/functions/account-deletion'
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { CRITICAL_FUNCTION_IDS } from '@/lib/inngest/functions/on-failure'
@@ -42,7 +47,7 @@ interface QueuedByTable { [table: string]: { error?: unknown }[] }
 
 function makeAdmin(
   queued: QueuedByTable = {},
-  opts: { deleteUserError?: { message: string } } = {},
+  opts: { deleteUserError?: { message: string; status?: number } } = {},
 ) {
   const counters: Record<string, number> = {}
   const order: string[] = []
@@ -173,6 +178,26 @@ describe('accountDeletion', () => {
     await expect(run(admin, [])).resolves.toEqual({ orgs_purged: 0 })
   })
 
+  it('treats a 404 status as already-deleted even when the message would not match the not-found regex', async () => {
+    // A brittle regex against error.message is fragile against wording drift
+    // in a third-party (Supabase GoTrue) error string this codebase does not
+    // control. The HTTP status is the real signal.
+    const admin = makeAdmin({}, { deleteUserError: { message: 'Auth admin error', status: 404 } })
+
+    await expect(run(admin, [])).resolves.toEqual({ orgs_purged: 0 })
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('still throws a non-404 error whose message does not mention not-found', async () => {
+    const admin = makeAdmin({}, { deleteUserError: { message: 'auth service down', status: 500 } })
+
+    await expect(run(admin, [])).rejects.toThrow(/deleteUser failed/)
+    expect(reportError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ site: 'inngest.account-deletion.delete_user' }),
+    )
+  })
+
   it('refuses a payload with more organizations than one run should ever carry, instead of truncating it', async () => {
     // Every org in the payload is one the caller OWNS and is the SOLE member
     // of, so this shape cannot be produced by the route. Truncating would
@@ -261,6 +286,63 @@ describe('accountDeletion', () => {
 
       // org_1 was fully purged before the org_2 check failed and stopped the run.
       expect(admin.order).toContain('delete:organizations')
+    })
+  })
+
+  describe('final sweep of non-cascading tables (race window before the org delete)', () => {
+    // Nothing locks the org against new writes between the first purge pass
+    // over ORG_TABLES_WITHOUT_CASCADE and the organizations delete — a crew
+    // member's own session is untouched by this flow (the sole-member check
+    // is about organization_members, not crew_members). A write that lands
+    // in that window is caught by neither the already-run purge step nor the
+    // organizations cascade (these tables have no FK to organizations at
+    // all), so it survives, orphaned. A second sweep immediately before the
+    // org delete closes that window.
+
+    it('re-sweeps every non-cascading table a second time, immediately before the organization delete', async () => {
+      const admin = makeAdmin()
+
+      await run(admin, ['org_1'])
+
+      for (const table of ORG_TABLES_WITHOUT_CASCADE) {
+        const occurrences = admin.order.filter((entry) => entry === `delete:${table}`).length
+        expect(occurrences).toBe(2)
+      }
+      // Tables that already cascade correctly (or block it and must run
+      // exactly once, before the cascade) get no second sweep — they were
+      // never the race window this closes.
+      for (const table of ORG_TABLES_BLOCKING_CASCADE) {
+        const occurrences = admin.order.filter((entry) => entry === `delete:${table}`).length
+        expect(occurrences).toBe(1)
+      }
+    })
+
+    it('runs the final sweep after the first purge pass and before the organization delete', async () => {
+      const admin = makeAdmin()
+
+      await run(admin, ['org_1'])
+
+      const orgIdx = admin.order.indexOf('delete:organizations')
+      for (const table of ORG_TABLES_WITHOUT_CASCADE) {
+        const lastIdx = admin.order.lastIndexOf(`delete:${table}`)
+        expect(lastIdx).toBeGreaterThan(admin.order.indexOf(`delete:${table}`)) // a real second occurrence
+        expect(lastIdx).toBeLessThan(orgIdx)
+      }
+    })
+
+    it('THROWS rather than continuing when the final sweep fails, and never deletes the organization', async () => {
+      // The first purge pass over crew_availability succeeds; the final
+      // sweep for the same table is what fails.
+      const admin = makeAdmin({ crew_availability: [{ error: null }, { error: { message: 'deadlock detected' } }] })
+
+      await expect(run(admin, ['org_1'])).rejects.toThrow(/final sweep failed for crew_availability\/org_1/)
+
+      expect(admin.order).not.toContain('delete:organizations')
+      expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
+      expect(reportError).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ site: 'inngest.account-deletion.purge_org_final_sweep' }),
+      )
     })
   })
 
