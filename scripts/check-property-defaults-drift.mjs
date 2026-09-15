@@ -101,12 +101,18 @@ const src = readFileSync(DEFAULTS_PATH, 'utf8')
 /** `columnName: row.columnName ?? <literal>,` -> { columnName, literal } */
 function parseHardcodedDefaults(text) {
   const parsed = {}
-  const re = /(\w+):\s*row\.\w+\s*\?\?\s*('[^']*'|[-\d.]+),/g
+  // A single [^,]+ capture (no internal alternation/quantifier ambiguity)
+  // rather than ('[^']*'|[-\d.]+) — SonarCloud flags the latter's shape as
+  // super-linear on backtracking. The literals here are simple words/numbers/
+  // times with no embedded commas, so splitting on the trailing comma and
+  // classifying by leading quote afterward is equivalent.
+  const re = /(\w+):\s*row\.\w+\s*\?\?\s*([^,]+),/g
   for (const m of text.matchAll(re)) {
     const [, name, rawLiteral] = m
-    parsed[name] = rawLiteral.startsWith("'")
-      ? rawLiteral.slice(1, -1)
-      : Number(rawLiteral)
+    const trimmed = rawLiteral.trim()
+    parsed[name] = trimmed.startsWith("'")
+      ? trimmed.slice(1, -1)
+      : Number(trimmed)
   }
   return parsed
 }

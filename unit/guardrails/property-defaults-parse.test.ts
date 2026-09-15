@@ -25,10 +25,13 @@ const SCRIPT_SRC = readFileSync(join(process.cwd(), 'scripts', 'check-property-d
 
 function parseHardcodedDefaults(text: string): Record<string, string | number> {
   const parsed: Record<string, string | number> = {}
-  const re = /(\w+):\s*row\.\w+\s*\?\?\s*('[^']*'|[-\d.]+),/g
+  // Kept identical to the script's regex — see that file's comment for why
+  // it's [^,]+ rather than ('[^']*'|[-\d.]+) (SonarCloud backtracking flag).
+  const re = /(\w+):\s*row\.\w+\s*\?\?\s*([^,]+),/g
   for (const m of text.matchAll(re)) {
     const [, name, rawLiteral] = m
-    parsed[name!] = rawLiteral!.startsWith("'") ? rawLiteral!.slice(1, -1) : Number(rawLiteral)
+    const trimmed = rawLiteral!.trim()
+    parsed[name!] = trimmed.startsWith("'") ? trimmed.slice(1, -1) : Number(trimmed)
   }
   return parsed
 }

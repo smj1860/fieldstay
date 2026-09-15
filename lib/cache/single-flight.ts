@@ -133,7 +133,7 @@ export async function singleFlight<T>(opts: SingleFlightOptions<T>): Promise<T> 
       // after the budget expires — a fresh, simultaneous stampede, worse
       // than no lock at all because it also added latency first.
       // eslint-disable-next-line no-restricted-properties -- desynchronise waiters, not id/token generation
-      const waitMs = baseWaitMs * (1 + Math.random() * 0.5)
+      const waitMs = baseWaitMs * (1 + Math.random() * 0.5) // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
       await new Promise((resolve) => setTimeout(resolve, waitMs))
       const settled = await opts.read()
       if (settled !== null && settled !== undefined) return settled

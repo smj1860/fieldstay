@@ -67,20 +67,39 @@ describe('GET /api/properties/[id]/history/export — CSV/formula injection', ()
     mockAuthed()
   })
 
-  it('prefixes a leading = with a single quote, neutralizing an Excel/Sheets formula', async () => {
+  it.each([
+    {
+      label:            'defangs a leading = with a single quote inside the quotes, neutralizing an Excel/Sheets formula',
+      title:            '=HYPERLINK("http://evil.example/","click")',
+      // Quoted and escaped, but the leading = must be defanged with a
+      // leading single quote INSIDE the quotes — a real spreadsheet still
+      // treats a raw ="..." field as live even when CSV-quoted.
+      expectContain:    '"\'=HYPERLINK(""http://evil.example/"",""click"")"',
+      expectNotContain: '"=HYPERLINK(',
+    },
+    {
+      label:            'leaves an ordinary field untouched, still just double-quote-escaped',
+      title:            'Replaced the "leaky" faucet',
+      expectContain:    '"Replaced the ""leaky"" faucet"',
+      expectNotContain: "'Replaced",
+    },
+    {
+      label:            'does not touch a field that merely CONTAINS = later in the string',
+      title:            'Cost = $40',
+      expectContain:    '"Cost = $40"',
+      expectNotContain: "'Cost",
+    },
+  ])('$label', async ({ title, expectContain, expectNotContain }) => {
     vi.mocked(loadPropertyHistory).mockResolvedValue({
-      events: [event({ title: '=HYPERLINK("http://evil.example/","click")' })],
+      events: [event({ title })],
       totalCount: 1, omittedCount: 0,
     })
 
     const res = await GET(getRequest(), params())
     const csv = await res.text()
 
-    // Quoted and escaped, but the leading = must be defanged with a leading
-    // single quote INSIDE the quotes — a real spreadsheet still treats a raw
-    // ="..." field as live even when CSV-quoted.
-    expect(csv).toContain('"\'=HYPERLINK(""http://evil.example/"",""click"")"')
-    expect(csv).not.toContain('"=HYPERLINK(')
+    expect(csv).toContain(expectContain)
+    expect(csv).not.toContain(expectNotContain)
   })
 
   it.each(['+', '-', '@', '\t', '\r'])('neutralizes a leading %s the same way', async (trigger) => {
@@ -93,31 +112,5 @@ describe('GET /api/properties/[id]/history/export — CSV/formula injection', ()
     const csv = await res.text()
 
     expect(csv).toContain(`'${trigger}cmd`)
-  })
-
-  it('leaves an ordinary field untouched, still just double-quote-escaped', async () => {
-    vi.mocked(loadPropertyHistory).mockResolvedValue({
-      events: [event({ title: 'Replaced the "leaky" faucet' })],
-      totalCount: 1, omittedCount: 0,
-    })
-
-    const res = await GET(getRequest(), params())
-    const csv = await res.text()
-
-    expect(csv).toContain('"Replaced the ""leaky"" faucet"')
-    expect(csv).not.toContain("'Replaced")
-  })
-
-  it('does not touch a field that merely CONTAINS = later in the string', async () => {
-    vi.mocked(loadPropertyHistory).mockResolvedValue({
-      events: [event({ title: 'Cost = $40' })],
-      totalCount: 1, omittedCount: 0,
-    })
-
-    const res = await GET(getRequest(), params())
-    const csv = await res.text()
-
-    expect(csv).toContain('"Cost = $40"')
-    expect(csv).not.toContain("'Cost")
   })
 })
