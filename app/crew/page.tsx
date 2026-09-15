@@ -13,6 +13,7 @@ import { useCrewT, formatActiveAssignments } from '@/lib/crew/i18n'
 import { distanceMiles }                 from '@/lib/geocoding'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 import { Dialog }                        from '@/components/ui/Dialog'
+import { LanguageToggle }                from './_components/language-toggle'
 import type { CrewLocale } from '@/types/database'
 
 const AVG_DRIVE_SPEED_MPH = 30
@@ -349,15 +350,18 @@ export default function CrewDashboardPage() {
 
       {/* ── Welcome banner ─────────────────────────────────────────────── */}
       <div
-        className="px-4 py-3 mb-4"
+        className="px-4 py-3 mb-4 flex items-start justify-between gap-3"
         style={{ background: '#FCD116' }}
       >
-        <p className="font-bold text-brand-900 text-base">
-          {t('dashboardWelcomePrefix')} {firstName}
-        </p>
-        <p className="text-xs text-brand-800 mt-0.5">
-          {bannerMessage}
-        </p>
+        <div className="min-w-0">
+          <p className="font-bold text-brand-900 text-base">
+            {t('dashboardWelcomePrefix')} {firstName}
+          </p>
+          <p className="text-xs text-brand-800 mt-0.5">
+            {bannerMessage}
+          </p>
+        </div>
+        <LanguageToggle />
       </div>
 
       {/* ── Two-column split ───────────────────────────────────────────── */}
