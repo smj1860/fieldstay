@@ -98,8 +98,9 @@ export type BroadcastResult = {
   skipped?: number
 }
 
-// Idempotent: skip if a maintenance_schedule with the same name
-// already exists on the property
+// Idempotent: skip if a schedule from the SAME template item already exists
+// on the property (falling back to name for schedules with no template
+// item) — see existingByTemplateItem/existingByName below.
 type BroadcastItem = {
   id: string; name: string; description: string | null
   schedule_frequency: ScheduleFrequency; vendor_specialty_hint: VendorSpecialty | null
@@ -210,10 +211,12 @@ export async function broadcastMaintenanceTemplate(
     // same property on purpose), so a truncated read here silently re-created
     // schedules that already existed — 50 properties × a 25-item template is
     // already past the cap.
-    const existingSchedules = await fetchAllRows<{ property_id: string; name: string }>(
+    const existingSchedules = await fetchAllRows<{
+      property_id: string; name: string; source_template_item_id: string | null
+    }>(
       (from, to) => supabase
         .from('maintenance_schedules')
-        .select('property_id, name')
+        .select('property_id, name, source_template_item_id')
         .eq('org_id', membership.org_id)
         .in('property_id', (properties as { id: string }[]).map((p) => p.id))
         .order('id', { ascending: true })
@@ -221,7 +224,29 @@ export async function broadcastMaintenanceTemplate(
       { label: 'broadcastMaintenanceTemplate.existing_schedules' },
     )
 
-    const existingNames = new Set(existingSchedules.map((s) => `${s.property_id}::${s.name}`))
+    // Keyed on the TEMPLATE ITEM, not the name. Two unrelated templates can
+    // legitimately share an item name ("HVAC Filter Replacement" is exactly
+    // the kind of name the standard catalog ships), and a name-only key would
+    // silently skip Template B's item as "already exists" because Template
+    // A's broadcast happened to use the same words. Renaming a saved
+    // template's item keeps its row id, so this key also stops a rename from
+    // orphaning the old schedule into a duplicate rather than being
+    // recognized as the same maintenance item on re-broadcast.
+    //
+    // A schedule with no source_template_item_id (hand-created, or from
+    // duplicateMaintenanceScheduleItem) falls back to the name key — the
+    // legacy dedup this table has always used for schedules nothing else can
+    // key off of.
+    const existingByTemplateItem = new Set(
+      existingSchedules
+        .filter((s) => s.source_template_item_id)
+        .map((s) => `${s.property_id}::${s.source_template_item_id}`),
+    )
+    const existingByName = new Set(
+      existingSchedules
+        .filter((s) => !s.source_template_item_id)
+        .map((s) => `${s.property_id}::${s.name}`),
+    )
 
     const fallbackDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
 
@@ -247,8 +272,9 @@ export async function broadcastMaintenanceTemplate(
 
     for (const property of properties) {
       for (const item of items) {
-        const key = `${property.id}::${item.name}`
-        if (existingNames.has(key)) {
+        const byTemplateItem = `${property.id}::${item.id}`
+        const byName         = `${property.id}::${item.name}`
+        if (existingByTemplateItem.has(byTemplateItem) || existingByName.has(byName)) {
           skipped++
           continue
         }
