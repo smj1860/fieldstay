@@ -30,12 +30,11 @@ export function LanguageToggle() {
   }
 
   return (
-    <div className="flex flex-col items-end">
+    <fieldset className="flex flex-col items-end border-0 p-0 m-0">
+      <legend className="sr-only">{t('language')}</legend>
       <div
         className="inline-flex rounded-full p-0.5"
         style={{ background: 'rgba(13, 31, 60, 0.12)' }}
-        role="group"
-        aria-label={t('language')}
       >
         <button
           type="button"
@@ -69,6 +68,6 @@ export function LanguageToggle() {
           {error}
         </p>
       )}
-    </div>
+    </fieldset>
   )
 }
