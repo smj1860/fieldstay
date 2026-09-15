@@ -23,15 +23,27 @@ import { join } from 'node:path'
 const DEFAULTS_SRC = readFileSync(join(process.cwd(), 'lib', 'properties', 'defaults.ts'), 'utf8')
 const SCRIPT_SRC = readFileSync(join(process.cwd(), 'scripts', 'check-property-defaults-drift.mjs'), 'utf8')
 
+// Kept identical to the script's parser — see that file's comment for why
+// this is line-by-line string splitting rather than a regex: SonarCloud kept
+// flagging every regex shape tried (including a plain, alternation-free
+// [^,]+ capture) as super-linear on backtracking.
 function parseHardcodedDefaults(text: string): Record<string, string | number> {
   const parsed: Record<string, string | number> = {}
-  // Kept identical to the script's regex — see that file's comment for why
-  // it's [^,]+ rather than ('[^']*'|[-\d.]+) (SonarCloud backtracking flag).
-  const re = /(\w+):\s*row\.\w+\s*\?\?\s*([^,]+),/g
-  for (const m of text.matchAll(re)) {
-    const [, name, rawLiteral] = m
-    const trimmed = rawLiteral!.trim()
-    parsed[name!] = trimmed.startsWith("'") ? trimmed.slice(1, -1) : Number(trimmed)
+  for (const line of text.split('\n')) {
+    const arrowIdx = line.indexOf('??')
+    const colonIdx = line.indexOf(':')
+    if (arrowIdx === -1 || colonIdx === -1 || colonIdx > arrowIdx) continue
+
+    const name = line.slice(0, colonIdx).trim()
+    if (!/^\w+$/.test(name)) continue
+    if (!line.slice(colonIdx + 1, arrowIdx).trim().startsWith('row.')) continue
+
+    const afterArrow = line.slice(arrowIdx + 2).trim()
+    const commaIdx = afterArrow.indexOf(',')
+    if (commaIdx === -1) continue
+
+    const rawLiteral = afterArrow.slice(0, commaIdx).trim()
+    parsed[name] = rawLiteral.startsWith("'") ? rawLiteral.slice(1, -1) : Number(rawLiteral)
   }
   return parsed
 }
