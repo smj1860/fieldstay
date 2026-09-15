@@ -41,6 +41,7 @@ vi.mock('@/lib/integrations/providers/hostex', async (importOriginal) => {
 
 import { NonRetriableError } from 'inngest'
 import { refreshHostexToken } from '@/lib/integrations/providers/hostex-token'
+import { reportError } from '@/lib/observability/report-error'
 import { hostexProvider, HostexOAuthError } from '@/lib/integrations/providers/hostex'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
@@ -96,6 +97,28 @@ describe('refreshHostexToken — happy path', () => {
 
     await expect(refreshHostexToken(USER_ID, '4242')).resolves.toBe('at_new')
     expect(storeIntegrationRefreshToken).not.toHaveBeenCalled()
+  })
+
+  it('reports and re-throws when the refresh-token write fails AFTER the access token already committed', async () => {
+    // The access token write above already landed, paired with a refresh
+    // token Hostex has already rotated away server-side (one-way, on their
+    // end) — a failure here leaves the connection looking completely
+    // healthy while Vault silently holds a stale refresh token, an outage
+    // that only surfaces ~5 days later with no correlated cause in the
+    // logs by then. Must be reported and re-thrown immediately instead of
+    // silently swallowed, so Inngest retries the whole exchange.
+    stubSupabase()
+    refreshMock.mockResolvedValue({
+      accessToken: 'at_new', refreshToken: 'rt_new', externalUserId: '', metadata: {},
+    })
+    vi.mocked(storeIntegrationRefreshToken).mockRejectedValue(new Error('Vault write timeout'))
+
+    await expect(refreshHostexToken(USER_ID, '4242')).rejects.toThrow('Vault write timeout')
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'lib.integrations.hostex-token.refresh.partial-write' }),
+    )
   })
 })
 

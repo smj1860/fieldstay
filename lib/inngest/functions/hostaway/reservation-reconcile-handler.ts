@@ -52,6 +52,8 @@ import { syncHostawayReservations } from './reservation-sync'
 import { syncHostawayReviews } from './reviews-sync'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { hostawaySyncLockKey } from './sync-lock'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
@@ -89,6 +91,17 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
   { event: 'integration/hostaway.reservation_reconcile.requested' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
+
+    // Cross-function lock, symmetric with the incremental handler — see
+    // sync-lock.ts and that file's own comment for why this daily reconcile
+    // and the hourly sweep genuinely overlap for every org during the 07:00
+    // UTC hour, both racing generateTurnoversForProperty otherwise.
+    const lockKey = hostawaySyncLockKey(org_id)
+    const gotLock = await acquireLock(lockKey, 300)
+    if (!gotLock) {
+      logger.info(`[Hostaway:${user_id}] Reconcile deferred — incremental sweep in flight for this org`)
+      return { skipped: true, reason: 'incremental_sync_in_progress' }
+    }
 
     try {
       return await runProviderReconcile({
@@ -151,6 +164,8 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
       })
 
       return { revoked: true }
+    } finally {
+      await releaseLock(lockKey)
     }
   }
 )

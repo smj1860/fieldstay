@@ -1,4 +1,5 @@
 import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // ============================================================================
 // Single-flight locking for OAuth token refreshes, shared by every provider.
@@ -32,8 +33,21 @@ import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 // correctness property and absence must mean "don't send".
 // ============================================================================
 
-/** Long enough for one token exchange, short enough that a crash self-heals. */
-const LOCK_TTL_SECONDS = 15
+/**
+ * Long enough for one token exchange, short enough that a crash self-heals.
+ *
+ * Was a flat 15s — shorter than what it protects. Hospitable's and Hostex's
+ * OWN token-endpoint fetch is allowed to run for the full PMS_API_TIMEOUT_MS
+ * (30s; see hospitable-token.ts's and hostex.ts's `AbortSignal.timeout(...)`
+ * calls), so a legitimately-slow-but-still-working exchange could outlive
+ * this Redis lock's TTL, expire it, and let a second concurrent caller start
+ * a second exchange against the same (about to be rotated) refresh token —
+ * exactly the interleaving this lock exists to prevent. +10s margin on top
+ * covers the Vault reads/writes and connection-status update that wrap the
+ * fetch itself. Same formula hostex-token.ts already uses for its own wait
+ * ceiling (REFRESH_LOCK_MAX_WAITS).
+ */
+const LOCK_TTL_SECONDS = Math.ceil((PMS_API_TIMEOUT_MS + 10_000) / 1_000)
 
 export type RefreshLockProvider = 'hospitable' | 'kroger' | 'ownerrez' | 'hostex'
 

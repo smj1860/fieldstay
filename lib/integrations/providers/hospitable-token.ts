@@ -68,10 +68,18 @@ const REFRESH_WINDOW_MINUTES = 30
 // functions can hit getValidHospitableToken() for one user simultaneously, so
 // the window is real, not theoretical.
 //
-// 20s TTL: comfortably longer than a token exchange + two Vault writes, short
-// enough that a crashed holder self-heals within one Inngest step retry.
+// The lock's own TTL (lib/integrations/refresh-lock.ts) is sized off
+// PMS_API_TIMEOUT_MS + margin — comfortably longer than a token exchange plus
+// two Vault writes, short enough that a crashed holder self-heals.
+//
+// This waiter's ceiling must never be shorter than the lock holder's own
+// refresh call can plausibly take (PMS_API_TIMEOUT_MS), or a waiter gives up
+// and refreshes UNLOCKED while the holder is merely slow, not dead — racing
+// the same refresh token Hospitable rotates on use. +10s margin covers the
+// Vault reads/writes refreshHospitableToken also performs around the fetch.
+// Same formula hostex-token.ts already uses for its own REFRESH_LOCK_MAX_WAITS.
 const REFRESH_LOCK_WAIT_MS     = 250
-const REFRESH_LOCK_MAX_WAITS   = 60   // ~15s ceiling
+const REFRESH_LOCK_MAX_WAITS   = Math.ceil((PMS_API_TIMEOUT_MS + 10_000) / REFRESH_LOCK_WAIT_MS)   // ~160, ~40s
 
 // ── Public API ────────────────────────────────────────────────────────────────
 

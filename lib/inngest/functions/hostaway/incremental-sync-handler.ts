@@ -39,6 +39,8 @@ import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connectio
 import { syncHostawayReservations } from './reservation-sync'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { hostawaySyncLockKey } from './sync-lock'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-incremental-sync'
@@ -79,11 +81,26 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
+    // Cross-FUNCTION lock: this handler's own concurrency key above only
+    // serializes it against itself. The daily reconcile is a DIFFERENT
+    // Inngest function on the same org, un-jittered at 07:30 UTC while this
+    // sweep jitters up to 55 minutes into the next hour — the two genuinely
+    // overlap every day, and both call generateTurnoversForProperty with no
+    // guard, a TOCTOU on which run's booking read wins. Whichever loses this
+    // lock backs off; see sync-lock.ts.
+    const lockKey  = hostawaySyncLockKey(org_id)
+    const gotLock  = await acquireLock(lockKey, 300 /* seconds, > worst-case run time */)
+    if (!gotLock) {
+      logger.info(`[Hostaway:${user_id}] Incremental sweep deferred — reconcile in flight for this org`)
+      return { skipped: true, reason: 'reconcile_in_progress' }
+    }
+
     // The whole sweep is wrapped, not just the first fetch: Hostaway's API key
     // cannot be refreshed, so once it stops being accepted every step below
     // fails the same way, and this runs HOURLY. Catching outside the steps lets
     // Inngest exhaust its retries first, so a transient 401 cannot revoke a
     // working connection.
+    try {
     try {
     const prepared = await step.run('read-cursor-and-properties', async () => {
       const token = await readIntegrationToken(user_id, PROVIDER)
@@ -193,6 +210,9 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       })
 
       return { reservations: 0, newTurnoverIds: 0, since: null, revoked: true }
+    }
+    } finally {
+      await releaseLock(lockKey)
     }
   }
 )

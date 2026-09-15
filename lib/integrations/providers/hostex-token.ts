@@ -216,12 +216,28 @@ export async function refreshHostexToken(
   // Hostex is documented to rotate, so treat its absence as a real anomaly
   // rather than quietly keeping the old value: log it, keep what we have.
   if (result.refreshToken) {
-    await storeIntegrationRefreshToken({
-      userId,
-      providerId:   HOSTEX_PROVIDER_ID,
-      refreshToken: result.refreshToken,
-      expiresAt:    result.expiresAt,
-    })
+    try {
+      await storeIntegrationRefreshToken({
+        userId,
+        providerId:   HOSTEX_PROVIDER_ID,
+        refreshToken: result.refreshToken,
+        expiresAt:    result.expiresAt,
+      })
+    } catch (err) {
+      // The access token above already committed, paired with a refresh
+      // token Hostex has already rotated away server-side (a one-way,
+      // non-reversible action on their end) — this write failing leaves the
+      // connection looking completely healthy (active status, working
+      // access token) while Vault silently holds a STALE refresh token.
+      // Nothing looks wrong for up to ~5 days, until the NEXT refresh reads
+      // it, Hostex rejects it as already-consumed, and the connection is
+      // revoked with no correlated error anywhere near the actual cause —
+      // by then this partial write is long gone from short-retention logs.
+      // Surface it now, while it is still attributable, and let Inngest
+      // retry the whole exchange rather than leaving a half-written pair.
+      reportError(err, { site: 'lib.integrations.hostex-token.refresh.partial-write' })
+      throw err
+    }
   } else {
     console.warn(
       `[Hostex] refresh response carried no refresh_token for user ${userId} — ` +
