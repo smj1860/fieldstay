@@ -193,6 +193,24 @@ export async function runReservationPipeline(
 
     // Which of the eligible reservations are genuinely NEW must be answered
     // BEFORE the upsert — afterwards every one of them exists.
+    //
+    // This read-then-upsert is a TOCTOU against ANOTHER concurrent run of
+    // this same pipeline for the same org — the daily reconcile and a
+    // webhook-triggered incremental sync are separate Inngest functions with
+    // independent concurrency keys, and both can genuinely be in flight at
+    // once (the reconcile exists precisely to catch what a webhook might
+    // have missed, i.e. exactly the overlap case). Two concurrent runs can
+    // both read "not yet a booking" for the same reservation and both fire
+    // their own booking/confirmed event for it.
+    //
+    // The MONEY is safe regardless: handleBookingConfirmed's own insert is
+    // `onConflict: source_reference_id,source DO NOTHING`, so a duplicate
+    // event never double-posts revenue. What this does NOT prevent is
+    // duplicate event traffic and duplicate no-op Inngest runs on overlap —
+    // accepted rather than closed via `RETURNING (xmax = 0) AS inserted`
+    // (which would need a wrapping RPC; PostgREST's .upsert() has no way to
+    // select that system column directly), since the failure mode is wasted
+    // work, not wrong data.
     let postable = revenueEligible
     if (revenueMode === 'new-only' && revenueEligible.length) {
       // `external_id` is nullable on bookings (iCal rows have none), so the
