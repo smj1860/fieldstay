@@ -171,15 +171,33 @@ function buildChildren(
   parent: InspectionFormItem,
   byParent: ReadonlyMap<string, InspectionFormItem[]>,
   inherit: ParentInstance = {},
+  // Cycle guard, not a depth cap: nothing in the seed pipeline can currently
+  // produce more than one level (a "child" can only reference a ROOT — see
+  // scripts/seed-inspection-forms.ts), but parent_item_id itself carries no
+  // constraint against a live edit or a corrupted form_snapshot creating a
+  // loop among children that never touches a root. A corrupt snapshot must
+  // degrade (drop the cyclic branch), never stack-overflow rendering a
+  // historical report.
+  ancestorIds: ReadonlySet<string> = new Set(),
 ): ResolvedItem[] {
+  const seen = new Set(ancestorIds).add(parent.id)
+
   return (byParent.get(parent.id) ?? [])
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order)
+    .filter((child) => !seen.has(child.id))
     .map((child) => ({
       formItem: child,
       ...(inherit.asset       !== undefined && { asset: inherit.asset }),
       ...(inherit.repeatIndex !== undefined && { repeatIndex: inherit.repeatIndex }),
-      children: [],
+      // Recurse rather than hardcoding []: a child can have its own children
+      // (a grandchild follow-up), and this used to silently drop any item
+      // nested more than one level deep — present in the flat item array,
+      // never rendered, never counted toward progress, and never reachable
+      // by the Review gate even when marked required. Same `inherit` at every
+      // depth: a grandchild belongs to the SAME asset/repeat instance as its
+      // parent and grandparent, matching the ParentInstance doc comment above.
+      children: buildChildren(child, byParent, inherit, seen),
     }))
 }
 
@@ -484,17 +502,26 @@ export function visibleNodes(
 ): VisibleNode[] {
   const out: VisibleNode[] = []
 
-  for (const item of page.items) {
-    out.push({ item, depth: 0 })
+  // Recursive, not a fixed two levels: a child can have its own children (a
+  // grandchild follow-up — see buildChildren in resolve-form.ts), and each
+  // one's visibility depends on ITS OWN direct parent's answer, not always
+  // the root's. A hardcoded single loop over `item.children` used to make a
+  // grandchild's condition unreachable even after buildChildren started
+  // resolving it, since nothing ever walked past depth 1 to check it.
+  const walk = (item: ResolvedItem, depth: number) => {
+    out.push({ item, depth })
 
-    // A child counts only when its condition is ACTUALLY MET, which needs the
-    // parent's answer — so visibility is decided here, where that answer is.
+    // A child counts only when its condition is ACTUALLY MET, which needs its
+    // direct parent's answer — so visibility is decided here, where that
+    // answer is.
     const parentResult = answers[answerKey(item)]?.result ?? null
     for (const child of item.children) {
       if (child.formItem.show_when && child.formItem.show_when !== parentResult) continue
-      out.push({ item: child, depth: 1 })
+      walk(child, depth + 1)
     }
   }
+
+  for (const item of page.items) walk(item, 0)
 
   return out
 }

@@ -91,6 +91,59 @@ export function buildFormSnapshot(
   }
 }
 
+function isStringOrNull(v: unknown): v is string | null {
+  return v === null || typeof v === 'string'
+}
+
+/**
+ * Structural validation only — a field has the right JS TYPE, not that an
+ * enum field holds one of its currently-known values. Downstream code
+ * already degrades safely for an unrecognised-but-correctly-typed enum
+ * string (`hasAnswer`'s switch on `response_type` falls to a default branch;
+ * `sectionIsShown`/`itemPassesFactGate` treat an unrecognised gate as "does
+ * not match"), and re-encoding the full enum vocabulary here would make this
+ * validator a second copy of the schema that drifts the moment a migration
+ * adds a new allowed value. What nothing downstream guards against is the
+ * field being the WRONG SHAPE entirely: `sort_order` as a string makes every
+ * numeric sort comparator produce `NaN`; `is_required` missing or the wrong
+ * type reads as falsy, which SILENTLY STOPS a genuinely required item from
+ * ever being enforced — the inspector signs off with a legally-required
+ * question never answered and never flagged.
+ */
+function isValidSnapshotItem(v: unknown): v is SnapshotItem {
+  if (!v || typeof v !== 'object') return false
+  const i = v as Record<string, unknown>
+
+  return (
+    typeof i.id === 'string' &&
+    typeof i.section_id === 'string' &&
+    typeof i.key === 'string' &&
+    typeof i.prompt === 'string' &&
+    typeof i.sort_order === 'number' &&
+    typeof i.response_type === 'string' &&
+    typeof i.is_required === 'boolean' &&
+    typeof i.photo_required === 'boolean' &&
+    isStringOrNull(i.parent_item_id) &&
+    isStringOrNull(i.show_when) &&
+    isStringOrNull(i.repeat_source_item_id) &&
+    typeof i.repeat_per_asset === 'boolean' &&
+    typeof i.per_unit === 'boolean' &&
+    isStringOrNull(i.na_reason_template) &&
+    isStringOrNull(i.na_asset_type) &&
+    isStringOrNull(i.asset_type) &&
+    isStringOrNull(i.concern_key) &&
+    isStringOrNull(i.asks_property_fact) &&
+    isStringOrNull(i.shown_when_property_fact) &&
+    typeof i.remediation === 'string' &&
+    Array.isArray(i.default_actions) && i.default_actions.every((a) => typeof a === 'string') &&
+    isStringOrNull(i.wo_category) &&
+    isStringOrNull(i.wo_priority) &&
+    isStringOrNull(i.po_catalog_item_id) &&
+    (i.po_default_qty === null || typeof i.po_default_qty === 'number') &&
+    typeof i.created_at === 'string'
+  )
+}
+
 /**
  * Read a stored `form_snapshot` back, defensively.
  *
@@ -102,7 +155,12 @@ export function buildFormSnapshot(
  *
  * `Json` in, so nothing about the shape can be assumed. A malformed snapshot
  * returns null and the caller says so, rather than throwing halfway through a
- * render or — far worse — silently resolving to a shorter form.
+ * render or — far worse — silently resolving to a shorter form. That includes
+ * every ITEM, not just the envelope: a blind `as SnapshotItem[]` cast used to
+ * trust the item array's shape entirely, so a snapshot written before a schema
+ * change (this type mirrors the LIVE row shape — a blob frozen before a
+ * migration keeps the OLD shape forever) could read back with a field simply
+ * missing, and the cast would still claim it was there.
  */
 export function parseFormSnapshot(value: unknown): FormSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -117,6 +175,7 @@ export function parseFormSnapshot(value: unknown): FormSnapshot | null {
     const s = entry as Record<string, unknown>
     if (typeof s.id !== 'string' || typeof s.key !== 'string' || typeof s.name !== 'string') return null
     if (typeof s.sort_order !== 'number' || !Array.isArray(s.items)) return null
+    if (!s.items.every(isValidSnapshotItem)) return null
 
     sections.push({
       id:               s.id,

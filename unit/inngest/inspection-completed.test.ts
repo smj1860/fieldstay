@@ -39,12 +39,29 @@ interface Def {
   po_default_qty?: number | null
 }
 
+/**
+ * Every field parseFormSnapshot's item validator checks is filled in here —
+ * see lib/inspections/snapshots.ts's isValidSnapshotItem for why a partial
+ * item (just the fields this file's tests care about) is rejected rather
+ * than silently accepted.
+ */
 function snapshot(defs: Def[]) {
   return {
     form_key: 'safety', form_version: 1, captured_at: '2026-08-23T10:00:00Z',
     sections: [{
       id: 'sec-1', key: 'fire', name: 'Fire', sort_order: 0, shown_when_asset: null,
-      items: defs.map((d) => ({ concern_key: null, ...d })),
+      items: defs.map((d) => ({
+        section_id: 'sec-1', key: d.id, prompt: 'Prompt', sort_order: 1,
+        response_type: 'yes_no', is_required: true, photo_required: false,
+        parent_item_id: null, show_when: null,
+        repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
+        na_reason_template: null, na_asset_type: null, asset_type: null,
+        concern_key: null, asks_property_fact: null, shown_when_property_fact: null,
+        default_actions: [], wo_category: null, wo_priority: null,
+        po_catalog_item_id: null, po_default_qty: null,
+        created_at: '2026-01-01T00:00:00Z',
+        ...d,
+      })),
     }],
   }
 }

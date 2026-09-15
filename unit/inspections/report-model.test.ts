@@ -84,6 +84,23 @@ function makeClient(tables: Record<string, Spec>, downloads: Record<string, Uint
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
+// Every field parseFormSnapshot's item validator checks. Individual tests
+// override only what they care about (id, remediation, sort_order, ...) —
+// see lib/inspections/snapshots.ts's isValidSnapshotItem for why a partial
+// item is rejected rather than silently accepted.
+const snapItem = (over: Record<string, unknown> = {}) => ({
+  id: 'fi-x', section_id: 'sec-1', key: 'k', prompt: 'Prompt', sort_order: 1,
+  response_type: 'yes_no', is_required: true, photo_required: false,
+  parent_item_id: null, show_when: null,
+  repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
+  na_reason_template: null, na_asset_type: null, asset_type: null,
+  concern_key: null, asks_property_fact: null, shown_when_property_fact: null,
+  remediation: 'work_order', default_actions: [],
+  wo_category: null, wo_priority: null, po_catalog_item_id: null, po_default_qty: null,
+  created_at: '2026-01-01T00:00:00Z',
+  ...over,
+})
+
 const snapshot = (over: Record<string, unknown> = {}) => ({
   form_key:     'safety',
   form_version: 3,
@@ -92,14 +109,14 @@ const snapshot = (over: Record<string, unknown> = {}) => ({
     {
       id: 'sec-1', key: 'detectors', name: 'Detectors', sort_order: 1, shown_when_asset: null,
       items: [
-        { id: 'fi-1', remediation: 'work_order', sort_order: 1 },
-        { id: 'fi-2', remediation: 'work_order', sort_order: 2 },
+        snapItem({ id: 'fi-1', section_id: 'sec-1', remediation: 'work_order', sort_order: 1 }),
+        snapItem({ id: 'fi-2', section_id: 'sec-1', remediation: 'work_order', sort_order: 2 }),
       ],
     },
     {
       id: 'sec-2', key: 'security', name: 'Security', sort_order: 2, shown_when_asset: null,
       items: [
-        { id: 'fi-3', remediation: 'none', sort_order: 1 },
+        snapItem({ id: 'fi-3', section_id: 'sec-2', remediation: 'none', sort_order: 1 }),
       ],
     },
   ],

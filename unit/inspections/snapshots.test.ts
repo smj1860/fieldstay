@@ -227,6 +227,71 @@ describe('parseFormSnapshot', () => {
     })
     expect(noGate!.sections[0]!.shown_when_asset).toBeNull()
   })
+
+  describe('rejects a snapshot whose ITEMS are malformed — it does NOT blindly cast them', () => {
+    // The envelope (form_key, sections, section id/key/name/sort_order) was
+    // validated; the items array itself was cast straight to SnapshotItem[]
+    // with no check at all. A snapshot frozen before a schema change (this
+    // type mirrors the LIVE row shape, and a blob written before a migration
+    // keeps the OLD shape forever) could read back with a field genuinely
+    // missing, and the cast would still claim it was there.
+    const withItem = (patch: Record<string, unknown>) => parseFormSnapshot({
+      ...good,
+      sections: [{ ...good.sections[0], items: [{ ...good.sections[0]!.items[0], ...patch }] }],
+    })
+
+    it('rejects an item missing a required string field (prompt)', () => {
+      expect(withItem({ prompt: undefined })).toBeNull()
+    })
+
+    it('rejects sort_order as a string rather than a number — would make every sort NaN', () => {
+      expect(withItem({ sort_order: '1' })).toBeNull()
+    })
+
+    it('rejects is_required as a string rather than a boolean — the DANGEROUS case', () => {
+      // A missing or wrong-typed is_required reads as falsy either way, which
+      // SILENTLY stops a genuinely required item from ever being enforced —
+      // the inspector signs off with the question never flagged as missing.
+      expect(withItem({ is_required: 'true' })).toBeNull()
+      expect(withItem({ is_required: undefined })).toBeNull()
+    })
+
+    it('rejects response_type missing entirely', () => {
+      expect(withItem({ response_type: undefined })).toBeNull()
+    })
+
+    it('rejects default_actions as a non-array', () => {
+      expect(withItem({ default_actions: 'repair' })).toBeNull()
+    })
+
+    it('rejects default_actions holding a non-string entry', () => {
+      expect(withItem({ default_actions: [{ not: 'a string' }] })).toBeNull()
+    })
+
+    it('accepts a nullable field genuinely null, and rejects it as the wrong non-null type', () => {
+      expect(withItem({ parent_item_id: null })).not.toBeNull()
+      expect(withItem({ parent_item_id: 42 })).toBeNull()
+    })
+
+    it('accepts po_default_qty as null or a number, rejects anything else', () => {
+      expect(withItem({ po_default_qty: null })).not.toBeNull()
+      expect(withItem({ po_default_qty: 3 })).not.toBeNull()
+      expect(withItem({ po_default_qty: '3' })).toBeNull()
+    })
+
+    it('does not drop the malformed item and keep the rest — it rejects the WHOLE snapshot', () => {
+      // Same principle as the section-level test above: a shorter-but-valid-
+      // looking form is the dangerous outcome, not merely an unhelpful one.
+      const twoItems = parseFormSnapshot({
+        ...good,
+        sections: [{
+          ...good.sections[0],
+          items: [good.sections[0]!.items[0], { ...good.sections[0]!.items[0], id: 'other', is_required: 'nope' }],
+        }],
+      })
+      expect(twoItems).toBeNull()
+    })
+  })
 })
 
 describe('formFromSnapshot', () => {
