@@ -247,3 +247,67 @@ describe('parseSubmitPayload — the repeat answer', () => {
       .toMatchObject({ repeat_answer: null })
   })
 })
+
+// ============================================================================
+// submit_inspection's INSERT ... ON CONFLICT ON CONSTRAINT
+// inspection_items_unique_answer DO UPDATE cannot affect the same target row
+// twice within one statement — Postgres raises a cardinality_violation and
+// the WHOLE submit fails. Two entries sharing (form_item_id, repeat_index,
+// asset_id) are plausible from a repeat-group re-render bug, a stale cached
+// answer plus a corrected one both surviving in the local draft, or a retry
+// that appends rather than replaces. This is TERMINAL for the outbox — a
+// rejected/failed submit dead-letters a completed walk whose answers exist
+// nowhere else — so the dedup has to happen here, before the RPC ever sees
+// a duplicate key.
+// ============================================================================
+describe('parseSubmitPayload — deduplicating a repeated answer key', () => {
+  const DEF = '22222222-2222-2222-2222-222222222222'
+  const ASSET = '33333333-3333-3333-3333-333333333333'
+
+  it('keeps only the LAST of two entries sharing (form_item_id, repeat_index, asset_id)', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, note: 'first pass — stale' }),
+        item({ form_item_id: DEF, note: 'corrected answer', result: 'fail' }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]).toMatchObject({ note: 'corrected answer', result: 'fail' })
+  })
+
+  it('treats a different repeat_index as a distinct key, not a duplicate', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, repeat_index: 1 }),
+        item({ form_item_id: DEF, repeat_index: 2 }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(2)
+  })
+
+  it('treats a different asset_id as a distinct key, not a duplicate', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, asset_id: ASSET }),
+        item({ form_item_id: DEF, asset_id: null }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(2)
+  })
+
+  it('collapses three duplicates of the same key down to one, still keeping the last', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, note: 'v1' }),
+        item({ form_item_id: DEF, note: 'v2' }),
+        item({ form_item_id: DEF, note: 'v3' }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.note).toBe('v3')
+  })
+})

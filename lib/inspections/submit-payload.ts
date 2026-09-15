@@ -107,7 +107,30 @@ export function parseSubmitPayload(body: unknown): ParseResult {
     items.push(item)
   }
 
-  return { inspectorName, items }
+  return { inspectorName, items: dedupeByAnswerKey(items) }
+}
+
+/**
+ * submit_inspection's INSERT ... ON CONFLICT ON CONSTRAINT
+ * inspection_items_unique_answer DO UPDATE cannot affect the same target row
+ * twice within one statement — Postgres raises "ON CONFLICT DO UPDATE
+ * command cannot affect row a second time" and the WHOLE submit fails. Two
+ * entries sharing (form_item_id, repeat_index, asset_id) are plausible from
+ * a repeat-group re-render bug, a stale cached answer plus a corrected one
+ * both surviving in the local draft, or a retry that appends rather than
+ * replaces. De-duplicated here, keeping the LAST occurrence — the same
+ * "later write wins" outcome the ON CONFLICT clause is trying to express one
+ * write at a time — so this failure mode is closed before it ever reaches
+ * the RPC, rather than surfacing as a permanently-failing outbox retry (this
+ * is TERMINAL for the outbox per this file's own header comment).
+ */
+function dedupeByAnswerKey(items: SubmittedItem[]): SubmittedItem[] {
+  const byKey = new Map<string, SubmittedItem>()
+  for (const item of items) {
+    const key = `${item.form_item_id}|${item.repeat_index ?? ''}|${item.asset_id ?? ''}`
+    byKey.set(key, item)
+  }
+  return [...byKey.values()]
 }
 
 function parseItem(entry: unknown): SubmittedItem | null {

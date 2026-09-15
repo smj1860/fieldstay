@@ -30,6 +30,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { parseHardcodedDefaults } from './parse-property-defaults.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DEFAULTS_PATH = path.join(__dirname, '..', 'lib', 'properties', 'defaults.ts')
@@ -95,28 +96,15 @@ const live = await res.json()
 // this to be reliable, same tradeoff check-type-drift.mjs makes about
 // types/database.ts. A false negative (a literal this can't parse) means the
 // column is silently skipped rather than falsely flagged.
+//
+// parseHardcodedDefaults lives in ./parse-property-defaults.mjs, imported
+// by both this script and unit/guardrails/property-defaults-parse.test.ts —
+// not duplicated between them (SonarCloud flagged the duplicated block this
+// used to be). The test still exercises the real parser against the real
+// file with no database needed; it just does so by calling the same
+// function this script calls, rather than a second independent copy of it.
 
 const src = readFileSync(DEFAULTS_PATH, 'utf8')
-
-/** `columnName: row.columnName ?? <literal>,` -> { columnName, literal } */
-function parseHardcodedDefaults(text) {
-  const parsed = {}
-  // A single [^,]+ capture (no internal alternation/quantifier ambiguity)
-  // rather than ('[^']*'|[-\d.]+) — SonarCloud flags the latter's shape as
-  // super-linear on backtracking. The literals here are simple words/numbers/
-  // times with no embedded commas, so splitting on the trailing comma and
-  // classifying by leading quote afterward is equivalent.
-  const re = /(\w+):\s*row\.\w+\s*\?\?\s*([^,]+),/g
-  for (const m of text.matchAll(re)) {
-    const [, name, rawLiteral] = m
-    const trimmed = rawLiteral.trim()
-    parsed[name] = trimmed.startsWith("'")
-      ? trimmed.slice(1, -1)
-      : Number(trimmed)
-  }
-  return parsed
-}
-
 const hardcoded = parseHardcodedDefaults(src)
 
 // ── Diff ─────────────────────────────────────────────────────────────────
