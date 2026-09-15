@@ -73,8 +73,10 @@ export async function syncHostexReviews(
   // ── 1. Fetch ─────────────────────────────────────────────────────────────
   const reviews = await step.run(`${stepPrefix}-fetch-reviews`, async (): Promise<HostexReview[]> => {
     if (fetchMode.kind === 'reservation') {
-      const one = await hostexFetchReviewByReservation(await getToken(), userId, fetchMode.reservationCode)
-      return one ? [one] : []
+      // Whether Hostex can return more than one review per reservation is
+      // documented elsewhere as "unconfirmed either way" — taking only the
+      // first silently ignored that uncertainty instead of resolving it safely.
+      return hostexFetchReviewByReservation(await getToken(), userId, fetchMode.reservationCode)
     }
 
     // Sequential rather than concurrent: these all spend the same

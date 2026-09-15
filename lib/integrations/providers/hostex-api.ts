@@ -332,14 +332,29 @@ export async function hostexFetchReservations(
  * reservation that was hard-deleted between the delivery and this read is a
  * legitimate outcome, not an error to retry.
  */
+/**
+ * Every stay under this reservation code — NOT the first one.
+ *
+ * Hostex returns one object per STAY, and hostex.mappers.ts's own extensive
+ * documentation establishes, as a hard-won fact, that multiple stays can
+ * share one reservation_code (a multi-room-type or multi-property booking) —
+ * which is exactly why hostexReservationToNormalized keys external_id on
+ * stay_code, not reservation_code. A webhook's `limit: 1` re-read used to
+ * fetch only the FIRST stay Hostex happened to return: on a two-room
+ * booking, editing or updating one room's stay refreshed at most one of the
+ * two rows in near-real-time, leaving the other silently stale (wrong
+ * dates, wrong status) until tomorrow's reconcile sweep — which this
+ * architecture treats as a backstop, not the primary path, precisely
+ * because Hostex never retries a dropped delivery.
+ */
 export async function hostexFetchReservationByCode(
   token:  string,
   userId: string,
   reservationCode: string,
-): Promise<HostexReservation | null> {
-  const qs   = new URLSearchParams({ reservation_code: reservationCode, limit: '1' })
+): Promise<HostexReservation[]> {
+  const qs   = new URLSearchParams({ reservation_code: reservationCode, limit: String(PAGE_SIZE) })
   const data = await hostexFetch<HostexReservationsData>(`/reservations?${qs.toString()}`, token, userId)
-  return data?.reservations?.[0] ?? null
+  return data?.reservations ?? []
 }
 
 // ── Staff & Tasks ────────────────────────────────────────────────────────────
@@ -477,14 +492,22 @@ export async function hostexFetchReviews(
  * anyway. A review for a stay that checked out more than ~180 days ago is
  * therefore not reachable this way — the windowed backfill is what covers it.
  */
+/**
+ * Every review under this reservation code — NOT the first one.
+ *
+ * hostexReviewExternalId's own doc comment admits whether Hostex can return
+ * more than one review per reservation is "unconfirmed either way" — a
+ * `limit: 1` re-read silently ignored that uncertainty instead of resolving
+ * it safely.
+ */
 export async function hostexFetchReviewByReservation(
   token:  string,
   userId: string,
   reservationCode: string,
-): Promise<HostexReview | null> {
-  const qs   = new URLSearchParams({ reservation_code: reservationCode, offset: '0', limit: '1' })
+): Promise<HostexReview[]> {
+  const qs   = new URLSearchParams({ reservation_code: reservationCode, offset: '0', limit: String(PAGE_SIZE) })
   const data = await hostexFetch<HostexReviewsData>(`/reviews?${qs.toString()}`, token, userId)
-  return data?.reviews?.[0] ?? null
+  return data?.reviews ?? []
 }
 
 // ── Webhook registration ─────────────────────────────────────────────────────

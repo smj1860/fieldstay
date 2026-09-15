@@ -26,6 +26,22 @@ export type { RevenueMode }
 
 const PROVIDER = 'hostaway' as const
 
+/**
+ * How far back a webhook re-read looks for the named reservation's activity.
+ *
+ * Generous relative to typical webhook delivery latency (minutes), because
+ * this also has to absorb an Inngest retry queue backing up — the failure
+ * mode is a silent no-op, not an oversized fetch, so erring wide costs
+ * nothing here the way it did on the arrivalFrom-unbounded-forward side.
+ */
+const WEBHOOK_ACTIVITY_LOOKBACK_DAYS = 3
+
+function isoDateDaysAgo(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
 type SyncStep = GetStepTools<typeof inngest>
 
 /**
@@ -116,13 +132,32 @@ export async function syncHostawayReservations(
       // but re-reading current state is what makes a delivery that arrives out
       // of order (modified before created) still converge — the same reason
       // Hostex reads back by code. Filtered client-side because /reservations
-      // has no id-list parameter; the window is already bounded to recent
-      // history, which is where a webhook's subject always lives.
+      // has no id-list parameter.
+      //
+      // `activitySince`, not `arrivalFrom`: a webhook fires because something
+      // CHANGED, and activitySince filters on when the record was last
+      // modified, not on the stay's arrival date. arrivalFrom silently missed
+      // any reservation whose arrivalDate was more than a month in the past —
+      // a late financial correction, a post-checkout edit, a review-triggering
+      // event tied to an old stay — which read back zero matches and made the
+      // whole delivery a silent no-op. It was also unbounded on the FUTURE
+      // end, so a single webhook risked fetching the operator's entire
+      // forward calendar and tripping hostawayFetchReservations' own
+      // MAX_PAGES ceiling. activitySince has neither problem: it is bounded
+      // by construction (only recently-touched rows match) and reaches a
+      // change regardless of which direction the stay's date lies in.
       const wanted = new Set(fetchMode.reservationIds)
       const recent = await hostawayFetchReservations(await getToken(), {
-        kind: 'arrivalFrom', date: hostawayHistoryCutoff(1),
+        kind: 'activitySince', date: isoDateDaysAgo(WEBHOOK_ACTIVITY_LOOKBACK_DAYS),
       })
-      return recent.filter((r) => wanted.has(String(r.id)))
+      const matched = recent.filter((r) => wanted.has(String(r.id)))
+      if (matched.length < wanted.size) {
+        logger.warn(
+          `[Hostaway:${userId}] webhook named ${wanted.size} reservation(s), only found ` +
+          `${matched.length} within the ${WEBHOOK_ACTIVITY_LOOKBACK_DAYS}-day activity lookback`,
+        )
+      }
+      return matched
     }
 
     if (fetchMode.kind === 'activitySince') {

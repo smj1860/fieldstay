@@ -36,6 +36,8 @@ import {
   hostexDeleteWebhook,
   hostexFetch,
   hostexFetchProperties,
+  hostexFetchReservationByCode,
+  hostexFetchReviewByReservation,
   hostexReservationWindow,
   isHostexAccountActionError,
 } from '@/lib/integrations/providers/hostex-api'
@@ -241,6 +243,61 @@ describe('hostexReservationWindow', () => {
     const w = hostexReservationWindow(12, 6, new Date('2026-08-16T00:00:00Z'))
     expect(w.startCheckOutDate).toBe('2025-08-16')
     expect(w.endCheckOutDate).toBe('2027-02-16')
+  })
+})
+
+describe('hostexFetchReservationByCode', () => {
+  // Hostex returns one object per STAY, and a single reservation_code can
+  // legitimately span more than one (a multi-room-type or multi-property
+  // booking) — hostexReservationToNormalized keys external_id on stay_code
+  // for exactly this reason. A `limit: 1` re-read used to silently drop
+  // every sibling stay past the first.
+  it('returns EVERY stay under the reservation code, not just the first', async () => {
+    const stays = [
+      { id: 1, reservation_code: 'R1', stay_code: 'R1-A' },
+      { id: 2, reservation_code: 'R1', stay_code: 'R1-B' },
+    ]
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => envelope({ reservations: stays, total: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchReservationByCode('tok', USER, 'R1')).resolves.toEqual(stays)
+
+    const url = fetchMock.mock.calls[0]![0] as string
+    expect(url).toContain('reservation_code=R1')
+    expect(url).not.toContain('limit=1&')
+    expect(url).not.toMatch(/limit=1$/)
+  })
+
+  it('returns an empty array, not null, when the code matches nothing', async () => {
+    // A hard-deleted-between-delivery-and-read reservation is a legitimate
+    // outcome, not an error — callers flatten these results, and flattening
+    // null would throw.
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ reservations: [], total: 0 })))
+    await expect(hostexFetchReservationByCode('tok', USER, 'GONE')).resolves.toEqual([])
+  })
+})
+
+describe('hostexFetchReviewByReservation', () => {
+  it('returns EVERY review under the reservation code, not just the first', async () => {
+    // Whether Hostex can return more than one review per reservation is
+    // documented as unconfirmed either way — taking only [0] silently
+    // resolved that uncertainty in the direction that drops data.
+    const reviews = [
+      { id: 1, reservation_code: 'R1' },
+      { id: 2, reservation_code: 'R1' },
+    ]
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => envelope({ reviews, total: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchReviewByReservation('tok', USER, 'R1')).resolves.toEqual(reviews)
+
+    const url = fetchMock.mock.calls[0]![0] as string
+    expect(url).toContain('reservation_code=R1')
+  })
+
+  it('returns an empty array, not null, when the reservation has no review', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ reviews: [], total: 0 })))
+    await expect(hostexFetchReviewByReservation('tok', USER, 'NONE')).resolves.toEqual([])
   })
 })
 
