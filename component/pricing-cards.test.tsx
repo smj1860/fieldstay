@@ -29,12 +29,17 @@ function priceText(): string {
   return label.parentElement!.textContent ?? ''
 }
 
+/** Renders the calculator and types `value` into its number input. */
+function typeQty(value: string): HTMLInputElement {
+  render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
+  const input = screen.getByRole('spinbutton') as HTMLInputElement
+  fireEvent.change(input, { target: { value } })
+  return input
+}
+
 describe('PricingCards calculator — non-integer property counts', () => {
   it('rounds a decimal typed into the number input to a valid integer', () => {
-    render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
-
-    fireEvent.change(input, { target: { value: '12.5' } })
+    const input = typeQty('12.5')
 
     // Clamped to a valid integer rather than passed straight through.
     expect(input.value).toBe('13')
@@ -45,38 +50,26 @@ describe('PricingCards calculator — non-integer property counts', () => {
     // annualCostCents() return null for a non-integer quantity, and
     // PricingCalculator used to read them with a non-null assertion —
     // `null! / 100` doesn't throw, it silently evaluates to 0.
-    render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
-
-    fireEvent.change(input, { target: { value: '12.5' } })
+    typeQty('12.5')
 
     expect(priceText()).not.toMatch(/\$0(?!\d)/)
   })
 
   it('clamps a non-numeric entry to 1 rather than NaN', () => {
-    render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
-
-    fireEvent.change(input, { target: { value: 'abc' } })
+    const input = typeQty('abc')
 
     expect(input.value).toBe('1')
     expect(priceText()).not.toMatch(/\$0(?!\d)/)
   })
 
   it('clamps an out-of-range entry to MAX_SELF_SERVE_PROPERTIES', () => {
-    render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
-
-    fireEvent.change(input, { target: { value: '9999' } })
+    const input = typeQty('9999')
 
     expect(input.value).toBe('150')
   })
 
   it('still shows a real price for an ordinary integer entry', () => {
-    render(<PricingCards tiers={TIERS} annual={false} signupHref="/signup" />)
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
-
-    fireEvent.change(input, { target: { value: '30' } })
+    const input = typeQty('30')
 
     expect(input.value).toBe('30')
     expect(priceText()).not.toMatch(/\$0(?!\d)/)
