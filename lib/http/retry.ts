@@ -75,8 +75,29 @@ export async function fetchWithRetry(
   init: RequestInit,
   opts: RetryOptions,
 ): Promise<Response> {
+  // The header above spends a whole comment block arguing retrying is
+  // actively wrong for a non-idempotent call — citing telnyx.ts's "retrying
+  // an ambiguous send texts a guest twice" as the canonical failure — but
+  // nothing enforced it: `init` is an arbitrary RequestInit, so a future
+  // caller reaching for this shared, well-documented helper for a POST (the
+  // exact "obviously the right tool" mistake the header tries to head off)
+  // got silent duplicate-request behaviour on any 5xx/429/timeout. Checked
+  // here, not just written about.
+  const method = (init.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') {
+    throw new Error(`fetchWithRetry: refusing to retry a ${method} — only idempotent GET/HEAD may use this helper`)
+  }
+
   const attempts = opts.attempts ?? DEFAULT_ATTEMPTS
   const base     = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
+
+  // attempts: 0 (a caller misconfiguration, not a retry-budget question)
+  // skips the loop body entirely and falls through to the `throw lastError`
+  // below with lastError still undefined — a generic "retries exhausted"
+  // message for what is actually a bad call site.
+  if (attempts < 1) {
+    throw new Error(`fetchWithRetry: opts.attempts must be >= 1 for ${opts.label}, got ${attempts}`)
+  }
 
   let lastError: unknown
 

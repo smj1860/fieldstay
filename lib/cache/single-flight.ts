@@ -26,6 +26,17 @@ import { getRedisIfConfigured } from '@/lib/redis'
 // token from refreshing — turning a cache outage into a total one. Same call as
 // lib/integrations/circuit-breaker.ts, and the opposite of the SMS nudge
 // budget, where the ceiling IS the correctness property.
+//
+// UNCONFIGURED REDIS MEANS ZERO STAMPEDE PROTECTION, NOT DEGRADED PROTECTION —
+// every concurrent caller sees `acquired: true` and calls produce()
+// independently, in every preview deploy. This is the accepted cost of failing
+// open rather than a gap this file closes: reporting it per call would
+// reproduce the exact CUSHION-D/E/H noise (one Sentry event per doomed
+// attempt, every preview deploy) that lib/redis.ts's own header was written
+// to eliminate. A caller whose produce() hits a real paid API under load is
+// the one place this tradeoff actually costs something, and that is a
+// call-site decision (rate limit the caller, or gate on upstashConfigured()
+// itself), not something this generic module can know to flag.
 // ============================================================================
 
 /** Long enough for one slow producer, short enough that a crash self-heals. */
@@ -108,16 +119,42 @@ export async function singleFlight<T>(opts: SingleFlightOptions<T>): Promise<T> 
   const acquired = await acquireLock(lockKey, opts.lockTtlSeconds ?? DEFAULT_LOCK_TTL_SECONDS)
 
   if (!acquired) {
-    const waitMs   = opts.waitMs   ?? DEFAULT_WAIT_MS
-    const maxWaits = opts.maxWaits ?? DEFAULT_MAX_WAITS
+    const baseWaitMs = opts.waitMs   ?? DEFAULT_WAIT_MS
+    const maxWaits   = opts.maxWaits ?? DEFAULT_MAX_WAITS
+    const lockTtl    = opts.lockTtlSeconds ?? DEFAULT_LOCK_TTL_SECONDS
 
     for (let i = 0; i < maxWaits; i++) {
+      // Jittered, not a fixed interval: every loser that lost the race at
+      // roughly the same wall-clock moment is otherwise on the IDENTICAL
+      // wait schedule, so if the winner's produce() takes longer than the
+      // full wait budget (plausible for a real external call under load —
+      // exactly the situation this module exists to protect), every one of
+      // them falls through to produce() within the same narrow window right
+      // after the budget expires — a fresh, simultaneous stampede, worse
+      // than no lock at all because it also added latency first.
+      // eslint-disable-next-line no-restricted-properties -- desynchronise waiters, not id/token generation
+      const waitMs = baseWaitMs * (1 + Math.random() * 0.5)
       await new Promise((resolve) => setTimeout(resolve, waitMs))
       const settled = await opts.read()
       if (settled !== null && settled !== undefined) return settled
     }
-    // Winner died, or is slower than our patience. Produce rather than fail —
-    // but do NOT release a lock we never held.
+
+    // Wait budget exhausted with nothing to read. Try ONCE more to become
+    // the winner before falling through unconditionally — the original
+    // holder may have crashed, in which case its lock has already expired
+    // (or another waiter released it after a failed produce()), and taking
+    // over here is a real single-flight rather than every waiter producing
+    // independently at the same moment.
+    if (await acquireLock(lockKey, lockTtl)) {
+      try {
+        return await opts.produce()
+      } finally {
+        await releaseLock(lockKey)
+      }
+    }
+
+    // Still held by someone else. Produce rather than fail — but do NOT
+    // release a lock we never held.
     return opts.produce()
   }
 
