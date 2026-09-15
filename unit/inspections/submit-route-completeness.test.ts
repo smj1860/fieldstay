@@ -89,3 +89,51 @@ describe('inspections submit route — completeness backstop result', () => {
     expect(auditMock).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('inspections submit route — structural vs. transient RPC errors', () => {
+  // form_item_id/asset_id are only type-checked by submit-payload.ts, never
+  // verified to still exist. A queued offline draft (held in IndexedDB,
+  // possibly across a release) can reference a form item retired by a seed
+  // re-run, or an asset deleted between draft time and submit time — the
+  // RPC's INSERT then raises a plain FK/cardinality violation for the WHOLE
+  // batch. Before this fix every such error fell through to the generic 500
+  // branch, which the outbox reads as transient and retries the identical,
+  // permanently-failing payload forever — a completed walk, whose answers
+  // exist nowhere else, that could never actually be submitted.
+  it('dead-letters a foreign-key violation (23503) with 422, not a retryable 500', async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { code: '23503', message: 'FK violation' } })
+
+    const res = await POST(req(VALID_BODY), { params })
+
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.ok).toBe(false)
+    expect(body.error).toMatch(/references an item that no longer exists/i)
+  })
+
+  it('dead-letters a cardinality violation (21000 — duplicate item in one batch) with 422', async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { code: '21000', message: 'ON CONFLICT DO UPDATE command cannot affect row a second time' } })
+
+    const res = await POST(req(VALID_BODY), { params })
+
+    expect(res.status).toBe(422)
+  })
+
+  it('still returns a retryable 500 for a genuinely transient error', async () => {
+    // A connection blip has no stable Postgres error code matching the
+    // structural set — it must still be retried, not dead-lettered.
+    rpcMock.mockResolvedValue({ data: null, error: { code: '08006', message: 'connection failure' } })
+
+    const res = await POST(req(VALID_BODY), { params })
+
+    expect(res.status).toBe(500)
+  })
+
+  it('still returns a retryable 500 when the error carries no code at all', async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: 'unknown' } })
+
+    const res = await POST(req(VALID_BODY), { params })
+
+    expect(res.status).toBe(500)
+  })
+})

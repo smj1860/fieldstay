@@ -48,6 +48,27 @@ export async function POST(
 
     if (error) {
       reportError(error, { site: 'route.inspections.submit' })
+
+      // 23503 (foreign_key_violation) and 21000 (cardinality_violation, e.g.
+      // two queued items colliding on the same ON CONFLICT DO UPDATE target)
+      // are STRUCTURAL, not transient. submit-payload.ts type-checks
+      // form_item_id/asset_id but never verifies the referenced row still
+      // exists — a queued offline draft (held in IndexedDB, possibly across
+      // a release) can reference a form item a seed re-run retired, or an
+      // asset deleted between draft time and submit time. The RPC's INSERT
+      // then aborts the WHOLE batch, and retrying the identical payload
+      // fails identically forever: without this branch every such submit was
+      // a 500 the outbox reads as transient and retries indefinitely (or
+      // until it exhausts its budget and dead-letters), for a completed walk
+      // — the answers exist nowhere else — that can never actually go
+      // through. 422 is terminal for the outbox and tells a human instead.
+      if (error.code === '23503' || error.code === '21000') {
+        return NextResponse.json(
+          { ok: false, error: 'This inspection references an item that no longer exists. Contact support.' },
+          { status: 422 },
+        )
+      }
+
       // 500, so the outbox RETRIES. A transient database error must not be
       // mistaken for a rejected submit — the answers exist only on the device.
       return NextResponse.json({ ok: false, error: 'Could not submit.' }, { status: 500 })

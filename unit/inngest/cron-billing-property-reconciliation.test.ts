@@ -184,7 +184,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 6 }],
         proration_behavior: 'none',
-      })
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:6:none' })
     })
 
     it('applies a DECREASE with proration_behavior none too', async () => {
@@ -200,7 +200,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 2 }],
         proration_behavior: 'none',
-      })
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:2:none' })
     })
 
     it('never fires the annual proration notification', async () => {
@@ -232,7 +232,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 3 }],
         proration_behavior: 'none',
-      })
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:3:none' })
     })
 
     it('HOLDS an increase below the addition threshold — no Stripe call at all', async () => {
@@ -265,7 +265,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: newQuantity }],
         proration_behavior: 'create_prorations',
-      })
+      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${newQuantity}:create_prorations` })
       expect(logAuditEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           orgId:  'org_1',
@@ -297,7 +297,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: newQuantity }],
         proration_behavior: 'create_prorations',
-      })
+      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${newQuantity}:create_prorations` })
     })
 
     it('is naturally idempotent: re-running after a successful flush is a no-op (Stripe already reflects it)', async () => {
@@ -316,5 +316,26 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).not.toHaveBeenCalled()
       expect(createPmNotification).not.toHaveBeenCalled()
     })
+  })
+
+  it('serialises per org, so two live invocations for the same org cannot race a stale Stripe read', () => {
+    // Sequential-retry idempotency ("re-fetch fresh from Stripe") says
+    // nothing about two CONCURRENT invocations — the dispatcher's own
+    // step.sendEvent() can itself be retried and re-send a second event for
+    // the same org. Without a per-org key, both invocations read the same
+    // stale billedQuantity before either writes: a TOCTOU race on real
+    // billing state. Asserted on the function's config, the same pattern
+    // used for auto-assign-turnover's per-turnover lock, because the
+    // guarantee IS the config — Inngest enforces it, and there's nothing in
+    // this process to observe directly.
+    const concurrency = (reconcilePropertyCountForOrg as unknown as {
+      opts: { concurrency: Array<{ limit: number; key?: string }> }
+    }).opts.concurrency
+
+    expect(Array.isArray(concurrency)).toBe(true)
+    expect(concurrency).toContainEqual({ limit: 1, key: 'event.data.org_id' })
+    // …without giving up the global cap that keeps a bulk fan-out from
+    // exhausting the connection pool.
+    expect(concurrency).toContainEqual({ limit: 10 })
   })
 })

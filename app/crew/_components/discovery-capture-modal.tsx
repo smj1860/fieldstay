@@ -5,7 +5,7 @@ import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useDexieDb } from '@/lib/dexie/context'
 import { createClient } from '@/lib/supabase/client'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
-import { enqueueMutation } from '@/lib/dexie/syncService'
+import { enqueueMutationTx, getSyncEngine } from '@/lib/dexie/syncService'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -78,28 +78,47 @@ export function DiscoveryCaptureModal({
       scanStatus: 'pending' | null
     },
   ): Promise<void> {
-    await db.property_assets.put({
-      id:          assetId,
-      org_id:      orgId,
-      property_id: propertyId,
-      asset_type:  assetType,
-      make:        fields.make ?? '',
-      model:       fields.model ?? '',
-      is_na:       fields.isNa ? 1 : 0,
-      photo_url:   fields.photoPath ?? '',
+    // ONE Dexie transaction, per CLAUDE.md: "The optimistic local write and
+    // its outbox row commit in ONE Dexie transaction... As two transactions,
+    // a PWA reclaimed between them left the cache updated with nothing
+    // queued to send it." enqueueMutation() (the public helper) opens its
+    // OWN transaction and cannot be folded into this one — enqueueMutationTx
+    // is the version meant to be called from inside an existing transaction,
+    // same as every other crew write path (lib/dexie/helpers.ts's
+    // writeAndQueue). Without this, a PWA backgrounded/reclaimed between the
+    // two awaits left a local property_assets row with nothing queued: no
+    // mutation row to show as failed, no delta pull to ever correct it, and
+    // onCaptured?.() (ticking the turnover's checklist item) had already
+    // fired — the captured asset silently never reached FieldStay while the
+    // checklist showed it done forever.
+    await db.transaction('rw', db.property_assets, db.mutations, async () => {
+      await db.property_assets.put({
+        id:          assetId,
+        org_id:      orgId,
+        property_id: propertyId,
+        asset_type:  assetType,
+        make:        fields.make ?? '',
+        model:       fields.model ?? '',
+        is_na:       fields.isNa ? 1 : 0,
+        photo_url:   fields.photoPath ?? '',
+      })
+
+      await enqueueMutationTx(db, 'property_assets', assetId, 'PUT', {
+        org_id:      orgId,
+        property_id: propertyId,
+        name:        assetTypeDisplayName(assetType),
+        asset_type:  assetType,
+        make:        fields.make,
+        model:       fields.model,
+        photo_url:   fields.photoPath,
+        is_na:       fields.isNa,
+        scan_status: fields.scanStatus,
+      })
     })
 
-    await enqueueMutation(userId, 'property_assets', assetId, 'PUT', {
-      org_id:      orgId,
-      property_id: propertyId,
-      name:        assetTypeDisplayName(assetType),
-      asset_type:  assetType,
-      make:        fields.make,
-      model:       fields.model,
-      photo_url:   fields.photoPath,
-      is_na:       fields.isNa,
-      scan_status: fields.scanStatus,
-    })
+    // Kicked OUTSIDE the transaction: network I/O inside it would throw
+    // TransactionInactiveError the moment the transaction auto-commits.
+    void getSyncEngine(userId).processOutbox()
   }
 
   async function handleMarkNa() {

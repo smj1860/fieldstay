@@ -52,6 +52,10 @@ function makeAdmin(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.delete = vi.fn(() => { order.push(`delete:${table}`); return chain })
+    chain.select = vi.fn(() => chain)
+    chain.not    = vi.fn(() => chain)
+    chain.neq    = vi.fn(() => chain)
+    chain.limit  = vi.fn(() => chain)
     chain.eq = vi.fn((column: string, value: unknown) => {
       eqCalls.push({ table, column, value })
       return chain
@@ -180,6 +184,84 @@ describe('accountDeletion', () => {
     await expect(run(admin, many)).rejects.toThrow(/refusing to purge 26 organizations/)
 
     expect(admin.order).toEqual([])
+  })
+
+  describe('sole-member re-verification (TOCTOU)', () => {
+    // assertSoleMember checked this ONCE, synchronously, when the deletion
+    // was requested. This function runs asynchronously and can be delayed by
+    // retries, so a member invited (or who finally accepted) between the
+    // request and this run must not be purged along with the requester's
+    // data — the route's promise has to be re-checked at execution time, not
+    // just trusted from the stale event payload.
+
+    it('refuses to purge an org that gained another accepted member since the request', async () => {
+      // The query itself excludes the requester (.neq('user_id', user_id)),
+      // so this fixture represents exactly what a real query would return:
+      // only OTHER accepted members.
+      const admin = makeAdmin({
+        organization_members: [{ data: [{ user_id: 'user_2' }], error: null } as never],
+      })
+
+      await expect(run(admin, ['org_1']))
+        .rejects.toThrow(/org_1 is no longer sole-member-owned/)
+
+      // Nothing purged — not even the tables, let alone the organization or
+      // the auth user.
+      expect(admin.order).toEqual([])
+      expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
+      expect(reportError).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ site: 'inngest.account-deletion.sole-member-race' }),
+      )
+    })
+
+    it('proceeds normally when the requester is still the only accepted member', async () => {
+      // No OTHER accepted members — the query's own .neq('user_id', user_id)
+      // means a real result here never includes the requester's own row.
+      const admin = makeAdmin({
+        organization_members: [{ data: [], error: null } as never],
+      })
+
+      await run(admin, ['org_1'])
+
+      expect(admin.order).toContain('delete:organizations')
+      expect(admin.auth.admin.deleteUser).toHaveBeenCalled()
+    })
+
+    it('treats a null data array (no rows) the same as empty — still proceeds', async () => {
+      const admin = makeAdmin({
+        organization_members: [{ data: null, error: null } as never],
+      })
+
+      await expect(run(admin, ['org_1'])).resolves.toEqual({ orgs_purged: 1 })
+    })
+
+    it('throws rather than purging when the re-check read itself fails', async () => {
+      const admin = makeAdmin({
+        organization_members: [{ error: { message: 'connection reset' } } as never],
+      })
+
+      await expect(run(admin, ['org_1']))
+        .rejects.toThrow(/sole-member re-check failed for org org_1/)
+
+      expect(admin.order).toEqual([])
+      expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
+    })
+
+    it('re-verifies EVERY org independently in a multi-org run — one racing org must not block the others', async () => {
+      const admin = makeAdmin({
+        organization_members: [
+          { data: [], error: null } as never,                 // org_1: still sole
+          { data: [{ user_id: 'user_2' }], error: null } as never, // org_2: raced
+        ],
+      })
+
+      await expect(run(admin, ['org_1', 'org_2']))
+        .rejects.toThrow(/org_2 is no longer sole-member-owned/)
+
+      // org_1 was fully purged before the org_2 check failed and stopped the run.
+      expect(admin.order).toContain('delete:organizations')
+    })
   })
 
   it('is registered as a critical function, so a retry-exhausted purge reaches a human', async () => {

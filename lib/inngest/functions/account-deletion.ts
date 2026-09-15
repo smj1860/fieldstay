@@ -152,6 +152,51 @@ export const accountDeletion = inngest.createFunction(
     // this loop is a fan of step boundaries rather than a single step with a
     // loop inside it.
     for (const orgId of orgIds) {
+      // Re-verify the invariant the route promised, at EXECUTION time, not
+      // just at request time. assertSoleMember checked this once,
+      // synchronously, when the deletion was requested — but this function
+      // runs asynchronously and can be delayed by retries, so the check can
+      // go stale: the requester invites a second member (or one who was
+      // already invited finally accepts) between the request and this run.
+      // Without re-checking, the job wakes up trusting the stale event
+      // payload and deletes every row in an org that is no longer sole-
+      // member-owned — including data belonging to a different, still-active
+      // person who never asked for anything to be deleted.
+      await step.run(`verify-sole-member-${orgId}`, async () => {
+        const admin = createServiceClient({ system: 'inngest:account-deletion' })
+
+        // Bounded to one row: this only needs to know whether ANY other
+        // accepted member exists, never the full membership list, so
+        // .neq(user_id) + .limit(1) both answers the question and avoids an
+        // unbounded .select() (PostgREST's max_rows=1000 cap has no
+        // truncation signal — see CLAUDE.md).
+        const { data: others, error } = await admin
+          .from('organization_members')
+          .select('user_id')
+          .eq('org_id', orgId)
+          .not('invite_accepted_at', 'is', null)
+          .neq('user_id', user_id)
+          .limit(1)
+
+        if (error) {
+          reportError(error, { site: 'inngest.account-deletion.sole-member-recheck', orgId })
+          throw new Error(`account-deletion: sole-member re-check failed for org ${orgId}: ${error.message}`)
+        }
+
+        if ((others ?? []).length > 0) {
+          // The invariant the route promised no longer holds. Do NOT purge —
+          // report it and let a human decide, rather than deleting a live
+          // org out from under someone who never asked for it.
+          reportError(new Error(
+            `account-deletion: org ${orgId} gained ${others.length} member(s) since the ` +
+            `deletion was requested — refusing to purge`,
+          ), { site: 'inngest.account-deletion.sole-member-race', orgId })
+          throw new Error(`account-deletion: org ${orgId} is no longer sole-member-owned by ${user_id}`)
+        }
+
+        return { orgId, verified: true }
+      })
+
       for (const table of ORG_PURGE_TABLES) {
         await step.run(`purge-${table}-${orgId}`, async () => {
           const admin = createServiceClient({ system: 'inngest:account-deletion' })

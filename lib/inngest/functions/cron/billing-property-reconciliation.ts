@@ -87,7 +87,16 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
     id:   'billing-reconcile-property-count-org',
     name: 'Billing: Reconcile Property Count — per org',
     retries: 3,
-    concurrency: { limit: 10 },
+    // Per-org key, not just a global cap. This function's own idempotency
+    // claim ("a retried step re-fetches the subscription fresh from Stripe")
+    // only holds for SEQUENTIAL retries — it says nothing about two live
+    // invocations for the same org running concurrently. The dispatcher's own
+    // step.sendEvent() is itself a step: if it durably queues events but the
+    // dispatcher doesn't get acknowledgment, Inngest retries the dispatcher,
+    // which re-sends a SECOND event per org. Without this key, both resulting
+    // invocations read the same stale Stripe quantity before either writes —
+    // a TOCTOU race on real billing state, unguarded by any compare-and-swap.
+    concurrency: [{ limit: 10 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'billing/reconcile-property-count.requested' },
   async ({ event, step }) => {
@@ -146,12 +155,22 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
 
       const interval = subscription.items.data[0]?.price?.recurring?.interval ?? 'month'
 
+      // Derived from the TARGET state, not a random value: a duplicate call
+      // that recomputes the identical target quantity collides on the same
+      // key and is a true no-op at Stripe's own layer, even if the per-org
+      // concurrency key above were ever bypassed (a second dispatcher retry
+      // queuing a second event, a manual re-trigger). proration_behavior is
+      // folded in because 'none' vs 'create_prorations' are genuinely
+      // different operations even at the same target quantity.
+      const idempotencyKeyFor = (proration: 'none' | 'create_prorations') =>
+        `billing-reconcile:${orgId}:${subscriptionId}:${currentCount}:${proration}`
+
       if (interval !== 'year') {
         // Monthly: any direction, deferred to the next natural invoice.
         await stripe.subscriptions.update(subscriptionId, {
           items:              [{ id: item.id, quantity: currentCount }],
           proration_behavior: 'none',
-        })
+        }, { idempotencyKey: idempotencyKeyFor('none') })
         return
       }
 
@@ -162,7 +181,7 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
         await stripe.subscriptions.update(subscriptionId, {
           items:              [{ id: item.id, quantity: currentCount }],
           proration_behavior: 'none',
-        })
+        }, { idempotencyKey: idempotencyKeyFor('none') })
         return
       }
 
@@ -178,7 +197,7 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
       await stripe.subscriptions.update(subscriptionId, {
         items:              [{ id: item.id, quantity: currentCount }],
         proration_behavior: 'create_prorations',
-      })
+      }, { idempotencyKey: idempotencyKeyFor('create_prorations') })
 
       await logAuditEvent({
         orgId,
