@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { parseQuantityInput } from '@/lib/inventory/quantity'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -305,7 +306,11 @@ function PropertyParLevelEditor({
                     <span className="text-xs text-muted-themed">Par:</span>
                     <input
                       type="number" min="0" step="0.5" value={row.par_level}
-                      onChange={(e) => updateRow(row.id, { par_level: Math.max(0, Number.parseFloat(e.target.value) || 0) })}
+                      // parseQuantityInput, not Number.parseFloat: parseFloat('2.5abc') is
+                      // 2.5, silently accepting a garbage suffix, and `|| 0` turned any
+                      // unparseable input into a silent 0 par — which can disable
+                      // low-stock nudges/purchasing for that item without the PM noticing.
+                      onChange={(e) => updateRow(row.id, { par_level: parseQuantityInput(e.target.value) ?? 0 })}
                       aria-label={`Par level for ${row.name}`}
                       className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                     />
