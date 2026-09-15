@@ -17,12 +17,59 @@ export type ThumbtackRfEvent =
     } }
   | { type: 'THUMBTACK_RF_CLOSE' }
 
-export function isThumbtackRfEvent(data: unknown): data is ThumbtackRfEvent {
+type StartData = Extract<ThumbtackRfEvent, { type: 'THUMBTACK_RF_START' }>['data']
+type RequestCreatedData = Extract<ThumbtackRfEvent, { type: 'THUMBTACK_RF_REQUEST_CREATED' }>['data']
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function isStartData(data: unknown): data is StartData {
   return (
-    typeof data === 'object' && data !== null && 'type' in data &&
-    typeof (data as { type: unknown }).type === 'string' &&
-    (data as { type: string }).type.startsWith('THUMBTACK_RF_')
+    isRecord(data) &&
+    typeof data.category_pk === 'string' &&
+    typeof data.zip_code === 'string' &&
+    typeof data.business_pk === 'string' &&
+    typeof data.business_name === 'string'
   )
+}
+
+function isRequestCreatedData(data: unknown): data is RequestCreatedData {
+  return (
+    isRecord(data) &&
+    Array.isArray(data.businesses_contacted) &&
+    data.businesses_contacted.every((b) =>
+      isRecord(b) && typeof b.business_pk === 'string' && typeof b.business_name === 'string',
+    ) &&
+    typeof data.category_pk === 'string' &&
+    typeof data.zip_code === 'string' &&
+    typeof data.user_pk === 'string' &&
+    typeof data.created_at === 'number' &&
+    typeof data.is_existing_user === 'boolean' &&
+    typeof data.search_id === 'string' &&
+    typeof data.request_pk === 'string'
+  )
+}
+
+/**
+ * Validates BOTH the `type` discriminant AND the shape of `data` for it —
+ * not just the discriminant. A `THUMBTACK_RF_REQUEST_CREATED` event whose
+ * `data` is missing or malformed used to pass this guard on the strength of
+ * its `type` string alone, then reach recordThumbtackRequestCreatedAction
+ * (lib/integrations/thumbtack-actions.ts), which reads
+ * `event.businesses_contacted.map(...)` and several other fields directly —
+ * a Server Action crash from a same-origin but malformed postMessage, not
+ * merely a client-side display bug.
+ */
+export function isThumbtackRfEvent(data: unknown): data is ThumbtackRfEvent {
+  if (!isRecord(data) || typeof data.type !== 'string') return false
+
+  switch (data.type) {
+    case 'THUMBTACK_RF_START':            return isStartData(data.data)
+    case 'THUMBTACK_RF_REQUEST_CREATED':  return isRequestCreatedData(data.data)
+    case 'THUMBTACK_RF_CLOSE':            return true
+    default:                              return false
+  }
 }
 
 /**
