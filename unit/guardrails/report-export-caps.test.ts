@@ -161,4 +161,14 @@ describe('guardrail: a cap that applies is stated in the output', () => {
     expect(code('lib/inspections/report/content.ts')).toContain('historyCapNote')
     expect(code('lib/inspections/report/render.ts')).toContain('historyCapNote(')
   })
+
+  it('MAX_REPORT_PHOTOS truncation is stated too, not just the walk-count cap', () => {
+    // The walk-count cap and the photo cap are two independent budgets on the
+    // same export, and a note for one does not cover the other — a whole
+    // history under MAX_HISTORY_INSPECTIONS can still lose photos to
+    // MAX_REPORT_PHOTOS, shared across every included walk.
+    expect(code('lib/inspections/report/model.ts')).toMatch(/omittedPhotoCount/)
+    expect(code('lib/inspections/report/content.ts')).toContain('photoCapNote')
+    expect(code('lib/inspections/report/render.ts')).toContain('photoCapNote(')
+  })
 })

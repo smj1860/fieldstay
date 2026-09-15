@@ -139,6 +139,12 @@ export interface InspectionReport {
   photosIncluded: boolean
   /** Set when a whole-property history was capped, so the PDF can say so. */
   omittedCount: number
+  /**
+   * Photo-bearing answers that existed but never got a chance at the shared
+   * MAX_REPORT_PHOTOS budget — see that constant's comment. Zero whenever
+   * `includePhotos` is false, since nothing was attempted at all.
+   */
+  omittedPhotoCount: number
 }
 
 const FORM_LABELS: Record<string, string> = {
@@ -179,7 +185,19 @@ const MAX_ANSWER_ROWS = 12_000
  *
  * The bucket caps an object at 10MB, so an unbounded photo log on a long
  * history could try to hold ~600MB in memory and serialise it into one
- * response. 150 covers a full Safety walk's photos many times over.
+ * response. 150 covers a full Safety walk's photos many times over — but a
+ * whole-PROPERTY-HISTORY export shares this ONE budget across every included
+ * walk (up to MAX_HISTORY_INSPECTIONS of them), and 60 walks at ~60 items
+ * each can carry thousands of eligible photos against it. Two things follow:
+ *
+ * - The budget is spent MOST-RECENT-WALK-FIRST (`loadPhotos` sorts by the
+ *   same recency the cover page and `omittedCount` already use), so a long
+ *   history does not let its earliest walks exhaust the budget before the
+ *   walk a PM actually opened the export to look at gets a single photo.
+ * - `omittedPhotoCount` reports it, the same way `omittedCount` reports the
+ *   walk-count cap — see the "cap that applies must SAY SO in the output"
+ *   rule. Without it, a walk whose photos lost the budget prints identically
+ *   to one whose photos genuinely failed to download.
  */
 export const MAX_REPORT_PHOTOS = 150
 
@@ -234,9 +252,9 @@ export async function loadInspectionReport(
     supabase, orgId, failedIds, rows.map((r) => r.id), 'inspections.report',
   )
 
-  const photos = includePhotos
-    ? await loadPhotos(supabase, answers)
-    : new Map<string, ReportPhoto>()
+  const { photos, omitted: omittedPhotoCount } = includePhotos
+    ? await loadPhotos(supabase, answers, rows.map((r) => r.id))
+    : { photos: new Map<string, ReportPhoto>(), omitted: 0 }
 
   return {
     orgId,
@@ -244,6 +262,7 @@ export async function loadInspectionReport(
     generatedAt:  input.now ?? new Date().toISOString(),
     photosIncluded: includePhotos,
     omittedCount: Math.max(0, totalCompleted - rows.length),
+    omittedPhotoCount,
     inspections: rows.map((row) => buildInspection({
       row,
       snapshot:   snapshots.get(row.id) ?? null,
@@ -353,13 +372,25 @@ async function loadAnswers(
  * inspection body still shows the item.
  */
 async function loadPhotos(
-  supabase: SupabaseClient,
-  answers:  AnswerRow[],
-): Promise<Map<string, ReportPhoto>> {
-  const out   = new Map<string, ReportPhoto>()
-  const paths = answers
+  supabase:        SupabaseClient,
+  answers:         AnswerRow[],
+  inspectionOrder: string[],
+): Promise<{ photos: Map<string, ReportPhoto>; omitted: number }> {
+  const out = new Map<string, ReportPhoto>()
+
+  // MOST-RECENT-WALK-FIRST, not the order `answers` came back in (`.order('id')`
+  // on that read is a pagination requirement, unrelated to which walk a photo
+  // belongs to). `inspectionOrder` is `rows`' own order — completed_at
+  // descending — the same ranking the cover page already uses for "most
+  // recent". Without this, a 60-walk history's earliest-id answers could
+  // exhaust the shared budget before the walk the PM actually opened the
+  // export to review gets a single photo.
+  const rank = new Map(inspectionOrder.map((id, i) => [id, i]))
+  const eligible = answers
     .filter((a) => a.photo_path)
-    .slice(0, MAX_REPORT_PHOTOS)
+    .sort((a, b) => (rank.get(a.inspection_id) ?? 0) - (rank.get(b.inspection_id) ?? 0))
+  const paths   = eligible.slice(0, MAX_REPORT_PHOTOS)
+  const omitted = Math.max(0, eligible.length - MAX_REPORT_PHOTOS)
 
   // Sequential rather than a Promise.all fan-out: this is 10MB-capped binary
   // per object, and firing 150 concurrent downloads is how a report becomes a
@@ -372,7 +403,7 @@ async function loadPhotos(
     const bytes = new Uint8Array(await data.arrayBuffer())
     out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
   }
-  return out
+  return { photos: out, omitted }
 }
 
 const PHOTO_BUCKET = 'inspection-photos'

@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   loadInspectionReport,
   MAX_HISTORY_INSPECTIONS,
+  MAX_REPORT_PHOTOS,
 } from '@/lib/inspections/report/model'
 
 // ============================================================================
@@ -282,6 +283,88 @@ describe('loadInspectionReport — photos', () => {
       })
       expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo!.format).toBe(expected)
     }
+  })
+})
+
+// ── The shared photo budget, across a whole-property-history export ────────
+
+describe('loadInspectionReport — the shared photo budget', () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0x01, 0x02])
+
+  it('spends MAX_REPORT_PHOTOS most-recent-walk-first and reports what it could not', async () => {
+    // filler occupies the whole budget by itself, all on the OLDER walk — if
+    // the budget were spent in raw answer-read order (unrelated to which walk
+    // a photo belongs to) rather than by recency, this would starve the newer
+    // walk's own single photo too.
+    const fillerPaths = Array.from(
+      { length: MAX_REPORT_PHOTOS }, (_, i) => `org-1/insp-1/filler-${i}.jpg`,
+    )
+    const filler = fillerPaths.map((path, i) => answer({
+      id: `filler-${i}`, inspection_id: 'insp-1', form_item_id: `filler-item-${i}`,
+      photo_path: path,
+    }))
+    const olderPath  = 'org-1/insp-1/old.jpg'
+    const olderPhoto = answer({
+      id: 'old-fi1', inspection_id: 'insp-1', form_item_id: 'fi-1', photo_path: olderPath,
+    })
+    const newerPath  = 'org-1/insp-2/new.jpg'
+    const newerPhoto = answer({
+      id: 'new-fi1', inspection_id: 'insp-2', form_item_id: 'fi-1', photo_path: newerPath,
+    })
+
+    const downloads: Record<string, Uint8Array> = {}
+    for (const path of [...fillerPaths, olderPath, newerPath]) downloads[path] = JPEG
+
+    const { client } = makeClient({
+      inspections: {
+        // insp-2 is the MORE RECENT walk, listed first — matching the real
+        // query's completed_at-descending order (this mock returns data as
+        // given rather than re-sorting it).
+        data: [
+          inspectionRow({ id: 'insp-2', completed_at: '2026-08-21T10:00:00.000Z' }),
+          inspectionRow({ id: 'insp-1' }),
+        ],
+        count: 2,
+      },
+      inspection_items: { data: [...filler, olderPhoto, newerPhoto] },
+      work_orders: { data: [] }, purchase_orders: { data: [] },
+    }, downloads)
+
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, propertyId: 'prop-1', includePhotos: true,
+    })
+
+    // Two entries lost the shared budget: the last filler item and the older
+    // walk's own photo — the newer walk's single photo sorts ahead of every
+    // one of the older walk's, filler included.
+    expect(report!.omittedPhotoCount).toBe(2)
+
+    const byId  = new Map(report!.inspections.map((i) => [i.id, i]))
+    const newer = byId.get('insp-2')!.sections.flatMap((s) => s.answers)
+      .find((a) => a.id === 'new-fi1')
+    const older = byId.get('insp-1')!.sections.flatMap((s) => s.answers)
+      .find((a) => a.id === 'old-fi1')
+
+    expect(newer!.photo, "the more recent walk's photo must win the shared budget").not.toBeNull()
+    expect(older!.photo, "the older walk's photo lost the budget to the newer walk").toBeNull()
+  })
+
+  it('is zero when photos were never requested — nothing was attempted, let alone capped', async () => {
+    const { client } = makeClient(baseTables())
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: false,
+    })
+    expect(report!.omittedPhotoCount).toBe(0)
+  })
+
+  it('is zero on a single inspection, which never approaches the budget', async () => {
+    const { client } = makeClient(baseTables({
+      inspection_items: { data: [answer({ photo_path: 'org-1/insp-1/a.jpg' })] },
+    }), { 'org-1/insp-1/a.jpg': JPEG })
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: true,
+    })
+    expect(report!.omittedPhotoCount).toBe(0)
   })
 })
 
