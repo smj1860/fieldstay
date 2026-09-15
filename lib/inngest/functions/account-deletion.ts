@@ -221,6 +221,35 @@ export const accountDeletion = inngest.createFunction(
         })
       }
 
+      // The non-cascading tables were cleared above, one step per table, but
+      // nothing locks the org against new writes in the window between that
+      // sweep and this delete — a crew member's own session is untouched by
+      // this flow (the sole-member check is about organization_members, not
+      // crew_members), so a write into e.g. crew_availability that lands
+      // after that table's purge but before the org row goes is caught by
+      // neither: the purge already ran, and these tables have no FK to
+      // organizations (that is the entire reason they're in this list), so
+      // the final cascade below doesn't touch them either. Re-sweep
+      // immediately before the org row goes to close that window.
+      for (const table of ORG_TABLES_WITHOUT_CASCADE) {
+        await step.run(`purge-${table}-${orgId}-final-sweep`, async () => {
+          const admin = createServiceClient({ system: 'inngest:account-deletion' })
+
+          const { error } = await admin.from(table).delete().eq('org_id', orgId)
+
+          if (error) {
+            reportError(error, {
+              site:  'inngest.account-deletion.purge_org_final_sweep',
+              orgId,
+              extra: { table },
+            })
+            throw new Error(`account-deletion: final sweep failed for ${table}/${orgId}: ${error.message}`)
+          }
+
+          return { table, orgId }
+        })
+      }
+
       await step.run(`delete-organization-${orgId}`, async () => {
         const admin = createServiceClient({ system: 'inngest:account-deletion' })
 
@@ -255,8 +284,16 @@ export const accountDeletion = inngest.createFunction(
       const { error } = await admin.auth.admin.deleteUser(user_id)
 
       // A user already gone is the retry case, not a failure: the previous
-      // attempt got this far and died on the response. Anything else throws.
-      if (error && !/not[_ ]found/i.test(error.message)) {
+      // attempt got this far and died on the response. The real signal is the
+      // HTTP status Supabase's admin client attaches (404) — not a regex
+      // against `error.message`'s wording, which is third-party prose this
+      // codebase does not control. If GoTrue ever rewords "User not found" to
+      // something the old regex missed, a legitimately-idempotent retry would
+      // throw, exhaust all 5 retries, and dead-letter a false alarm to the
+      // founder inbox for an account that was, in fact, already deleted. The
+      // regex stays as a fallback for the rare case status is undefined.
+      const alreadyGone = error && (error.status === 404 || /not[_ ]found/i.test(error.message))
+      if (error && !alreadyGone) {
         reportError(error, { site: 'inngest.account-deletion.delete_user' })
         throw new Error(`account-deletion: deleteUser failed: ${error.message}`)
       }

@@ -48,22 +48,29 @@ function successMessage(o: Extract<Outcome, { kind: 'done' }>): string {
  * wrong guest, and there is no undo.
  */
 export function ErasureForm() {
-  const [email,    setEmail]    = useState('')
-  const [confirm,  setConfirm]  = useState(false)
-  const [outcome,  setOutcome]  = useState<Outcome>({ kind: 'idle' })
-  const [pending,  startErasure] = useTransition()
+  const [email,        setEmail]        = useState('')
+  const [confirm,      setConfirm]      = useState(false)
+  const [typedConfirm, setTypedConfirm] = useState('')
+  const [outcome,      setOutcome]      = useState<Outcome>({ kind: 'idle' })
+  const [pending,      startErasure]    = useTransition()
 
   const trimmed = email.trim()
   const valid   = trimmed.includes('@') && trimmed.length > 2
+  // Re-typed, not just read back — an operator acting on a ticket is one
+  // paste away from scrubbing the wrong guest, and a static echo of the
+  // address relies on them re-reading it rather than re-entering it.
+  const typedConfirmMatches = typedConfirm.trim().toLowerCase() === trimmed.toLowerCase()
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!valid) return
     setOutcome({ kind: 'idle' })
+    setTypedConfirm('')
     setConfirm(true)
   }
 
   function runErasure() {
+    if (!typedConfirmMatches) return
     startErasure(async () => {
       try {
         const result = await anonymizeGuestData(trimmed)
@@ -148,7 +155,12 @@ export function ErasureForm() {
             <Button variant="secondary" onClick={() => setConfirm(false)} disabled={pending}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={runErasure} disabled={pending} className="flex items-center gap-1.5">
+            <Button
+              variant="danger"
+              onClick={runErasure}
+              disabled={pending || !typedConfirmMatches}
+              className="flex items-center gap-1.5"
+            >
               {pending && <Loader2 className="w-4 h-4 animate-spin" />}
               {pending ? 'Erasing…' : 'Erase permanently'}
             </Button>
@@ -161,6 +173,19 @@ export function ErasureForm() {
           across every booking in this organization. It cannot be undone, and the
           data cannot be recovered from a backup for you.
         </p>
+        <div className="mt-3">
+          <label htmlFor="erasure-confirm-email" className="label">
+            Re-type the guest email address to confirm
+          </label>
+          <Input
+            id="erasure-confirm-email"
+            value={typedConfirm}
+            onChange={(e) => setTypedConfirm(e.target.value)}
+            placeholder={trimmed}
+            autoComplete="off"
+            disabled={pending}
+          />
+        </div>
       </Dialog>
     </Card>
   )

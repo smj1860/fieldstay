@@ -1178,6 +1178,11 @@ export interface WorkOrderUpdate {
   status_to:                 WoStatus | null
   notes:                     string | null
   created_at:                string
+  // One note per inspection_items row, ever: 'recurrence:' || inspection_items.id.
+  // NULL for every other work_order_updates row (status-change notes, etc.) —
+  // see work_order_updates_dedupe_key_idx (20260915211000), plain unique so
+  // supabase-js's onConflict can name it as an arbiter.
+  dedupe_key:                string | null
 }
 
 export interface WorkOrderPhoto {

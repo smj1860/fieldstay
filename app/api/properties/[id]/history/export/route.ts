@@ -16,7 +16,14 @@ import { loadPropertyHistory } from '@/lib/history/loadPropertyHistory'
 
 function csvField(value: string | null): string {
   if (!value) return ''
-  return `"${value.replace(/"/g, '""')}"`
+  const escaped = value.replace(/"/g, '""')
+  // Excel/LibreOffice/Sheets treat a leading =, +, -, @, tab or CR as the
+  // start of a formula on open — a crew note or WO description titled
+  // =HYPERLINK(...) executes on whoever opens this export. Prefix with a
+  // single quote to neutralize it (OWASP CSV injection guidance) — visible
+  // in the cell, but inert.
+  const safe = /^[=+\-@\t\r]/.test(escaped) ? `'${escaped}` : escaped
+  return `"${safe}"`
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

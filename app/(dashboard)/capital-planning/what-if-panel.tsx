@@ -21,7 +21,16 @@ export function WhatIfPanel({
   const [inflationRatePct, setInflationRatePct] = useState(initialInflationRatePct)
   const [deferMonths,      setDeferMonths]      = useState(0)
   const [saved,            setSaved]            = useState(false)
+  const [saveError,        setSaveError]        = useState<string | null>(null)
   const [pending,          startSave]           = useTransition()
+
+  // The <Input type="number" min={0} max={25}> attributes only engage on a
+  // native form submit / .reportValidity() call — Save is a plain onClick
+  // driven by React state, so neither the range nor an emptied-field NaN is
+  // actually enforced by them. Mirrors the server action's own guard
+  // (updateCapexInflationRate) so the button reflects what the server will
+  // accept instead of relying on the server to reject it after a round trip.
+  const inflationRateValid = Number.isFinite(inflationRatePct) && inflationRatePct >= 0 && inflationRatePct <= 25
 
   const scenario = useMemo(
     () => buildWhatIfScenario(projections, currentYear, inflationRatePct, deferMonths / 12),
@@ -31,9 +40,18 @@ export function WhatIfPanel({
 
   function handleSave() {
     setSaved(false)
+    setSaveError(null)
+    if (!inflationRateValid) {
+      setSaveError('Inflation rate must be a number between 0% and 25%.')
+      return
+    }
     startSave(async () => {
       const result = await updateCapexInflationRate(inflationRatePct)
-      if (!result.error) setSaved(true)
+      if (result.error) {
+        setSaveError(result.error)
+      } else {
+        setSaved(true)
+      }
     })
   }
 
@@ -60,7 +78,7 @@ export function WhatIfPanel({
               max={25}
               step={0.1}
               value={inflationRatePct}
-              onChange={(e) => { setInflationRatePct(Number(e.target.value)); setSaved(false) }}
+              onChange={(e) => { setInflationRatePct(Number(e.target.value)); setSaved(false); setSaveError(null) }}
               className="w-24"
             />
             <span className="text-sm text-muted-themed">%</span>
@@ -111,12 +129,13 @@ export function WhatIfPanel({
           type="button"
           variant="ghost"
           onClick={handleSave}
-          disabled={pending || inflationRatePct === initialInflationRatePct}
+          disabled={pending || !inflationRateValid || inflationRatePct === initialInflationRatePct}
           className="text-xs"
         >
           {pending ? 'Saving…' : 'Save as org default'}
         </Button>
         {saved && <span className="text-xs" style={{ color: 'var(--accent-green)' }}>Saved</span>}
+        {saveError && <span className="text-xs" style={{ color: 'var(--accent-red)' }}>{saveError}</span>}
       </div>
     </Card>
   )
