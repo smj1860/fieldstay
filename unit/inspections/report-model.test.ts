@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   loadInspectionReport,
   MAX_HISTORY_INSPECTIONS,
+  MAX_REPORT_PHOTOS,
 } from '@/lib/inspections/report/model'
 
 // ============================================================================
@@ -84,6 +85,23 @@ function makeClient(tables: Record<string, Spec>, downloads: Record<string, Uint
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
+// Every field parseFormSnapshot's item validator checks. Individual tests
+// override only what they care about (id, remediation, sort_order, ...) —
+// see lib/inspections/snapshots.ts's isValidSnapshotItem for why a partial
+// item is rejected rather than silently accepted.
+const snapItem = (over: Record<string, unknown> = {}) => ({
+  id: 'fi-x', section_id: 'sec-1', key: 'k', prompt: 'Prompt', sort_order: 1,
+  response_type: 'yes_no', is_required: true, photo_required: false,
+  parent_item_id: null, show_when: null,
+  repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
+  na_reason_template: null, na_asset_type: null, asset_type: null,
+  concern_key: null, asks_property_fact: null, shown_when_property_fact: null,
+  remediation: 'work_order', default_actions: [],
+  wo_category: null, wo_priority: null, po_catalog_item_id: null, po_default_qty: null,
+  created_at: '2026-01-01T00:00:00Z',
+  ...over,
+})
+
 const snapshot = (over: Record<string, unknown> = {}) => ({
   form_key:     'safety',
   form_version: 3,
@@ -92,14 +110,14 @@ const snapshot = (over: Record<string, unknown> = {}) => ({
     {
       id: 'sec-1', key: 'detectors', name: 'Detectors', sort_order: 1, shown_when_asset: null,
       items: [
-        { id: 'fi-1', remediation: 'work_order', sort_order: 1 },
-        { id: 'fi-2', remediation: 'work_order', sort_order: 2 },
+        snapItem({ id: 'fi-1', section_id: 'sec-1', remediation: 'work_order', sort_order: 1 }),
+        snapItem({ id: 'fi-2', section_id: 'sec-1', remediation: 'work_order', sort_order: 2 }),
       ],
     },
     {
       id: 'sec-2', key: 'security', name: 'Security', sort_order: 2, shown_when_asset: null,
       items: [
-        { id: 'fi-3', remediation: 'none', sort_order: 1 },
+        snapItem({ id: 'fi-3', section_id: 'sec-2', remediation: 'none', sort_order: 1 }),
       ],
     },
   ],
@@ -251,6 +269,29 @@ describe('loadInspectionReport — photos', () => {
     expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo).toBeNull()
   })
 
+  it('SKIPS a photo whose download THROWS — a timeout, not just an error result', async () => {
+    // storage-js's download() only converts a StorageError to
+    // { data: null, error }; an abort or any other failure REJECTS. Without a
+    // catch around the call, this would propagate out of loadInspectionReport
+    // and take the whole document down over one hung object.
+    const { client } = makeClient(withPhoto)
+    const supabase = {
+      ...client,
+      storage: {
+        from: () => ({
+          download: () => Promise.reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })),
+        }),
+      },
+    } as unknown as SupabaseClient
+
+    const report = await loadInspectionReport(supabase, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: true,
+    })
+
+    expect(report).not.toBeNull()
+    expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo).toBeNull()
+  })
+
   it('classifies by MAGIC BYTES, so a non-JPEG cannot throw inside the render', async () => {
     // pdf-lib embeds JPEG and PNG only, and throws on anything else — which
     // would take the whole document down over one photograph. The bucket also
@@ -265,6 +306,88 @@ describe('loadInspectionReport — photos', () => {
       })
       expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo!.format).toBe(expected)
     }
+  })
+})
+
+// ── The shared photo budget, across a whole-property-history export ────────
+
+describe('loadInspectionReport — the shared photo budget', () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0x01, 0x02])
+
+  it('spends MAX_REPORT_PHOTOS most-recent-walk-first and reports what it could not', async () => {
+    // filler occupies the whole budget by itself, all on the OLDER walk — if
+    // the budget were spent in raw answer-read order (unrelated to which walk
+    // a photo belongs to) rather than by recency, this would starve the newer
+    // walk's own single photo too.
+    const fillerPaths = Array.from(
+      { length: MAX_REPORT_PHOTOS }, (_, i) => `org-1/insp-1/filler-${i}.jpg`,
+    )
+    const filler = fillerPaths.map((path, i) => answer({
+      id: `filler-${i}`, inspection_id: 'insp-1', form_item_id: `filler-item-${i}`,
+      photo_path: path,
+    }))
+    const olderPath  = 'org-1/insp-1/old.jpg'
+    const olderPhoto = answer({
+      id: 'old-fi1', inspection_id: 'insp-1', form_item_id: 'fi-1', photo_path: olderPath,
+    })
+    const newerPath  = 'org-1/insp-2/new.jpg'
+    const newerPhoto = answer({
+      id: 'new-fi1', inspection_id: 'insp-2', form_item_id: 'fi-1', photo_path: newerPath,
+    })
+
+    const downloads: Record<string, Uint8Array> = {}
+    for (const path of [...fillerPaths, olderPath, newerPath]) downloads[path] = JPEG
+
+    const { client } = makeClient({
+      inspections: {
+        // insp-2 is the MORE RECENT walk, listed first — matching the real
+        // query's completed_at-descending order (this mock returns data as
+        // given rather than re-sorting it).
+        data: [
+          inspectionRow({ id: 'insp-2', completed_at: '2026-08-21T10:00:00.000Z' }),
+          inspectionRow({ id: 'insp-1' }),
+        ],
+        count: 2,
+      },
+      inspection_items: { data: [...filler, olderPhoto, newerPhoto] },
+      work_orders: { data: [] }, purchase_orders: { data: [] },
+    }, downloads)
+
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, propertyId: 'prop-1', includePhotos: true,
+    })
+
+    // Two entries lost the shared budget: the last filler item and the older
+    // walk's own photo — the newer walk's single photo sorts ahead of every
+    // one of the older walk's, filler included.
+    expect(report!.omittedPhotoCount).toBe(2)
+
+    const byId  = new Map(report!.inspections.map((i) => [i.id, i]))
+    const newer = byId.get('insp-2')!.sections.flatMap((s) => s.answers)
+      .find((a) => a.id === 'new-fi1')
+    const older = byId.get('insp-1')!.sections.flatMap((s) => s.answers)
+      .find((a) => a.id === 'old-fi1')
+
+    expect(newer!.photo, "the more recent walk's photo must win the shared budget").not.toBeNull()
+    expect(older!.photo, "the older walk's photo lost the budget to the newer walk").toBeNull()
+  })
+
+  it('is zero when photos were never requested — nothing was attempted, let alone capped', async () => {
+    const { client } = makeClient(baseTables())
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: false,
+    })
+    expect(report!.omittedPhotoCount).toBe(0)
+  })
+
+  it('is zero on a single inspection, which never approaches the budget', async () => {
+    const { client } = makeClient(baseTables({
+      inspection_items: { data: [answer({ photo_path: 'org-1/insp-1/a.jpg' })] },
+    }), { 'org-1/insp-1/a.jpg': JPEG })
+    const report = await loadInspectionReport(client, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: true,
+    })
+    expect(report!.omittedPhotoCount).toBe(0)
   })
 })
 

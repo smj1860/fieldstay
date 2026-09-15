@@ -12,6 +12,7 @@ import {
   historyCapNote,
   historyRange,
   metaRows,
+  photoCapNote,
   remediationLine,
   statusLabel,
   type Tone,
@@ -153,6 +154,15 @@ function drawHistoryCover(cur: Cursor, report: InspectionReport): void {
   if (capNote) {
     cur.y -= 8
     paragraph(cur, capNote, 9, RED)
+  }
+
+  // Same reasoning, the shared photo budget: a walk whose photos lost it to
+  // an earlier one in the export must not print identically to a walk whose
+  // photos genuinely failed to download.
+  const photoNote = photoCapNote(report)
+  if (photoNote) {
+    cur.y -= 8
+    paragraph(cur, photoNote, 9, RED)
   }
 
   cur.y -= 14

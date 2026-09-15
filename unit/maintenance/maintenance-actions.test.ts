@@ -1627,6 +1627,34 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ success: true, created: 1, skipped: 0 })
     })
 
+    // ── Regression: a send failure AFTER the write must not report failure ──
+    // The schedules are already committed by the RPC — that IS the broadcast.
+    // A failing inngest.send() (network blip, Inngest outage) must not turn
+    // that success into "Operation failed. Please try again.", which would
+    // give the PM every reason to retry a broadcast that already ran.
+    it('still reports success when the post-write event send fails', async () => {
+      const supabase = makeSupabase({
+        maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
+        maintenance_schedule_template_items: [{ data: [{ id: 'item_1', name: 'Filter change', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null }] }],
+        properties:                          [{ data: [{ id: 'prop_1' }] }],
+        maintenance_schedules:                [{ data: [] }],
+      }, 'user_1', {
+        broadcast_maintenance_schedules: { data: { inserted: 1 }, error: null },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+      vi.mocked(inngest.send).mockRejectedValueOnce(new Error('Inngest unreachable'))
+
+      const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ success: true, created: 1, skipped: 0 })
+      expect(reportError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ site: 'serverAction.maintenance.broadcastMaintenanceTemplate.event' }),
+      )
+    })
+
     it('trusts the RPC over its own pre-lock estimate — a row the RPC skipped counts as skipped, not created', async () => {
       // The pre-lock existingNames read is only a fast estimate for BUILDING
       // rowsToInsert; it is not itself a safe dedup guard, since there is

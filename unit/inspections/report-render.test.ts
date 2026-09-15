@@ -11,6 +11,7 @@ import {
   historyCapNote,
   historyRange,
   metaRows,
+  photoCapNote,
   remediationLine,
   statusLabel,
 } from '@/lib/inspections/report/content'
@@ -249,7 +250,8 @@ describe('actionsLine', () => {
 describe('historyCapNote', () => {
   const report = (over: Partial<InspectionReport> = {}): InspectionReport => ({
     orgId: 'o', propertyName: 'Lake House', generatedAt: '2026-08-25T12:00:00.000Z',
-    inspections: [inspection(), inspection()], photosIncluded: false, omittedCount: 0, ...over,
+    inspections: [inspection(), inspection()], photosIncluded: false, omittedCount: 0,
+    omittedPhotoCount: 0, ...over,
   })
 
   it('states the cap when one applied', () => {
@@ -260,11 +262,33 @@ describe('historyCapNote', () => {
   })
 })
 
+describe('photoCapNote', () => {
+  const report = (over: Partial<InspectionReport> = {}): InspectionReport => ({
+    orgId: 'o', propertyName: 'Lake House', generatedAt: '2026-08-25T12:00:00.000Z',
+    inspections: [inspection(), inspection()], photosIncluded: true, omittedCount: 0,
+    omittedPhotoCount: 0, ...over,
+  })
+
+  it('states the cap when the shared photo budget was exceeded', () => {
+    const note = photoCapNote(report({ omittedPhotoCount: 12 }))
+    expect(note).toContain('12 earlier')
+    expect(note).toContain('photographs are on file but not included')
+  })
+  it('singularises a one-photo shortfall', () => {
+    const note = photoCapNote(report({ omittedPhotoCount: 1 }))
+    expect(note).toContain('1 earlier')
+    expect(note).toContain('photograph is on file but not included')
+  })
+  it('adds no caveat when every eligible photo fit the budget', () => {
+    expect(photoCapNote(report())).toBeNull()
+  })
+})
+
 describe('historyRange', () => {
   const at = (iso: string) => inspection({ completedAt: iso })
   const of = (...isos: string[]): InspectionReport => ({
     orgId: 'o', propertyName: 'x', generatedAt: '2026-08-25T12:00:00.000Z',
-    inspections: isos.map(at), photosIncluded: false, omittedCount: 0,
+    inspections: isos.map(at), photosIncluded: false, omittedCount: 0, omittedPhotoCount: 0,
   })
 
   it('returns [earliest, latest] whatever order the walks arrive in', () => {
@@ -310,7 +334,7 @@ const JPEG_1PX = Uint8Array.from(Buffer.from(
 function reportWith(over: Partial<InspectionReport> = {}): InspectionReport {
   return {
     orgId: 'o', propertyName: 'Lake House', generatedAt: '2026-08-25T12:00:00.000Z',
-    photosIncluded: false, omittedCount: 0,
+    photosIncluded: false, omittedCount: 0, omittedPhotoCount: 0,
     inspections: [inspection({
       sections: [{ key: 'd', name: 'Detectors', answers: [
         answer({ id: 'a1', result: 'fail', note: 'Upstairs hallway unit is expired',

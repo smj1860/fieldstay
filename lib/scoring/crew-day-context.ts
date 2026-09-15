@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
@@ -11,6 +12,13 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
  * practice — but PostgREST truncates at max_rows with a 200 and no signal, and
  * a silently short read here would under-report a cascade risk, which is the
  * one thing this function exists to surface.
+ *
+ * MAX_CHECKLIST_ITEMS is above max_rows (1000) on purpose — a busy crew
+ * member's several same-day turnovers can genuinely carry that many items
+ * across their checklists — which is exactly why the read it bounds goes
+ * through fetchAllRows()'s .range() pagination rather than a bare .limit():
+ * a .limit() above max_rows is not a higher ceiling, it is the same 1000-row
+ * truncation with a bigger, misleading number written next to it.
  */
 const MAX_EARLIER_ASSIGNMENTS = 200
 const MAX_CHECKLIST_ITEMS     = 4000
@@ -73,26 +81,22 @@ interface ChecklistItemRow {
 }
 
 /**
- * ONE read for every item across every instance. Bound to a named const before
- * unwrapping, matching the two reads above — an `await` inlined as a call
- * argument reads as a discarded PostgREST result to semgrep's
- * `supabase-discarded-result` chokepoint, which cannot see through the
- * explicit type argument on unwrapList.
+ * ONE read for every item across every instance, paginated via .range()
+ * rather than a bare .limit() — see MAX_CHECKLIST_ITEMS's comment above.
  */
 async function loadChecklistItems(
   supabase: ReturnType<typeof createServiceClient>,
   instances: { id: string }[],
-  orgId: string,
 ): Promise<ChecklistItemRow[]> {
-  const res = await supabase
-    .from('checklist_instance_items')
-    .select('instance_id, is_completed, completed_at')
-    .in('instance_id', instances.map((i) => i.id))
-    .limit(MAX_CHECKLIST_ITEMS)
-
-  return unwrapList<ChecklistItemRow>(res, {
-    site: 'scoring.crew-day-context.checklistItems', orgId,
-  })
+  return fetchAllRows<ChecklistItemRow>(
+    (from, to) => supabase
+      .from('checklist_instance_items')
+      .select('instance_id, is_completed, completed_at')
+      .in('instance_id', instances.map((i) => i.id))
+      .order('id', { ascending: true })
+      .range(from, to),
+    { label: 'scoring.crew-day-context.checklistItems', maxRows: MAX_CHECKLIST_ITEMS },
+  )
 }
 
 /**
@@ -194,7 +198,7 @@ export async function getCrewDayContext(
   // ONE read for every item across every instance, folded in memory.
   const progressByInstance = instances.length === 0
     ? new Map<string, ChecklistProgress>()
-    : foldProgress(await loadChecklistItems(supabase, instances, orgId))
+    : foldProgress(await loadChecklistItems(supabase, instances))
 
   const now = Date.now()
 

@@ -42,6 +42,12 @@ const workOrder = (id: string, over: Partial<WorkOrder> = {}): WorkOrder => ({
 let workOrderRows: { data: unknown; error: unknown } = { data: [], error: null }
 let vendorRows:    { data: unknown; error: unknown } = { data: [], error: null }
 
+// Fires exactly when the work_orders SELECT's response is being read — lets a
+// test model something completing concurrently with that request, the same
+// way the outbox drain can finish syncing a work order while this warm's own
+// SELECT is still in flight.
+let onWorkOrdersRead: (() => Promise<void>) | null = null
+
 // getSession() is what the warm's session gate asks, and it is not a storage
 // peek: supabase-js refreshes an expired token inside it and returns null when
 // that refresh fails. `null` here therefore models the real production case —
@@ -59,7 +65,10 @@ function fakeSupabase() {
       const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
       for (const m of ['select', 'eq', 'in', 'order', 'limit']) builder[m] = () => builder
-      builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result()).then(resolve)
+      builder.then = (resolve: (v: unknown) => unknown) => {
+        const hook = table === 'work_orders' ? onWorkOrdersRead : null
+        return (hook ? hook() : Promise.resolve()).then(() => resolve(result()))
+      }
       return builder
     },
   }
@@ -71,9 +80,10 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 const { warmMaintenanceBoardForOffline } = await import('@/lib/dexie/dashboard/warm-maintenance-board')
 
 beforeEach(async () => {
-  workOrderRows = { data: [], error: null }
-  vendorRows    = { data: [], error: null }
-  session       = { access_token: 'jwt' }
+  workOrderRows    = { data: [], error: null }
+  vendorRows       = { data: [], error: null }
+  onWorkOrdersRead = null
+  session          = { access_token: 'jwt' }
   vi.stubGlobal('navigator', { onLine: true })
 
   closeDashboardDb()
@@ -113,6 +123,32 @@ describe('warmMaintenanceBoardForOffline', () => {
 
     expect(await db.work_orders.get('local-1')).toBeTruthy()
     expect(await db.work_orders.get('server-1')).toBeTruthy()
+  })
+
+  it('a work order that finishes syncing WHILE the SELECT is in flight survives', async () => {
+    // The race this warm's ordering exists to close. `workOrderRows` is EMPTY
+    // — the server had not committed the create yet when this SELECT actually
+    // ran — but by the time the outbox drain finishes elsewhere and deletes
+    // the mutation, the SELECT response has still not been read. If `pending`
+    // were captured AFTER the SELECT (the pre-fix ordering) this sequence
+    // deletes a work order that, on the server, already exists: the mutation
+    // is gone (not "pending") and the stale response never saw it either (not
+    // "covered"). Reading `pending` before the SELECT fires closes the
+    // window — see the header comment in warm-maintenance-board.ts.
+    const db = getDashboardDb(USER, ORG)
+    await db.work_orders.put(workOrder('local-1', { wo_number: null }))
+    await db.mutations.add({
+      kind: 'work_order.create', targetId: 'local-1', orgId: ORG,
+      payload: {}, createdAt: new Date().toISOString(), retryCount: 0,
+    })
+    workOrderRows = { data: [], error: null }
+    onWorkOrdersRead = async () => {
+      await db.mutations.where('targetId').equals('local-1').delete()
+    }
+
+    await warmMaintenanceBoardForOffline(USER, ORG)
+
+    expect(await db.work_orders.get('local-1')).toBeTruthy()
   })
 
   it('a work order that finished sending is no longer exempt, and is reconciled normally', async () => {

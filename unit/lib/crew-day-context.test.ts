@@ -16,7 +16,7 @@ const CHECKIN  = '2026-09-13T14:00:00.000Z'
 /** Every builder method returns the chain; awaiting it (or maybeSingle) resolves. */
 function chain(result: unknown) {
   const c: Record<string, unknown> = {}
-  const methods = ['select', 'eq', 'in', 'neq', 'gte', 'lt', 'limit', 'order', 'not']
+  const methods = ['select', 'eq', 'in', 'neq', 'gte', 'lt', 'limit', 'order', 'not', 'range']
   for (const m of methods) c[m] = vi.fn(() => c)
   c.maybeSingle = vi.fn(() => Promise.resolve(result))
   c.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
@@ -32,15 +32,20 @@ interface Fixture {
 
 function makeSupabase(f: Fixture) {
   const calls: string[] = []
+  // Built once per table, not per .from() call, so a test can inspect the
+  // SAME chain object the code under test actually queried through.
+  const chains: Record<string, ReturnType<typeof chain>> = {
+    turnovers:                 chain(f.target    ?? { data: null, error: null }),
+    turnover_assignments:      chain(f.earlier   ?? { data: [], error: null }),
+    checklist_instances:       chain(f.instances ?? { data: [], error: null }),
+    checklist_instance_items:  chain(f.items     ?? { data: [], error: null }),
+  }
   const from = vi.fn((table: string) => {
     calls.push(table)
-    if (table === 'turnovers')                return chain(f.target    ?? { data: null, error: null })
-    if (table === 'turnover_assignments')     return chain(f.earlier   ?? { data: [], error: null })
-    if (table === 'checklist_instances')      return chain(f.instances ?? { data: [], error: null })
-    if (table === 'checklist_instance_items') return chain(f.items     ?? { data: [], error: null })
-    throw new Error(`Unexpected table: ${table}`)
+    if (!(table in chains)) throw new Error(`Unexpected table: ${table}`)
+    return chains[table]
   })
-  return { from, callsByTable: () => calls }
+  return { from, callsByTable: () => calls, chains }
 }
 
 const targetWithCrew = (crew: { id: string; name: string }[]) => ({
@@ -188,6 +193,22 @@ describe('getCrewDayContext', () => {
     expect(result).toHaveLength(2)
     expect(result[0]!.earlierTurnoversToday).toHaveLength(2)
     expect(result[1]!.earlierTurnoversToday).toHaveLength(2)
+  })
+
+  it('paginates the checklist-items read via .range(), not a bare .limit()', async () => {
+    // MAX_CHECKLIST_ITEMS (4000) is deliberately above PostgREST's own
+    // max_rows (1000) — a busy crew member's several same-day turnovers can
+    // genuinely carry that many items — so a bare .limit(4000) would silently
+    // truncate at 1000 with no signal. Only .range()-based pagination
+    // actually reaches the real ceiling.
+    const supabase = makeSupabase(soloDay(HALF_DONE))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await getCrewDayContext('tvr_flagged', 'org_1')
+
+    const itemsChain = supabase.chains.checklist_instance_items
+    expect(itemsChain.range).toHaveBeenCalled()
+    expect(itemsChain.limit).not.toHaveBeenCalled()
   })
 
   it('returns [] when the flagged turnover does not exist', async () => {

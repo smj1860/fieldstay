@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asSlotType } from '@/lib/guidebook/offer'
 // Only MAX_SPONSORS_PER_PROPERTY is read inside this module; the re-export
@@ -228,13 +229,25 @@ async function resolveAuto(
 }
 
 /**
+ * Headroom above the schema's actual per-org ceiling
+ * (`guidebook_sponsors.slot_number` CHECK 1..6, UNIQUE(org_id, slot_number)),
+ * not the literal 6 — so a modest widening of that constraint does not
+ * immediately start silently truncating here. It is still a bound, not
+ * "unbounded": determinism matters on a public guest page, and an
+ * accidentally-unbounded query here is the same `max_rows = 1000` class of
+ * silent truncation this codebase treats as a systemic risk elsewhere.
+ *
+ * If the schema's ceiling is EVER raised past this, `fetchActiveSponsors`
+ * below reports it rather than quietly returning a short list.
+ */
+export const MAX_ACTIVE_SPONSORS_PER_ORG = 64
+
+/**
  * The org's active sponsors, ordered by id.
  *
  * `.order('id')` is not cosmetic: it is what makes the coordinate-less
  * fallback in `pickNearestSponsor` deterministic, and this runs on a public
- * page. Bounded explicitly even though the schema caps an org at six
- * (slot_number CHECK 1..6 plus UNIQUE(org_id, slot_number)) so a raised slot
- * ceiling cannot start truncating here silently.
+ * page.
  */
 async function fetchActiveSponsors(
   supabase: AnySupabase,
@@ -247,11 +260,27 @@ async function fetchActiveSponsors(
     .eq('org_id', orgId)
     .eq('status', 'active')
     .order('id')
-    .limit(64)
+    .limit(MAX_ACTIVE_SPONSORS_PER_ORG)
 
   // `as unknown as` because the select string is built from a constant rather
   // than a literal, so postgrest-js infers GenericStringError[] for it.
   const rows = unwrapList(res, { site, orgId }) as unknown as (Omit<ResolverSponsorRow, 'slot_type'> & { slot_type: string })[]
+
+  if (rows.length === MAX_ACTIVE_SPONSORS_PER_ORG) {
+    // The result set exactly filled the bound. Cannot tell from here whether
+    // that is a coincidence or the schema's slot ceiling having grown past
+    // what this limit was sized for — and on a page that decides which
+    // sponsors a guest actually sees, guessing "coincidence" is the wrong
+    // side to be wrong on.
+    reportError(
+      new Error(
+        `fetchActiveSponsors hit its ${MAX_ACTIVE_SPONSORS_PER_ORG}-row cap for org ${orgId} — ` +
+        'the schema\'s per-org sponsor ceiling may have grown past what this limit was sized for',
+      ),
+      { site, orgId, level: 'warning' },
+    )
+  }
+
   return rows.map(toResolverRow)
 }
 

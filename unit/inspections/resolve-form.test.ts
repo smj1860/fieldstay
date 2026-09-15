@@ -249,6 +249,68 @@ describe('resolveFormPages — structure', () => {
     expect(page.items[0]!.children[0]!.formItem.show_when).toBe('fail')
   })
 
+  it('resolves a GRANDCHILD — a child of a child, not just one level down', () => {
+    // buildChildren used to hardcode `children: []` on every child it built,
+    // so an item nested two levels deep (present in the flat array, its own
+    // parent_item_id pointing at another CHILD rather than a root) was never
+    // attached anywhere in the resolved tree at all.
+    const s = section({ key: 'fire' })
+    const parent      = item({ section_id: s.id, key: 'fire.smoke' })
+    const child        = item({ section_id: s.id, key: 'fire.smoke_where', parent_item_id: parent.id, show_when: 'fail' })
+    const grandchild   = item({ section_id: s.id, key: 'fire.smoke_where.type', parent_item_id: child.id })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child, grandchild], assets: [],
+    })[0]!
+
+    const resolvedChild = page.items[0]!.children[0]!
+    expect(resolvedChild.formItem.key).toBe('fire.smoke_where')
+    expect(resolvedChild.children.map((c) => c.formItem.key)).toEqual(['fire.smoke_where.type'])
+  })
+
+  it('a grandchild inherits the SAME asset/repeat instance as its parent and grandparent', () => {
+    // Same defect class as "a child inherits the instance it hangs from"
+    // below, one level deeper: an uninherited identity would merge every
+    // instance's grandchild answer into one.
+    const s = section({ key: 'assets' })
+    const parent      = item({ section_id: s.id, key: 'assets.condition', repeat_per_asset: true })
+    const child        = item({ section_id: s.id, key: 'assets.plate_photo', parent_item_id: parent.id })
+    const grandchild   = item({ section_id: s.id, key: 'assets.plate_photo.note', parent_item_id: child.id })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child, grandchild],
+      assets: [asset({ asset_type: 'generator' }), asset({ asset_type: 'roof' })],
+    })[0]!
+
+    const [first, second] = page.items
+    const firstGrandchild  = first!.children[0]!.children[0]!
+    const secondGrandchild = second!.children[0]!.children[0]!
+
+    expect(firstGrandchild.asset?.asset_type).toBe('generator')
+    expect(secondGrandchild.asset?.asset_type).toBe('roof')
+    expect(answerKey(firstGrandchild)).not.toBe(answerKey(secondGrandchild))
+  })
+
+  it('degrades a cyclic parent_item_id chain instead of stack-overflowing', () => {
+    // Not reachable through the live seed pipeline (a "child" can only ever
+    // reference a ROOT — see scripts/seed-inspection-forms.ts), but
+    // parent_item_id carries no DB constraint against it, and this module
+    // also renders a completed inspection's frozen, untrusted form_snapshot.
+    // Simulated here as corrupted data would actually look: TWO rows sharing
+    // one id, so walking root -> a -> b -> "a again" closes a loop entirely
+    // reachable from an actual root, which a real duplicate/looping
+    // form_snapshot id could produce.
+    const s = section({ key: 'fire' })
+    const root = item({ section_id: s.id, key: 'fire.smoke' })
+    const a = item({ section_id: s.id, key: 'fire.a', parent_item_id: root.id })
+    const b = item({ section_id: s.id, key: 'fire.b', parent_item_id: a.id })
+    const aAgain = item({ section_id: s.id, key: 'fire.a', id: a.id, parent_item_id: b.id })
+
+    expect(() => resolveFormPages({
+      sections: [s], items: [root, a, b, aAgain], assets: [],
+    })).not.toThrow()
+  })
+
   it('answerKey distinguishes repeat instances and per-asset rows', () => {
     // Without this, two extinguishers or two HVAC units would share one answer
     // and the second would silently overwrite the first.
@@ -416,6 +478,63 @@ describe('findOutstanding — what the Review page lists', () => {
   })
 })
 
+describe('findOutstanding — na_asset_type is verified against the live asset ledger', () => {
+  // §12.3 / INSPECTIONS_SPEC.md: "N/A — no pool at this property" is exactly
+  // the assertion the person who benefits from skipping the pool section is
+  // the one making. This column existed and was carried everywhere (the
+  // seed, the type, the snapshot) but nothing anywhere actually checked it
+  // against property_assets — the documented "rejected at fill time" never
+  // shipped.
+  const s = section({ key: 'outdoor' })
+  const pool = item({
+    section_id: s.id, key: 'outdoor.pool', prompt: 'Pool gate self-latching',
+    na_asset_type: 'pool_pump',
+  })
+  const build = (assets: PropertyAsset[]) => {
+    const pages = resolveFormPages({ sections: [s], items: [pool], assets })
+    return { pages, key: answerKey(pages[0]!.items[0]!) }
+  }
+
+  it('rejects an N/A when an ACTIVE asset of that type is on record', () => {
+    const { pages, key } = build([asset({ asset_type: 'pool_pump', is_active: true })])
+    const out = findOutstanding(pages, { [key]: { result: 'na' } }, [asset({ asset_type: 'pool_pump', is_active: true })])
+    expect(out.map((o) => o.reason)).toEqual(['na_contradicts_ledger'])
+  })
+
+  it('accepts the N/A when no such asset is on record at all', () => {
+    const { pages, key } = build([])
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, [])).toEqual([])
+  })
+
+  it('accepts the N/A when the only matching asset is INACTIVE (replaced/removed)', () => {
+    // A replaced pool pump must not keep rejecting an honest N/A about the
+    // pool forever — same "ACTIVE only" rule resolveFormPages itself uses.
+    const inactive = [asset({ asset_type: 'pool_pump', is_active: false })]
+    const { pages, key } = build(inactive)
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, inactive)).toEqual([])
+  })
+
+  it('does not reject a PASS or FAIL answer even with a matching asset — only N/A is a claim of absence', () => {
+    const assets = [asset({ asset_type: 'pool_pump', is_active: true })]
+    const { pages, key } = build(assets)
+    expect(findOutstanding(pages, { [key]: { result: 'pass' } }, assets)).toEqual([])
+    expect(findOutstanding(pages, { [key]: { result: 'fail', note: 'gate broken' } }, assets)).toEqual([])
+  })
+
+  it('defaults to no assets when the caller omits them, rather than throwing', () => {
+    const { pages, key } = build([])
+    expect(() => findOutstanding(pages, { [key]: { result: 'na' } })).not.toThrow()
+  })
+
+  it('an item with no na_asset_type at all is never subject to this check', () => {
+    const plain = item({ section_id: s.id, key: 'outdoor.other' })
+    const pages = resolveFormPages({ sections: [s], items: [plain], assets: [] })
+    const key = answerKey(pages[0]!.items[0]!)
+    const assets = [asset({ asset_type: 'pool_pump', is_active: true })]
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, assets)).toEqual([])
+  })
+})
+
 // ============================================================================
 // FOUR OF THE FIVE RESPONSE TYPES DO NOT ANSWER WITH A PASS/FAIL.
 //
@@ -553,6 +672,45 @@ describe('visibleNodes — the renderer and the gate share ONE definition', () =
       const complained = new Set(findOutstanding(pages, answers).map((o) => o.itemKey))
       for (const key of complained) expect(visible.has(key), `${key} reported but not shown`).toBe(true)
     }
+  })
+})
+
+describe('visibleNodes — a grandchild\'s visibility depends on ITS OWN parent, not the root', () => {
+  // A hardcoded single loop over item.children used to make anything past
+  // depth 1 unreachable here even after buildChildren started resolving it —
+  // the tree existed but nothing ever walked into it.
+  const s = section({ key: 'fire' })
+  const root  = item({ section_id: s.id, key: 'fire.smoke' })
+  const mid   = item({ section_id: s.id, key: 'fire.smoke_where', parent_item_id: root.id, show_when: 'fail' })
+  const leaf  = item({ section_id: s.id, key: 'fire.smoke_where.type', parent_item_id: mid.id, show_when: 'pass' })
+  const pages = resolveFormPages({ sections: [s], items: [root, mid, leaf], assets: [] })
+  const rootKey = answerKey(pages[0]!.items[0]!)
+  const midKey  = answerKey(pages[0]!.items[0]!.children[0]!)
+
+  const keysWhen = (answers: Record<string, AnswerState>) =>
+    visibleNodes(pages[0]!, answers).map((n) => n.item.formItem.key)
+
+  it('the grandchild stays hidden while its OWN parent (not the root) is unanswered', () => {
+    // Root fails (so `mid` shows), but `mid` itself has no answer yet.
+    expect(keysWhen({ [rootKey]: { result: 'fail' } })).toEqual(['fire.smoke', 'fire.smoke_where'])
+  })
+
+  it('the grandchild appears once its OWN direct parent takes the matching branch', () => {
+    expect(keysWhen({
+      [rootKey]: { result: 'fail' },
+      [midKey]:  { result: 'pass' },
+    })).toEqual(['fire.smoke', 'fire.smoke_where', 'fire.smoke_where.type'])
+  })
+
+  it('reports depth 2 for the grandchild, not clamped to 1', () => {
+    const visible = visibleNodes(pages[0]!, { [rootKey]: { result: 'fail' }, [midKey]: { result: 'pass' } })
+    expect(visible.map((n) => n.depth)).toEqual([0, 1, 2])
+  })
+
+  it('the grandchild never appears if the root never even shows the middle item', () => {
+    // Root passes, so `mid` (show_when: 'fail') never renders — its own
+    // child must not sneak in independently of that.
+    expect(keysWhen({ [rootKey]: { result: 'pass' } })).toEqual(['fire.smoke'])
   })
 })
 

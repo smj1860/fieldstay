@@ -78,41 +78,69 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Could not load the property.' }, { status: 400 })
     }
 
+    const sourceScheduleId = await resolveSourceSchedule(supabase, membership.org_id, parsed.sourceScheduleId)
+
+    const basePayload = {
+      id:            parsed.id,
+      org_id:        membership.org_id,
+      property_id:   parsed.propertyId,
+      form_id:       parsed.formId,
+      form_version:  parsed.formVersion,
+      // The DEVICE's snapshot, deliberately. It records the form actually
+      // walked; rebuilding it here would freeze whatever the form says now,
+      // which after a re-seed is a different set of questions.
+      form_snapshot: parsed.formSnapshot,
+      header_snapshot: buildHeaderSnapshot({
+        property,
+        orgName:      membership.org?.name ?? '',
+        orgOwnerName: await loadOrgOwnerName(supabase, membership.org_id, membership),
+        conditions:   await captureConditions(property, clock.startedAt),
+        capturedAt:   new Date().toISOString(),
+      }),
+      scheduled_for:               parsed.scheduledFor,
+      started_at:                  clock.startedAt,
+      started_at_source:           'device',
+      device_started_at:           parsed.deviceStartedAt,
+      device_clock_offset_seconds: clock.offsetSeconds,
+      assigned_to_user_id:         user.id,
+    }
+
     // ignoreDuplicates is what makes a replay safe: the drain deletes a queued
     // row only after its handler resolves, so a response lost in flight resends
     // the same create. ON CONFLICT DO NOTHING means the second one is a no-op
     // rather than a second inspection — and cannot overwrite one that has since
     // been completed.
-    const { error } = await supabase
+    let { error } = await supabase
       .from('inspections')
-      .upsert({
-        id:            parsed.id,
-        org_id:        membership.org_id,
-        property_id:   parsed.propertyId,
-        form_id:       parsed.formId,
-        form_version:  parsed.formVersion,
-        // The DEVICE's snapshot, deliberately. It records the form actually
-        // walked; rebuilding it here would freeze whatever the form says now,
-        // which after a re-seed is a different set of questions.
-        form_snapshot: parsed.formSnapshot,
-        header_snapshot: buildHeaderSnapshot({
-          property,
-          orgName:      membership.org?.name ?? '',
-          orgOwnerName: await loadOrgOwnerName(supabase, membership.org_id, membership),
-          conditions:   await captureConditions(property, clock.startedAt),
-          capturedAt:   new Date().toISOString(),
-        }),
-        // §7. Validated below rather than trusted: a schedule id from a device
-        // decides which schedule COMPLETION will advance, so an id belonging to
-        // another org — or to a work-order schedule — must not be written.
-        source_schedule_id:          await resolveSourceSchedule(supabase, membership.org_id, parsed.sourceScheduleId),
-        scheduled_for:               parsed.scheduledFor,
-        started_at:                  clock.startedAt,
-        started_at_source:           'device',
-        device_started_at:           parsed.deviceStartedAt,
-        device_clock_offset_seconds: clock.offsetSeconds,
-        assigned_to_user_id:         user.id,
-      }, { onConflict: 'id', ignoreDuplicates: true })
+      // §7. Validated above rather than trusted: a schedule id from a device
+      // decides which schedule COMPLETION will advance, so an id belonging to
+      // another org — or to a work-order schedule — must not be written.
+      .upsert({ ...basePayload, source_schedule_id: sourceScheduleId }, { onConflict: 'id', ignoreDuplicates: true })
+
+    // inspections_one_open_walk_per_schedule (20260915122230): at most one
+    // OPEN inspection may reference a given schedule. Two devices — or one
+    // device racing a double-tap before its own cache re-renders — can each
+    // mint a fresh id against the same schedule while the read-time
+    // due-schedules filter (lib/inspections/due-schedules.ts) has not yet
+    // caught up, which the `onConflict: 'id'` target above does nothing to
+    // stop (they are two genuinely different ids). This is a UNIQUE
+    // violation on a DIFFERENT constraint than the one just handled, so
+    // `ignoreDuplicates` does not absorb it — it surfaces as a real error.
+    //
+    // Same resolution as resolveSourceSchedule's own null fallback above:
+    // the walk is real and its answers are on a tablet, so drop the
+    // schedule link and let the create through rather than dead-lettering a
+    // completed walk. The schedule itself is unaffected — it is still
+    // "open" against the winner's inspection and will notify again next
+    // occurrence if this one's link is lost, which is visible and
+    // recoverable, unlike losing the walk.
+    let scheduleLinkDropped = false
+    if (error?.code === '23505' && error.message.includes('inspections_one_open_walk_per_schedule')) {
+      scheduleLinkDropped = true
+      ;({ error } = await supabase
+        .from('inspections')
+        .upsert({ ...basePayload, source_schedule_id: null }, { onConflict: 'id', ignoreDuplicates: true }))
+    }
 
     if (error) {
       reportError(error, { site: 'route.inspections.create' })
@@ -134,6 +162,7 @@ export async function POST(req: Request) {
         property_id: parsed.propertyId,
         started_at_source: 'device',
         device_clock_offset_seconds: clock.offsetSeconds,
+        ...(scheduleLinkDropped && { schedule_link_dropped: true }),
       },
     })
 

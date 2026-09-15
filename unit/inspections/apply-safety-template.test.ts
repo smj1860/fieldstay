@@ -1,11 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import {
   applySafetyTemplate,
   rebaseSafetySchedules,
   SAFETY_SCHEDULE_NAME,
+  MAX_PROPERTIES,
 } from '@/lib/inspections/apply-safety-template'
+import { reportError } from '@/lib/observability/report-error'
 
 // ============================================================================
 // APPLYING THE TEMPLATE — the one function onboarding and the cron share.
@@ -217,6 +221,44 @@ describe('applySafetyTemplate', () => {
     expect(result.created).toBe(2)
     const rows = writes[0]!.rows as Record<string, unknown>[]
     expect(rows[0]).toMatchObject({ frequency: 'annual', next_due_date: '2026-06-01' })
+  })
+})
+
+describe('applySafetyTemplate — MAX_PROPERTIES cap-hit signal', () => {
+  // The result set exactly filling the bound used to be silent: every
+  // property past the cap never gets a safety schedule, forever (there is
+  // no separate "catch what was missed" mechanism — the nightly rebase
+  // pass only re-times schedules that already exist), with nothing in the
+  // returned ApplyResult or anywhere else to say so.
+  const manyProperties = { data: Array.from({ length: MAX_PROPERTIES }, (_, i) => ({ id: `prop-${i}` })) }
+
+  it('does NOT report when the org has fewer properties than the cap', async () => {
+    vi.clearAllMocks()
+    const { client } = makeClient({ inspection_forms: FORMS, properties: TWO_PROPERTIES })
+    await applySafetyTemplate(client, ORG, { template: TEMPLATE, today: TODAY })
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('REPORTS a warning when the result set exactly fills the cap', async () => {
+    vi.clearAllMocks()
+    const { client } = makeClient({ inspection_forms: FORMS, properties: manyProperties })
+    await applySafetyTemplate(client, ORG, { template: TEMPLATE, today: TODAY })
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ orgId: ORG, level: 'warning' }),
+    )
+    const [err] = vi.mocked(reportError).mock.calls[0]!
+    expect((err as Error).message).toContain(String(MAX_PROPERTIES))
+  })
+
+  it('still creates schedules for the properties it DID read, even while reporting the cap', async () => {
+    vi.clearAllMocks()
+    const { client } = makeClient({ inspection_forms: FORMS, properties: manyProperties })
+    const result = await applySafetyTemplate(client, ORG, { template: TEMPLATE, today: TODAY })
+
+    expect(result.properties).toBe(MAX_PROPERTIES)
+    expect(result.created).toBe(MAX_PROPERTIES)
   })
 })
 

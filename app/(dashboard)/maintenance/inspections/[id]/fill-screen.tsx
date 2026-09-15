@@ -189,7 +189,10 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
     })
   }, [snapshot, assets, answerRows, propertyFacts])
 
-  const outstanding = useMemo(() => findOutstanding(pages, answers), [pages, answers])
+  const outstanding = useMemo(
+    () => findOutstanding(pages, answers, assets ?? []),
+    [pages, answers, assets],
+  )
 
   const onChange = useCallback((key: string, formItemId: string, prompt: string,
                                 assetId: string | null, repeatIndex: number | null,

@@ -24,9 +24,9 @@ const checkLimitMock = vi.fn()
 // global fetch spy and the "called fetch once" assertions count three.
 vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
   ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
-  failureCount:  vi.fn(async () => 0),
-  recordFailure: vi.fn(async () => undefined),
-  recordSuccess: vi.fn(async () => undefined),
+  evaluateBreaker: vi.fn(async () => ({ decision: 'closed', priorFailures: 0 })),
+  recordFailure:   vi.fn(async () => undefined),
+  recordSuccess:   vi.fn(async () => undefined),
 }))
 
 vi.mock('@/lib/rate-limit', () => ({

@@ -39,7 +39,7 @@ import { getPmMembers }         from '@/lib/inngest/helpers'
 import { resend, FROM }         from '@/lib/resend/client'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { reportError }          from '@/lib/observability/report-error'
-import { todayISO }             from '@/lib/inspections/due-schedules'
+import { todayISO, scheduleIdsWithOpenWalk } from '@/lib/inspections/due-schedules'
 import {
   firstOfMonth,
   selectOverdueForDigest,
@@ -128,7 +128,23 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
         { label: 'maintenance_schedules(overdue-inspection-dispatch)' },
       )
 
-      return [...new Set(selectOverdueForDigest(rows, today).map((r) => r.org_id))]
+      // Platform-wide, so a schedule already mid-walk on ANY org does not
+      // pull that org into the fan-out just to have the handler discover
+      // it and skip — same reasoning as re-selecting per-org in the
+      // handler below, one step earlier.
+      const openWalks = await fetchAllRows<{ source_schedule_id: string | null; completed_at: string | null }>(
+        (from, to) => supabase
+          .from('inspections')
+          .select('source_schedule_id, completed_at')
+          .is('completed_at', null)
+          .not('source_schedule_id', 'is', null)
+          .order('id')
+          .range(from, to),
+        { label: 'inspections(overdue-inspection-dispatch-open-walks)' },
+      )
+      const openWalkScheduleIds = scheduleIdsWithOpenWalk(openWalks)
+
+      return [...new Set(selectOverdueForDigest(rows, today, openWalkScheduleIds).map((r) => r.org_id))]
     })
 
     if (orgIds.length === 0) {
@@ -181,7 +197,24 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
         .limit(MAX_SCHEDULES_PER_ORG)
 
       if (error) throw new Error(`[InspectionOverdue] load failed for org ${org_id}: ${error.message}`)
-      return selectOverdueForDigest((data ?? []) as unknown as ScheduleRow[], today)
+
+      // Re-selected alongside the schedules, not carried from dispatch: a walk
+      // can be started between the platform-wide dispatch scan and this run,
+      // and mailing a PM that a walk is overdue while it is already under way
+      // is exactly the inaccuracy this whole check exists to close.
+      const { data: openWalks, error: openWalksError } = await supabase
+        .from('inspections')
+        .select('source_schedule_id, completed_at')
+        .eq('org_id', org_id)
+        .is('completed_at', null)
+        .not('source_schedule_id', 'is', null)
+        .limit(MAX_SCHEDULES_PER_ORG)
+
+      if (openWalksError) throw new Error(`[InspectionOverdue] open-walk load failed for org ${org_id}: ${openWalksError.message}`)
+
+      return selectOverdueForDigest(
+        (data ?? []) as unknown as ScheduleRow[], today, scheduleIdsWithOpenWalk(openWalks ?? []),
+      )
     })
 
     if (rows.length === 0) {

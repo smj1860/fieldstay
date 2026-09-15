@@ -166,6 +166,21 @@ export const RESEND_TIMEOUT_MS = 20_000
 export const PMS_API_TIMEOUT_MS = 30_000
 
 /**
+ * One photograph download inside the inspection report's photo log
+ * (lib/inspections/report/model.ts's loadPhotos).
+ *
+ * These run SEQUENTIALLY, up to MAX_REPORT_PHOTOS of them, synchronously on
+ * a request path with no yield point — see that file's header comment. An
+ * untimed download here does not just cost one photograph slowly; a single
+ * hung object holds the whole loop, and the whole PDF response, open until
+ * the platform kills the function, and the 149 photographs still to come
+ * never get their turn at all. Tight relative to the other budgets in this
+ * file because the alternative to giving up is a PM staring at a spinner for
+ * an object that may never arrive.
+ */
+export const INSPECTION_PHOTO_TIMEOUT_MS = 6_000
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

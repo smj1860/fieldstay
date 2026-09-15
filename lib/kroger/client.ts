@@ -22,7 +22,7 @@ import type {
 import { reportError } from '@/lib/observability/report-error'
 import { KROGER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import { NonRetriableError } from 'inngest'
-import { failureCount, recordFailure, recordSuccess, CircuitOpenError, CIRCUIT_BREAKER_CONFIG } from '@/lib/integrations/circuit-breaker'
+import { evaluateBreaker, recordFailure, recordSuccess, CircuitOpenError } from '@/lib/integrations/circuit-breaker'
 
 const KROGER_API_BASE  = 'https://api.kroger.com/v1'
 const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
@@ -80,9 +80,14 @@ async function krogerFetch(
   // Inngest's backoff — N orgs x (1 + retries) full-timeout round-trips
   // against a service already in trouble, each holding a step open the whole
   // time. NonRetriable on purpose: retrying is precisely the behaviour that
-  // amplifies the outage, and the next run after the window lapses re-probes.
-  const priorFailures = await failureCount('kroger')
-  if (priorFailures >= CIRCUIT_BREAKER_CONFIG.FAILURE_THRESHOLD) {
+  // amplifies the outage.
+  //
+  // A real half-open gate, not just a counter's own TTL: once the cooldown
+  // elapses, exactly ONE concurrent caller gets 'probe' and is let through as
+  // the trial attempt — everyone else still reads 'open' until that probe's
+  // outcome resolves the circuit. See lib/integrations/circuit-breaker.ts.
+  const { decision: breakerDecision, priorFailures } = await evaluateBreaker('kroger')
+  if (breakerDecision === 'open') {
     throw new NonRetriableError(new CircuitOpenError('kroger').message)
   }
 

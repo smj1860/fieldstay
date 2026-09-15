@@ -13,9 +13,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // ============================================================================
 
 const checkLimitMock = vi.fn()
-const failureCountMock  = vi.fn()
-const recordFailureMock = vi.fn()
-const recordSuccessMock = vi.fn()
+const evaluateBreakerMock = vi.fn()
+const recordFailureMock   = vi.fn()
+const recordSuccessMock   = vi.fn()
 
 vi.mock('@/lib/rate-limit', () => ({
   krogerAuthApiLimiter:      { __limiter: 'kroger-auth' },
@@ -27,18 +27,21 @@ vi.mock('@/lib/rate-limit', () => ({
 }))
 vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
   ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
-  failureCount:  (...a: unknown[]) => failureCountMock(...a),
-  recordFailure: (...a: unknown[]) => recordFailureMock(...a),
-  recordSuccess: (...a: unknown[]) => recordSuccessMock(...a),
+  evaluateBreaker: (...a: unknown[]) => evaluateBreakerMock(...a),
+  recordFailure:   (...a: unknown[]) => recordFailureMock(...a),
+  recordSuccess:   (...a: unknown[]) => recordSuccessMock(...a),
 }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { NonRetriableError } from 'inngest'
 import { searchProducts } from '@/lib/kroger/client'
-import { CIRCUIT_BREAKER_CONFIG } from '@/lib/integrations/circuit-breaker'
 
-const OPEN   = CIRCUIT_BREAKER_CONFIG.FAILURE_THRESHOLD
-const CLOSED = 0
+function closed(priorFailures = 0) {
+  return { decision: 'closed' as const, priorFailures }
+}
+function open(priorFailures = 5) {
+  return { decision: 'open' as const, priorFailures }
+}
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -49,7 +52,7 @@ function ok(body: unknown = { data: [] }) {
 beforeEach(() => {
   vi.clearAllMocks()
   checkLimitMock.mockResolvedValue({ allowed: true, skipped: false, errored: false, limit: 1, remaining: 1, reset: Date.now() })
-  failureCountMock.mockResolvedValue(CLOSED)
+  evaluateBreakerMock.mockResolvedValue(closed())
   fetchMock = vi.fn(async () => ok())
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -59,12 +62,20 @@ afterEach(() => { vi.unstubAllGlobals() })
 describe('krogerFetch consults the circuit breaker', () => {
   it('makes the call when the circuit is closed', async () => {
     await searchProducts('token', 'paper towels', 'loc_1').catch(() => {})
-    expect(failureCountMock).toHaveBeenCalledWith('kroger')
+    expect(evaluateBreakerMock).toHaveBeenCalledWith('kroger')
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('makes the call when this caller is granted the exclusive probe slot', async () => {
+    // Half-open: the cooldown elapsed and this caller won the probe claim —
+    // it must proceed exactly like 'closed', not be treated as open.
+    evaluateBreakerMock.mockResolvedValue({ decision: 'probe', priorFailures: 5 })
+    await searchProducts('token', 'paper towels', 'loc_1').catch(() => {})
     expect(fetchMock).toHaveBeenCalled()
   })
 
   it('SKIPS the call entirely when the circuit is open', async () => {
-    failureCountMock.mockResolvedValue(OPEN)
+    evaluateBreakerMock.mockResolvedValue(open())
 
     await expect(searchProducts('token', 'paper towels', 'loc_1')).rejects.toThrow(/circuit is open/)
     // The whole point: no outbound request, so no full-timeout wait added to a
@@ -73,12 +84,12 @@ describe('krogerFetch consults the circuit breaker', () => {
   })
 
   it('throws NonRetriable when open — retrying is the amplification', async () => {
-    failureCountMock.mockResolvedValue(OPEN)
+    evaluateBreakerMock.mockResolvedValue(open())
     await expect(searchProducts('token', 'x', 'loc_1')).rejects.toBeInstanceOf(NonRetriableError)
   })
 
   it('checks the breaker BEFORE the rate limiter has any chance to allow a call through', async () => {
-    failureCountMock.mockResolvedValue(OPEN)
+    evaluateBreakerMock.mockResolvedValue(open())
     await searchProducts('token', 'x', 'loc_1').catch(() => {})
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -114,13 +125,19 @@ describe('krogerFetch feeds the breaker', () => {
   it('skips the clearing DEL on a healthy call when nothing is counted', async () => {
     // The count is already in hand from the pre-check, so an unconditional
     // recordSuccess would add a Redis round-trip to every successful call.
-    failureCountMock.mockResolvedValue(0)
+    evaluateBreakerMock.mockResolvedValue(closed(0))
     await searchProducts('token', 'x', 'loc_1').catch(() => {})
     expect(recordSuccessMock).not.toHaveBeenCalled()
   })
 
   it('DOES clear on a success that follows recorded failures (recovery)', async () => {
-    failureCountMock.mockResolvedValue(2)
+    evaluateBreakerMock.mockResolvedValue(closed(2))
+    await searchProducts('token', 'x', 'loc_1').catch(() => {})
+    expect(recordSuccessMock).toHaveBeenCalledWith('kroger')
+  })
+
+  it('DOES clear after a successful PROBE call (the circuit fully closes again)', async () => {
+    evaluateBreakerMock.mockResolvedValue({ decision: 'probe', priorFailures: 5 })
     await searchProducts('token', 'x', 'loc_1').catch(() => {})
     expect(recordSuccessMock).toHaveBeenCalledWith('kroger')
   })

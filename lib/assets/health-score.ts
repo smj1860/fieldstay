@@ -1,6 +1,6 @@
 import type { PropertyAsset, AssetTypeStandard } from '@/types/database'
 import type { StatusDotStatus } from '@/components/ui/StatusDot'
-import { assetAgeBasis } from '@/lib/assets/age-basis'
+import { assetAgeBasis, assetAgeYears } from '@/lib/assets/age-basis'
 
 export interface AssetRepairSummary {
   total_repairs:     number
@@ -101,10 +101,14 @@ export function calculateHealthScoreBreakdown(
     return { ageScore: weights.age / 2, conditionScore: weights.condition / 2, total: 50 }
   }
 
-  const installYear = new Date(ageBasis.date).getFullYear()
-  const currentYear = new Date().getFullYear()
-  const ageYears    = Math.max(currentYear - installYear, 0)
-  const lifespan    = (asset.expected_lifespan_years
+  // assetAgeYears(), not a second getFullYear() subtraction — this drove the
+  // exact bug that function's own doc comment describes: an asset installed
+  // December 20 and scored January 5 read as a full year old here, distorting
+  // both the Weibull curve below and the age-normalized repair rate at
+  // exactly the young ages where the relative error is largest. `?? 0` is
+  // defensive only — ageBasis being non-null above already guarantees this is.
+  const ageYears = assetAgeYears(asset) ?? 0
+  const lifespan  = (asset.expected_lifespan_years
     ?? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2))
     || 10  // guard against 0/0 standard ranges to prevent division by zero
 
