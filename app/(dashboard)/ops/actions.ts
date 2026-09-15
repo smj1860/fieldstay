@@ -6,6 +6,7 @@ import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 import type { MemberRole } from '@/types/database'
 import { acceptSuggestion } from '../turnovers/actions'
 
@@ -52,65 +53,90 @@ export async function acceptSmartFix(frictionId: string): Promise<FrictionAction
     if (!friction) return { error: 'That flag no longer exists.' }
     if (!friction.smart_fix_crew_id) return { error: 'There is no Smart Fix to accept on this turnover.' }
 
-    // Compare-and-swap on the column being written, same shape as
-    // dismissSuggestion: two managers on one dashboard is not an exotic race,
-    // and without the precondition the later click would silently overwrite
-    // the earlier decision while both were told it worked.
-    const { data: staged, error: stageError } = await supabase
-      .from('turnovers')
-      .update({
-        suggested_crew_ids:   [friction.smart_fix_crew_id],
-        suggestion_reasoning: friction.smart_fix_reasoning,
-        suggestion_status:    'pending',
-      })
-      .eq('id', friction.turnover_id)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (stageError) {
-      console.error('[acceptSmartFix] stage', stageError)
-      reportError(stageError, { site: 'serverAction.ops.acceptSmartFix.stage', orgId: membership.org_id })
-      return { error: 'Failed to accept the Smart Fix. Please try again.' }
-    }
-    if (!staged) return { error: NOTHING_UPDATED }
-
-    // The shared accept path. Its own guards (terminal turnover statuses,
-    // crew-in-org) run here, so a turnover completed since the 2am score
-    // refuses with a real message rather than being reopened.
-    const accepted = await acceptSuggestion(friction.turnover_id)
-    if (accepted.error) return { error: accepted.error }
-
-    // Only after the assignment actually landed. Resolving first would clear
-    // the flag off the panel for an assignment that never happened.
-    const { data: resolved, error: resolveError } = await supabase
-      .from('pre_flight_friction')
-      .update({ status: 'resolved' })
-      .eq('id', frictionId)
-      .eq('org_id', membership.org_id)
-      .eq('status', 'flagged')
-      .select('id')
-      .maybeSingle()
-
-    if (resolveError) {
-      console.error('[acceptSmartFix] resolve', resolveError)
-      reportError(resolveError, { site: 'serverAction.ops.acceptSmartFix.resolve', orgId: membership.org_id })
-      // The crew IS assigned at this point — reporting failure would invite a
-      // retry that assigns nobody new and confuses the PM about what happened.
-      // The flag simply stays until the next 2am rescore clears it.
+    // LOCKED, not merely CAS'd — this used to claim "compare-and-swap on the
+    // column being written, same shape as dismissSuggestion", which was never
+    // true: dismissSuggestion is ONE atomic UPDATE with a real precondition in
+    // its WHERE clause, but staging here, acceptSuggestion() and the resolve
+    // below are THREE separate writes with nothing tying them together — the
+    // stage write below had no precondition at all, so two managers double-
+    // clicking (or one stale tab) would both pass it and both run the full
+    // accept pipeline, exactly the "later click silently overwrites the
+    // earlier decision" scenario the comment claimed was already prevented.
+    //
+    // A single WHERE-clause precondition cannot cover a three-write sequence,
+    // so this locks the whole thing per friction flag instead — the same
+    // pattern already used for applyStandardInventoryToProperty and
+    // syncChecklistRoomCounts's own check-then-write races. Resolving
+    // pre_flight_friction stays LAST regardless: resolving first would clear
+    // the flag off the panel for an assignment that had not landed yet.
+    const lockKey = `smart-fix-accept:${frictionId}`
+    if (!(await acquireLock(lockKey))) {
+      // Someone else is already accepting this exact flag. Their pipeline
+      // covers it — running a second one would duplicate the assignment
+      // upsert (harmless, it's an upsert) but could also stage a SECOND,
+      // possibly stale, copy of the same suggestion on top of the first.
+      return { error: NOTHING_UPDATED }
     }
 
-    // No audit row here on purpose: acceptSuggestion() already wrote
-    // 'turnover.suggestion.accepted' for this turnover. A second row for the
-    // same act would read, to whoever is working an incident, as two
-    // acceptances.
-    if (!resolved) {
-      console.warn('[acceptSmartFix] flag not resolved; next rescore will clear it', { frictionId })
-    }
+    try {
+      const { data: staged, error: stageError } = await supabase
+        .from('turnovers')
+        .update({
+          suggested_crew_ids:   [friction.smart_fix_crew_id],
+          suggestion_reasoning: friction.smart_fix_reasoning,
+          suggestion_status:    'pending',
+        })
+        .eq('id', friction.turnover_id)
+        .eq('org_id', membership.org_id)
+        .select('id')
+        .maybeSingle()
 
-    revalidatePath('/ops')
-    revalidatePath('/turnovers')
-    return { success: true }
+      if (stageError) {
+        console.error('[acceptSmartFix] stage', stageError)
+        reportError(stageError, { site: 'serverAction.ops.acceptSmartFix.stage', orgId: membership.org_id })
+        return { error: 'Failed to accept the Smart Fix. Please try again.' }
+      }
+      if (!staged) return { error: NOTHING_UPDATED }
+
+      // The shared accept path. Its own guards (terminal turnover statuses,
+      // crew-in-org) run here, so a turnover completed since the 2am score
+      // refuses with a real message rather than being reopened.
+      const accepted = await acceptSuggestion(friction.turnover_id)
+      if (accepted.error) return { error: accepted.error }
+
+      // Only after the assignment actually landed. Resolving first would clear
+      // the flag off the panel for an assignment that never happened.
+      const { data: resolved, error: resolveError } = await supabase
+        .from('pre_flight_friction')
+        .update({ status: 'resolved' })
+        .eq('id', frictionId)
+        .eq('org_id', membership.org_id)
+        .eq('status', 'flagged')
+        .select('id')
+        .maybeSingle()
+
+      if (resolveError) {
+        console.error('[acceptSmartFix] resolve', resolveError)
+        reportError(resolveError, { site: 'serverAction.ops.acceptSmartFix.resolve', orgId: membership.org_id })
+        // The crew IS assigned at this point — reporting failure would invite a
+        // retry that assigns nobody new and confuses the PM about what happened.
+        // The flag simply stays until the next 2am rescore clears it.
+      }
+
+      // No audit row here on purpose: acceptSuggestion() already wrote
+      // 'turnover.suggestion.accepted' for this turnover. A second row for the
+      // same act would read, to whoever is working an incident, as two
+      // acceptances.
+      if (!resolved) {
+        console.warn('[acceptSmartFix] flag not resolved; next rescore will clear it', { frictionId })
+      }
+
+      revalidatePath('/ops')
+      revalidatePath('/turnovers')
+      return { success: true }
+    } finally {
+      await releaseLock(lockKey)
+    }
   } catch (err) {
     console.error('[acceptSmartFix]', err)
     reportError(err, { site: 'serverAction.ops.acceptSmartFix.outer' })
