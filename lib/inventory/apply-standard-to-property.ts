@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { Constants, type InventoryCategory } from '@/types/database'
 import { unwrapList, tryUnwrap } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 import { getStandardInventoryTemplateId } from './standard-template'
 
 /**
@@ -30,6 +31,11 @@ import { getStandardInventoryTemplateId } from './standard-template'
  *
  * Returns a count and the source rather than throwing on "nothing to do":
  * no standard designated and an empty template are both ordinary states.
+ *
+ * PER-PROPERTY LOCKED around the dedup read and the insert — see the lock's
+ * own comment below. Two concurrent calls for the same property would
+ * otherwise both read the same "what's already here" set and both insert the
+ * same missing items twice.
  */
 
 export interface ApplyStandardResult {
@@ -154,51 +160,78 @@ export async function applyStandardInventoryToProperty(
   const items = org ? org.items : await loadPlatformTemplateItems(supabase, orgId, platformTemplateId)
   if (!items.length) return { applied: 0, source }
 
-  // Dedup on BOTH keys, matching applyTemplateToProperties. catalog_item_id
-  // alone misses an item a PM typed by hand, and name alone misses one whose
-  // catalog row was renamed since — this property already holds a row for it
-  // either way, and a second one would double every restock count.
-  const existingRes = await supabase
-    .from('inventory_items')
-    .select('catalog_item_id, name')
-    .eq('property_id', propertyId)
-    .limit(TEMPLATE_ITEM_CAP * 2)
-  const existing = unwrapList<{ catalog_item_id: string | null; name: string }>(existingRes,
-    { site: 'lib.inventory.applyStandardToProperty.existing', orgId })
-  const haveCatalogIds = new Set(existing.map((e) => e.catalog_item_id).filter(Boolean))
-  const haveNames      = new Set(existing.map((e) => e.name.toLowerCase()))
+  // LOCKED around the read-then-insert below, not just the insert. The dedup
+  // set (haveCatalogIds/haveNames) is computed from a read that has no DB
+  // constraint backing it — see loadPlatformTemplateItems's sibling
+  // applyTemplateToProperties for why: the dedup key is two-pronged
+  // (catalog_item_id OR case-insensitive name), and live inventory_items
+  // already contains duplicates a unique index would fail to build against.
+  // Without this lock, two concurrent calls for the same property (a
+  // double-submitted create, a retried step) would both read the SAME
+  // existing set, both decide the SAME items are missing, and both insert —
+  // doubling every restock count, exactly what the dedup below exists to
+  // prevent. Fails OPEN like every other lock in lib/cache/single-flight.ts:
+  // no Redis means "proceed unlocked", which is the behaviour before this
+  // lock existed and no worse than that.
+  const lockKey = `apply-standard-inventory:${propertyId}`
+  if (!(await acquireLock(lockKey))) {
+    // Someone else is applying standard inventory to this property right
+    // now. Their insert already covers it — this caller doing nothing is the
+    // correct outcome, not a missed one. createProperty already treats a
+    // zero/failed apply as non-fatal and re-appliable from Templates →
+    // Inventory → Par Levels.
+    return { applied: 0, source }
+  }
 
-  const toInsert = items
-    .filter((i) => !(i.catalog_item_id && haveCatalogIds.has(i.catalog_item_id)))
-    .filter((i) => !haveNames.has(i.name.toLowerCase()))
-    .map((i) => ({
-      property_id:             propertyId,
-      org_id:                  orgId,
-      catalog_item_id:         i.catalog_item_id,
-      // Provenance, matching applyTemplateToProperties. Null on the platform
-      // fallback path — there is no org template row to point at, and
-      // inventing one would claim a link that does not exist.
-      source_template_id:      org?.templateId ?? null,
-      name:                    i.name,
-      name_es:                 i.name_es,
-      // Both columns are NOT NULL on inventory_items but nullable on the
-      // template, so the fallbacks are the column defaults, not invented values.
-      category:                toInventoryCategory(i.category),
-      unit:                    i.unit ?? 'units',
-      par_level:               i.par_level,
-      par_mode:                i.par_mode,
-      smart_group:             i.smart_group,
-      base_qty:                i.base_qty,
-      preferred_brand:         i.preferred_brand,
-      current_quantity:        0,
-      low_stock_threshold_pct: 20,
-      is_active:               true,
-    }))
+  try {
+    // Dedup on BOTH keys, matching applyTemplateToProperties. catalog_item_id
+    // alone misses an item a PM typed by hand, and name alone misses one whose
+    // catalog row was renamed since — this property already holds a row for it
+    // either way, and a second one would double every restock count.
+    const existingRes = await supabase
+      .from('inventory_items')
+      .select('catalog_item_id, name')
+      .eq('property_id', propertyId)
+      .limit(TEMPLATE_ITEM_CAP * 2)
+    const existing = unwrapList<{ catalog_item_id: string | null; name: string }>(existingRes,
+      { site: 'lib.inventory.applyStandardToProperty.existing', orgId })
+    const haveCatalogIds = new Set(existing.map((e) => e.catalog_item_id).filter(Boolean))
+    const haveNames      = new Set(existing.map((e) => e.name.toLowerCase()))
 
-  if (!toInsert.length) return { applied: 0, source }
+    const toInsert = items
+      .filter((i) => !(i.catalog_item_id && haveCatalogIds.has(i.catalog_item_id)))
+      .filter((i) => !haveNames.has(i.name.toLowerCase()))
+      .map((i) => ({
+        property_id:             propertyId,
+        org_id:                  orgId,
+        catalog_item_id:         i.catalog_item_id,
+        // Provenance, matching applyTemplateToProperties. Null on the platform
+        // fallback path — there is no org template row to point at, and
+        // inventing one would claim a link that does not exist.
+        source_template_id:      org?.templateId ?? null,
+        name:                    i.name,
+        name_es:                 i.name_es,
+        // Both columns are NOT NULL on inventory_items but nullable on the
+        // template, so the fallbacks are the column defaults, not invented values.
+        category:                toInventoryCategory(i.category),
+        unit:                    i.unit ?? 'units',
+        par_level:               i.par_level,
+        par_mode:                i.par_mode,
+        smart_group:             i.smart_group,
+        base_qty:                i.base_qty,
+        preferred_brand:         i.preferred_brand,
+        current_quantity:        0,
+        low_stock_threshold_pct: 20,
+        is_active:               true,
+      }))
 
-  const { error } = await supabase.from('inventory_items').insert(toInsert)
-  if (error) throw error
+    if (!toInsert.length) return { applied: 0, source }
 
-  return { applied: toInsert.length, source }
+    const { error } = await supabase.from('inventory_items').insert(toInsert)
+    if (error) throw error
+
+    return { applied: toInsert.length, source }
+  } finally {
+    await releaseLock(lockKey)
+  }
 }

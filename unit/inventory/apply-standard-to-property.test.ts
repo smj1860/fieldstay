@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inventory/standard-template', () => ({ getStandardInventoryTemplateId: vi.fn() }))
+vi.mock('@/lib/cache/single-flight', () => ({
+  acquireLock: vi.fn(async () => true),
+  releaseLock: vi.fn(async () => {}),
+}))
 
 import { applyStandardInventoryToProperty } from '@/lib/inventory/apply-standard-to-property'
 import { getStandardInventoryTemplateId } from '@/lib/inventory/standard-template'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 
 // ============================================================================
 // Leg 3: a new property is stocked from the standard template at creation.
@@ -130,5 +135,81 @@ describe('applyStandardInventoryToProperty', () => {
     await expect(applyStandardInventoryToProperty(PROP, ORG, client))
       .resolves.toEqual({ applied: 0, source: 'org_template' })
     expect(inserts).toHaveLength(0)
+  })
+
+  // ── The race two concurrent callers would otherwise hit ────────────────────
+  // No DB constraint backs the dedup read (see the sibling applyTemplateTo-
+  // Properties' comment on why: live data already has duplicates a unique
+  // index would fail to build against), so this lock is the only thing
+  // standing between two concurrent calls for the same property and a
+  // doubled item set.
+
+  describe('concurrency lock', () => {
+    it('does nothing, safely, when another call already holds the lock', async () => {
+      vi.mocked(acquireLock).mockResolvedValueOnce(false)
+      vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
+      const { client, inserts } = makeSupabase({
+        inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
+        inventory_template_items: { data: [ORG_ITEM], error: null },
+        inventory_items:          { data: [], error: null },
+      })
+
+      await expect(applyStandardInventoryToProperty(PROP, ORG, client))
+        .resolves.toEqual({ applied: 0, source: 'org_template' })
+
+      // The loser never even reads the property's existing items, let alone
+      // inserts — the winning caller's insert is the only one that happens.
+      expect(inserts).toHaveLength(0)
+    })
+
+    it('scopes the lock key to the PROPERTY, not shared across properties', async () => {
+      vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
+      const { client } = makeSupabase({
+        inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
+        inventory_template_items: { data: [ORG_ITEM], error: null },
+        inventory_items:          { data: [], error: null },
+      })
+      await applyStandardInventoryToProperty(PROP, ORG, client)
+      await applyStandardInventoryToProperty('prop-2', ORG, client)
+
+      const keys = vi.mocked(acquireLock).mock.calls.map((c) => c[0])
+      expect(new Set(keys).size).toBe(2)
+      expect(keys.every((k) => k.includes('apply-standard-inventory'))).toBe(true)
+    })
+
+    it('always releases the lock, success or failure', async () => {
+      vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
+      const { client } = makeSupabase({
+        inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
+        inventory_template_items: { data: [ORG_ITEM], error: null },
+        inventory_items:          { data: [], error: null },
+      })
+      await applyStandardInventoryToProperty(PROP, ORG, client)
+      expect(releaseLock).toHaveBeenCalledTimes(1)
+
+      vi.clearAllMocks()
+      vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
+      const failing = makeSupabase({
+        inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
+        inventory_template_items: { data: [ORG_ITEM], error: null },
+        inventory_items:          { data: [], error: null },
+      })
+      failing.client.from = vi.fn((table: string) => {
+        const resp = table === 'inventory_items'
+          ? { data: [], error: null }
+          : { data: table === 'inventory_templates' ? { id: 'org-tpl-1' } : [ORG_ITEM], error: null }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chain: any = {}
+        for (const m of ['select', 'eq', 'order', 'limit']) chain[m] = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn(() => Promise.resolve(resp))
+        chain.insert = vi.fn(() => Promise.resolve({ error: { message: 'insert failed' } }))
+        chain.then = (res: (v: unknown) => unknown) => Promise.resolve(resp).then(res)
+        return chain
+      })
+
+      await expect(applyStandardInventoryToProperty(PROP, ORG, failing.client))
+        .rejects.toBeTruthy()
+      expect(releaseLock).toHaveBeenCalledTimes(1)
+    })
   })
 })
