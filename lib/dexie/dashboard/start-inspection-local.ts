@@ -36,6 +36,7 @@ import type { Inspection } from '@/types/database'
 
 import { getDashboardDb } from './schema'
 import { enqueueDashboardMutation } from './syncService'
+import { reportError } from '@/lib/observability/report-error'
 
 export type StartLocalOutcome =
   | { ok: true; inspectionId: string }
@@ -68,84 +69,99 @@ export async function startInspectionLocally(
     scheduledFor?:     string | null
   },
 ): Promise<StartLocalOutcome> {
-  const db = getDashboardDb(userId, orgId)
+  try {
+    const db = getDashboardDb(userId, orgId)
 
-  const form = await loadCachedForm(db, input.formKey)
-  if (!form) {
-    // Distinct from a generic failure: this device has never been online long
-    // enough to hold the forms, and no amount of retrying here will fix it.
-    return { ok: false, error: 'The inspection forms aren’t on this device yet. Reconnect once, then try again.' }
-  }
+    const form = await loadCachedForm(db, input.formKey)
+    if (!form) {
+      // Distinct from a generic failure: this device has never been online long
+      // enough to hold the forms, and no amount of retrying here will fix it.
+      return { ok: false, error: 'The inspection forms aren’t on this device yet. Reconnect once, then try again.' }
+    }
 
-  const property = await db.properties.get(input.propertyId)
-  // Covers both "not cached" and "cached but another org's" — undefined is not
-  // equal to orgId either, and the remedy the message offers is the same.
-  if (property?.org_id !== orgId) {
-    return { ok: false, error: 'That property isn’t on this device yet. Reconnect once, then try again.' }
-  }
+    const property = await db.properties.get(input.propertyId)
+    // Covers both "not cached" and "cached but another org's" — undefined is not
+    // equal to orgId either, and the remedy the message offers is the same.
+    if (property?.org_id !== orgId) {
+      return { ok: false, error: 'That property isn’t on this device yet. Reconnect once, then try again.' }
+    }
 
-  const inspectionId  = crypto.randomUUID()
-  const deviceStarted = new Date().toISOString()
+    const inspectionId  = crypto.randomUUID()
+    const deviceStarted = new Date().toISOString()
 
-  const snapshot = buildFormSnapshot(
-    form.key, form.version, form.sections, form.items, deviceStarted,
-  )
+    const snapshot = buildFormSnapshot(
+      form.key, form.version, form.sections, form.items, deviceStarted,
+    )
 
-  const row: Inspection = {
-    id:            inspectionId,
-    org_id:        orgId,
-    property_id:   input.propertyId,
-    form_id:       form.id,
-    form_version:  form.version,
-    form_snapshot: snapshot,
-    // The server builds this at create — see the header comment.
-    header_snapshot: null,
-    assigned_to_user_id: userId,
-    inspector_name:      null,
-    scheduled_for:       input.scheduledFor ?? null,
-    // Provisional, and labelled as such. The create route replaces it with the
-    // skew-corrected value; until then this is what the UI shows, which is the
-    // device's own belief and therefore right for the device's own display.
-    started_at:                  deviceStarted,
-    started_at_source:           'device',
-    device_started_at:           deviceStarted,
-    device_clock_offset_seconds: null,
-    completed_at:         null,
-    completed_by_user_id: null,
-    source_schedule_id:     input.sourceScheduleId ?? null,
-    corrects_inspection_id: null,
-    created_at: deviceStarted,
-    updated_at: deviceStarted,
-  }
+    const row: Inspection = {
+      id:            inspectionId,
+      org_id:        orgId,
+      property_id:   input.propertyId,
+      form_id:       form.id,
+      form_version:  form.version,
+      form_snapshot: snapshot,
+      // The server builds this at create — see the header comment.
+      header_snapshot: null,
+      assigned_to_user_id: userId,
+      inspector_name:      null,
+      scheduled_for:       input.scheduledFor ?? null,
+      // Provisional, and labelled as such. The create route replaces it with the
+      // skew-corrected value; until then this is what the UI shows, which is the
+      // device's own belief and therefore right for the device's own display.
+      started_at:                  deviceStarted,
+      started_at_source:           'device',
+      device_started_at:           deviceStarted,
+      device_clock_offset_seconds: null,
+      completed_at:         null,
+      completed_by_user_id: null,
+      source_schedule_id:     input.sourceScheduleId ?? null,
+      corrects_inspection_id: null,
+      created_at: deviceStarted,
+      updated_at: deviceStarted,
+    }
 
-  await enqueueDashboardMutation(
-    userId, orgId,
-    {
-      kind:     'inspection.create',
-      targetId: inspectionId,
-      payload:  {
-        id:            inspectionId,
-        property_id:   input.propertyId,
-        form_id:       form.id,
-        form_version:  form.version,
-        form_snapshot: snapshot,
-        // `device_now` is deliberately NOT set here. The offset is only
-        // meaningful when both clocks are read at the same instant, so the
-        // upload handler stamps it at POST time — which may be hours later.
-        device_started_at: deviceStarted,
-        // §7's link. Null for an ad-hoc walk, which is most of them.
-        source_schedule_id: input.sourceScheduleId ?? null,
-        scheduled_for:      input.scheduledFor ?? null,
+    await enqueueDashboardMutation(
+      userId, orgId,
+      {
+        kind:     'inspection.create',
+        targetId: inspectionId,
+        payload:  {
+          id:            inspectionId,
+          property_id:   input.propertyId,
+          form_id:       form.id,
+          form_version:  form.version,
+          form_snapshot: snapshot,
+          // `device_now` is deliberately NOT set here. The offset is only
+          // meaningful when both clocks are read at the same instant, so the
+          // upload handler stamps it at POST time — which may be hours later.
+          device_started_at: deviceStarted,
+          // §7's link. Null for an ad-hoc walk, which is most of them.
+          source_schedule_id: input.sourceScheduleId ?? null,
+          scheduled_for:      input.scheduledFor ?? null,
+        },
       },
-    },
-    // Same transaction as the outbox row. CLAUDE.md's rule, bought with a real
-    // bug: as two transactions a reclaimed PWA leaves a local row with nothing
-    // queued to send it — here, an inspection that exists only on the tablet
-    // and never reaches anyone.
-    () => { void db.inspections.put(row) },
-  )
+      // Same transaction as the outbox row. CLAUDE.md's rule, bought with a real
+      // bug: as two transactions a reclaimed PWA leaves a local row with nothing
+      // queued to send it — here, an inspection that exists only on the tablet
+      // and never reaches anyone.
+      () => { void db.inspections.put(row) },
+    )
 
-  return { ok: true, inspectionId }
+    return { ok: true, inspectionId }
+  } catch (err) {
+    // IndexedDB can fail for reasons entirely outside this code's control:
+    // quota exceeded (very plausible on a photo-heavy, multi-MB-per-photo
+    // device cache), the database failing to open at all (some private-
+    // browsing modes), or a corrupted database from a previous crash. Every
+    // sibling write path in this subsystem (captureInspectionPhoto,
+    // createWorkOrderLocal) wraps its body and returns a discriminated
+    // result; this is the "Start Inspection" entry point and must not be the
+    // one place that instead rejects uncaught, appearing to do nothing with
+    // no error message anywhere.
+    console.error('[startInspectionLocally]', err)
+    reportError(err, { site: 'dexie.dashboard.startInspectionLocally' })
+    return { ok: false, error: 'Could not start the inspection on this device. Please try again.' }
+  }
 }
 
 interface CachedForm {

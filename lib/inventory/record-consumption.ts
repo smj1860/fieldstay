@@ -43,6 +43,7 @@ export interface RecordConsumptionResult {
   /** Why nothing was recorded, when nothing was. Surfaced for the log — these
    *  are all ordinary states, not failures. */
   reason?: 'no_previous_count' | 'no_occupied_nights' | 'no_positive_deltas' | 'no_property'
+    | 'already_recorded'
 }
 
 /** Nights of overlap between a booking and the window between two counts.
@@ -63,6 +64,25 @@ export async function recordConsumptionFromCount(
 ): Promise<RecordConsumptionResult> {
   const { countId, propertyId, orgId } = scope
   const ctx = { site: 'lib.inventory.recordConsumptionFromCount', orgId }
+
+  // Idempotency claim, FIRST — before anything is read or derived. Inngest
+  // guarantees only at-least-once delivery, and this function's whole
+  // derivation is pure over two already-persisted rows: a second call
+  // recomputes the IDENTICAL sample and record_consumption_samples() has no
+  // way to tell it apart from a genuinely new observation, since its conflict
+  // target is the item's one rolling-stats row, not a per-observation key. A
+  // second delivery must be a guaranteed no-op, so claim before reading
+  // anything a caller could use to derive a sample.
+  const claimRes = await supabase
+    .from('inventory_counts')
+    .update({ consumption_recorded_at: new Date().toISOString() })
+    .eq('id', countId)
+    .eq('org_id', orgId)
+    .is('consumption_recorded_at', null)
+    .select('id')
+    .maybeSingle()
+  const claim = tryUnwrap<{ id: string }>(claimRes, ctx)
+  if (!claim.ok || !claim.data) return { recorded: 0, reason: 'already_recorded' }
 
   const currRes = await supabase
     .from('inventory_counts')

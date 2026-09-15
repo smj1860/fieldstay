@@ -221,6 +221,13 @@ describe('inventory/actions', () => {
       })
       expect(supabase.from).not.toHaveBeenCalledWith('inventory_items')
       expect(inngest.send).toHaveBeenCalledWith({
+        // `id` gives Inngest's own 24h dedup window something to collapse —
+        // matching the crew route's producer, so a double-tapped submit or a
+        // client retry after a timeout can't fire
+        // record-inventory-consumption twice from the Inngest layer alone
+        // (the DB-side atomic claim in recordConsumptionFromCount is the
+        // real fix; this is the cheap first layer on top of it).
+        id:   'inventory-count-submitted:count_1',
         name: 'inventory/count-submitted',
         data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' },
       })

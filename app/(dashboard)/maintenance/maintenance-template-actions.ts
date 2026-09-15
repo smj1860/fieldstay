@@ -274,12 +274,34 @@ export async function broadcastMaintenanceTemplate(
       }
     }
 
+    // Via the broadcast_maintenance_schedules RPC, not a plain .insert(): the
+    // pre-lock existingNames read above is only a fast estimate for the loop
+    // that BUILDS rowsToInsert — it is not itself a safe dedup guard, because
+    // there is deliberately no unique constraint behind it
+    // (duplicateMaintenanceScheduleItem copies a row's name onto the same
+    // property on purpose). The RPC takes an advisory lock scoped to
+    // (org_id, template_id) and RE-VERIFIES existence under that lock
+    // immediately before inserting, so two concurrent broadcasts of the same
+    // template serialize instead of both reading "not yet created" and both
+    // inserting duplicate schedules that would each generate their own
+    // recurring work orders forever.
+    let actuallyInserted = rowsToInsert.length
     if (rowsToInsert.length > 0) {
-      const { error } = await supabase.from('maintenance_schedules').insert(rowsToInsert)
+      const { data, error } = await supabase.rpc('broadcast_maintenance_schedules', {
+        p_org_id:      membership.org_id,
+        p_template_id: templateId,
+        p_rows:        rowsToInsert,
+      })
       if (error) {
         console.error('[broadcastMaintenanceTemplate]', error)
         return { error: 'Failed to broadcast template' }
       }
+      actuallyInserted = Number((data as { inserted?: number } | null)?.inserted ?? 0)
+      // A row this action computed as "new" can still lose the race to a
+      // concurrent broadcast between the estimate above and the lock being
+      // taken — those rows the RPC skipped are real skips, same as a
+      // pre-existing name.
+      skipped += rowsToInsert.length - actuallyInserted
     }
 
     await inngest.send({
@@ -296,7 +318,7 @@ export async function broadcastMaintenanceTemplate(
     revalidatePath('/templates/maintenance/create')
     revalidatePath('/templates/maintenance/saved')
     revalidatePath('/templates/maintenance/schedules')
-    return { success: true, created: rowsToInsert.length, skipped }
+    return { success: true, created: actuallyInserted, skipped }
   } catch (err) {
     console.error('[broadcastMaintenanceTemplate]', err)
     reportError(err, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate' })

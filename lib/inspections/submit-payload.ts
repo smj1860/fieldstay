@@ -53,10 +53,20 @@ const REPEAT_ANSWERS = new Set<string>(['same', 'new'])
 /**
  * The most answers one inspection may carry.
  *
- * The largest form is 55 root items, and repeat groups are capped at 999
- * instances each — so a legitimate inspection is in the hundreds and a request
- * in the tens of thousands is a bug or an attack, not a thorough walk. Bounded
- * here because the RPC will happily insert whatever it is handed.
+ * The largest form is 55 root items, and repeat groups are capped at
+ * MAX_REPEAT_INSTANCES (resolve-form.ts) instances each — so a legitimate
+ * inspection is in the hundreds and a request in the tens of thousands is a
+ * bug or an attack, not a thorough walk. Bounded here because the RPC will
+ * happily insert whatever it is handed.
+ *
+ * MUST stay above the worst case MAX_REPEAT_INSTANCES can produce on the
+ * largest real form, or a legitimately-filled walk — the inspector doing
+ * exactly what the UI invited, up to the code's own accepted maximum — gets
+ * silently dead-lettered here: this is TERMINAL for the outbox, since a
+ * rejected submit has no answers anywhere else. The two constants were once
+ * chosen independently and drifted apart (999 * 5-member extinguisher group
+ * alone exceeded this ceiling); their joint relationship is now asserted by
+ * unit/guardrails/inspection-item-caps-consistent.test.ts.
  */
 export const MAX_ITEMS = 5_000
 

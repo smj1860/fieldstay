@@ -309,7 +309,13 @@ export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHo
     external_source:      'hostaway',
     property_external_id: String(review.listingMapId),
     guest_name:           optionalText(review.guestName ?? undefined),
-    rating:               Math.round(rating),
+    // reviews.rating has a DB CHECK (rating BETWEEN 1 AND 5). A single row
+    // outside that range aborts the ENTIRE bulk upsert (23514), silently
+    // blocking every other review in this sync run, forever, since the same
+    // bad row is re-fetched on every retry. Hostaway aggregates channels with
+    // different native scales (Booking.com is 1-10) and this scale was never
+    // verified against a live payload — clamp defensively rather than trust it.
+    rating:               Math.min(5, Math.max(1, Math.round(rating))),
     review_text:          text,
     review_date:          hostawayDateToIso(review.departureDate),
     response_status:      review.revieweeResponse?.trim() ? 'posted' : 'pending',

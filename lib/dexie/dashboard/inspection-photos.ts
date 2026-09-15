@@ -92,27 +92,43 @@ export async function captureInspectionPhoto(
       async () => {
         await db.photo_blobs.put({ key: path, blob: compressed })
         await db.pending_photo_uploads.add({
-          id:         path,
+          id:          path,
           orgId,
-          targetId:   input.inspectionId,
-          blobKey:    path,
-          mimeType:   compressed.type || 'image/jpeg',
-          status:     'pending',
-          retryCount: 0,
-          failed:     0,
-          createdAt:  now,
+          targetId:    input.inspectionId,
+          answerRowId: input.answerRowId,
+          blobKey:     path,
+          mimeType:    compressed.type || 'image/jpeg',
+          status:      'pending',
+          retryCount:  0,
+          failed:      0,
+          createdAt:   now,
         })
         // Written straight onto the answer. The Review gate reads `photoPath`,
         // so the item stops being outstanding the moment the picture is taken
         // rather than when it finishes uploading — which is correct: the
         // inspector has done their part.
-        await db.inspection_answers.update(input.answerRowId, {
+        //
+        // Table.update() is a documented no-op on a missing key — it resolves
+        // with 0, it does not throw or reject the transaction. If this photo
+        // is the item's FIRST interaction (plausible for a photo-evidence-only
+        // question, before saveAnswer has ever created this answerKey's row),
+        // that silently drops the photo's only link to the inspection: the
+        // blob uploads successfully, but nothing on the answer ever points at
+        // it, and Review/the final report both show the item as
+        // un-photographed with no error anywhere. Checking the count and
+        // throwing rolls back the blob/queue writes too, which is correct —
+        // an orphaned queued photo with nothing to show for it is exactly the
+        // failure this closes.
+        const updated = await db.inspection_answers.update(input.answerRowId, {
           photoPath: path,
           // A photo supersedes the reason there wasn't one. Leaving both would
           // put "camera failed" on a report next to the photograph.
           photoUnavailableReason: null,
           updatedAt: now,
         })
+        if (updated === 0) {
+          throw new Error(`No answer row "${input.answerRowId}" to attach photo to`)
+        }
       })
 
     // Kicked, not awaited — a capture must return the instant the bytes are

@@ -923,6 +923,8 @@ export interface InventoryCount {
   submitted_at:         string
   notes:                string | null
   created_at:           string
+  /** Idempotency claim for recordConsumptionFromCount() — see 20260915151000. */
+  consumption_recorded_at: string | null
 }
 
 export interface InventoryCountItem {

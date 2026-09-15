@@ -397,8 +397,13 @@ export async function submitInventoryCount(
       if (recordError) return { error: recordError }
     }
 
-    // Fire Inngest event
+    // Fire Inngest event. `id` gives Inngest's own 24h dedup window something
+    // to collapse — matching the crew route's producer
+    // (app/api/crew/inventory-count/route.ts), which already does this. The
+    // DB-side atomic claim in recordConsumptionFromCount() is the real fix
+    // for a redelivery; this is the cheap first layer on top of it.
     await inngest.send({
+      id:   `inventory-count-submitted:${count.id}`,
       name: 'inventory/count-submitted',
       data: {
         count_id:    count.id,
