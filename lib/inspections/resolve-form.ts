@@ -253,6 +253,17 @@ function buildRepeatGroup(
  * every keystroke without a cache, and what makes the whole thing testable
  * without a database or a browser.
  */
+/**
+ * ACTIVE assets only, and just their types. Shared by resolveFormPages (for
+ * the section/sweep gates) and findOutstanding (for the na_asset_type ledger
+ * check below), so both agree on what "active" means from one place — a
+ * replaced water heater must not resurrect the well section OR let an N/A
+ * about a water heater pass unchallenged.
+ */
+function activeAssetTypeSet(assets: readonly PropertyAsset[]): ReadonlySet<string> {
+  return new Set(assets.filter((a) => a.is_active).map((a) => a.asset_type))
+}
+
 export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   const counts = input.countsByItemId ?? {}
 
@@ -260,7 +271,7 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   // water heater must not resurrect the well section or generate a question
   // about itself.
   const activeAssets = input.assets.filter((a) => a.is_active)
-  const activeTypes  = new Set(activeAssets.map((a) => a.asset_type))
+  const activeTypes  = activeAssetTypeSet(input.assets)
 
   const index      = indexItems(input.items)
   const sweepable  = assetsForGenericSweep(activeAssets, coveredAssetTypes(input.items))
@@ -451,7 +462,7 @@ export interface OutstandingItem {
   sectionName: string
   itemKey:     string
   prompt:      string
-  reason:      'unanswered' | 'fail_needs_description' | 'needs_photo'
+  reason:      'unanswered' | 'fail_needs_description' | 'needs_photo' | 'na_contradicts_ledger'
   repeatIndex?: number
   assetId?:     string
 }
@@ -529,12 +540,22 @@ export function visibleNodes(
 export function findOutstanding(
   pages: ResolvedPage[],
   answers: Readonly<Record<string, AnswerState>>,
+  /**
+   * The property's live asset ledger, for the na_asset_type check below.
+   * Optional and defaulting to none rather than required, so a caller that
+   * genuinely has no asset data (there isn't one today, but a defensive
+   * default costs nothing) degrades to skipping the check rather than
+   * throwing — the same "an absent signal must not crash" posture the rest
+   * of this module takes toward a corrupted snapshot.
+   */
+  assets: readonly PropertyAsset[] = [],
 ): OutstandingItem[] {
   const out: OutstandingItem[] = []
+  const activeTypes = activeAssetTypeSet(assets)
 
   pages.forEach((page, pageIndex) => {
     for (const { item: node } of visibleNodes(page, answers)) {
-      const reason = outstandingReason(node, answers[answerKey(node)])
+      const reason = outstandingReason(node, answers[answerKey(node)], activeTypes)
       if (!reason) continue
       out.push({
         pageIndex,
@@ -595,8 +616,9 @@ function photoSatisfied(answer: AnswerState | undefined): boolean {
 }
 
 function outstandingReason(
-  node:   ResolvedItem,
-  answer: AnswerState | undefined,
+  node:        ResolvedItem,
+  answer:      AnswerState | undefined,
+  activeTypes: ReadonlySet<string>,
 ): OutstandingItem['reason'] | null {
   const def = node.formItem
 
@@ -604,6 +626,16 @@ function outstandingReason(
   // function only judges an item it has already been told is on screen.
   if (def.is_required && !hasAnswer(def, answer)) {
     return def.response_type === 'photo' ? 'needs_photo' : 'unanswered'
+  }
+
+  // §12.3 / INSPECTIONS_SPEC.md "na_asset_type": "N/A — no pool at this
+  // property" is exactly the assertion the person who benefits from
+  // skipping the pool section is the one making. Where the item names an
+  // asset type FieldStay already tracks, an N/A the ledger contradicts is
+  // rejected here rather than taken on trust — this was the documented
+  // point of the column and had no enforcement anywhere before this.
+  if (answer?.result === 'na' && def.na_asset_type && activeTypes.has(def.na_asset_type)) {
+    return 'na_contradicts_ledger'
   }
 
   // §5: "A description is REQUIRED on fail" — it becomes the work order's

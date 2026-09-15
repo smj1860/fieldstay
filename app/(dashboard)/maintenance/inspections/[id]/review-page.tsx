@@ -30,6 +30,7 @@ const REASON_LABEL: Record<OutstandingItem['reason'], string> = {
   unanswered:             'Not answered',
   fail_needs_description: 'Needs a description',
   needs_photo:            'Needs a photo, or a reason there isn’t one',
+  na_contradicts_ledger:  'Marked N/A, but this property has one on record',
 }
 
 interface Props {

@@ -478,6 +478,63 @@ describe('findOutstanding — what the Review page lists', () => {
   })
 })
 
+describe('findOutstanding — na_asset_type is verified against the live asset ledger', () => {
+  // §12.3 / INSPECTIONS_SPEC.md: "N/A — no pool at this property" is exactly
+  // the assertion the person who benefits from skipping the pool section is
+  // the one making. This column existed and was carried everywhere (the
+  // seed, the type, the snapshot) but nothing anywhere actually checked it
+  // against property_assets — the documented "rejected at fill time" never
+  // shipped.
+  const s = section({ key: 'outdoor' })
+  const pool = item({
+    section_id: s.id, key: 'outdoor.pool', prompt: 'Pool gate self-latching',
+    na_asset_type: 'pool_pump',
+  })
+  const build = (assets: PropertyAsset[]) => {
+    const pages = resolveFormPages({ sections: [s], items: [pool], assets })
+    return { pages, key: answerKey(pages[0]!.items[0]!) }
+  }
+
+  it('rejects an N/A when an ACTIVE asset of that type is on record', () => {
+    const { pages, key } = build([asset({ asset_type: 'pool_pump', is_active: true })])
+    const out = findOutstanding(pages, { [key]: { result: 'na' } }, [asset({ asset_type: 'pool_pump', is_active: true })])
+    expect(out.map((o) => o.reason)).toEqual(['na_contradicts_ledger'])
+  })
+
+  it('accepts the N/A when no such asset is on record at all', () => {
+    const { pages, key } = build([])
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, [])).toEqual([])
+  })
+
+  it('accepts the N/A when the only matching asset is INACTIVE (replaced/removed)', () => {
+    // A replaced pool pump must not keep rejecting an honest N/A about the
+    // pool forever — same "ACTIVE only" rule resolveFormPages itself uses.
+    const inactive = [asset({ asset_type: 'pool_pump', is_active: false })]
+    const { pages, key } = build(inactive)
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, inactive)).toEqual([])
+  })
+
+  it('does not reject a PASS or FAIL answer even with a matching asset — only N/A is a claim of absence', () => {
+    const assets = [asset({ asset_type: 'pool_pump', is_active: true })]
+    const { pages, key } = build(assets)
+    expect(findOutstanding(pages, { [key]: { result: 'pass' } }, assets)).toEqual([])
+    expect(findOutstanding(pages, { [key]: { result: 'fail', note: 'gate broken' } }, assets)).toEqual([])
+  })
+
+  it('defaults to no assets when the caller omits them, rather than throwing', () => {
+    const { pages, key } = build([])
+    expect(() => findOutstanding(pages, { [key]: { result: 'na' } })).not.toThrow()
+  })
+
+  it('an item with no na_asset_type at all is never subject to this check', () => {
+    const plain = item({ section_id: s.id, key: 'outdoor.other' })
+    const pages = resolveFormPages({ sections: [s], items: [plain], assets: [] })
+    const key = answerKey(pages[0]!.items[0]!)
+    const assets = [asset({ asset_type: 'pool_pump', is_active: true })]
+    expect(findOutstanding(pages, { [key]: { result: 'na' } }, assets)).toEqual([])
+  })
+})
+
 // ============================================================================
 // FOUR OF THE FIVE RESPONSE TYPES DO NOT ANSWER WITH A PASS/FAIL.
 //
