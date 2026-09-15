@@ -335,14 +335,28 @@ export default function PrivacyPage() {
           <section id="cookies">
             <h2 className="text-xl font-semibold text-gray-900 mb-3">7. Cookies and Local Storage</h2>
             <p>
-              We use only strictly necessary cookies for session management (keeping you logged in)
+              We use strictly necessary cookies for session management (keeping you logged in)
               and a <code className="bg-gray-100 px-1 rounded text-sm">localStorage</code> entry to
-              remember your theme preference. No advertising, tracking, or analytics cookies are set.
+              remember your theme preference.
+            </p>
+            <p className="mt-3">
+              We also use Google Analytics to measure how our website and application are used
+              (pages viewed, referring source, approximate location derived from IP). Google
+              Analytics sets first-party <code className="bg-gray-100 px-1 rounded text-sm">_ga</code>
+              {' '}cookies for this purpose. These are analytics cookies, not advertising cookies:
+              we do not run advertising or remarketing tags, and we do not sell or share this data.
             </p>
             <p className="mt-3 text-sm">
-              Because we use only technically necessary cookies, consent is not required under the
-              GDPR ePrivacy Directive or CPRA for these cookies. You may delete all cookies via your
-              browser settings, which will log you out of the Service.
+              You may delete all cookies via your browser settings, which will log you out of the
+              Service. You can also opt out of Google Analytics on any site using Google&apos;s{' '}
+              <a
+                href="https://tools.google.com/dlpage/gaoptout"
+                className="underline underline-offset-2"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                browser opt-out add-on
+              </a>.
             </p>
           </section>
 
@@ -603,9 +617,10 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold text-gray-900 mb-3">11. Do Not Track</h2>
             <p className="text-sm">
               California&apos;s Online Privacy Protection Act (CalOPPA) requires disclosure of how we
-              respond to Do Not Track (DNT) signals. FieldStay does not respond to DNT signals because
-              we do not engage in cross-site tracking of any kind. We do not track your activities
-              across third-party websites or services.
+              respond to Do Not Track (DNT) signals. FieldStay does not respond to DNT signals. We do
+              not track your activities across third-party websites or services, and we do not run
+              advertising or remarketing tags; our only analytics is first-party measurement of our
+              own site and application, described in Section 7.
             </p>
           </section>
 

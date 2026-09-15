@@ -48,8 +48,8 @@ export function CookieNotice() {
         }}
       >
         <p className="flex-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-          We use essential cookies to keep you signed in and remember your preferences.
-          No tracking or advertising cookies.{' '}
+          We use essential cookies to keep you signed in and remember your preferences, and
+          Google Analytics to measure how the site is used. No advertising cookies.{' '}
           <Link
             href="/privacy#cookies"
             className="underline underline-offset-2 hover:opacity-80"
