@@ -18,8 +18,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/checklists/apply-master-template', () => ({ fetchOrgRoomTemplateData: vi.fn() }))
+vi.mock('@/lib/cache/single-flight', () => ({
+  acquireLock: vi.fn(async () => true),
+  releaseLock: vi.fn(async () => {}),
+}))
 
 import { syncChecklistRoomCounts } from '@/lib/checklists/sync-room-counts'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 
 const BEDROOM_TPL  = 'tpl-bedroom'
 const BATHROOM_TPL = 'tpl-bathroom'
@@ -193,5 +198,67 @@ describe('syncChecklistRoomCounts', () => {
     await expect(
       syncChecklistRoomCounts('prop-1', 'org-1', exploding, { bedrooms: 4, bathrooms: 1 }, ROOM_DATA),
     ).resolves.toEqual({ added: 0 })
+  })
+
+  // ── The race two concurrent calls would otherwise hit ───────────────────
+  // No DB constraint backs the missing-section read (planMissingSections
+  // numbers a new section from currentCount + 1, and duplicate numbering is a
+  // legitimate outcome of the room-library picker, not something a unique
+  // index could reject), so this lock is the only thing standing between two
+  // concurrent calls for the same property and a doubled set of sections.
+
+  describe('concurrency lock', () => {
+    it('does nothing, safely, when another call already holds the lock', async () => {
+      vi.mocked(acquireLock).mockResolvedValueOnce(false)
+      const { supabase, inserted } = stubSupabase({
+        template: { id: 'tmpl-1' },
+        sections: [{ id: 's1', room_template_id: BEDROOM_TPL, sort_order: 0 }],
+      })
+
+      const result = await syncChecklistRoomCounts(
+        'prop-1', 'org-1', supabase, { bedrooms: 4, bathrooms: 0 }, ROOM_DATA,
+      )
+
+      expect(result).toEqual({ added: 0 })
+      // The loser never even reads the template, let alone inserts — the
+      // winning caller's insert is the only one that happens.
+      expect(inserted).toHaveLength(0)
+    })
+
+    it('scopes the lock key to the PROPERTY', async () => {
+      const { supabase } = stubSupabase({ template: { id: 'tmpl-1' }, sections: [] })
+
+      await syncChecklistRoomCounts('prop-1', 'org-1', supabase, { bedrooms: 2, bathrooms: 0 }, ROOM_DATA)
+      await syncChecklistRoomCounts('prop-2', 'org-1', supabase, { bedrooms: 2, bathrooms: 0 }, ROOM_DATA)
+
+      const keys = vi.mocked(acquireLock).mock.calls.map((c) => c[0])
+      expect(new Set(keys).size).toBe(2)
+      expect(keys.every((k) => k.includes('sync-checklist-room-counts'))).toBe(true)
+    })
+
+    it('always releases the lock, success or failure', async () => {
+      const { supabase } = stubSupabase({ template: { id: 'tmpl-1' }, sections: [] })
+      await syncChecklistRoomCounts('prop-1', 'org-1', supabase, { bedrooms: 2, bathrooms: 0 }, ROOM_DATA)
+      expect(releaseLock).toHaveBeenCalledTimes(1)
+
+      vi.clearAllMocks()
+      vi.mocked(acquireLock).mockResolvedValue(true)
+      // The lock is only acquired once a default template is found, so the
+      // failure here has to happen AFTER that read succeeds — inside the
+      // lock-guarded block — to actually exercise the release-on-error path.
+      const chain: Record<string, unknown> = {}
+      const self = () => chain
+      Object.assign(chain, {
+        select: self, eq: self,
+        maybeSingle: async () => ({ data: { id: 'tmpl-1' }, error: null }),
+        limit:       () => { throw new Error('db down') },
+      })
+      const explodingOnSections = { from: () => chain } as never
+
+      await syncChecklistRoomCounts(
+        'prop-1', 'org-1', explodingOnSections, { bedrooms: 4, bathrooms: 1 }, ROOM_DATA,
+      )
+      expect(releaseLock).toHaveBeenCalledTimes(1)
+    })
   })
 })

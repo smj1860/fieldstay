@@ -32,6 +32,16 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({
 vi.mock('@/lib/geocoding', () => ({ geocodeZip: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+// syncChecklistRoomCounts (pulled in transitively by saveDetails, also not
+// under test here) locks per property around its read-then-insert — see
+// lib/checklists/sync-room-counts.ts. unit/setup.ts stamps fake-but-truthy
+// Upstash credentials into every unit test's env, so an unmocked acquireLock
+// here would look "configured" and attempt a real network call to a URL that
+// does not resolve, hanging the test past its timeout.
+vi.mock('@/lib/cache/single-flight', () => ({
+  acquireLock: vi.fn(async () => true),
+  releaseLock: vi.fn(async () => {}),
+}))
 
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
