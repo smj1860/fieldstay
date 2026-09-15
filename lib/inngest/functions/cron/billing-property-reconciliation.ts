@@ -1,6 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripe }              from '@/lib/stripe/client'
+import { stripe, isPlatformPriceId } from '@/lib/stripe/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { logAuditEvent }       from '@/lib/audit'
@@ -141,14 +141,29 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
       if (currentCount < 1) return
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-      const item = subscription.items.data[0]
-      if (!item) {
+      if (!subscription.items.data.length) {
         reportError(new Error('Platform subscription has no line item to reconcile'), {
           site: 'inngest.billing-property-reconciliation.no-item', orgId,
           extra: { subscription_id: subscriptionId },
         })
         return
       }
+
+      // The platform-price item, not blindly items.data[0] — same reasoning
+      // as the webhook handler's own lookup (core-billing.ts): `plan` on the
+      // organizations row is display-only and only ever synced FORWARD by a
+      // webhook, so it can read 'platform' for an org whose live Stripe
+      // subscription has since moved to a different price entirely
+      // (Enterprise, a promo, a grandfathered legacy price, something set up
+      // directly in the dashboard) without this cron ever hearing about it.
+      // That price's `quantity` means something else, or nothing at all —
+      // writing this org's live property count into it is not a
+      // reconciliation, it is a silent, unrelated billing change. Not an
+      // error: this is exactly the expected shape for an org that moved to
+      // Enterprise while still carrying `plan = 'platform'` from before that
+      // happened, so it is a quiet skip, not a report.
+      const item = subscription.items.data.find((i) => isPlatformPriceId(i.price.id))
+      if (!item) return
 
       const billedQuantity = item.quantity ?? 0
       if (currentCount === billedQuantity) return  // already in sync
