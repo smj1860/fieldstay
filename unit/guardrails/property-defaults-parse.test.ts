@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { parseHardcodedDefaults } from '@/scripts/parse-property-defaults.mjs'
 
 // ============================================================================
 // Guardrail: check-property-defaults-drift.mjs's parser must stay parseable.
@@ -9,44 +10,23 @@ import { join } from 'node:path'
 // supabase/migrations/20260915210000_property_defaults_report.sql) can only
 // run against the live E2E database, which the always-on `checks` job never
 // has credentials for — the db-invariants job SELF-DISARMS without them (a
-// fork PR, a local run with no .env). This test runs the JS-SIDE regex parser
+// fork PR, a local run with no .env). This test runs the JS-SIDE parser
 // against the real lib/properties/defaults.ts with no database at all, so a
 // refactor that breaks the parse (a reformat, a renamed field, a literal
 // moved onto its own line) is caught on the PR rather than silently turning
 // the DB-side gate into a no-op that reports "0 columns checked, all clear".
 //
-// Deliberately duplicates the script's regex, same convention as
-// type-drift-map-parses.test.ts — the duplication is the point: it is what
-// makes a silent divergence between the two fail.
+// Imports the SAME parser the script calls (scripts/parse-property-
+// defaults.mjs) rather than duplicating it — the type-drift-map-parses.test.ts
+// convention this used to follow duplicates its (much shorter) regex
+// deliberately, but SonarCloud flagged this one's larger duplicated block, and
+// there is exactly one correct way to parse this shape: sharing the real
+// implementation still catches a parser-breaking refactor with no database
+// needed, which is the property that actually matters here.
 // ============================================================================
 
 const DEFAULTS_SRC = readFileSync(join(process.cwd(), 'lib', 'properties', 'defaults.ts'), 'utf8')
 const SCRIPT_SRC = readFileSync(join(process.cwd(), 'scripts', 'check-property-defaults-drift.mjs'), 'utf8')
-
-// Kept identical to the script's parser — see that file's comment for why
-// this is line-by-line string splitting rather than a regex: SonarCloud kept
-// flagging every regex shape tried (including a plain, alternation-free
-// [^,]+ capture) as super-linear on backtracking.
-function parseHardcodedDefaults(text: string): Record<string, string | number> {
-  const parsed: Record<string, string | number> = {}
-  for (const line of text.split('\n')) {
-    const arrowIdx = line.indexOf('??')
-    const colonIdx = line.indexOf(':')
-    if (arrowIdx === -1 || colonIdx === -1 || colonIdx > arrowIdx) continue
-
-    const name = line.slice(0, colonIdx).trim()
-    if (!/^\w+$/.test(name)) continue
-    if (!line.slice(colonIdx + 1, arrowIdx).trim().startsWith('row.')) continue
-
-    const afterArrow = line.slice(arrowIdx + 2).trim()
-    const commaIdx = afterArrow.indexOf(',')
-    if (commaIdx === -1) continue
-
-    const rawLiteral = afterArrow.slice(0, commaIdx).trim()
-    parsed[name] = rawLiteral.startsWith("'") ? rawLiteral.slice(1, -1) : Number(rawLiteral)
-  }
-  return parsed
-}
 
 describe('guardrail: check-property-defaults-drift.mjs can still parse the defaults', () => {
   const parsed = parseHardcodedDefaults(DEFAULTS_SRC)
