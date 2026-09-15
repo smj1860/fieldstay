@@ -45,9 +45,15 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // Next.js's own inline hydration scripts; wasm-unsafe-eval required by
     // the Supabase JS client. Dev mode additionally needs 'unsafe-eval' for
     // Turbopack's eval()-based module wrapping/HMR.
+    //
+    // googletagmanager.com is the GA4 tag (app/layout.tsx). It is loaded as an
+    // EXTERNAL script and its bootstrap lives in /gtag-init.js rather than
+    // inline, for the same reason /theme-init.js does: an inline snippet would
+    // need 'unsafe-inline' in script-src on every nonce'd route, which is the
+    // relaxation this whole directive exists to avoid.
     isDev
-      ? `script-src 'self' ${inlineScripts} 'unsafe-eval' 'wasm-unsafe-eval'`
-      : `script-src 'self' ${inlineScripts} 'wasm-unsafe-eval'`,
+      ? `script-src 'self' ${inlineScripts} 'unsafe-eval' 'wasm-unsafe-eval' https://*.googletagmanager.com`
+      : `script-src 'self' ${inlineScripts} 'wasm-unsafe-eval' https://*.googletagmanager.com`,
 
     // Styles: 'unsafe-inline' required for the codebase's established
     // style={{ ... }} convention with CSS variables. Inline styles are CSS,
@@ -75,7 +81,12 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // API + WebSocket connections. Sentry ingest host added for client-side
     // error/trace reporting (instrumentation-client.ts) — without this the
     // browser SDK's own requests get silently blocked by this same CSP.
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511738488094720.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
+    // The three Google hosts are GA4's collect endpoints. www.google-analytics.com
+    // is the classic one; *.analytics.google.com and region1.google-analytics.com
+    // are where GA4 actually sends most /g/collect beacons, and a policy naming
+    // only the first blocks the majority of hits with nothing in the UI to show
+    // for it — the tag loads, the page looks fine, and no data arrives.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511738488094720.ingest.us.sentry.io https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com http://localhost:* ws://localhost:* wss://localhost:*",
 
     // Object/media: locked down entirely
     "object-src 'none'",
