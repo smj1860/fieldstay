@@ -33,6 +33,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { runIdStartedAt, runDurationMs } from '@/lib/inngest/run-id'
+import { reportError }         from '@/lib/observability/report-error'
 
 /**
  * Loop breaker.
@@ -139,9 +140,25 @@ export const jobRunRecorder = inngest.createFunction(
         )
 
       if (insertError) {
-        // Logged, never thrown. This function exists to observe the platform;
-        // it must not become a source of failures in it.
+        // Logged AND reported, never thrown. This function exists to observe
+        // the platform; it must not become a source of failures in it — but a
+        // logger.error() call alone was exactly the 47-minute production gap
+        // this file's own history records above (the 'completed'/'succeeded'
+        // literal mismatch): Axiom-only logging left the ledger silently
+        // empty while the recorder looked healthy, because nothing was
+        // watching Inngest's own function logs for a system cron nobody
+        // thought to check. reportError() is what makes a *second* failure of
+        // this insert — schema drift, an RLS change, the table itself going
+        // away — visible without a person happening to notice the gap, the
+        // same failure mode this whole module was built to close for every
+        // OTHER cron. 'warning', matching this module's own framing: a lost
+        // heartbeat row is a monitoring gap, not data loss.
         logger.error(`[job-run-recorder] insert failed: ${insertError.message}`)
+        reportError(insertError, {
+          site:  'inngest.job-run-recorder',
+          level: 'warning',
+          extra: { functionId: bareId, runId },
+        })
       }
     })
 
