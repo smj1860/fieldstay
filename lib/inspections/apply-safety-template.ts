@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { reportError } from '@/lib/observability/report-error'
 import {
   firstSafetyDueDate,
   rebasedSafetyDueDate,
@@ -42,7 +43,7 @@ import {
 // no arbiters, so this shape passes its unit tests either way.
 
 /** Bound on one org's fan-out. Well above the 50-property plan ceiling. */
-const MAX_PROPERTIES = 500
+export const MAX_PROPERTIES = 500
 
 export interface ApplyResult {
   /** Schedules actually inserted. Zero is the steady state after the first run. */
@@ -86,6 +87,22 @@ export async function applySafetyTemplate(
 
   if (error) throw new Error(`property load failed for org ${orgId}: ${error.message}`)
   if (!properties?.length) return { created: 0, properties: 0, skipped: 'no_properties' }
+
+  if (properties.length === MAX_PROPERTIES) {
+    // The result set exactly filled the bound. Cannot tell from here whether
+    // that is a coincidence or a genuine Enterprise-tier org past this
+    // constant's headroom — but every property past the cap silently never
+    // gets a safety schedule, forever, on every future nightly pass too
+    // (there is no separate "catch what was missed" mechanism), so guessing
+    // "coincidence" is the wrong side to be wrong on.
+    reportError(
+      new Error(
+        `applySafetyTemplate hit its ${MAX_PROPERTIES}-property cap for org ${orgId} — ` +
+        'properties past this limit will silently never get a safety schedule',
+      ),
+      { site: 'lib.inspections.apply-safety-template', orgId, level: 'warning' },
+    )
+  }
 
   const dueDate = firstSafetyDueDate(template, opts.today ?? new Date())
 
