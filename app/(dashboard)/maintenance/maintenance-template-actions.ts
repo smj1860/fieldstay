@@ -304,15 +304,29 @@ export async function broadcastMaintenanceTemplate(
       skipped += rowsToInsert.length - actuallyInserted
     }
 
-    await inngest.send({
-      name: 'maintenance/template-broadcast' as const,
-      data: {
-        org_id:       membership.org_id,
-        template_id:  templateId,
-        property_ids: (properties as { id: string }[]).map((p) => p.id),
-        triggered_by: user.id,
-      },
-    })
+    // Non-fatal, and deliberately outside the outer try/catch's failure path:
+    // the schedules are already committed by the RPC above — that IS the
+    // broadcast. A send failure here must not turn a write that already
+    // succeeded into "Operation failed. Please try again." for the PM, who
+    // would then have every reason to retry a broadcast that already ran,
+    // relying on the RPC's advisory lock to sort out the resulting no-op
+    // rather than seeing an accurate result the first time.
+    try {
+      await inngest.send({
+        name: 'maintenance/template-broadcast' as const,
+        data: {
+          org_id:       membership.org_id,
+          template_id:  templateId,
+          property_ids: (properties as { id: string }[]).map((p) => p.id),
+          triggered_by: user.id,
+        },
+      })
+    } catch (sendErr) {
+      console.error('[broadcastMaintenanceTemplate] event send failed', sendErr)
+      reportError(sendErr, {
+        site: 'serverAction.maintenance.broadcastMaintenanceTemplate.event', orgId: membership.org_id,
+      })
+    }
 
     revalidatePath('/maintenance')
     revalidatePath('/templates/maintenance/create')
