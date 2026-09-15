@@ -100,16 +100,38 @@ const VENDOR_LIMIT = 1000
 const WARM_WATERMARK = 'maintenance_board:last_warm_at'
 const WARM_INTERVAL_MS = 15 * 60 * 1000
 
+// One in-flight run per (userId, orgId) — see warm-inspections.ts's identical
+// map for the full reasoning (React Strict Mode's double-invoke, a tablet
+// reconnecting right as the layout mounts). Both calls would otherwise read
+// isDue() as false before either had written the watermark.
+const inFlight = new Map<string, Promise<MaintenanceBoardWarmResult>>()
+
 /**
  * Pulls the open work-order board into the local cache.
  *
  * Never throws — a device that misses a warm is no worse off than before this
  * existed; it just falls back to whatever the server last rendered.
  */
-export async function warmMaintenanceBoardForOffline(
+export function warmMaintenanceBoardForOffline(
   userId: string,
   orgId:  string,
   opts:   { force?: boolean } = {},
+): Promise<MaintenanceBoardWarmResult> {
+  const key = `${userId}-${orgId}`
+  const existing = inFlight.get(key)
+  if (existing && !opts.force) return existing
+
+  const run = runWarm(userId, orgId, opts).finally(() => {
+    if (inFlight.get(key) === run) inFlight.delete(key)
+  })
+  inFlight.set(key, run)
+  return run
+}
+
+async function runWarm(
+  userId: string,
+  orgId:  string,
+  opts:   { force?: boolean },
 ): Promise<MaintenanceBoardWarmResult> {
   if (!canWarm()) return { ...EMPTY, skipped: 'offline' }
 
@@ -128,6 +150,13 @@ export async function warmMaintenanceBoardForOffline(
     }
 
     const vendors = await cacheVendors(db, orgId)
+
+    // Re-checked, not just at the top: a token can expire between this call's
+    // start and the work_orders query below on the flaky/high-latency
+    // connection this feature is built around, and a later query going out
+    // unauthenticated 42501s — exactly the incident ./session-gate.ts
+    // documents (the vendors read was one of the four that day).
+    if (!(await hasUsableSession())) return { ...EMPTY, vendors, skipped: 'unauthenticated' }
 
     // READ BEFORE THE SELECT FIRES, not after it resolves — the ordering is
     // load-bearing. A work order created offline can finish syncing (its

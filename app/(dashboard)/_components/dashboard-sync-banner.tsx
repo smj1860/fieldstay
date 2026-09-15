@@ -62,16 +62,25 @@ export function DashboardSyncBanner({ userId, orgId }: Readonly<{ userId: string
   // guardrail requires it on both outboxes rather than just the mutation one:
   // on the crew side, photos were covered by neither and a whole shift could
   // retry against a captive portal with nothing on screen.
+  // `.where('failed').equals(0)` first, THEN `.filter()` on the retry count —
+  // not a bare `.filter()`. useLiveQuery re-runs on any change to the table it
+  // reads, not just changes to the filtered field, so this re-runs on every
+  // mutation insert/update/delete (i.e. every checklist tap that queues one).
+  // The `failed` index doesn't stop that by itself — it only helps a query
+  // that actually reads through it — so a bare `.filter()` here still full-
+  // scanned the whole outbox on every write despite `failed` being indexed.
   const stalledMutations = useLiveQuery(
     () => db.mutations
-      .filter((m) => !m.failed && (m.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .where('failed').equals(0)
+      .filter((m) => (m.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
       .toArray(),
     [userId, orgId],
   ) ?? []
 
   const stalledPhotos = useLiveQuery(
     () => db.pending_photo_uploads
-      .filter((p) => !p.failed && (p.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .where('failed').equals(0)
+      .filter((p) => (p.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
       .toArray(),
     [userId, orgId],
   ) ?? []
