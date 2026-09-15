@@ -194,3 +194,73 @@ describe('POST /api/inspections — schedule-collision retry', () => {
     expect(supabase.upsertCalls).toHaveLength(2)
   })
 })
+
+// ============================================================================
+// idx_inspections_one_open_draft: at most one OPEN inspection per
+// (property_id, form_id). Unlike the schedule conflict above, this cannot be
+// safely absorbed by dropping a field and re-inserting under the same id —
+// the answers on the LOSING device are real, distinct work, and silently
+// returning success without a row for this id would mean its later
+// inspection_items sync has no parent to attach to, discarding that work
+// with no trace. So this must be a TERMINAL 409 — not retried by the outbox,
+// not silently swallowed as success — surfaced through the same dead-letter
+// path every other terminal outbox failure uses.
+// ============================================================================
+describe('POST /api/inspections — one-open-draft-per-property-and-form conflict', () => {
+  it('returns a terminal 409 rather than retrying or claiming success', async () => {
+    const supabase = makeSupabase({
+      upsertResults: [
+        { error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_inspections_one_open_draft"' } },
+      ],
+    })
+    vi.mocked(requireOrgRole).mockResolvedValue({
+      supabase, membership: { org_id: ORG, org: { name: 'Org' } }, user: { id: USER },
+    } as never)
+
+    const res = await POST(req(body()))
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.ok).toBe(false)
+    // Exactly one attempt — no silent retry that could paper over the
+    // conflict, and no second insert under a modified payload the way the
+    // schedule-collision case retries with source_schedule_id dropped.
+    expect(supabase.upsertCalls).toHaveLength(1)
+  })
+
+  it('reports the conflict as a warning-level signal, not a hard error', async () => {
+    const supabase = makeSupabase({
+      upsertResults: [
+        { error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_inspections_one_open_draft"' } },
+      ],
+    })
+    vi.mocked(requireOrgRole).mockResolvedValue({
+      supabase, membership: { org_id: ORG, org: { name: 'Org' } }, user: { id: USER },
+    } as never)
+
+    await POST(req(body()))
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        site: 'route.inspections.create.duplicate_open_draft',
+        level: 'warning',
+      }),
+    )
+  })
+
+  it('does NOT log an audit event for a rejected duplicate-draft create', async () => {
+    const supabase = makeSupabase({
+      upsertResults: [
+        { error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_inspections_one_open_draft"' } },
+      ],
+    })
+    vi.mocked(requireOrgRole).mockResolvedValue({
+      supabase, membership: { org_id: ORG, org: { name: 'Org' } }, user: { id: USER },
+    } as never)
+
+    await POST(req(body()))
+
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+})

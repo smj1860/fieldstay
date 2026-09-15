@@ -142,6 +142,25 @@ export async function POST(req: Request) {
         .upsert({ ...basePayload, source_schedule_id: null }, { onConflict: 'id', ignoreDuplicates: true }))
     }
 
+    // idx_inspections_one_open_draft (20260915213000): at most one OPEN
+    // inspection per (property_id, form_id). Unlike the schedule conflict
+    // above, this cannot be safely absorbed by dropping a field and
+    // re-inserting under the same id — the answers on the LOSING device are
+    // real, distinct work, and silently returning success without a row for
+    // this id would mean its later inspection_items sync has no parent to
+    // attach to, discarding that work with no trace. So this is a genuine,
+    // TERMINAL conflict: 409, not 500 — the outbox must not retry a create
+    // that will never stop colliding, and it must surface through the same
+    // dead-letter/retry-banner path every other terminal failure uses rather
+    // than being silently swallowed.
+    if (error?.code === '23505' && error.message.includes('idx_inspections_one_open_draft')) {
+      reportError(error, { site: 'route.inspections.create.duplicate_open_draft', level: 'warning' })
+      return NextResponse.json({
+        ok: false,
+        error: 'An inspection is already in progress for this property and form.',
+      }, { status: 409 })
+    }
+
     if (error) {
       reportError(error, { site: 'route.inspections.create' })
       // 500 so the outbox RETRIES. The inspection exists only on the device.
