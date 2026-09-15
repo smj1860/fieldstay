@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { unwrapList, tryUnwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import {
   resolvePar,
@@ -180,13 +180,25 @@ export async function recomputeParLevels(
   // currently resolves through the smart-group formula. Reading it now means
   // the historical branch starts working the moment stats exist, with no
   // further change here.
-  const statsRes = await supabase
-    .from('inventory_consumption_stats')
-    .select('inventory_item_id, avg_rate_per_guest_night, sample_count')
-    .eq('org_id', orgId)
-    .in('inventory_item_id', items.map((i) => i.id))
-    .limit(ITEM_CAP)
-  const stats = unwrapList<StatsRow>(statsRes, { ...ctx, extra: { stage: 'stats' } })
+  //
+  // fetchAllRows, not a bare .select().limit(ITEM_CAP). PostgREST's own
+  // max_rows = 1000 caps every response regardless of what a client asks
+  // for, so .limit(20_000) here was never actually 20,000 rows — it was 1,000,
+  // silently, with a 200 and no error. Past that many smart items with
+  // recorded consumption, a recompute would resolve the excess through the
+  // smart-group formula instead of their real historical rate, with nothing
+  // to say the stats were ever truncated. `.range()` pagination is the only
+  // thing that raises the real ceiling.
+  const stats = await fetchAllRows<StatsRow>(
+    (from, to) => supabase
+      .from('inventory_consumption_stats')
+      .select('inventory_item_id, avg_rate_per_guest_night, sample_count')
+      .eq('org_id', orgId)
+      .in('inventory_item_id', items.map((i) => i.id))
+      .order('inventory_item_id')
+      .range(from, to),
+    { label: 'inventory.recomputePar.stats', maxRows: ITEM_CAP },
+  )
 
   const stayNights  = await fetchStayNights(supabase, orgId, propertyIds, ctx)
   const propertyById = new Map(
