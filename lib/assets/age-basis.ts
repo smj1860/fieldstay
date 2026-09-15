@@ -79,11 +79,36 @@ export function assetServiceBasis(asset: ServiceBasisFields): AgeBasis | null {
       ?? basis(asset.manufacture_date, 'manufacture')
 }
 
-/** Whole years from the basis date to now, floored at 0. Null when undated. */
+/**
+ * Whole years ELAPSED from the basis date to now, floored at 0. Null when
+ * undated.
+ *
+ * `now.getFullYear() - basis.getFullYear()` — calendar-year subtraction — was
+ * the original implementation, and it is not the same question. An asset
+ * installed December 20 and checked January 5 sixteen days later scored a
+ * full year old: `getFullYear()` had already ticked over, even though almost
+ * no time had actually passed. This function feeds a continuous decay curve
+ * (weibullSurvivalFraction) and an age-normalized repair rate
+ * (repairs / max(ageYears, 1)) in lib/assets/health-score.ts, both of which
+ * are most sensitive to exactly this error at exactly the ages it is
+ * largest at: an asset that is truly 0.1 years old reporting as 1 is a 10x
+ * distortion, not a rounding nicety.
+ *
+ * The fix is the ordinary "age from a birthdate" algorithm: subtract calendar
+ * years, then subtract one more if this year's month/day hasn't yet reached
+ * the basis date's month/day — i.e. the anniversary hasn't happened yet.
+ */
 export function assetAgeYears(asset: AgeBasisFields, now: Date = new Date()): number | null {
   const found = assetAgeBasis(asset)
   if (!found) return null
-  return Math.max(now.getFullYear() - new Date(found.date).getFullYear(), 0)
+
+  const basisDate = new Date(found.date)
+  let years = now.getFullYear() - basisDate.getFullYear()
+  const monthDiff = now.getMonth() - basisDate.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < basisDate.getDate())) {
+    years--
+  }
+  return Math.max(years, 0)
 }
 
 /**

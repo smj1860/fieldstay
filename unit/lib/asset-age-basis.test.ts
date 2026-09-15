@@ -93,6 +93,43 @@ describe('assetAgeYears', () => {
   it('is null for an undated asset', () => {
     expect(assetAgeYears({ installation_date: null, manufacture_date: null }, now)).toBeNull()
   })
+
+  // ── Elapsed time, not calendar-year subtraction ──────────────────────────
+  // now.getFullYear() - basis.getFullYear() was the original implementation.
+  // An asset installed December 20 and checked January 5 sixteen days later
+  // scored a full year old under it, because getFullYear() had already ticked
+  // over — even though almost no time had actually passed. This feeds a
+  // continuous Weibull decay curve and an age-normalized repair rate in
+  // lib/assets/health-score.ts, both most sensitive to exactly this error at
+  // exactly the ages it is largest at.
+
+  it('does NOT count a year that has not actually elapsed, across a year boundary', () => {
+    const checkedInJanuary = new Date('2026-01-05T00:00:00Z')
+    expect(assetAgeYears(
+      { installation_date: '2025-12-20', manufacture_date: null }, checkedInJanuary,
+    )).toBe(0)
+  })
+
+  it('counts the year once the anniversary date is reached', () => {
+    const onTheAnniversary = new Date('2026-06-01T00:00:00Z')
+    const dayBefore        = new Date('2026-05-31T00:00:00Z')
+    expect(assetAgeYears(
+      { installation_date: '2019-06-01', manufacture_date: null }, onTheAnniversary,
+    )).toBe(7)
+    // One day short of the anniversary: still only 6 full years elapsed, not 7.
+    expect(assetAgeYears(
+      { installation_date: '2019-06-01', manufacture_date: null }, dayBefore,
+    )).toBe(6)
+  })
+
+  it('handles a same-month comparison correctly (day, not just month, decides it)', () => {
+    // Installed the 20th, checked the 10th of the SAME month the following
+    // year — the anniversary is still 10 days away.
+    expect(assetAgeYears(
+      { installation_date: '2024-03-20', manufacture_date: null },
+      new Date('2026-03-10T00:00:00Z'),
+    )).toBe(1)
+  })
 })
 
 describe('formatBasisDate', () => {
