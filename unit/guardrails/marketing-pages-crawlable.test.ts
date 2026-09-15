@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { classifyRoute, isPrerenderedRoute } from '@/proxy'
+import { PAGES as SITEMAP_PAGES } from '@/app/sitemap'
 import { readCode } from './scan'
 
 // ============================================================================
@@ -92,6 +93,18 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
   it('every one has a page file — the list cannot rot into naming pages that do not exist', () => {
     const missing = PUBLIC_MARKETING_PAGES.filter((r) => !existsSync(pageFile(r)))
     expect(missing, 'listed routes with no app/<route>/page.tsx').toEqual([])
+  })
+
+  it('every crawlable page is also in the sitemap — the two lists are independent hand-maintained duplicates with nothing else coupling them', () => {
+    // Without this, the next new marketing page is only REQUIRED to be added
+    // here to pass this suite's other checks — nothing fails CI if
+    // app/sitemap.ts's PAGES is left stale, and the page silently stays
+    // missing from the sitemap XML app/robots.ts advertises: reachable via
+    // crawled links, but waiting weeks for a crawler to find it on its own —
+    // exactly the gap sitemap.ts's own header comment says it exists to close.
+    const sitemapPaths = new Set(SITEMAP_PAGES.map((p) => p.path))
+    const missing = PUBLIC_MARKETING_PAGES.filter((route) => !sitemapPaths.has(route))
+    expect(missing, 'listed as crawlable but absent from app/sitemap.ts\'s PAGES').toEqual([])
   })
 
   it('none falls through to the auth gate', () => {
