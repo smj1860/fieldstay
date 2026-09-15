@@ -35,7 +35,17 @@ export function CrewMessagesView({
   const [draft, setDraft]             = useState('')
   const [draftLoaded, setDraftLoaded] = useState(false)
   const [sendError, setSendError]     = useState<string | null>(null)
+  const [sending, setSending]         = useState(false)
   const bottomRef                     = useRef<HTMLDivElement>(null)
+  // A ref, not just the `sending` state: two triggers reach handleSend — the
+  // Enter keydown and the button's onClick — and a fast double-tap can fire
+  // both before React has committed the state update that would disable the
+  // button. queueMessageToPM mints a fresh crypto.randomUUID() on every call
+  // with no dedup, so without a synchronously-readable gate here, re-entrancy
+  // sends the same message twice. The ref is read-and-set synchronously, so
+  // the second call sees it immediately regardless of render timing; `sending`
+  // state exists purely to disable the button in the UI.
+  const sendingRef                    = useRef(false)
 
   // Queued-but-unsent messages. `failed` ones are deliberately included: that
   // message has NOT reached the server either, so hiding it would tell the
@@ -72,8 +82,11 @@ export function CrewMessagesView({
   }
 
   async function handleSend() {
+    if (sendingRef.current) return
     const content = draft.trim()
     if (!content) return
+    sendingRef.current = true
+    setSending(true)
     setSendError(null)
     try {
       await queueMessageToPM(dexieUserId, content)
@@ -85,6 +98,9 @@ export function CrewMessagesView({
       console.error('[messages] queue failed:', err)
       reportError(err, { site: 'page.crew.messages.queue' })
       setSendError('Could not save your message. Please try again.')
+    } finally {
+      sendingRef.current = false
+      setSending(false)
     }
   }
 
@@ -159,7 +175,7 @@ export function CrewMessagesView({
           <button
             type="button"
             onClick={() => void handleSend()}
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || sending}
             aria-label="Send message"
             className="min-h-11 min-w-11 flex items-center justify-center rounded-lg shrink-0 bg-brand-800 text-white disabled:opacity-40"
           >
