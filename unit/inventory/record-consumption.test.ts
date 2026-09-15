@@ -50,7 +50,7 @@ function makeSupabase(q: Record<string, Resp[]>, rpcResult: unknown = 1) {
     const resp = q[table]?.[i] ?? q[table]?.[q[table].length - 1] ?? { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'eq', 'lt', 'gt', 'order', 'limit']) chain[m] = vi.fn(() => chain)
+    for (const m of ['select', 'eq', 'lt', 'gt', 'order', 'limit', 'update', 'is']) chain[m] = vi.fn(() => chain)
     chain.maybeSingle = vi.fn(() => Promise.resolve(resp))
     chain.then = (res: (v: unknown) => unknown) => Promise.resolve(resp).then(res)
     return chain
@@ -59,14 +59,18 @@ function makeSupabase(q: Record<string, Resp[]>, rpcResult: unknown = 1) {
   return { client: { from, rpc } as any, rpc, from }
 }
 
-const CURR = { id: 'count-2', submitted_at: '2026-08-11T00:00:00Z', property_id: PROP }
-const PREV = { id: 'count-1', submitted_at: '2026-08-01T00:00:00Z', property_id: PROP }
+const CURR  = { id: 'count-2', submitted_at: '2026-08-11T00:00:00Z', property_id: PROP }
+const PREV  = { id: 'count-1', submitted_at: '2026-08-01T00:00:00Z', property_id: PROP }
+/** The idempotency claim — a successful UPDATE...WHERE consumption_recorded_at IS NULL. */
+const CLAIMED = { data: { id: CNT }, error: null }
 /** 5 nights inside the window, capacity 4 -> 20 capacity-nights. */
 const BOOKINGS = [{ checkin_date: '2026-08-02', checkout_date: '2026-08-07' }]
 
 function scenario(prevItems: unknown[], currItems: unknown[], bookings = BOOKINGS, maxGuests = 4) {
   return makeSupabase({
-    inventory_counts:      [{ data: CURR, error: null }, { data: PREV, error: null }],
+    // Order matches the function's actual reads: the atomic claim first,
+    // then the current count, then the previous one.
+    inventory_counts:      [CLAIMED, { data: CURR, error: null }, { data: PREV, error: null }],
     properties:            [{ data: { max_guests: maxGuests }, error: null }],
     bookings:              [{ data: bookings, error: null }],
     inventory_count_items: [{ data: prevItems, error: null }, { data: currItems, error: null }],
@@ -133,10 +137,29 @@ describe('recordConsumptionFromCount', () => {
 
   it('records nothing on the very first count — there is nothing to diff', async () => {
     const client = makeSupabase({
-      inventory_counts: [{ data: CURR, error: null }, { data: null, error: null }],
+      inventory_counts: [CLAIMED, { data: CURR, error: null }, { data: null, error: null }],
     }).client
     await expect(recordConsumptionFromCount(client, { countId: CNT, propertyId: PROP, orgId: ORG }))
       .resolves.toEqual({ recorded: 0, reason: 'no_previous_count' })
+  })
+
+  it('is a guaranteed no-op on a second delivery for the same count', async () => {
+    // Inngest guarantees only AT-LEAST-ONCE delivery. This function's whole
+    // derivation is pure over two already-persisted rows, so a redelivered
+    // event would otherwise recompute and re-merge the IDENTICAL sample,
+    // corrupting the rolling avg_rate_per_guest_night a second time. The
+    // atomic claim (`UPDATE ... WHERE consumption_recorded_at IS NULL`) is
+    // what makes a second delivery for the same count_id a no-op regardless
+    // of whatever protection (or lack of it) the event producer has.
+    const { client, rpc } = makeSupabase({
+      // The claim UPDATE matches no row — someone already claimed it.
+      inventory_counts: [{ data: null, error: null }],
+    })
+
+    const res = await recordConsumptionFromCount(client, { countId: CNT, propertyId: PROP, orgId: ORG })
+
+    expect(res).toEqual({ recorded: 0, reason: 'already_recorded' })
+    expect(rpc).not.toHaveBeenCalled()
   })
 
   it('ignores an item that was not counted last time', async () => {

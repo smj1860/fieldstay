@@ -36,6 +36,7 @@ import {
   storeIntegrationRefreshToken,
 } from '@/lib/integrations/vault'
 import { hostexProvider, HostexOAuthError } from '@/lib/integrations/providers/hostex'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 const HOSTEX_PROVIDER_ID = 'hostex'
 
@@ -47,7 +48,12 @@ const HOSTEX_PROVIDER_ID = 'hostex'
 const REFRESH_WINDOW_MINUTES = 120
 
 const REFRESH_LOCK_WAIT_MS   = 250
-const REFRESH_LOCK_MAX_WAITS = 60   // ~15s ceiling
+// Must never be shorter than the lock holder's own refresh call can
+// plausibly take (PMS_API_TIMEOUT_MS), or a waiter gives up and refreshes
+// UNLOCKED while the holder is merely slow, not dead — racing the same
+// refresh token Hostex rotates on every use. +10s margin covers the Vault
+// reads/writes refreshHostexToken also performs around that call.
+const REFRESH_LOCK_MAX_WAITS = Math.ceil((PMS_API_TIMEOUT_MS + 10_000) / REFRESH_LOCK_WAIT_MS)   // ~160, ~40s
 
 function shouldRefresh(expiresAt: string | null): boolean {
   if (!expiresAt) return true

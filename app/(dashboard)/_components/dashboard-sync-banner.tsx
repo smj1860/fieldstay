@@ -27,6 +27,7 @@ import {
   discardFailedDashboardMutation,
   retryAllFailedDashboardMutations,
 } from '@/lib/dexie/dashboard/syncService'
+import { discardInspectionPhoto } from '@/lib/dexie/dashboard/inspection-photos'
 
 /**
  * Phrased for a PM, not an engineer: the label appears on a red pill next to
@@ -86,7 +87,13 @@ export function DashboardSyncBanner({ userId, orgId }: Readonly<{ userId: string
       key:     `photo-${p.id}`,
       label:   'Photo',
       detail:  p.lastError ?? '',
-      discard: async () => { await db.pending_photo_uploads.delete(p.id) },
+      // discardInspectionPhoto(), never a bare `.delete()` on the queue row
+      // alone — that leaves the image bytes unreachable in photo_blobs
+      // forever (drainInspectionPhotos only iterates the queue table, not the
+      // blob store) and the answer's photoPath pointing at a key that will
+      // now never exist in Storage, which a finished report would then cite
+      // as if the photo existed.
+      discard: () => discardInspectionPhoto(userId, orgId, { answerRowId: p.answerRowId, path: p.blobKey }),
     })),
   ]
 

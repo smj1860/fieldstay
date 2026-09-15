@@ -94,4 +94,31 @@ describe('resolveStartTime', () => {
     const { startedAt } = resolveStartTime(iso(SERVER_NOW), iso(SERVER_NOW), SERVER_NOW)
     expect(Date.parse(startedAt)).toBeLessThanOrEqual(SERVER_NOW)
   })
+
+  describe('a malformed device timestamp falls back to "started now" instead of throwing', () => {
+    // The exact condition this module exists to handle — a device offline for
+    // days — is also the one most likely to hand back an empty string, "null"
+    // coerced from a null field, or a partially-written IndexedDB record.
+    // Date.parse on any of those is NaN, which used to propagate all the way
+    // to `new Date(NaN).toISOString()` throwing RangeError: an unhandled 500
+    // at the one moment ("no signal, first walk of the day") this code exists
+    // to handle gracefully.
+    it('unparseable deviceStartedAt', () => {
+      const { startedAt, offsetSeconds } = resolveStartTime('', iso(SERVER_NOW), SERVER_NOW)
+      expect(startedAt).toBe(iso(SERVER_NOW))
+      expect(offsetSeconds).toBe(0)
+    })
+
+    it('unparseable deviceNow', () => {
+      const { startedAt, offsetSeconds } = resolveStartTime(iso(SERVER_NOW - 90 * MINUTE), 'null', SERVER_NOW)
+      expect(startedAt).toBe(iso(SERVER_NOW))
+      expect(offsetSeconds).toBe(0)
+    })
+
+    it('both unparseable', () => {
+      expect(() => resolveStartTime('garbage', 'also-garbage', SERVER_NOW)).not.toThrow()
+      const { startedAt } = resolveStartTime('garbage', 'also-garbage', SERVER_NOW)
+      expect(startedAt).toBe(iso(SERVER_NOW))
+    })
+  })
 })

@@ -95,6 +95,16 @@ export interface DashboardPendingPhotoRow {
   orgId:      string
   /** Which queued write this photo belongs to, by `targetId`. */
   targetId:   string
+  /**
+   * The `inspection_answers` row this photo is attached to. Required to
+   * discard a dead-lettered photo CORRECTLY — deleting only this row (and not
+   * also clearing the answer's `photoPath`) leaves the answer pointing at a
+   * key that will never exist in Storage, and the blob itself unreachable by
+   * any code path (drainInspectionPhotos only iterates this table). Without
+   * this field a discard handler has no way to call discardInspectionPhoto()
+   * at all, correctly or otherwise.
+   */
+  answerRowId: string
   blobKey:    string
   mimeType:   string
   status:     'pending' | 'uploaded'

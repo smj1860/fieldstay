@@ -53,9 +53,28 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'Could not submit.' }, { status: 500 })
     }
 
-    const result = data as { ok: boolean; reason?: string; already_completed?: boolean } | null
+    const result = data as {
+      ok: boolean
+      reason?: string
+      already_completed?: boolean
+      missing_count?: number
+    } | null
 
     if (!result?.ok) {
+      // 'incomplete' is the server-side completeness backstop (20260915150000)
+      // rejecting a payload that is missing required answers — the exact
+      // attack this route exists to close, not a normal outcome. The client
+      // already blocks this before it can happen, so reaching it means a
+      // forged/replayed/buggy request, and retrying the SAME payload can
+      // never fix it: 422, terminal for the outbox, distinct from the
+      // generic "gone" case below so a PM sees what actually happened.
+      if (result?.reason === 'incomplete') {
+        return NextResponse.json(
+          { ok: false, error: 'That inspection is missing required answers and cannot be submitted as complete.' },
+          { status: 422 },
+        )
+      }
+
       // 404 is TERMINAL for the outbox, and correctly so: the inspection is
       // gone or belongs to another org, and no number of retries will change
       // that. It dead-letters and the banner surfaces it, which is the right

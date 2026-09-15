@@ -2577,6 +2577,7 @@ export type Database = {
       }
       inventory_counts: {
         Row: {
+          consumption_recorded_at: string | null
           created_at: string
           id: string
           notes: string | null
@@ -2586,6 +2587,7 @@ export type Database = {
           submitted_by_crew_id: string | null
         }
         Insert: {
+          consumption_recorded_at?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -2595,6 +2597,7 @@ export type Database = {
           submitted_by_crew_id?: string | null
         }
         Update: {
+          consumption_recorded_at?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -6629,6 +6632,10 @@ export type Database = {
           p_quote_request_id: string
           p_token_expires_at: string
         }
+        Returns: Json
+      }
+      broadcast_maintenance_schedules: {
+        Args: { p_org_id: string; p_rows: Json; p_template_id: string }
         Returns: Json
       }
       claim_hospitable_promo_slot: {

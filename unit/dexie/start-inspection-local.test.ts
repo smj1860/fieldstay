@@ -60,6 +60,7 @@ vi.mock('@/lib/dexie/dashboard/syncService', () => ({
     queued.push(mutation)
   }),
 }))
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 let queued: { kind: string; targetId: string; payload: Record<string, unknown> }[] = []
 
@@ -208,5 +209,27 @@ describe('startInspectionLocally — a partial cache REFUSES', () => {
     const row = await db.inspections.get((result as { inspectionId: string }).inspectionId)
     expect(row!.form_id).toBe('form-2')
     expect(row!.form_version).toBe(2)
+  })
+
+  it('an IndexedDB failure resolves ok:false rather than rejecting uncaught', async () => {
+    // Every sibling write path (captureInspectionPhoto, createWorkOrderLocal)
+    // wraps its body and returns a discriminated result. This is the "Start
+    // Inspection" entry point, and without a try/catch a quota-exceeded or
+    // database-failed-to-open error would reject the promise straight past
+    // its StartLocalOutcome return type — "Start Inspection" would appear to
+    // do nothing, with no error message anywhere, because nothing produced one.
+    await seedCache()
+    const { enqueueDashboardMutation } = await import('@/lib/dexie/dashboard/syncService')
+    const { reportError } = await import('@/lib/observability/report-error')
+    vi.mocked(enqueueDashboardMutation).mockRejectedValueOnce(new Error('QuotaExceededError'))
+
+    const result = await startInspectionLocally(USER, ORG, { propertyId: 'prop-1', formKey: 'safety' })
+
+    expect(result.ok).toBe(false)
+    expect((result as { error: string }).error).toMatch(/could not start/i)
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'dexie.dashboard.startInspectionLocally' }),
+    )
   })
 })

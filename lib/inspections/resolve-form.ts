@@ -192,8 +192,20 @@ function buildChildren(
  * inspection — the one moment there is no way to recover. Matched by the
  * `inspection_items_value_number_range` CHECK (20260823001839) so a write that
  * did not come through here is bounded too.
+ *
+ * Also bounded by `submit-payload.ts`'s MAX_ITEMS at the OTHER end: at 999,
+ * the Safety form's 5-member extinguisher group alone produces
+ * 999 * 5 = 4,995 rows, which together with the rest of that form's own ~60
+ * items exceeded MAX_ITEMS — so a legitimately-filled walk (the inspector
+ * doing exactly what the UI invited, up to the code's own accepted maximum)
+ * was rejected outright by the submit boundary, dead-lettering a completed
+ * walk whose answers exist nowhere else. 400 leaves the largest form's
+ * worst case comfortably under MAX_ITEMS with margin to spare; the joint
+ * relationship is asserted by
+ * unit/guardrails/inspection-item-caps-consistent.test.ts so the two limits
+ * can never silently drift apart again.
  */
-export const MAX_REPEAT_INSTANCES = 999
+export const MAX_REPEAT_INSTANCES = 400
 
 function buildRepeatGroup(
   members:  InspectionFormItem[],

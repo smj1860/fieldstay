@@ -80,10 +80,32 @@ describe('captureInspectionPhoto', () => {
     expect(await db.photo_blobs.get(path)).toBeTruthy()
     expect(await db.pending_photo_uploads.get(path)).toMatchObject({
       status: 'pending', targetId: INSP, blobKey: path, failed: 0,
+      // The link a dead-letter discard needs to also clear the answer's
+      // photoPath — without it, a discard handler has no way to call
+      // discardInspectionPhoto() correctly at all.
+      answerRowId: draftRowId(INSP, KEY),
     })
     // One string is the blob key, the object key and the answer's photo_path,
     // so none of the three can drift from the others.
     expect((await db.inspection_answers.get(draftRowId(INSP, KEY)))!.photoPath).toBe(path)
+  })
+
+  it('rolls back the blob and queue row when the answer row does not exist yet', async () => {
+    // Table.update() on a missing key is a documented Dexie no-op — it
+    // resolves with 0, it does not throw. A photo whose form item's FIRST
+    // interaction is the camera (plausible for a photo-only question, before
+    // saveAnswer has ever created this answerKey's row) used to silently
+    // orphan the photo: the blob uploads fine, but nothing on any answer ever
+    // points at it, and Review/the report both show the item unphotographed
+    // with no error anywhere.
+    const db = getDashboardDb(USER, ORG)
+    await db.inspection_answers.clear()   // no seeded row for this answerKey
+
+    const result = await capture()
+
+    expect(result.ok).toBe(false)
+    expect(await db.photo_blobs.count()).toBe(0)
+    expect(await db.pending_photo_uploads.count()).toBe(0)
   })
 
   it('the path carries the org prefix the bucket policies match on', async () => {
