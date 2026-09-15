@@ -154,10 +154,17 @@ describe('systemWatchdog — cold start', () => {
 
   it('stays silent about jobs never recorded when recording only just began', async () => {
     // Recording live for 2h. Every daily job (30h budget) is unobservable —
-    // it simply has not been due yet.
+    // it simply has not been due yet. Some non-watched function (or the
+    // watchdog's own prior run) has recorded within the window — a real
+    // system whose oldest row is 2h old would show it here too — which is
+    // what tells noRunsRecorded (now derived from this same windowed read,
+    // not a separate all-time count) that the recorder is alive.
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
       makeSupabase(
-        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        {
+          system_job_runs: [{ data: [{ function_id: 'some-other-cron', started_at: hoursAgo(2) }], error: null }],
+          integration_connections: [{ data: [], error: null }],
+        },
         [],
         { oldestStartedAt: hoursAgo(2), jobRunCount: 5 },
       ),
@@ -235,6 +242,39 @@ describe('systemWatchdog — cold start', () => {
     expect(res.silentJobs).toBe(0)
     expect(reportError).toHaveBeenCalledTimes(1)
     expect(String((reportError as ReturnType<typeof vi.fn>).mock.calls[0][0])).toContain('empty')
+  })
+
+  it('reports the recorder as dead again after it worked for months and then stopped', async () => {
+    // The bug this guards: noRunsRecorded used to be a plain, unbounded
+    // `count` over the whole table with no time filter. Once system_job_runs
+    // held even one historical row that count could never return to zero
+    // again — so it could only ever catch the recorder being broken from the
+    // very first deploy, never a recorder that worked fine for months (50
+    // historical rows, oldest nearly 8 days old) and then silently stopped
+    // (a regression, an RLS change, the table going away). Recording has
+    // matured well past every watched budget, so every job below would also
+    // eventually be reported individually — but this is the one clean signal
+    // that should fire immediately, not up to 30h later and scattered across
+    // up to twelve alerts.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        // The 31h-windowed read (what noRunsRecorded is now derived from)
+        // comes back empty — nothing, for any function, in over a day —
+        // while the old table-wide jobRunCount stays a healthy-looking 50.
+        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        RECORDING_MATURE,
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { noRunsRecorded: boolean }
+
+    expect(res.noRunsRecorded).toBe(true)
+    expect(reportError).toHaveBeenCalled()
+    const messages = (reportError as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+    expect(messages.some((m) => m.includes('empty') || m.includes('not recording'))).toBe(true)
   })
 })
 

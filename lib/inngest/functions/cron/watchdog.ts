@@ -558,25 +558,41 @@ export const systemWatchdog = inngest.createFunction(
       // runs is individually a normal duration.
       const duplicatedCrons = findDuplicatedCrons(rows, watchedIds)
 
-      return { silentJobs, slowJobs, duplicatedCrons }
+      // Fourth reading of the same scan — see the "An entirely empty ledger"
+      // comment below for why this is bounded to the 31h window rather than
+      // an all-time count of system_job_runs. `rows` already covers EVERY
+      // function platform-wide, not just WATCHED_JOBS, so an empty result
+      // here means the recorder wrote nothing for anything in over a day —
+      // a signal strong enough that a live system with any event-driven
+      // traffic at all should never produce it by chance.
+      const noRunsRecorded = rows.length === 0
+
+      return { silentJobs, slowJobs, duplicatedCrons, noRunsRecorded }
     })
 
     const silent     = silentAndSlow.silentJobs
     const slow       = silentAndSlow.slowJobs
     const duplicated = silentAndSlow.duplicatedCrons
-
     // An entirely empty ledger is its own finding, not ten of them. It is
-    // expected exactly once — on the very first run, before this watchdog's own
-    // completion has been recorded — and after that it means the recorder is
-    // not working, which is worth knowing precisely because every other check
-    // here depends on it.
-    const noRunsRecorded = await step.run('check-recording-alive', async () => {
-      const supabase = createServiceClient({ system: 'inngest:system-watchdog' })
-      const { count } = await supabase
-        .from('system_job_runs')
-        .select('*', { count: 'exact', head: true })
-      return (count ?? 0) === 0
-    })
+    // expected exactly once — on the very first run, before this watchdog's
+    // own completion has been recorded — and after that it means the
+    // recorder is not working, which is worth knowing precisely because
+    // every other check here depends on it.
+    //
+    // This USED to be a plain, unbounded `count` over the whole table with
+    // no time filter — which meant that once system_job_runs held even one
+    // historical row, `count === 0` could never be true again, for the rest
+    // of the table's life. That only ever caught the recorder being broken
+    // from the very first deploy; a recorder that worked fine for months and
+    // then silently stopped (a regression, an RLS change, the table itself
+    // going away) left this permanently false while `silent` slowly
+    // discovered the same outage one watched job at a time, hours later and
+    // scattered across up to twelve separate alerts instead of the one clean
+    // "recording is dead" signal this check exists to give. Deriving it from
+    // the SAME 31h-bounded `rows` read as everything else above closes that:
+    // it is empty in the true cold-start case exactly like the old count
+    // was, and — unlike the old count — it can also become true again later.
+    const noRunsRecorded = silentAndSlow.noRunsRecorded
 
     // ── 2. Active integrations that have gone quiet ─────────────────────────
     const quiet = await step.run('check-quiet-integrations', async () => {
