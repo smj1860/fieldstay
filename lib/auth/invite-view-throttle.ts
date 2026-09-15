@@ -38,7 +38,20 @@ import { extractClientIp } from '@/lib/integrations/webhook-verification'
 export async function inviteViewThrottled(site: string): Promise<boolean> {
   const ip = extractClientIp(
     new Request('https://fieldstay.local', { headers: await headers() })
-  ) ?? 'unknown'
+  )
+
+  // No fallback to a shared 'unknown' key. That was a shared-fate bucket: any
+  // request with no resolvable IP header — plausible for ordinary traffic,
+  // not just an attacker — pooled onto ONE limiter bucket with every other
+  // such request, so one client hammering the page with no IP headers could
+  // exhaust the whole budget for every other client in that same position,
+  // defeating the PER-CLIENT anti-enumeration property this module exists
+  // for. Failing this specific case toward THROTTLED (not toward the
+  // Redis-outage 'allow' policy below, which is a different failure mode —
+  // no signal from checkLimit at all vs. no client identity to key on) costs
+  // an unresolvable-IP client one denied page load; the alternative costs
+  // every unresolvable-IP client an unbounded token-guessing surface.
+  if (!ip) return true
 
   const decision = await checkLimit(inviteAcceptRatelimit, `invite-view:${ip}`, {
     onError: 'allow',
