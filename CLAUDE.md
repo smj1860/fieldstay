@@ -1382,11 +1382,29 @@ and gated crew counts behind a PM approval that product never wanted.
 
 The inspection report (phase 7) renders synchronously on the request path:
 several passes over the answers, then pdf-lib draw calls per row, then one
-`save()` that serialises the whole document, with no yield point in the chain
-and no `maxDuration` entry in `vercel.json`. So it carries explicit ceilings.
-They are recorded here because **a cap nobody remembers is a cap somebody
-raises**, and this document's entire claim is completeness — a history that
-silently stops partway through 2024 reads as the PM having given up.
+`save()` that serialises the whole document, with no yield point in the chain.
+So it carries explicit ceilings on the WORK — the table below — plus a
+`maxDuration` in `vercel.json` on each of its three routes, sized to what that
+ceiling can still cost in TIME: 60s for the single-inspection PM route, 90s
+for the whole-property history export (the heavier of the two — up to
+`MAX_REPORT_PHOTOS` sequential downloads on top of up to `MAX_ANSWER_ROWS`),
+30s for the owner-portal copy (no photos, ever — see `includePhotos` in
+`lib/inspections/report/model.ts`). Neither substitutes for the other: a row
+cap bounds how much work there is to do; `maxDuration` bounds how long the
+platform lets that work run before killing the function outright, mid-`save()`,
+with nothing in the response to explain it. The caps are recorded here because
+**a cap nobody remembers is a cap somebody raises**, and this document's
+entire claim is completeness — a history that silently stops partway through
+2024 reads as the PM having given up.
+
+Each of those sequential photo downloads is itself time-boxed —
+`INSPECTION_PHOTO_TIMEOUT_MS` (`lib/http/timeout.ts`) via an `AbortSignal` —
+and the download is wrapped in a `try/catch`, not just an `if (error)` check:
+storage-js's `download()` only converts a `StorageError` to `{ data: null,
+error }`; an abort or any other throw propagates. Without the catch, one hung
+object would not cost its own photograph, it would take the whole document
+down — the same failure this file's photo-loop comment says a bad photo must
+never cause.
 
 | Cap | Value | Where | What it bounds |
 |---|---|---|---|

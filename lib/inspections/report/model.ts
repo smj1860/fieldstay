@@ -3,6 +3,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { INSPECTION_PHOTO_TIMEOUT_MS } from '@/lib/http/timeout'
 import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import {
   parseFormSnapshot,
@@ -395,13 +396,28 @@ async function loadPhotos(
   // Sequential rather than a Promise.all fan-out: this is 10MB-capped binary
   // per object, and firing 150 concurrent downloads is how a report becomes a
   // memory spike rather than a slow response.
+  //
+  // TIMED, AND CAUGHT. Storage-js's download() only converts a StorageError
+  // to `{ data: null, error }` — anything else, an abort included, it
+  // RETHROWS (see BlobDownloadBuilder.execute()). Without the try/catch below,
+  // one hung object would not just cost its own photograph: an uncaught throw
+  // here propagates out of loadPhotos and loadInspectionReport, taking the
+  // whole document down over one picture — the exact failure mode this
+  // function's own header comment says a photo download must never cause. The
+  // signal is what makes "hung" a real, bounded outcome rather than "holds
+  // this loop, and the request, open until the platform kills the function."
   for (const answer of paths) {
     const path = answer.photo_path!
-    const { data, error } = await supabase.storage.from(PHOTO_BUCKET).download(path)
-    if (error || !data) continue
+    try {
+      const { data, error } = await supabase.storage.from(PHOTO_BUCKET)
+        .download(path, {}, { signal: AbortSignal.timeout(INSPECTION_PHOTO_TIMEOUT_MS) })
+      if (error || !data) continue
 
-    const bytes = new Uint8Array(await data.arrayBuffer())
-    out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
+      const bytes = new Uint8Array(await data.arrayBuffer())
+      out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
+    } catch {
+      continue
+    }
   }
   return { photos: out, omitted }
 }

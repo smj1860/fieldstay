@@ -171,4 +171,58 @@ describe('guardrail: a cap that applies is stated in the output', () => {
     expect(code('lib/inspections/report/content.ts')).toContain('photoCapNote')
     expect(code('lib/inspections/report/render.ts')).toContain('photoCapNote(')
   })
+
+  it('each sequential photo download is timed, and its failure is caught rather than left to propagate', () => {
+    // storage-js's download() only converts a StorageError to
+    // { data: null, error } — anything else, an abort included, it rethrows.
+    // Without a catch around it, one hung object takes the whole document
+    // down over one picture, which is exactly the failure this loop exists
+    // to prevent for an ordinary download error.
+    const src = code('lib/inspections/report/model.ts')
+    expect(src).toContain('INSPECTION_PHOTO_TIMEOUT_MS')
+    expect(src).toMatch(/AbortSignal\.timeout\(INSPECTION_PHOTO_TIMEOUT_MS\)/)
+    expect(src, 'the download must be wrapped in a try/catch, not just an `if (error)` check')
+      .toMatch(/try\s*\{[\s\S]*download\([\s\S]*?\}\s*catch/)
+  })
+})
+
+describe('guardrail: the report routes budget their own request-path duration', () => {
+  // Everything after the load is synchronous CPU with no yield point — see the
+  // "Report and export caps" section above. A cap on the WORK does not bound
+  // the TIME the platform lets that work run; without its own maxDuration,
+  // each of these three routes inherits Vercel's default, and the platform
+  // kills the function mid-save() with nothing in the response to explain it.
+  const ROUTES = {
+    single:  'app/api/inspections/[id]/report/route.ts',
+    history: 'app/api/properties/[id]/inspections/report/route.ts',
+    owner:   'app/api/owner/[token]/inspections/[id]/report/route.ts',
+  } as const
+
+  function maxDurations(): Record<keyof typeof ROUTES, number> {
+    const config = JSON.parse(read('vercel.json')) as {
+      functions: Record<string, { maxDuration?: number }>
+    }
+    const out = {} as Record<keyof typeof ROUTES, number>
+    for (const [key, path] of Object.entries(ROUTES) as [keyof typeof ROUTES, string][]) {
+      const value = config.functions[path]?.maxDuration
+      expect(value, `${path} has no maxDuration entry in vercel.json`).toBeTypeOf('number')
+      out[key] = value!
+    }
+    return out
+  }
+
+  it('every one of the three report routes has a maxDuration budget', () => {
+    const durations = maxDurations()
+    for (const value of Object.values(durations)) expect(value).toBeGreaterThan(0)
+  })
+
+  it('the heaviest route — the whole-property history export — gets the longest budget', () => {
+    // Up to MAX_REPORT_PHOTOS sequential downloads on top of up to
+    // MAX_ANSWER_ROWS, against the single-inspection route's one walk's worth
+    // of each and the owner route's none at all (it never fetches photos).
+    const { single, history, owner } = maxDurations()
+    expect(history, 'the whole-history export must not get the shortest budget')
+      .toBeGreaterThanOrEqual(single)
+    expect(single).toBeGreaterThanOrEqual(owner)
+  })
 })

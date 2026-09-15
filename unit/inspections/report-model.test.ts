@@ -269,6 +269,29 @@ describe('loadInspectionReport — photos', () => {
     expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo).toBeNull()
   })
 
+  it('SKIPS a photo whose download THROWS — a timeout, not just an error result', async () => {
+    // storage-js's download() only converts a StorageError to
+    // { data: null, error }; an abort or any other failure REJECTS. Without a
+    // catch around the call, this would propagate out of loadInspectionReport
+    // and take the whole document down over one hung object.
+    const { client } = makeClient(withPhoto)
+    const supabase = {
+      ...client,
+      storage: {
+        from: () => ({
+          download: () => Promise.reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })),
+        }),
+      },
+    } as unknown as SupabaseClient
+
+    const report = await loadInspectionReport(supabase, {
+      orgId: ORG, inspectionId: 'insp-1', includePhotos: true,
+    })
+
+    expect(report).not.toBeNull()
+    expect(report!.inspections[0]!.sections[0]!.answers[0]!.photo).toBeNull()
+  })
+
   it('classifies by MAGIC BYTES, so a non-JPEG cannot throw inside the render', async () => {
     // pdf-lib embeds JPEG and PNG only, and throws on anything else — which
     // would take the whole document down over one photograph. The bucket also
