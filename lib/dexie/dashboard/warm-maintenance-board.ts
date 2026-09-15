@@ -47,6 +47,19 @@
 // offline when the throttle next allows a warm." Every row with a pending
 // `work_order.create` mutation is excluded from the stale-deletion set for
 // exactly this reason; see the test that creates one and re-warms.
+//
+// THE PENDING SET IS READ BEFORE THE SELECT FIRES, and that ordering is not
+// incidental. A work order can finish syncing — its outbox row deleted by the
+// drain — WHILE the SELECT below is in flight. Read `pending` AFTER the
+// SELECT and there is a real window where a just-synced work order is in
+// neither set: its mutation is already gone (so it is not "pending"), and the
+// SELECT's result was captured before the server had committed it (so it is
+// not "covered" either) — reconcile-by-absence then deletes a work order that
+// exists, correctly, on the server. Reading `pending` first closes the
+// window: anything still queued at that instant stays protected no matter
+// when it syncs afterward, and anything that had ALREADY synced by that
+// instant was necessarily committed before the SELECT was even issued, so the
+// SELECT is guaranteed to see it.
 
 import { createClient } from '@/lib/supabase/client'
 import { reportError } from '@/lib/observability/report-error'
@@ -116,6 +129,20 @@ export async function warmMaintenanceBoardForOffline(
 
     const vendors = await cacheVendors(db, orgId)
 
+    // READ BEFORE THE SELECT FIRES, not after it resolves — the ordering is
+    // load-bearing. A work order created offline can finish syncing (its
+    // outbox row deleted by the drain) WHILE this SELECT is in flight. Reading
+    // `pending` after the SELECT leaves a real window where a just-synced work
+    // order is neither in `pending` (its mutation is already gone) nor in the
+    // SELECT's result (the server had not committed it yet when the query
+    // ran) — reconcile-by-absence then deletes it. Capturing `pending` first
+    // closes the window: anything still queued at this instant is protected
+    // regardless of when it syncs afterward, and anything that had ALREADY
+    // synced by this instant was necessarily committed before the SELECT
+    // below was even issued, so the SELECT is guaranteed to see it. See the
+    // regression test that creates one and re-warms mid-fetch.
+    const pending = await pendingLocalCreateIds(db)
+
     const supabase = createClient()
     const { data, error } = await supabase
       .from('work_orders')
@@ -148,7 +175,6 @@ export async function warmMaintenanceBoardForOffline(
     }
 
     const rows = (data ?? []) as unknown as WorkOrder[]
-    const pending = await pendingLocalCreateIds(db)
 
     await db.transaction('rw', db.work_orders, async () => {
       const covered = rows.map((r) => r.id)
