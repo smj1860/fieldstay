@@ -21,6 +21,7 @@
 // arrive once that runs. Retrying would not conjure the property.
 // ============================================================================
 
+import { NonRetriableError }  from 'inngest'
 import { inngest }           from '@/lib/inngest/client'
 import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { reportError }       from '@/lib/observability/report-error'
@@ -28,9 +29,23 @@ import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { fetchProviderPropertyIdMap } from '../shared/reservation-pipeline'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
+import { isHostexAccountActionError } from '@/lib/integrations/providers/hostex-api'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-webhook-handler'
+
+/**
+ * A terminal, already-known-dead connection. No revocation webhook exists for
+ * Hostex — it keeps pushing events to a still-registered URL until tomorrow's
+ * reconcile catches this same condition and revokes the connection. Reporting
+ * every one of those deliveries is one Sentry event per webhook — potentially
+ * many per hour for an active listing — for a condition already being handled
+ * on its own daily cadence, not a new fault.
+ */
+export function isDeadHostexConnectionError(err: unknown): boolean {
+  return isHostexAccountActionError(err) || isProviderAuthFailure(err) || err instanceof NonRetriableError
+}
 
 export const hostexWebhookHandler = inngest.createFunction(
   {
@@ -145,7 +160,12 @@ export const hostexWebhookHandler = inngest.createFunction(
       // swallowing it would make the loss invisible.
       const msg = err instanceof Error ? err.message : String(err)
       logger.error(`[Hostex:${user_id}] webhook handling failed for ${reservation_code}: ${msg}`)
-      reportError(err, { site: 'inngest.hostex-webhook-handler', orgId: org_id })
+
+      if (isDeadHostexConnectionError(err)) {
+        logger.warn(`[Hostex:${user_id}] connection appears dead — suppressing duplicate report, awaiting reconcile revoke`)
+      } else {
+        reportError(err, { site: 'inngest.hostex-webhook-handler', orgId: org_id })
+      }
       throw err
     }
   }
