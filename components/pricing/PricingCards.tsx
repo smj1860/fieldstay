@@ -56,6 +56,23 @@ function tierIndexForQty(qty: number): number {
   return idx === -1 ? TIER_UPPER_BOUNDS.length : idx;
 }
 
+/**
+ * Every `qty` this calculator holds must be a valid integer in
+ * [1, MAX_SELF_SERVE_PROPERTIES] — monthlyCostCents()/annualCostCents() return
+ * `null` for anything else, and PricingCalculator reads them with a non-null
+ * assertion. `null! / 100` does not throw; `null` coerces to `0` in a numeric
+ * division, so a non-integer quantity silently rendered "$0/mo" to a visitor
+ * instead of a real price. The range input's default step already keeps it to
+ * whole numbers, but the number input has no such guarantee — nothing stops a
+ * visitor from typing "12.5", and `Number("12.5")` is a valid, non-integer
+ * number that the old `Number(e.target.value) || 1` clamp let straight
+ * through. Both inputs route through this so neither can reintroduce the gap.
+ */
+function clampQty(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(MAX_SELF_SERVE_PROPERTIES, Math.max(1, Math.round(value)));
+}
+
 function PricingCalculator({
   qty, onQtyChange, annual, matchedTierName,
 }: Readonly<{ qty: number; onQtyChange: (n: number) => void; annual: boolean; matchedTierName: string }>) {
@@ -76,7 +93,7 @@ function PricingCalculator({
               min={1}
               max={MAX_SELF_SERVE_PROPERTIES}
               value={qty}
-              onChange={(e) => onQtyChange(Number(e.target.value))}
+              onChange={(e) => onQtyChange(clampQty(Number(e.target.value)))}
               className="flex-1 accent-[var(--mkt-gold)]"
               aria-label="Number of properties"
             />
@@ -86,7 +103,7 @@ function PricingCalculator({
               min={1}
               max={MAX_SELF_SERVE_PROPERTIES}
               value={qty}
-              onChange={(e) => onQtyChange(Math.min(MAX_SELF_SERVE_PROPERTIES, Math.max(1, Number(e.target.value) || 1)))}
+              onChange={(e) => onQtyChange(clampQty(Number(e.target.value)))}
               className="w-16 text-center font-mono font-semibold rounded-lg border border-[var(--mkt-border)] py-1.5 text-[var(--mkt-ink)]"
             />
           </div>
