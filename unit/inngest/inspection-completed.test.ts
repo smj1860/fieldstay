@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
 vi.mock('@/lib/inngest/helpers', () => ({ createPmNotification: vi.fn() }))
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 
 // ============================================================================
@@ -575,6 +577,40 @@ describe('inspectionCompleted — what it refuses to act on', () => {
     expect(result).toMatchObject({ workOrders: 0 })
     expect(writes).toEqual([])
     expect(c.logger.warn).toHaveBeenCalled()
+  })
+
+  it('reports hitting its MAX_REMEDIATIONS cap instead of silently dropping the rest', async () => {
+    // The comment on MAX_REMEDIATIONS calls exceeding it "a device fault
+    // rather than a property in trouble" — which is exactly why hitting it
+    // has to be visible: whatever caused 200+ failures needs a human to look,
+    // and every finding past the cap otherwise vanishes with no work order,
+    // no PO line and no trace that remediation was ever incomplete.
+    const items = Array.from({ length: 200 }, (_, i) =>
+      failedItem({ id: `item-${i}`, form_item_id: 'def-1' }))
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: items,
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+
+    expect(reportError).toHaveBeenCalledTimes(1)
+    const [err, opts] = vi.mocked(reportError).mock.calls[0]!
+    expect((err as Error).message).toContain('200')
+    expect(opts).toMatchObject({ site: 'inngest.inspection-completed', level: 'warning', orgId: ORG })
+  })
+
+  it('does not report the cap for a normal, uncapped inspection', async () => {
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [failedItem()],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+
+    expect(reportError).not.toHaveBeenCalled()
   })
 })
 
