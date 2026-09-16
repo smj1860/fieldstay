@@ -87,7 +87,7 @@ export async function recordThumbtackRequestCreatedAction(
     // client (audit_events SELECT is owner-only via RLS, and the caller here
     // may not be an owner) but is scoped to this org via authorizedBy.
     const admin = createServiceClient({ authorizedBy: membership })
-    const dedupeCheck = await tryUnwrap(
+    const dedupeCheck = tryUnwrap(
       await admin
         .from('audit_events')
         .select('id')

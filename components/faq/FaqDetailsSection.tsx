@@ -47,8 +47,11 @@ export default function FaqDetailsSection({
               // merged questions ever collide. A duplicate key would silently
               // drop/misrender a <details> and its open/closed state could
               // leak onto the wrong sibling — dormant today only because this
-              // accordion has no re-render trigger post-mount.
-              key={i}
+              // accordion has no re-render trigger post-mount. `items` is a
+              // static list built once per page (no filtering/reordering/
+              // insertion after mount), which is exactly the case an index
+              // key is safe for — SonarCloud's rule can't see that.
+              key={i} // NOSONAR -- static list, never reordered/filtered post-mount; see comment above
               className="group rounded-xl border border-[var(--mkt-border)] bg-white p-5"
             >
               <summary className="font-semibold text-[var(--mkt-ink)] cursor-pointer list-none flex justify-between items-center gap-4">

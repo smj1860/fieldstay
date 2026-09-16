@@ -186,7 +186,7 @@ describe('conditions — recorded and reported are never the same claim', () => 
     const result = reportedConditions(long)
     expect(result?.source).toBe('reported')
     if (result?.source !== 'reported') throw new Error('expected a reported reading')
-    expect(result.text.length).toBe(200)
+    expect(result.text).toHaveLength(200)
     expect(result.text).toBe('x'.repeat(200))
   })
 })
