@@ -94,7 +94,9 @@ describe('billingPropertyReconciliation (cron fan-out)', () => {
     })
 
     expect(result).toEqual({ dispatched: 2 })
-    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-property-reconciliation', [
+    // sendEventsChunked names each chunk's step `${prefix}-${i}` so Inngest
+    // can memoize per chunk — one chunk here, hence the `-0` suffix.
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-property-reconciliation-0', [
       { name: 'billing/reconcile-property-count.requested', data: { org_id: 'org_1' } },
       { name: 'billing/reconcile-property-count.requested', data: { org_id: 'org_2' } },
     ])

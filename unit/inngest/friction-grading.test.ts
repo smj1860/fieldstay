@@ -50,7 +50,9 @@ describe('frictionGrading (cron fan-out)', () => {
     const result = await invokeHandler(frictionGrading, { event: {}, step, logger })
 
     expect(result).toEqual({ dispatched: 2 })
-    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-friction-grading', [
+    // sendEventsChunked names each chunk's step `${prefix}-${i}` — `-0` here
+    // since both orgs fit in one chunk.
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-friction-grading-0', [
       { name: 'friction/grading.requested', data: { org_id: 'org_1' } },
       { name: 'friction/grading.requested', data: { org_id: 'org_2' } },
     ])
