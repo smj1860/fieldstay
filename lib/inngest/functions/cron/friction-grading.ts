@@ -1,6 +1,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchDistinctOrgIds }  from '@/lib/inngest/paginate'
+import { sendEventsChunked }    from '@/lib/inngest/chunk'
 
 /**
  * SCHEDULED: grades yesterday's friction forecasts against what actually
@@ -52,7 +53,8 @@ export const frictionGrading = inngest.createFunction(
     })
 
     if (orgIds.length) {
-      await step.sendEvent(
+      await sendEventsChunked(
+        step,
         'fan-out-friction-grading',
         orgIds.map((orgId) => ({
           name: 'friction/grading.requested' as const,
