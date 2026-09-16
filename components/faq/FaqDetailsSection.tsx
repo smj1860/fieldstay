@@ -40,9 +40,15 @@ export default function FaqDetailsSection({
           {heading}
         </h2>
         <div className="space-y-4">
-          {items.map((f) => (
+          {items.map((f, i) => (
             <details
-              key={f.question}
+              // Index, not f.question: every caller concatenates multiple FAQ
+              // arrays from lib/faq-content.ts, and nothing enforces no two
+              // merged questions ever collide. A duplicate key would silently
+              // drop/misrender a <details> and its open/closed state could
+              // leak onto the wrong sibling — dormant today only because this
+              // accordion has no re-render trigger post-mount.
+              key={i}
               className="group rounded-xl border border-[var(--mkt-border)] bg-white p-5"
             >
               <summary className="font-semibold text-[var(--mkt-ink)] cursor-pointer list-none flex justify-between items-center gap-4">

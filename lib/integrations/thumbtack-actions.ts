@@ -4,6 +4,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { reportError } from '@/lib/observability/report-error'
 import { logAuditEvent } from '@/lib/audit'
 import { createServiceClient } from '@/lib/supabase/server'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { checkLimit, retryAfterSeconds, thumbtackSearchRatelimit } from '@/lib/rate-limit'
 import {
   searchThumbtackPros,
@@ -86,16 +87,21 @@ export async function recordThumbtackRequestCreatedAction(
     // client (audit_events SELECT is owner-only via RLS, and the caller here
     // may not be an owner) but is scoped to this org via authorizedBy.
     const admin = createServiceClient({ authorizedBy: membership })
-    const { data: existing } = await admin
-      .from('audit_events')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .eq('action', 'thumbtack.request_flow.completed')
-      .contains('metadata', { request_pk: event.request_pk })
-      .limit(1)
-      .maybeSingle()
-
-    if (existing) return
+    const dedupeCheck = await tryUnwrap(
+      await admin
+        .from('audit_events')
+        .select('id')
+        .eq('org_id', membership.org_id)
+        .eq('action', 'thumbtack.request_flow.completed')
+        .contains('metadata', { request_pk: event.request_pk })
+        .limit(1)
+        .maybeSingle(),
+      { site: 'action.thumbtack.record-request-created.dedup-check' },
+    )
+    // A failed dedup CHECK is not a reason to drop a real completed-request
+    // record — tryUnwrap already logged/reported it. Fail open on the check,
+    // not on the write itself.
+    if (dedupeCheck.ok && dedupeCheck.data) return
 
     await logAuditEvent({
       orgId:      membership.org_id,
