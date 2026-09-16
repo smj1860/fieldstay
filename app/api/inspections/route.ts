@@ -50,8 +50,18 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  */
 const WEATHER_FRESHNESS_MS = 2 * 60 * 60 * 1000
 
-/** A clock this far out is not skew, it is a broken or spoofed device. */
-const MAX_PLAUSIBLE_OFFSET_SECONDS = 10 * 365 * 24 * 60 * 60
+/**
+ * A clock this far out is not skew, it is a broken or spoofed device.
+ *
+ * A walk starting hours late/early from the reconnect window is expected
+ * (§8's offline scenario) — a day of margin covers that comfortably. Ten
+ * years, the prior value, was so wide it accepted exactly the realistic
+ * failure case this guard names: a dead-CMOS-battery tablet whose clock reset
+ * to a few years off would be "plausible" and used to correct started_at
+ * using an offset that is itself evidence the device's sense of time is
+ * unreliable for the whole session, not just at this one instant.
+ */
+const MAX_PLAUSIBLE_OFFSET_SECONDS = 24 * 60 * 60
 
 export async function POST(req: Request) {
   try {

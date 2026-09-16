@@ -264,3 +264,36 @@ describe('POST /api/inspections — one-open-draft-per-property-and-form conflic
     expect(logAuditEvent).not.toHaveBeenCalled()
   })
 })
+
+describe('POST /api/inspections — device clock plausibility', () => {
+  // MAX_PLAUSIBLE_OFFSET_SECONDS used to be 10 years, which accepted exactly
+  // the realistic "broken device" case it was meant to catch: a dead-CMOS
+  // tablet whose clock reset a few years off. Now 1 day.
+  it('rejects a device_now offset by years, not just multiple decades', async () => {
+    const threeYearsAgo = new Date(Date.now() - 3 * 365 * 24 * 60 * 60 * 1000).toISOString()
+    const supabase = makeSupabase({ upsertResults: [{ error: null }] })
+    vi.mocked(requireOrgRole).mockResolvedValue({
+      supabase, membership: { org_id: ORG, org: { name: 'Org' } }, user: { id: USER },
+    } as never)
+
+    const res = await POST(req(body({ device_started_at: threeYearsAgo, device_now: threeYearsAgo })))
+    const json = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(json.ok).toBe(false)
+    expect(supabase.upsertCalls).toHaveLength(0)
+  })
+
+  it('accepts an offset within a day, the expected offline-reconnect window', async () => {
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+    const supabase = makeSupabase({ upsertResults: [{ error: null }] })
+    vi.mocked(requireOrgRole).mockResolvedValue({
+      supabase, membership: { org_id: ORG, org: { name: 'Org' } }, user: { id: USER },
+    } as never)
+
+    const res = await POST(req(body({ device_started_at: twelveHoursAgo, device_now: twelveHoursAgo })))
+
+    expect(res.status).toBe(200)
+    expect(supabase.upsertCalls).toHaveLength(1)
+  })
+})

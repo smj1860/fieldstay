@@ -45,6 +45,12 @@ interface FrictionRow {
   crew_members:        unknown
 }
 
+/** A finite probability, or 0 for anything Number() can't make sense of. */
+function toFiniteProbability(value: number | string): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function toFlagged(row: FrictionRow): FlaggedTurnover {
   const property = unwrapJoin(row.properties)    as { name?: string } | null
   const turnover = unwrapJoin(row.turnovers)     as { checkout_datetime?: string } | null
@@ -55,8 +61,12 @@ function toFlagged(row: FrictionRow): FlaggedTurnover {
     turnoverId:         row.turnover_id,
     propertyName:       property?.name ?? null,
     checkoutDatetime:   turnover?.checkout_datetime ?? null,
-    // PostgREST returns numeric as a string.
-    failureProbability: Number(row.failure_probability),
+    // PostgREST returns numeric as a string. A non-numeric value (a bad
+    // manual edit, a migration default, a future write path that skips
+    // buildFrictionRow's rounding) would otherwise flow through as NaN and
+    // render the literal "NaN% risk" on a dashboard whose whole premise is
+    // trustworthy signal — 0 degrades to "no measured risk" instead.
+    failureProbability: toFiniteProbability(row.failure_probability),
     severity:           row.severity === 'critical' ? 'critical' : 'high',
     reasons:            topFrictionReasons(row.score_breakdown ?? {}),
     smartFixCrewId:     row.smart_fix_crew_id,

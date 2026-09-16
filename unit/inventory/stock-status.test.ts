@@ -84,6 +84,15 @@ describe('stockStatus', () => {
     expect(stockStatus(item({ first_count_recorded_at: null, current_quantity: 99, par_level: 1 })))
       .toBe('uncounted')
   })
+
+  it('is uncounted rather than yellow/green for a NaN quantity or par', () => {
+    // NaN < x and NaN > x are both false in JS, so without a guard this falls
+    // through to "exactly at par" — a false-healthy badge for corrupt data
+    // (malformed upstream input coerced with Number() and no isFinite check).
+    expect(stockStatus(item({ current_quantity: NaN, par_level: 5 }))).toBe('uncounted')
+    expect(stockStatus(item({ current_quantity: 5, par_level: NaN }))).toBe('uncounted')
+    expect(stockStatus(item({ current_quantity: NaN, par_level: NaN }))).toBe('uncounted')
+  })
 })
 
 describe('needsRestock / restockQuantity', () => {

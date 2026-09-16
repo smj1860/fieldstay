@@ -74,9 +74,15 @@ export const assetWarrantyExpiryCheck = inngest.createFunction(
       const claimedAssets = assets.filter((a) => claimedIds.has(a.id))
 
       const notifications: CreatePmNotificationInput[] = claimedAssets.map((asset) => {
-        const daysUntil = Math.round(
+        // The query's warranty_expiry_date >= todayStr guarantee is relative to
+        // whenever it ran, not to the moment this line executes — an
+        // off-schedule invocation (a manual replay, a delayed retry, a
+        // rescheduled cron) run later in the day than the fixed 0 12 * * *
+        // slot can otherwise compute a negative days-until for an asset
+        // expiring "today", rendering "expires in -1 days" to the PM.
+        const daysUntil = Math.max(0, Math.round(
           (new Date(asset.warranty_expiry_date).getTime() - Date.now()) / 86_400_000
-        )
+        ))
         return {
           orgId:     asset.org_id,
           type:      'asset_warranty_expiry',

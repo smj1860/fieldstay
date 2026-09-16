@@ -204,8 +204,13 @@ export async function pruneFinishedInspections(userId: string, orgId: string): P
   const ids = new Set(finished.map((i) => i.id))
   await db.transaction('rw', db.inspections, db.inspection_answers, async () => {
     await db.inspections.bulkDelete([...ids])
+    // .where('inspectionId') uses the index schema.ts declares specifically
+    // because every fill-screen read is "this inspection's answers" — a
+    // .filter() scan here ignores it and walks every answer row on every
+    // fill-screen mount, which is exactly the scaling scenario this file's
+    // own header warns about (fifty dead drafts of ~250 rows each).
     const orphaned = await db.inspection_answers
-      .filter((row) => ids.has(row.inspectionId))
+      .where('inspectionId').anyOf([...ids])
       .primaryKeys()
     await db.inspection_answers.bulkDelete(orphaned)
   })
