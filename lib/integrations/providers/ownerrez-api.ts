@@ -25,8 +25,10 @@ import type {
 } from '../types'
 
 import { reportError } from '@/lib/observability/report-error'
-import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { PMS_API_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import { getRedis, upstashConfigured } from '@/lib/redis'
+import { NonRetriableError } from 'inngest'
+import { evaluateBreaker, recordFailure, recordSuccess, CircuitOpenError } from '@/lib/integrations/circuit-breaker'
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
@@ -131,6 +133,16 @@ export class OwnerRezApiClient {
    * `url` MUST already be origin-checked by the caller — see assertOwnerRezUrl.
    * `label` is the path used in log/error messages only; it never affects the
    * request, and exists so a followed page URL still reports as its endpoint.
+   *
+   * Gated by the shared, platform-wide circuit breaker (lib/integrations/
+   * circuit-breaker.ts) in addition to the IP rate-limit budget above — this
+   * is EVERY OwnerRez call's transport, including the three consumers
+   * (initial-sync, reviews-sync, reconciliation-handler) that have no breaker
+   * of their own. It runs ALONGSIDE, not instead of,
+   * lib/inngest/functions/ownerrez/incremental-sync.ts's own PER-CONNECTION
+   * breaker — that one decides whether to even attempt a given connection's
+   * tick; this one is the platform-wide backstop against every OwnerRez
+   * consumer amplifying load during a real outage.
    */
   private async fetchUrl<T>(
     url: URL,
@@ -158,22 +170,49 @@ export class OwnerRezApiClient {
 
     const path = label
 
-    const res = await globalThis.fetch(url.toString(), {
-      method:  options?.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'User-Agent':    `FieldStay/1.0 (${clientId})`,
-        'Accept':        'application/json',
-        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-      ...(options?.body ? { body: options.body } : {}),
-    })
+    // Checked BEFORE the fetch, after the rate-limit budget: that bounds how
+    // fast WE call OwnerRez; this bounds whether we call at all while
+    // OwnerRez is failing outright. NonRetriable — retrying immediately is
+    // exactly the amplifying behaviour the breaker exists to stop. Same
+    // wiring as krogerFetch (lib/kroger/client.ts) and hospitableFetch
+    // (lib/integrations/providers/hospitable.ts).
+    const { decision: breakerDecision, priorFailures } = await evaluateBreaker('ownerrez')
+    if (breakerDecision === 'open') {
+      throw new NonRetriableError(new CircuitOpenError('ownerrez').message)
+    }
+
+    let res: Response
+    try {
+      res = await globalThis.fetch(url.toString(), {
+        method:  options?.method ?? 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'User-Agent':    `FieldStay/1.0 (${clientId})`,
+          'Accept':        'application/json',
+          ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
+        ...(options?.body ? { body: options.body } : {}),
+      })
+    } catch (err) {
+      // A timeout or transport failure is exactly what the breaker counts —
+      // record it before rethrowing so the Nth concurrent caller stops
+      // paying the full timeout once the threshold trips.
+      await recordFailure('ownerrez')
+      if (isTimeoutError(err)) {
+        console.error(`[OwnerRez:${this.userId}] ${path} timed out`, { timeoutMs: PMS_API_TIMEOUT_MS })
+        reportError(err, { site: 'lib.integrations.providers.ownerrez-api.fetchUrl', extra: { timedOut: true } })
+        throw new Error(`[OwnerRez:${this.userId}] ${path} timed out after ${PMS_API_TIMEOUT_MS}ms`)
+      }
+      throw err
+    }
 
     if (res.status === 401) {
       // A credential we DO hold was rejected — the grant was revoked on
       // OwnerRez's side, or the token expired. Capture their reason before
       // marking the connection, since the token itself is never logged.
+      // NOT a breaker failure: this is our own credential being rejected,
+      // not OwnerRez's API failing.
       const body = await res.text().catch(() => '')
       console.error(`[OwnerRez:${this.userId}] 401 on ${path}: ${body}`)
       await this.markConnectionError()
@@ -181,13 +220,27 @@ export class OwnerRezApiClient {
     }
 
     if (res.status === 429) {
+      // Deliberately NOT a breaker failure: 429 is OwnerRez working correctly
+      // and telling us to slow down, already handled by the IP budget above
+      // and this explicit Retry-After. Counting it would open the circuit on
+      // our own throughput rather than their health.
       const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
       throw new RateLimitError(retryAfter)
     }
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
+      // 5xx is the provider failing; other 4xx statuses (400, 403, 404, …)
+      // are us sending something wrong and would never clear by waiting —
+      // only the former should trip the breaker.
+      if (res.status >= 500) await recordFailure('ownerrez')
       throw new Error(`[OwnerRez:${this.userId}] ${path} → ${res.status}: ${body}`)
+    }
+
+    if (priorFailures > 0) {
+      // Only clear when there is something to clear — avoids a Redis
+      // round-trip on every healthy call.
+      await recordSuccess('ownerrez')
     }
 
     const body = await res.json() as Record<string, unknown>

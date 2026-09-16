@@ -49,8 +49,13 @@ describe('hospTeammateSyncCron', () => {
     })
 
     expect(result).toEqual({ dispatched: 2 })
+    // '-0': dispatch now goes through sendEventsChunked (lib/inngest/chunk.ts),
+    // which suffixes every chunk's step id so a resumed run can memoize per
+    // chunk — see connection-dispatch.ts. Only one chunk here (2 connections,
+    // well under SEND_EVENT_CHUNK_SIZE), so the payload itself is unchanged;
+    // teammate-sync doesn't opt into dispatch jitter, so there's no `ts`.
     expect(step.sendEvent).toHaveBeenCalledWith(
-      'dispatch-teammate-sync-events',
+      'dispatch-teammate-sync-events-0',
       [
         { name: 'integration/hospitable.teammate_sync.requested', data: { user_id: 'user_1', org_id: 'org_1', external_user_id: 'ext_1' } },
         { name: 'integration/hospitable.teammate_sync.requested', data: { user_id: 'user_2', org_id: 'org_2', external_user_id: 'ext_2' } },
