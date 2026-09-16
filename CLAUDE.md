@@ -2177,6 +2177,32 @@ meta-rule, prose is for judgment calls only.
   data deletion) actually calls `logAuditEvent(s)()` can't be enumerated
   mechanically — there's no fixed pattern distinguishing "this action is
   audit-worthy" from "this one isn't."
+- **RLS "manage" policies keyed off an opaque SECURITY DEFINER function.**
+  The standard `is_org_member(org_id, ARRAY[...])` policy (Critical Security
+  Rules #2) is correct and intentional, but it is opaque to the query
+  planner: Postgres cannot push a condition evaluated inside a SECURITY
+  DEFINER PL/pgSQL function down into an index scan the way it can a plain
+  inlined `org_id = ...` predicate, so a large table's RLS-filtered scan can
+  fall back to evaluating the function once per candidate row rather than
+  seeking directly via an index on `org_id`. Whether this actually matters
+  for a given table depends on its size, its existing indexes, and how
+  selective the rest of the query's WHERE clause is — a genuinely
+  table-specific, plan-dependent judgment call, not a pattern a text or AST
+  scanner can safely flag. A blanket lint of "every RLS-table call site must
+  inline an org filter alongside is_org_member()" would fire constantly
+  against legitimate ID-scoped writes/reads that are already correctly
+  protected by RLS alone (the exact class of false positive the IDOR item
+  above warns about) — there is no way to distinguish "this query would
+  benefit from an inlined org_id filter for planner reasons" from "this
+  query is already fine because RLS forces correctness regardless of the
+  plan Postgres chooses" without reading each call site's actual query plan
+  (`EXPLAIN ANALYZE`) against realistic data volume. Check this manually,
+  table by table, on the tables genuinely at scale (property_assets,
+  work_orders, assignment_outcomes, checklist_instance_items, bookings): run
+  `EXPLAIN ANALYZE` on that table's hot read path and confirm the plan is
+  seeking on an index that includes `org_id`, not sequentially scanning and
+  calling `is_org_member()`/`get_user_org_ids()` per row. Do NOT attempt an
+  automated lint for this one.
 
 ### Code Quality
 
