@@ -116,9 +116,10 @@ function byCodeUnit(a: string, b: string): number {
  */
 interface WalkState { nodes: number }
 
-export function canonicalJson(value: unknown, depth = 0, state: WalkState = { nodes: 0 }): string {
-  state.nodes++
-  if (state.nodes > MAX_NODES) throw new PayloadTooLargeError(MAX_NODES)
+export function canonicalJson(value: unknown, depth = 0, state?: WalkState): string {
+  const walkState = state ?? { nodes: 0 }
+  walkState.nodes++
+  if (walkState.nodes > MAX_NODES) throw new PayloadTooLargeError(MAX_NODES)
 
   // Primitives, null, and anything JSON.stringify drops (undefined, function,
   // symbol) — `?? 'null'` covers the drop, which stringify signals by
@@ -128,7 +129,7 @@ export function canonicalJson(value: unknown, depth = 0, state: WalkState = { no
   if (depth >= MAX_DEPTH) throw new PayloadTooDeepError(MAX_DEPTH)
 
   if (Array.isArray(value)) {
-    return `[${value.map((v) => canonicalJson(v, depth + 1, state)).join(',')}]`
+    return `[${value.map((v) => canonicalJson(v, depth + 1, walkState)).join(',')}]`
   }
 
   const obj   = value as Record<string, unknown>
@@ -139,7 +140,7 @@ export function canonicalJson(value: unknown, depth = 0, state: WalkState = { no
     // JSON.stringify omits undefined-valued properties; match that so an
     // explicitly-undefined key cannot change the hash.
     if (v === undefined) continue
-    parts.push(`${JSON.stringify(key)}:${canonicalJson(v, depth + 1, state)}`)
+    parts.push(`${JSON.stringify(key)}:${canonicalJson(v, depth + 1, walkState)}`)
   }
 
   return `{${parts.join(',')}}`

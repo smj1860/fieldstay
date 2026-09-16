@@ -170,6 +170,6 @@ describe('guardrail: tenant-keyed Inngest concurrency', () => {
         async () => {},
       )
     `
-    expect(findUnkeyedConcurrencyBlocks(control).length).toBe(0)
+    expect(findUnkeyedConcurrencyBlocks(control)).toHaveLength(0)
   })
 })

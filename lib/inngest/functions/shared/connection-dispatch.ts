@@ -117,7 +117,7 @@ export interface DispatchParams {
 function jitterSecondsForConnection(userId: string, windowSeconds: number): number {
   let hash = 0x811c9dc5
   for (let i = 0; i < userId.length; i++) {
-    hash ^= userId.charCodeAt(i)
+    hash ^= userId.codePointAt(i) ?? 0
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
   return hash % windowSeconds

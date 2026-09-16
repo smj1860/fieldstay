@@ -384,7 +384,7 @@ describe('accountDeletion', () => {
       const calls = admin.rpcCalls.filter((c) => c.table === 'messages')
       // One in the main pass, one in the final sweep (messages is in
       // ORG_TABLES_WITHOUT_CASCADE) — neither takes a second batch.
-      expect(calls.length).toBe(2)
+      expect(calls).toHaveLength(2)
     })
 
     it('takes a SECOND batch when the first reports exactly PURGE_BATCH_SIZE rows, then stops once a short batch confirms drained', async () => {
@@ -401,7 +401,7 @@ describe('accountDeletion', () => {
 
       const calls = admin.rpcCalls.filter((c) => c.table === 'messages')
       // 2 batches for the main pass + 1 for the final sweep.
-      expect(calls.length).toBe(3)
+      expect(calls).toHaveLength(3)
     })
 
     it('throws rather than looping forever when a table never reports a short batch', async () => {

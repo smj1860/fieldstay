@@ -70,7 +70,7 @@ async function hostawayGetWithRetry(url: string, token: string, label: string): 
 
   if (res.status === 429) {
     const retryAfterHeader  = res.headers.get('Retry-After')
-    const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN
+    const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : Number.NaN
     throw rateLimitRetry(new RateLimitError(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 60))
   }
 

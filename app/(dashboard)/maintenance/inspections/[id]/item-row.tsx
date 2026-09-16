@@ -176,8 +176,8 @@ export const ItemRow = memo(function ItemRow(
     onChange(key, def.id, def.prompt, assetId, node.repeatIndex ?? null, patch)
   }, [onChange, key, def.id, def.prompt, assetId, node.repeatIndex])
 
-  const handleCapture = useCallback((file: Blob) => { void onCapture(key, file) }, [onCapture, key])
-  const handleDiscard = useCallback(() => { void onDiscard(key) }, [onDiscard, key])
+  const handleCapture = useCallback((file: Blob) => { onCapture(key, file) }, [onCapture, key])
+  const handleDiscard = useCallback(() => { onDiscard(key) }, [onDiscard, key])
 
   return (
     <li

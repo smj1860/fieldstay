@@ -129,6 +129,6 @@ describe('guardrail: chunked step.sendEvent() for unbounded fan-out', () => {
     const control = `
       await sendEventsChunked(step, 'fan-out', orgIds.map((orgId) => ({ name: 'x/y', data: { orgId } })))
     `
-    expect(findUnchunkedSendEventCalls(control).length).toBe(0)
+    expect(findUnchunkedSendEventCalls(control)).toHaveLength(0)
   })
 })
