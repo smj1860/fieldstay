@@ -36,6 +36,7 @@
 import type { GetStepTools } from 'inngest'
 import { inngest }            from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
+import { sendEventsChunked }  from '@/lib/inngest/chunk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
@@ -129,7 +130,13 @@ export async function dispatchPerProviderConnection(
 
   if (connections.length === 0) return { dispatched: 0 }
 
-  await step.sendEvent(
+  // Chunked, not one call for the whole platform: Inngest enforces a
+  // per-call event-count/payload ceiling, and a single call built from a
+  // platform-wide connection scan risks being rejected or truncated
+  // ATOMICALLY the moment that scan crosses it — failing dispatch for every
+  // tenant in this batch, not just the ones past the limit.
+  await sendEventsChunked(
+    step,
     dispatchStepId,
     connections.map((c) => ({
       name: eventName,

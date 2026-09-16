@@ -35,6 +35,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows }         from '@/lib/inngest/paginate'
+import { sendEventsChunked }    from '@/lib/inngest/chunk'
 import { getPmMembers }         from '@/lib/inngest/helpers'
 import { resend, FROM }         from '@/lib/resend/client'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
@@ -152,9 +153,11 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
       return { orgs: 0 }
     }
 
-    // ONE sendEvent with an array, not a loop of sends — a single call whose
-    // cost does not scale with tenant count.
-    await step.sendEvent('dispatch-overdue-emails', orgIds.map((org_id) => ({
+    // Chunked sendEvent, not a loop of individual sends OR one call for the
+    // whole platform — the former scales cost with tenant count, the latter
+    // risks Inngest's per-call event ceiling atomically failing dispatch for
+    // every org in the batch once the platform grows past it.
+    await sendEventsChunked(step, 'dispatch-overdue-emails', orgIds.map((org_id) => ({
       name: 'inspection/overdue.email.requested' as const,
       data: { org_id },
     })))

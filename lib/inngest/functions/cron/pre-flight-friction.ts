@@ -1,6 +1,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { sendEventsChunked } from '@/lib/inngest/chunk'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { frictionDateString, localDateFrom, frictionDayUtcBounds } from '@/lib/friction/date'
@@ -95,7 +96,8 @@ export const preFlightFriction = inngest.createFunction(
     })
 
     if (orgIds.length) {
-      await step.sendEvent(
+      await sendEventsChunked(
+        step,
         'fan-out-friction-scoring',
         orgIds.map((orgId) => ({
           name: 'friction/pre_flight.requested' as const,

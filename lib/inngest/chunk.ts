@@ -51,7 +51,13 @@ export const IN_CLAUSE_CHUNK_SIZE = 300
 export const SEND_EVENT_CHUNK_SIZE = 500
 
 interface StepLike {
-  sendEvent: (id: string, events: unknown | unknown[]) => Promise<unknown>
+  // Method shorthand (not a property arrow type) deliberately: Inngest's real
+  // `step.sendEvent` takes a specific EventPayload union, and this helper is
+  // generic over every caller's own event union. Method-syntax parameters are
+  // checked bivariantly, so a caller's concretely-typed `step` is assignable
+  // here without this helper losing type safety at its own call sites (each
+  // event object literal is still checked against the caller's real union).
+  sendEvent(id: string, events: unknown): Promise<unknown>
 }
 
 /**

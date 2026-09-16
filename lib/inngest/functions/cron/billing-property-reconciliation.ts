@@ -2,6 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe, isPlatformPriceId } from '@/lib/stripe/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
+import { sendEventsChunked }   from '@/lib/inngest/chunk'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { logAuditEvent }       from '@/lib/audit'
 import { reportError }         from '@/lib/observability/report-error'
@@ -68,7 +69,8 @@ export const billingPropertyReconciliation = inngest.createFunction(
     })
 
     if (orgIds.length) {
-      await step.sendEvent(
+      await sendEventsChunked(
+        step,
         'fan-out-property-reconciliation',
         orgIds.map((orgId) => ({
           name: 'billing/reconcile-property-count.requested' as const,
