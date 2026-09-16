@@ -320,9 +320,15 @@ export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHo
     throw new Error('[Hostaway] review payload missing id — refusing to map')
   }
 
-  const rating = typeof review.rating === 'number' && Number.isFinite(review.rating)
-    ? review.rating
-    : null
+  const ratingRaw = review.rating
+  const rating = typeof ratingRaw === 'number' && Number.isFinite(ratingRaw) ? ratingRaw : null
+  if (rating === null && ratingRaw !== null && ratingRaw !== undefined) {
+    // Distinct from the documented "not yet reviewed" case (rating genuinely
+    // null) — this is Hostaway returning a rating in a shape we don't expect
+    // (e.g. a numeric string), which would otherwise fall into the exact same
+    // dropped path with nothing to distinguish it from normal sync traffic.
+    console.warn(`[Hostaway] review ${review.id} has non-numeric rating "${String(ratingRaw)}" — dropped`)
+  }
   const text = review.publicReview?.trim()
 
   if (rating === null || !text) return null

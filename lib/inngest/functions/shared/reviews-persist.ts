@@ -110,20 +110,33 @@ export async function persistNormalizedReviews<T extends PersistableReview>(
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
 
-  if (!rows.length) return 0
+  // Defensive against the provider's fetch, not just this file's own logic —
+  // a windowed fetch (Hostex chunks reviews into sub-180-day windows the same
+  // way ownerrez-backfill.ts's bookings windows do) can return the same
+  // review from two overlapping windows. Postgres's ON CONFLICT DO UPDATE
+  // rejects a batch outright ("command cannot affect row a second time")
+  // rather than skipping the dup, which would fail this whole sync step for
+  // every review in the batch, not just the duplicated one. Last occurrence
+  // wins, the same posture the Hospitable reservation fetch already takes
+  // with its own reservationsById Map.
+  const dedupedRows = [...new Map(
+    rows.map((row) => [`${row.external_source}|${row.external_id}`, row]),
+  ).values()]
+
+  if (!dedupedRows.length) return 0
 
   // ignoreDuplicates:false on purpose — a re-sync must UPDATE, so that a reply
   // posted inside the provider flips response_status here. See the header.
   const { error } = await supabase
     .from('reviews')
-    .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
+    .upsert(dedupedRows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
 
   if (error) {
     logger.error(`[${label}:${userId}] reviews upsert failed: ${error.message}`)
     throw new Error(`Reviews upsert failed: ${error.message}`)
   }
 
-  return rows.length
+  return dedupedRows.length
 }
 
 /**

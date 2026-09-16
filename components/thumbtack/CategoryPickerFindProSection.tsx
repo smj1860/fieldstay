@@ -36,6 +36,11 @@ export function CategoryPickerFindProSection({ heading, categoryOptions, categor
 
   if (categoryOptions.length === 0 || category === undefined) return null
 
+  // inputMode="numeric" is a soft-keyboard hint only — it does not stop a
+  // desktop user, a password manager, or a paste from putting anything in
+  // this field. A length check alone lets "aaaaa" or "-----" through.
+  const isValidZip = /^\d{5}$/.test(zip.trim())
+
   if (confirmedZip) {
     const label = categoryOptions.find((c) => c.value === category)?.label.toLowerCase() ?? 'pro'
     return <FindProOnThumbtackSection categoryKey={category} zipCode={confirmedZip} categoryLabel={label} />
@@ -78,7 +83,7 @@ export function CategoryPickerFindProSection({ heading, categoryOptions, categor
         <Button
           variant="secondary"
           className="text-sm"
-          disabled={zip.trim().length < 5}
+          disabled={!isValidZip}
           onClick={() => setConfirmedZip(zip.trim())}
         >
           Search

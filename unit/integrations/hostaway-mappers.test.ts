@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   hostawayListingToNormalized,
   hostawayReservationToNormalized,
@@ -402,5 +402,25 @@ describe('hostawayReviewToNormalized: mapping', () => {
 
   it('rounds a fractional rating, since reviews.rating is an integer column', () => {
     expect(hostawayReviewToNormalized(review({ rating: 4.6 }))!.rating).toBe(5)
+  })
+})
+
+describe('hostawayReviewToNormalized: a malformed-type rating is distinct from "not yet reviewed"', () => {
+  // Both drop the review (rating stays required), but only the malformed-shape
+  // case is a genuine API contract anomaly worth a log line — a real null
+  // rating is the documented, silent, common case.
+  it('warns when rating arrives as a non-numeric shape, e.g. a stringified number', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(hostawayReviewToNormalized(review({ rating: '4' as unknown as number }))).toBeNull()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('non-numeric rating')
+    warnSpy.mockRestore()
+  })
+
+  it('does not warn for a genuinely null rating (the documented "not yet reviewed" case)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(hostawayReviewToNormalized(review({ rating: null }))).toBeNull()
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })

@@ -177,6 +177,18 @@ describe('conditions — recorded and reported are never the same claim', () => 
     // …and a reported reading carries NO measurements to mistake for real ones.
     expect(rep && 'temperature_f' in rep).toBe(false)
   })
+
+  it('caps text length before it is frozen permanently into HeaderSnapshot', () => {
+    // Unlike submit-payload.ts's other free-text fields, this one had no bound
+    // at all before — a device payload could balloon the jsonb column with
+    // whatever the inspector's text field held.
+    const long = 'x'.repeat(500)
+    const result = reportedConditions(long)
+    expect(result?.source).toBe('reported')
+    if (result?.source !== 'reported') throw new Error('expected a reported reading')
+    expect(result.text.length).toBe(200)
+    expect(result.text).toBe('x'.repeat(200))
+  })
 })
 
 // ============================================================================
