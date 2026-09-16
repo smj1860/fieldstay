@@ -138,6 +138,11 @@ describe('recordConsumptionFromCount', () => {
   it('records nothing on the very first count — there is nothing to diff', async () => {
     const client = makeSupabase({
       inventory_counts: [CLAIMED, { data: CURR, error: null }, { data: null, error: null }],
+      // curr and prop are read concurrently now (finding #3 — they have no
+      // data dependency on each other), so this scenario needs a valid
+      // property row too, or it would short-circuit on 'no_property' before
+      // ever reaching the prev-count check this test is actually about.
+      properties: [{ data: { max_guests: 4 }, error: null }],
     }).client
     await expect(recordConsumptionFromCount(client, { countId: CNT, propertyId: PROP, orgId: ORG }))
       .resolves.toEqual({ recorded: 0, reason: 'no_previous_count' })

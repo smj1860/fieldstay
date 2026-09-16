@@ -84,17 +84,38 @@ export async function recordConsumptionFromCount(
   const claim = tryUnwrap<{ id: string }>(claimRes, ctx)
   if (!claim.ok || !claim.data) return { recorded: 0, reason: 'already_recorded' }
 
-  const currRes = await supabase
-    .from('inventory_counts')
-    .select('id, submitted_at, property_id')
-    .eq('id', countId)
-    .eq('org_id', orgId)
-    .maybeSingle()
+  // curr and prop are independent reads — neither's inputs depend on the
+  // other's result (curr only needs countId/orgId, prop only needs
+  // propertyId/orgId, both already in scope) — so they run concurrently.
+  // prev is NOT joined here: it filters on `curr.data.submitted_at`, a real
+  // data dependency, and must wait for curr to resolve first.
+  const [currRes, propRes] = await Promise.all([
+    supabase
+      .from('inventory_counts')
+      .select('id, submitted_at, property_id')
+      .eq('id', countId)
+      .eq('org_id', orgId)
+      .maybeSingle(),
+    supabase
+      .from('properties')
+      .select('max_guests')
+      .eq('id', propertyId)
+      .eq('org_id', orgId)
+      .maybeSingle(),
+  ])
   const curr = tryUnwrap<CountRow>(currRes, ctx)
   if (!curr.ok || !curr.data) return { recorded: 0, reason: 'no_previous_count' }
 
+  const prop = tryUnwrap<{ max_guests: number | null }>(propRes, ctx)
+  if (!prop.ok || !prop.data) return { recorded: 0, reason: 'no_property' }
+  // Same fallback the resolver uses for an unset capacity, so the two stay
+  // consistent when a property's metadata is incomplete.
+  const capacity = prop.data.max_guests && prop.data.max_guests > 0 ? prop.data.max_guests : 2
+
   // The immediately preceding count for this property. Scoped by org as well
   // as property so a forged count_id cannot walk another tenant's history.
+  // Genuinely sequential — filters on curr.data.submitted_at, so it cannot
+  // start until curr has resolved above.
   const prevRes = await supabase
     .from('inventory_counts')
     .select('id, submitted_at, property_id')
@@ -106,18 +127,6 @@ export async function recordConsumptionFromCount(
     .maybeSingle()
   const prev = tryUnwrap<CountRow>(prevRes, ctx)
   if (!prev.ok || !prev.data) return { recorded: 0, reason: 'no_previous_count' }
-
-  const propRes = await supabase
-    .from('properties')
-    .select('max_guests')
-    .eq('id', propertyId)
-    .eq('org_id', orgId)
-    .maybeSingle()
-  const prop = tryUnwrap<{ max_guests: number | null }>(propRes, ctx)
-  if (!prop.ok || !prop.data) return { recorded: 0, reason: 'no_property' }
-  // Same fallback the resolver uses for an unset capacity, so the two stay
-  // consistent when a property's metadata is incomplete.
-  const capacity = prop.data.max_guests && prop.data.max_guests > 0 ? prop.data.max_guests : 2
 
   // checkin_date/checkout_date are DATE columns; submitted_at is a timestamptz
   // ISO string. Comparing them directly forwards a literal that Postgres
