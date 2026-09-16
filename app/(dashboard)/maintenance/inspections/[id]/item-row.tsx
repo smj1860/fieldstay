@@ -22,13 +22,14 @@
 // and trapping them on a page fights the job. The Review page is what makes the
 // omission impossible to walk past.
 
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Camera, History, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
-import { MAX_REPEAT_INSTANCES, type ResolvedItem } from '@/lib/inspections/resolve-form'
+import { answerKey, MAX_REPEAT_INSTANCES, type ResolvedItem } from '@/lib/inspections/resolve-form'
 import type { InspectionAnswerRow, OpenConcernRow } from '@/lib/dexie/dashboard/schema'
 import type { AnswerPatch } from '@/lib/dexie/dashboard/inspection-draft'
 import type { InspectionAction, InspectionRepeatAnswer, InspectionResult } from '@/types/database'
@@ -44,6 +45,75 @@ const ACTIONS: { value: InspectionAction; label: string }[] = [
   { value: 'service', label: 'Service' },
   { value: 'replace', label: 'Replace' },
 ]
+
+/** How long a free-text field waits after the last keystroke before it commits. */
+const TEXT_DEBOUNCE_MS = 450
+
+/**
+ * Debounces a free-text field's write to Dexie without lagging the keystroke.
+ *
+ * `saveAnswer()` is a full Dexie read-modify-write, called on every commit, and
+ * every write fires fill-screen's `answerRows` live query, which re-runs
+ * `resolveFormPages`/`findOutstanding` over the WHOLE form (see that file's
+ * header comment). For a button press that is one write; for a field typed
+ * character by character it was one full-form recompute per keystroke.
+ *
+ * Local state renders every keystroke instantly. The actual commit — the
+ * Dexie write — fires TEXT_DEBOUNCE_MS after the last keystroke, or
+ * immediately on blur, so nothing is lost if the inspector taps away
+ * mid-pause (moving to the next item, opening the camera, closing the app).
+ */
+function useDebouncedText(externalValue: string, commit: (value: string) => void): {
+  value:    string
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onBlur:   () => void
+} {
+  const [value, setValue] = useState(externalValue)
+  const pendingRef = useRef(false)
+  const timerRef   = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Read on every commit rather than a dependency of `flush`/`onChange`, so
+  // those callbacks stay stable across renders even though `commit` itself is
+  // a fresh closure every render (built from the item's current answer).
+  // Written from an effect, never during render — react-hooks/refs bans
+  // mutating a ref's `.current` in the render body itself.
+  const commitRef  = useRef(commit)
+  useEffect(() => { commitRef.current = commit })
+
+  // Re-sync from the external (Dexie-backed) value when it changes with
+  // nothing pending locally — otherwise a delta pull mid-type would stomp
+  // what the inspector is typing right now.
+  useEffect(() => {
+    if (!pendingRef.current) setValue(externalValue)
+  }, [externalValue])
+
+  // Clears a pending timer on unmount — moving to another page mid-debounce
+  // must not fire a commit against an item row that is no longer mounted.
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+
+  const flush = useCallback((next: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = undefined
+    pendingRef.current = false
+    commitRef.current(next)
+  }, [])
+
+  const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value
+    setValue(next)
+    pendingRef.current = true
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => flush(next), TEXT_DEBOUNCE_MS)
+  }, [flush])
+
+  // Commits on blur so a value typed less than TEXT_DEBOUNCE_MS before the
+  // inspector taps away (or the field loses focus for any other reason)
+  // still lands rather than waiting out a timer nothing will ever fire again.
+  const onBlur = useCallback(() => {
+    if (pendingRef.current) flush(value)
+  }, [flush, value])
+
+  return { value, onChange, onBlur }
+}
 
 interface ControlProps {
   id:      string
@@ -61,14 +131,53 @@ interface ControlProps {
   openConcern?: OpenConcernRow
 }
 
-interface Props extends Omit<ControlProps, 'id'> {
+/**
+ * ItemRow's own external contract — the form-wide, STABLE callbacks fill-screen
+ * defines once via `useCallback`, not the per-item `(patch) => void` shape
+ * `ControlProps` above hands to the leaf controls. ItemRow derives the
+ * `(key, formItemId, …)` identity itself from `node`, so fill-screen can pass
+ * these straight through instead of allocating a fresh wrapper closure per row
+ * per render — which is what makes the `React.memo` below able to actually skip
+ * an unrelated row, rather than seeing a "changed" prop on every single one
+ * every time fill-screen re-renders for any reason.
+ */
+interface ItemRowProps {
+  node:    ResolvedItem
   /** 0 for a root, 1 for a conditional follow-up. Layout only. */
-  depth: number
+  depth:   number
+  answer:  InspectionAnswerRow | undefined
+  onChange: (
+    key: string, formItemId: string, prompt: string,
+    assetId: string | null, repeatIndex: number | null, patch: AnswerPatch,
+  ) => void
+  /** Compresses and queues a captured image. Never blocks on the network. */
+  onCapture: (key: string, file: Blob) => void
+  onDiscard: (key: string) => void
+  openConcern?: OpenConcernRow
 }
 
-export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard, openConcern }: Readonly<Props>) {
+// Memoized: a full walk renders hundreds of these in one unvirtualized list
+// (see fill-screen.tsx's header comment), and only ONE row's answer changes
+// per interaction. Without this every keystroke/tap re-renders every row on
+// the page, not just the one that changed.
+export const ItemRow = memo(function ItemRow(
+  { node, depth, answer, onChange, onCapture, onDiscard, openConcern }: Readonly<ItemRowProps>,
+) {
   const def = node.formItem
   const id  = `item-${def.id}-${node.repeatIndex ?? ''}-${node.asset?.id ?? ''}`
+  const key = answerKey(node)
+  const assetId = node.asset?.id ?? null
+
+  // The per-item closures the leaf controls actually call. Memoized on the
+  // identity fields alone (not on `node`/`answer` wholesale, which are new
+  // objects on every full-form recompute) so these stay stable across a
+  // render that leaves this item's own identity untouched.
+  const handleChange = useCallback((patch: AnswerPatch) => {
+    onChange(key, def.id, def.prompt, assetId, node.repeatIndex ?? null, patch)
+  }, [onChange, key, def.id, def.prompt, assetId, node.repeatIndex])
+
+  const handleCapture = useCallback((file: Blob) => { void onCapture(key, file) }, [onCapture, key])
+  const handleDiscard = useCallback(() => { void onDiscard(key) }, [onDiscard, key])
 
   return (
     <li
@@ -96,14 +205,14 @@ export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard, o
       </div>
 
       <AnswerControl
-        id={id} node={node} answer={answer} onChange={onChange}
-        onCapture={onCapture} onDiscard={onDiscard}
+        id={id} node={node} answer={answer} onChange={handleChange}
+        onCapture={handleCapture} onDiscard={handleDiscard}
       />
 
       {answer?.result === 'fail' && (
         <FailDetail
-          id={id} node={node} answer={answer} onChange={onChange}
-          onCapture={onCapture} onDiscard={onDiscard} openConcern={openConcern}
+          id={id} node={node} answer={answer} onChange={handleChange}
+          onCapture={handleCapture} onDiscard={handleDiscard} openConcern={openConcern}
         />
       )}
 
@@ -114,11 +223,18 @@ export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard, o
       )}
     </li>
   )
-}
+})
 
 /** The control the response type actually calls for. */
 function AnswerControl({ id, node, answer, onChange, onCapture, onDiscard }: Readonly<ControlProps>) {
   const def = node.formItem
+
+  // Called unconditionally regardless of response_type — Rules of Hooks
+  // forbid calling it only inside the 'text' branch below. Unused for every
+  // other response type, which costs one idle piece of local state. The
+  // commit closure need not be stable: useDebouncedText reads it through a
+  // ref, not a dependency array.
+  const textField = useDebouncedText(answer?.valueText ?? '', (v) => onChange({ valueText: v || null }))
 
   if (def.response_type === 'count') {
     return (
@@ -154,8 +270,9 @@ function AnswerControl({ id, node, answer, onChange, onCapture, onDiscard }: Rea
       <Input
         id={id}
         aria-labelledby={`${id}-label`}
-        value={answer?.valueText ?? ''}
-        onChange={(e) => onChange({ valueText: e.target.value || null })}
+        value={textField.value}
+        onChange={textField.onChange}
+        onBlur={textField.onBlur}
       />
     )
   }
@@ -221,6 +338,14 @@ function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
   onCapture: (file: Blob) => void
   onDiscard: () => void
 }>) {
+  // Called unconditionally, before the early return — Rules of Hooks. Unused
+  // once a photo is attached (the branch below returns before rendering the
+  // field this feeds).
+  const reasonField = useDebouncedText(
+    answer?.photoUnavailableReason ?? '',
+    (v) => onChange({ photoUnavailableReason: v || null }),
+  )
+
   if (answer?.photoPath) {
     return (
       <div className="flex items-center justify-between gap-3">
@@ -273,8 +398,9 @@ function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
       <Input
         id={`${id}-nophoto`}
         placeholder="e.g. tag illegible, camera failed"
-        value={answer?.photoUnavailableReason ?? ''}
-        onChange={(e) => onChange({ photoUnavailableReason: e.target.value || null })}
+        value={reasonField.value}
+        onChange={reasonField.onChange}
+        onBlur={reasonField.onBlur}
       />
     </div>
   )
@@ -284,6 +410,7 @@ function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
 function FailDetail({ id, node, answer, onChange, openConcern }: Readonly<ControlProps>) {
   const def = node.formItem
   const selected = answer?.actions ?? []
+  const noteField = useDebouncedText(answer?.note ?? '', (v) => onChange({ note: v || null }))
 
   const toggle = (action: InspectionAction) => {
     onChange({
@@ -304,8 +431,9 @@ function FailDetail({ id, node, answer, onChange, openConcern }: Readonly<Contro
         </label>
         <Input
           id={`${id}-note`}
-          value={answer?.note ?? ''}
-          onChange={(e) => onChange({ note: e.target.value || null })}
+          value={noteField.value}
+          onChange={noteField.onChange}
+          onBlur={noteField.onBlur}
           placeholder="Back door latch does not engage"
         />
       </div>

@@ -347,8 +347,14 @@ interface ItemIndex {
 function indexItems(items: InspectionFormItem[]): ItemIndex {
   const index: ItemIndex = { bySection: new Map(), byParent: new Map(), byRepeatSource: new Map() }
 
+  // Mutates the existing bucket array in place rather than spreading a new one
+  // per insertion. `[...(map.get(key) ?? []), item]` copies the whole bucket on
+  // EVERY item pushed to it — O(n²) for a section/parent with n items — where a
+  // large safety form's biggest section is exactly the shape that pays for it.
   const push = (map: Map<string, InspectionFormItem[]>, key: string, item: InspectionFormItem) => {
-    map.set(key, [...(map.get(key) ?? []), item])
+    const bucket = map.get(key)
+    if (bucket) bucket.push(item)
+    else map.set(key, [item])
   }
 
   for (const item of items) {

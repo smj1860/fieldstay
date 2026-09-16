@@ -37,7 +37,7 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows }         from '@/lib/inngest/paginate'
 import { sendEventsChunked }    from '@/lib/inngest/chunk'
 import { getPmMembers }         from '@/lib/inngest/helpers'
-import { resend, FROM }         from '@/lib/resend/client'
+import { resend, FROM, sendWithTimeout } from '@/lib/resend/client'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { reportError }          from '@/lib/observability/report-error'
 import { todayISO, scheduleIdsWithOpenWalk } from '@/lib/inspections/due-schedules'
@@ -174,7 +174,14 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
     id:      'inspection-overdue-email-handler',
     name:    'Inspections: Overdue Email (per org)',
     retries: 2,
+    // `concurrency` here is keyed PER ORG (limit 4 concurrent runs for the
+    // SAME org), which is a no-op fan-out throttle: the dispatcher fires
+    // exactly one event per org, so no org ever has more than one invocation
+    // in flight regardless of this number. `throttle` is the real,
+    // function-scoped cap — the platform-wide Resend send rate stays bounded
+    // (20/s) no matter how many orgs the dispatcher fans out to in one run.
     concurrency: { limit: 4, key: 'event.data.org_id' },
+    throttle:    { limit: 20, period: '1s' },
   },
   { event: 'inspection/overdue.email.requested' as const },
   async ({ event, step, logger }) => {
@@ -302,7 +309,12 @@ async function sendOverdueEmail(
       : {}),
   })
 
-  const { error } = await resend.emails.send({
+  // sendWithTimeout — every other Resend call site goes through it (see
+  // lib/resend/client.ts). An untimed resend.emails.send() has no budget of
+  // its own and holds this step open until the PLATFORM kills the whole
+  // function; wrapping it here closes the one send in this file that bypassed
+  // that chokepoint.
+  const { error } = await sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to,
     replyTo: 'support@fieldstay.app',
@@ -314,7 +326,7 @@ async function sendOverdueEmail(
     // the retries and deliberately not next month's run — the
     // overdue_notified_month flag is what makes this once per month.
     idempotencyKey: `inspection-overdue-${orgId}-${firstOfMonth(todayISO())}`,
-  })
+  }))
 
   if (error) {
     // Thrown, not swallowed: nothing is marked yet, so a transient failure
