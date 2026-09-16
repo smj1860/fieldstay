@@ -2,6 +2,7 @@ import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { after } from 'next/server'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { reportError } from '@/lib/observability/report-error'
@@ -77,9 +78,15 @@ export function workOrderCompletionFields(notes?: string | null): TablesUpdate<'
 
 /**
  * Advance every source maintenance schedule behind a batch of completed work
- * orders. The read is batched into one `.in()` query; the writes are
- * necessarily one per schedule because each carries its own computed
- * next_due_date.
+ * orders. Both the read and the write are ONE round trip regardless of batch
+ * size — the write is a single set-based UPDATE via the
+ * bulk_advance_maintenance_schedules RPC
+ * (20260916120000_bulk_advance_maintenance_schedules_rpc.sql), even though
+ * each row carries its own computed next_due_date. This used to be one
+ * `.update()` per schedule fanned out with Promise.allSettled: fine for a
+ * handful of schedules, but a 500-work-order bulk completion fired 500
+ * simultaneous UPDATEs at the database in one request — the platform-wide
+ * version of the same N+1 shape CLAUDE.md bans in a loop.
  *
  * Exported so the vendor portal completion path
  * (app/api/work-orders/[token]/complete/helpers.ts) can advance its source
@@ -127,14 +134,23 @@ export async function advanceSchedulesAfterCompletion(
 
   const lastCompleted = isoDate()
 
-  const writes = (schedules ?? []).map((schedule: {
+  interface BulkScheduleUpdate {
+    id:                  string
+    last_completed_date: string
+    next_due_date:       string | null
+  }
+
+  const updates: BulkScheduleUpdate[] = (schedules ?? []).map((schedule: {
     id: string; schedule_type: string | null; frequency: string | null
     next_due_date: string | null
-  }) => {
+  }): BulkScheduleUpdate | null => {
     if (!schedule.next_due_date) return null
 
     // A non-routine schedule, or one with no frequency: record the completion
     // date only, because there is nothing to derive a next occurrence from.
+    // next_due_date is sent as null — the RPC COALESCEs it against the
+    // existing stored value rather than overwriting it, so this never
+    // clobbers a date with NULL.
     //
     // The seasonal branch that used to sit here is gone with `month_due`
     // (20260823215150). An annually-recurring schedule is `routine` with
@@ -143,11 +159,7 @@ export async function advanceSchedulesAfterCompletion(
     // seasonal path, that one also advances in the daily cron rather than only
     // on completion.
     if (schedule.schedule_type !== 'routine' || !schedule.frequency) {
-      return supabase
-        .from('maintenance_schedules')
-        .update({ last_completed_date: lastCompleted })
-        .eq('id', schedule.id)
-        .eq('org_id', orgId)
+      return { id: schedule.id, last_completed_date: lastCompleted, next_due_date: null }
     }
 
     // Bumped (gap-driven) completions anchor to the ACTUAL completion date —
@@ -160,31 +172,58 @@ export async function advanceSchedulesAfterCompletion(
 
     const nextDue = calcNextDueDate(schedule.frequency as ScheduleFrequency, anchor)
 
-    return supabase
-      .from('maintenance_schedules')
-      .update({
-        last_completed_date: lastCompleted,
-        next_due_date:       nextDue.toISOString().split('T')[0],
-      })
-      .eq('id', schedule.id)
-      .eq('org_id', orgId)
-  }).filter((w): w is NonNullable<typeof w> => w !== null)
-
-  // allSettled, not all: a genuinely REJECTED write (a network-level throw
-  // under the fetch, not just a resolved `{error}`) must not abort visibility
-  // into every OTHER schedule's write, which Promise.all would do — some
-  // schedules would silently advance while others silently don't, with only
-  // one opaque thrown error reaching the caller and no indication which was
-  // which.
-  const results = await Promise.allSettled(writes)
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      console.error('[advanceSchedulesAfterCompletion] schedule advance threw', result.reason)
-      reportError(result.reason, { site: 'maintenance.advanceSchedulesAfterCompletion.write', orgId })
-    } else if (result.value.error) {
-      console.error('[advanceSchedulesAfterCompletion] schedule advance failed', result.value.error)
-      reportError(result.value.error, { site: 'maintenance.advanceSchedulesAfterCompletion.write', orgId })
+    return {
+      id:                  schedule.id,
+      last_completed_date: lastCompleted,
+      next_due_date:       nextDue.toISOString().split('T')[0]!,
     }
+  }).filter((u): u is BulkScheduleUpdate => u !== null)
+
+  if (updates.length === 0) return
+
+  // One set-based UPDATE instead of one .update() call per schedule — see the
+  // RPC's own migration comment for why this is safe to run under either an
+  // RLS-enforced or a service-role client. This trades the old per-row
+  // Promise.allSettled's isolated-failure property (one rejecting write
+  // couldn't block the others) for one atomic round trip: either every
+  // schedule in this batch advances, or none does, and there is exactly one
+  // failure to report instead of up to N of them. That isolation only existed
+  // because there used to be hundreds of independent round trips in the first
+  // place — collapsing them to one is the actual fix, not a regression in
+  // resilience.
+  try {
+    const { error, data: applied } = await supabase.rpc('bulk_advance_maintenance_schedules', {
+      p_org_id:  orgId,
+      p_updates: updates,
+    })
+
+    if (error) {
+      console.error('[advanceSchedulesAfterCompletion] bulk schedule advance failed', error)
+      reportError(error, {
+        site:  'maintenance.advanceSchedulesAfterCompletion.write',
+        orgId,
+        extra: { schedules_attempted: updates.length },
+      })
+    } else if (typeof applied === 'number' && applied < updates.length) {
+      // Not an error — some schedules went away (deleted, or an org-mismatch
+      // that should never happen given orgId is server-derived) between the
+      // read and this write. Worth a warning-level signal rather than silence,
+      // same reasoning as persistScores()'s shortfall comment in
+      // lib/inngest/functions/cron/asset-health-helpers.ts.
+      reportError(new Error('bulk_advance_maintenance_schedules applied fewer rows than requested'), {
+        site:  'maintenance.advanceSchedulesAfterCompletion.write',
+        orgId,
+        level: 'warning',
+        extra: { schedules_attempted: updates.length, schedules_applied: applied },
+      })
+    }
+  } catch (error) {
+    console.error('[advanceSchedulesAfterCompletion] bulk schedule advance threw', error)
+    reportError(error, {
+      site:  'maintenance.advanceSchedulesAfterCompletion.write',
+      orgId,
+      extra: { schedules_attempted: updates.length },
+    })
   }
 }
 
@@ -245,6 +284,42 @@ async function sendCompletionEventWithRetry(
 }
 
 /**
+ * Fires the `work-order/completed` batch off the request's critical path.
+ *
+ * sendCompletionEventWithRetry can sleep up to ~1.4s across its three
+ * attempts (jittered exponential backoff), and finalizeWorkOrderCompletion
+ * runs inline in the same request that just completed the work order — a
+ * plain `await` on it held the HTTP response open for that long on EVERY
+ * completion, which at 100x traffic is the request path serializing on a
+ * single Inngest send.
+ *
+ * `after()` (Next's request-lifecycle hook — same pattern as
+ * `sendEventAsync` in lib/inngest/client.ts) keeps the serverless invocation
+ * alive long enough for the retry loop and its own reportError() call to
+ * finish, instead of racing a bare unawaited promise against Vercel freezing
+ * the invocation the instant the response is sent — which could silently
+ * drop the send before it (or even its first attempt) completes. Every
+ * current call site (bulkUpdateWorkOrderStatus, markWorkVerified, the crew
+ * completion route) is a Server Action or Route Handler, so `after()` always
+ * has a real request to attach to in production.
+ *
+ * The catch is a defensive fallback only — `after()` throws synchronously
+ * when called outside an actual Next.js request scope (verified against the
+ * real `next/server` package, not just this codebase's mocks of it). That
+ * should never happen given the call sites above, but finalizeWorkOrderCompletion's
+ * whole contract is that it never throws, so a future call site (or a test)
+ * that isn't request-scoped still gets the event sent — just without the
+ * keep-alive guarantee — rather than an uncaught throw undoing that contract.
+ */
+function scheduleCompletionEventSend(rows: CompletedWorkOrderRow[], orgId: string): void {
+  try {
+    after(() => sendCompletionEventWithRetry(rows, orgId))
+  } catch {
+    void sendCompletionEventWithRetry(rows, orgId)
+  }
+}
+
+/**
  * Every side effect a completed work order must carry, for one or many rows.
  *
  * Call this ONLY with rows a completing UPDATE actually returned — that is
@@ -272,8 +347,11 @@ export async function finalizeWorkOrderCompletion(
   if (rows.length === 0) return
 
   // One event per work order so each gets its own Inngest retry path; sent as
-  // a single batch so the fan-out is one round-trip, not one per row.
-  await sendCompletionEventWithRetry(rows, orgId)
+  // a single batch so the fan-out is one round-trip, not one per row. Fired
+  // off the critical path (see scheduleCompletionEventSend) rather than
+  // awaited here — the retry loop's sleeps must not hold the HTTP response
+  // open on every single completion.
+  scheduleCompletionEventSend(rows, orgId)
 
   const { error: updatesError } = await supabase.from('work_order_updates').insert(
     rows.map((row) => ({

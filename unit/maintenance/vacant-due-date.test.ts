@@ -13,7 +13,7 @@ interface Filter { method: string; args: unknown[] }
 function makeClient(result: { data?: unknown[]; error?: { message: string } }) {
   const filters: Filter[] = []
   const builder: Record<string, unknown> = {}
-  for (const m of ['select', 'eq', 'in', 'lte', 'gte', 'limit']) {
+  for (const m of ['select', 'eq', 'in', 'lte', 'gte', 'order', 'limit']) {
     builder[m] = (...args: unknown[]) => { filters.push({ method: m, args }); return builder }
   }
   builder.then = (resolve: (v: unknown) => unknown) =>
@@ -70,6 +70,17 @@ describe('nudgeDueDateIntoVacancy', () => {
     expect(filters.some((f) => f.method === 'limit')).toBe(true)
   })
 
+  it('orders before the cap, so a truncation is deterministic rather than an arbitrary subset', async () => {
+    const { client, filters } = makeClient({ data: [] })
+    await nudgeDueDateIntoVacancy(client, 'org-1', 'prop-1', '2026-09-15')
+
+    const orderIdx = filters.findIndex((f) => f.method === 'order')
+    const limitIdx = filters.findIndex((f) => f.method === 'limit')
+    expect(orderIdx).toBeGreaterThanOrEqual(0)
+    expect(orderIdx).toBeLessThan(limitIdx)
+    expect(filters[orderIdx]!.args).toEqual(['checkin_date', { ascending: true }])
+  })
+
   it('moves the date onto a free day', async () => {
     const { client } = makeClient({ data: [b('2026-09-10', '2026-09-20')] })
     expect(await nudgeDueDateIntoVacancy(client, 'org-1', 'prop-1', '2026-09-12'))
@@ -109,7 +120,7 @@ describe('nudgeDueDateIntoVacancy — no accidental sends', () => {
   it('reads bookings and writes nothing', async () => {
     const from = vi.fn(() => {
       const builder: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'in', 'lte', 'gte', 'limit']) builder[m] = () => builder
+      for (const m of ['select', 'eq', 'in', 'lte', 'gte', 'order', 'limit']) builder[m] = () => builder
       builder.then = (r: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(r)
       return builder
     })

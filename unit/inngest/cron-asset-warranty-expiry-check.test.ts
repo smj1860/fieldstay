@@ -6,10 +6,12 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/inngest/helpers', () => ({
   createPmNotifications: vi.fn(async () => undefined),
 }))
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { assetWarrantyExpiryCheck } from '@/lib/inngest/functions/cron/asset-warranty-expiry-check'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotifications } from '@/lib/inngest/helpers'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
@@ -186,5 +188,59 @@ describe('assetWarrantyExpiryCheck', () => {
 
     const isCalls = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'is')
     expect(isCalls.map((c) => c.args)).toContainEqual(['warranty_warned_at', null])
+  })
+
+  it('reports a warning-level signal when a run hits the MAX_PER_RUN cap, not just a log line', async () => {
+    const MAX_PER_RUN = 200
+    const assets = Array.from({ length: MAX_PER_RUN }, (_, i) => ({
+      id: `asset_${i}`, org_id: 'org_1', name: `Asset ${i}`,
+      warranty_expiry_date: '2026-08-01', warranty_provider: null,
+    }))
+    const supabase = makeSupabase({
+      property_assets: [
+        { data: assets, error: null },
+        { data: assets.map((a) => ({ id: a.id })), error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(assetWarrantyExpiryCheck, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    expect(result).toEqual({ warned: MAX_PER_RUN })
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        site:  'inngest.asset-warranty-expiry-check.cap-hit',
+        level: 'warning',
+      }),
+    )
+  })
+
+  it('does not report the cap signal when a run comes in under the cap', async () => {
+    const supabase = makeSupabase({
+      property_assets: [
+        {
+          data: [{
+            id: 'asset_1', org_id: 'org_1', name: 'Main HVAC',
+            warranty_expiry_date: '2026-08-01', warranty_provider: 'Carrier',
+          }],
+          error: null,
+        },
+        { data: [{ id: 'asset_1' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(assetWarrantyExpiryCheck, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    expect(reportError).not.toHaveBeenCalled()
   })
 })
