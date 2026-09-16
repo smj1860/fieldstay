@@ -6622,7 +6622,7 @@ export type Database = {
         Returns: number
       }
       apply_crew_score_recompute: { Args: never; Returns: Json }
-      apply_friction_grading: { Args: never; Returns: Json }
+      apply_friction_grading: { Args: { p_org_id: string }; Returns: Json }
       apply_inventory_counts: {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number

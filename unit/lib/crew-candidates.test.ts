@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { scoreCrewCandidates, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
+import { scoreCrewCandidates, topCrewCandidate, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
 
 // Extracted out of auto-assign-turnover.ts so the friction forecaster's Smart
 // Fix ranks candidates the same way the turnover board's suggestion does. The
@@ -139,6 +139,51 @@ describe('scoreCrewCandidates', () => {
     })
     expect(Number.isNaN(top!.score)).toBe(false)
     expect(top!.breakdown.workload).toBe(1)
+  })
+})
+
+describe('topCrewCandidate', () => {
+  // A single O(n) pass over the same scoring as scoreCrewCandidates(), used
+  // by every real caller that only ever reads index 0 of the sorted list.
+  // These assert it agrees with scoreCrewCandidates()[0] rather than
+  // re-deriving the scoring rules a second time.
+
+  it('returns null for an empty candidate pool', () => {
+    expect(topCrewCandidate({
+      isSameDay: false, property: { lat: null, lng: null },
+      crew: [], familiarCrewIds: [], workloadMap: {},
+    })).toBeNull()
+  })
+
+  it('agrees with scoreCrewCandidates()[0] on the best candidate', () => {
+    const input = {
+      isSameDay: false,
+      property:  { lat: 32.5, lng: -85.9 },
+      crew: [
+        crew({ id: 'a', reliability_score: 0.5 }),
+        crew({ id: 'b', reliability_score: 1, home_lat: 32.5, home_lng: -85.9 }),
+        crew({ id: 'c', reliability_score: 0.9 }),
+      ],
+      familiarCrewIds: ['c'],
+      workloadMap:     { a: 2 },
+    }
+    const [expected] = scoreCrewCandidates(input)
+    const top = topCrewCandidate(input)
+
+    expect(top).not.toBeNull()
+    expect(top!.crew_member_id).toBe(expected!.crew_member_id)
+    expect(top!.score).toBeCloseTo(expected!.score)
+  })
+
+  it('re-weights toward proximity on a same-day turnover, same as the sorted list', () => {
+    const property = { lat: 32.5, lng: -85.9 }
+    const near = crew({ id: 'near', home_lat: 32.5, home_lng: -85.9 })
+    const far  = crew({ id: 'far',  home_lat: 40.7, home_lng: -74.0 })
+
+    const top = topCrewCandidate({
+      isSameDay: true, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {},
+    })
+    expect(top!.crew_member_id).toBe('near')
   })
 })
 

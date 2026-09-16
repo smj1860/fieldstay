@@ -1275,4 +1275,16 @@ export type FieldStayEvents = {
       turnover_date: string
     }
   },
+
+  /**
+   * One org's ungraded pre_flight_friction rows are ready to grade against
+   * reality. Fanned out by cron-friction-grading so apply_friction_grading()
+   * scopes its UPDATE...FROM to a single tenant instead of one unbatched
+   * platform-wide join — see 20260916120000_friction_grading_per_org.sql.
+   */
+  'friction/grading.requested': {
+    data: {
+      org_id: string
+    }
+  },
 }
