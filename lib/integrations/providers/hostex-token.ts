@@ -53,6 +53,20 @@ const REFRESH_LOCK_WAIT_MS   = 250
 // UNLOCKED while the holder is merely slow, not dead — racing the same
 // refresh token Hostex rotates on every use. +10s margin covers the Vault
 // reads/writes refreshHostexToken also performs around that call.
+//
+// This ceiling is NOT shrunk now that lib/inngest/functions/hostex/
+// token-lock-wait.ts's top-level `step.sleep` wait exists (every Hostex
+// Inngest function calls it once, before any step here runs) — that helper
+// only shortens how often THIS loop has to run at all, by resolving the
+// common case (a refresh already well underway when the run starts) via
+// step.sleep instead of a busy-wait. It cannot shrink what this loop must
+// still be able to wait out: a refresh that starts in the gap between that
+// top-level check and the step.run that reaches this function is a BRAND
+// NEW refresh with the SAME up-to-PMS_API_TIMEOUT_MS duration, and bailing
+// early on it is exactly the stranded-connection race
+// unit/integrations/hostex-token-refresh-lock-ceiling.test.ts exists to
+// prevent. The two waits are complementary, not layered discounts on the
+// same budget.
 const REFRESH_LOCK_MAX_WAITS = Math.ceil((PMS_API_TIMEOUT_MS + 10_000) / REFRESH_LOCK_WAIT_MS)   // ~160, ~40s
 
 function shouldRefresh(expiresAt: string | null): boolean {
@@ -70,7 +84,11 @@ function shouldRefresh(expiresAt: string | null): boolean {
  * connection at once, and Hostex ROTATES the refresh token on every use, so
  * two interleaved exchanges leave the loser's superseded token in Vault and
  * the connection dies at the next refresh. A caller that loses the race polls
- * the connection row rather than starting a second exchange.
+ * the connection row rather than starting a second exchange — for the BULK
+ * of that wait, callers should first run
+ * lib/inngest/functions/hostex/token-lock-wait.ts's waitForHostexTokenRefresh
+ * at their function's top level; see that file's header for why the wait is
+ * split across two places instead of living entirely in this one.
  */
 export async function getValidHostexToken(userId: string): Promise<string> {
   const admin = createServiceClient({ system: 'lib/integrations/providers/hostex-token' })

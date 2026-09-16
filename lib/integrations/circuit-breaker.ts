@@ -67,7 +67,7 @@ const WINDOW_SECONDS = 60
  */
 const PROBE_TIMEOUT_SECONDS = 20
 
-export type BreakerProvider = 'kroger' | 'telnyx' | 'mapbox' | 'tomorrow'
+export type BreakerProvider = 'kroger' | 'telnyx' | 'mapbox' | 'tomorrow' | 'hostex'
 
 function failuresKey(provider: BreakerProvider): string {
   return `circuit:${provider}:failures`

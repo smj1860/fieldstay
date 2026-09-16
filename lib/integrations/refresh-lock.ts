@@ -1,4 +1,4 @@
-import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { acquireLock, releaseLock, isLockHeld } from '@/lib/cache/single-flight'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // ============================================================================
@@ -76,4 +76,17 @@ export async function releaseRefreshLock(
   userId:   string,
 ): Promise<void> {
   return releaseLock(lockKey(provider, userId))
+}
+
+/**
+ * A plain read of whether a refresh is CURRENTLY in progress for this
+ * (provider, user) — does not attempt to acquire the lock itself. For a
+ * top-level Inngest step deciding whether to `step.sleep` before any later
+ * step spends a token — see lib/inngest/functions/hostex/token-lock-wait.ts.
+ */
+export async function isRefreshLockHeld(
+  provider: RefreshLockProvider,
+  userId:   string,
+): Promise<boolean> {
+  return isLockHeld(lockKey(provider, userId))
 }
