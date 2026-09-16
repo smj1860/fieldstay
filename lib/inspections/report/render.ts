@@ -119,16 +119,38 @@ export async function renderInspectionReport(report: InspectionReport): Promise<
     newPage(cur)
   }
 
-  report.inspections.forEach((inspection, i) => {
-    if (i > 0) newPage(cur)
-    drawInspection(cur, report, inspection)
-  })
+  // Awaited, not a bare forEach — see drawInspection and yieldToEventLoop.
+  // This is the one loop MAX_HISTORY_INSPECTIONS actually bounds (up to 60
+  // walks, each several sections of pdf-lib draw calls), so it is where a
+  // synchronous render most needs to give other concurrent invocations of the
+  // same runtime a turn rather than holding the event loop for its whole span.
+  for (let i = 0; i < report.inspections.length; i++) {
+    if (i > 0) { newPage(cur); await yieldToEventLoop() }
+    await drawInspection(cur, report, report.inspections[i]!)
+  }
 
   // LAST, because a footer says "page 3 of 11" and the total is not known until
   // every page exists.
   drawFooters(pdf, font, report)
 
   return pdf.save()
+}
+
+/**
+ * Yields to the event loop between the heaviest chunks of a synchronous PDF
+ * render (inspections, sections, photo-log entries) — see the header comment.
+ *
+ * `setTimeout(…, 0)` rather than `setImmediate`: it works identically in every
+ * runtime this route could end up on, where `setImmediate` is Node-specific
+ * and this codebase has been bitten before by an API that quietly isn't there
+ * on every deploy target (see lib/http/timeout.ts's AbortSignal notes). This
+ * does not make the render non-blocking — it is still one request's CPU —
+ * only unblocks OTHER concurrent work between chunks instead of after all of
+ * it, and gives Node's IO/timer queues, including hung requests elsewhere in
+ * the process, a chance to make progress.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, 0) })
 }
 
 // ── Cover ────────────────────────────────────────────────────────────────────
@@ -185,7 +207,7 @@ function drawHistoryCover(cur: Cursor, report: InspectionReport): void {
 
 // ── One inspection ───────────────────────────────────────────────────────────
 
-function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspection): void {
+async function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspection): Promise<void> {
   band(cur, toWinAnsi(ins.formLabel).toUpperCase())
 
   cur.y -= 12
@@ -219,6 +241,13 @@ function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspec
   for (const section of body) {
     keepTogether(cur, sectionHeight(cur, section))
     drawSection(cur, section)
+    // One section can itself be dozens of items (a repeat group of 400
+    // extinguishers, at the resolver's own ceiling) — yielding per section
+    // rather than per answer keeps the overhead of the yield itself
+    // negligible against how many there typically are (single digits per
+    // form) while still breaking up the biggest single contributor to one
+    // inspection's draw time.
+    await yieldToEventLoop()
   }
 
   keepTogether(cur, (signoff ? sectionHeight(cur, signoff) : 0) + SIGNOFF_BLOCK_HEIGHT)
@@ -510,11 +539,25 @@ async function embedPhotos(
         else if (photo.format === 'png') out.set(answer.id, await pdf.embedPng(photo.bytes))
       } catch {
         // Named in the log by its absence from this map — see drawPhotoEntry.
+      } finally {
+        // DISCARDED the moment this one photo is done with, win or lose.
+        // pdf-lib keeps its own internal copy once embedding succeeds, so
+        // holding onto the raw buffer past this point serves nobody but the
+        // garbage collector's worst case. Without this, every
+        // ReportAnswer.photo.bytes stays reachable through `report` for the
+        // rest of rendering — drawSignOff and drawPhotoLog both still read
+        // `ins`/`report` afterwards — so up to MAX_REPORT_PHOTOS raw buffers
+        // (each up to the bucket's 10MB cap) would sit in memory
+        // SIMULTANEOUSLY instead of one at a time as this loop moves on.
+        photo.bytes = EMPTY_PHOTO_BYTES
       }
     }
   }
   return out
 }
+
+/** Releases a photo's raw bytes after `embedPhotos` is done with it — see there. */
+const EMPTY_PHOTO_BYTES = new Uint8Array(0)
 
 // ── Primitives ───────────────────────────────────────────────────────────────
 

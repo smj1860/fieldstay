@@ -34,9 +34,12 @@ export async function GET(
   const { user, supabase, membership } = await requireOrgMember()
 
   // Sized against the heavier of the two exports: up to 60 walks, each with its
-  // answers, plus photographs. Fails OPEN — see the single-inspection route.
+  // answers, plus photographs. Fails CLOSED — see the single-inspection
+  // route's comment: a Redis outage must not also remove the one cap standing
+  // between this request path and the platform's memory ceiling, and this is
+  // the HEAVIER of the two report routes.
   const rl = await checkLimit(dataExportLimiter, `inspection-history:${user.id}`, {
-    onError: 'allow',
+    onError: 'deny',
     site:    'route.properties.inspections.report.GET',
   })
   if (!rl.allowed) {

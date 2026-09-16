@@ -3,6 +3,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { chunkArray } from '@/lib/inngest/chunk'
 import { INSPECTION_PHOTO_TIMEOUT_MS } from '@/lib/http/timeout'
 import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import {
@@ -336,8 +337,25 @@ async function loadInspectionRows(
   return { rows, totalCompleted: res.count ?? rows.length }
 }
 
-/** `.order('id')` is load-bearing: `.range()` pages are only stable under a
- *  stable sort, and an unstable one drops and repeats rows across boundaries. */
+/**
+ * `.order('id')` is load-bearing: `.range()` pages are only stable under a
+ * stable sort, and an unstable one drops and repeats rows across boundaries.
+ *
+ * `fetchAllRows` here issues up to `MAX_ANSWER_ROWS / max_rows` ≈ 12
+ * sequential round-trips (13 including the final short page) — designed for a
+ * background job's step budget, not a synchronous request. There is no cheap
+ * narrowing available: every column and every row is used (the printed body,
+ * the pass/fail tally, the record-only exclusion, and the photo lookup all
+ * read the full answer set for every inspection in scope — see this module's
+ * header comment on why the body is the same document for every audience),
+ * so trimming the SELECT or the row set would mean printing a document that
+ * is quietly missing part of the record. This is the same finding as
+ * MAX_REPORT_PHOTOS' and this file's top comment: the real fix is moving
+ * generation off the request path onto an Inngest job that writes to Storage
+ * and hands back a signed URL. Finding #5's bounded-parallel photo download
+ * is the change made THIS pass; this sequential drain is unchanged and
+ * remains the next thing to address if history exports keep growing.
+ */
 async function loadAnswers(
   supabase:      SupabaseClient,
   orgId:         string,
@@ -393,34 +411,57 @@ async function loadPhotos(
   const paths   = eligible.slice(0, MAX_REPORT_PHOTOS)
   const omitted = Math.max(0, eligible.length - MAX_REPORT_PHOTOS)
 
-  // Sequential rather than a Promise.all fan-out: this is 10MB-capped binary
-  // per object, and firing 150 concurrent downloads is how a report becomes a
-  // memory spike rather than a slow response.
+  // BOUNDED PARALLEL BATCHES, not fully sequential and not a single unbounded
+  // Promise.all. Each object is 10MB-capped binary, so PHOTO_DOWNLOAD_BATCH_SIZE
+  // concurrent downloads bounds the in-flight memory to roughly that many
+  // objects at once — fully sequential (1 at a time, worst case
+  // MAX_REPORT_PHOTOS * INSPECTION_PHOTO_TIMEOUT_MS ≈ 900s against a 90s
+  // maxDuration) turns one slow storage backend into a request that cannot
+  // possibly finish; an unbounded fan-out (150 at once) turns it into a memory
+  // spike instead of a slow response. Chunked sequentially — the NEXT batch
+  // does not start until this one settles — so the ceiling holds regardless of
+  // how many chunks there are.
   //
-  // TIMED, AND CAUGHT. Storage-js's download() only converts a StorageError
-  // to `{ data: null, error }` — anything else, an abort included, it
-  // RETHROWS (see BlobDownloadBuilder.execute()). Without the try/catch below,
-  // one hung object would not just cost its own photograph: an uncaught throw
-  // here propagates out of loadPhotos and loadInspectionReport, taking the
-  // whole document down over one picture — the exact failure mode this
-  // function's own header comment says a photo download must never cause. The
-  // signal is what makes "hung" a real, bounded outcome rather than "holds
-  // this loop, and the request, open until the platform kills the function."
-  for (const answer of paths) {
-    const path = answer.photo_path!
-    try {
-      const { data, error } = await supabase.storage.from(PHOTO_BUCKET)
-        .download(path, {}, { signal: AbortSignal.timeout(INSPECTION_PHOTO_TIMEOUT_MS) })
-      if (error || !data) continue
+  // TIMED, AND CAUGHT, per photo. Storage-js's download() only converts a
+  // StorageError to `{ data: null, error }` — anything else, an abort
+  // included, it RETHROWS (see BlobDownloadBuilder.execute()). Without the
+  // try/catch below, one hung object would not just cost its own photograph:
+  // an uncaught throw here propagates out of loadPhotos and
+  // loadInspectionReport, taking the whole document down over one picture —
+  // the exact failure mode this function's own header comment says a photo
+  // download must never cause. The signal is what makes "hung" a real,
+  // bounded outcome rather than "holds this loop, and the request, open until
+  // the platform kills the function."
+  for (const batch of chunkArray(paths, PHOTO_DOWNLOAD_BATCH_SIZE)) {
+    await Promise.all(batch.map(async (answer) => {
+      const path = answer.photo_path!
+      try {
+        const { data, error } = await supabase.storage.from(PHOTO_BUCKET)
+          .download(path, {}, { signal: AbortSignal.timeout(INSPECTION_PHOTO_TIMEOUT_MS) })
+        if (error || !data) return
 
-      const bytes = new Uint8Array(await data.arrayBuffer())
-      out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
-    } catch {
-      continue
-    }
+        const bytes = new Uint8Array(await data.arrayBuffer())
+        out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
+      } catch {
+        // Skipped — see the header comment above.
+      }
+    }))
   }
   return { photos: out, omitted }
 }
+
+/**
+ * How many photo downloads run at once within one batch of `loadPhotos`.
+ *
+ * 8 is the "highest-value fix within scope" per CLAUDE.md's Report and export
+ * caps section: it cuts the worst-case wall time roughly 8x over fully
+ * sequential without approaching a memory spike (8 * 10MB ≈ 80MB in flight,
+ * against a platform function typically sized in the low GB). It is NOT a
+ * substitute for moving generation off the request path — see this file's
+ * header comment and MAX_REPORT_PHOTOS's — only a bound on how bad the
+ * synchronous path can get before that migration happens.
+ */
+const PHOTO_DOWNLOAD_BATCH_SIZE = 8
 
 const PHOTO_BUCKET = 'inspection-photos'
 
