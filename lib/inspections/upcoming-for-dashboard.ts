@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { unwrapList } from '@/lib/supabase/unwrap'
 import {
+  addDaysISO,
   selectUpcomingSchedules,
   todayISO,
   type DueSchedule,
@@ -127,12 +128,3 @@ function propertyNameOf(row: ScheduleRow): string | null {
   return Array.isArray(row.property) ? row.property[0]?.name ?? null : row.property.name
 }
 
-/** `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer. */
-function addDaysISO(date: string, days: number): string {
-  const ms = Date.UTC(
-    Number(date.slice(0, 4)),
-    Number(date.slice(5, 7)) - 1,
-    Number(date.slice(8, 10)),
-  )
-  return new Date(ms + days * 86_400_000).toISOString().slice(0, 10)
-}

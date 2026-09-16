@@ -122,6 +122,42 @@ describe('persistNormalizedReviews', () => {
     expect(supabase.from).not.toHaveBeenCalled()
   })
 
+  it('dedupes rows sharing the upsert conflict target, keeping the last occurrence', async () => {
+    // Postgres rejects the WHOLE upsert ("command cannot affect row a second
+    // time") if two rows in one batch share (org_id, external_id,
+    // external_source) — a windowed fetch (Hostex chunks reviews into
+    // sub-180-day windows) can plausibly return the same review from two
+    // overlapping windows, the same shape ownerrez-backfill.ts documents for
+    // bookings. Deduping here means that never wedges the whole sync step.
+    const supabase = makeSupabase()
+
+    const count = await persistNormalizedReviews({
+      ...BASE, supabase, logger: makeLogger(),
+      propertyIdMap: { '101': 'prop_uuid' },
+      normalized: [
+        review({ review_text: 'stale copy from window A' }),
+        review({ review_text: 'fresher copy from window B' }),
+      ],
+    })
+
+    expect(count).toBe(1)
+    expect(supabase.upsert.mock.calls[0][0]).toHaveLength(1)
+    expect(supabase.upsert.mock.calls[0][0][0]).toMatchObject({ review_text: 'fresher copy from window B' })
+  })
+
+  it('does not dedupe rows for different external_ids', async () => {
+    const supabase = makeSupabase()
+
+    const count = await persistNormalizedReviews({
+      ...BASE, supabase, logger: makeLogger(),
+      propertyIdMap: { '101': 'prop_uuid' },
+      normalized: [review(), review({ external_id: 'rev_2' })],
+    })
+
+    expect(count).toBe(2)
+    expect(supabase.upsert.mock.calls[0][0]).toHaveLength(2)
+  })
+
   it('THROWS on an upsert error rather than reporting a successful sync', async () => {
     // A swallowed failure here is a provider whose reviews silently never
     // arrive while the connection reports healthy.

@@ -146,8 +146,15 @@ export function selectUpcomingSchedules(
     .sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))
 }
 
-/** `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer. */
-function addDaysISO(date: string, days: number): string {
+/**
+ * `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer.
+ * Exported for upcoming-for-dashboard.ts, which shares this exact date-math
+ * contract — see selectUpcomingSchedules' header comment on why the
+ * selection half is shared: a second implementation drifting from this one
+ * would reintroduce the same class of "the dashboard nags about a walk the
+ * Maintenance page already stopped listing" bug that design exists to prevent.
+ */
+export function addDaysISO(date: string, days: number): string {
   return new Date(dayMs(date) + days * DAY_MS).toISOString().slice(0, 10)
 }
 

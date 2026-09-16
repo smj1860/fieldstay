@@ -371,8 +371,18 @@ function indexItems(items: InspectionFormItem[]): ItemIndex {
  * the generic sweep ask about them a second time.
  */
 function coveredAssetTypes(items: InspectionFormItem[]): ReadonlySet<string> {
+  // Root items only — a conditionally-hidden child (parent_item_id set) or a
+  // repeat-group template member (repeat_source_item_id set) carrying the
+  // same asset_type as an always-visible root would otherwise count exactly
+  // the same as that root, even though it may never actually render at a
+  // given property. Every asset type a child/member carries today is also
+  // carried by a root covering the same type, so this isn't live, but nothing
+  // enforces that relationship for the next form author who adds one without
+  // the other.
   return new Set(
-    items.filter((i) => i.asset_type).map((i) => i.asset_type as string),
+    items
+      .filter((i) => i.asset_type && !i.parent_item_id && !i.repeat_source_item_id)
+      .map((i) => i.asset_type as string),
   )
 }
 
@@ -393,7 +403,16 @@ function resolveRoot(root: InspectionFormItem, ctx: ResolveCtx): ResolvedItem[] 
   const members = ctx.index.byRepeatSource.get(root.id)
   if (!members?.length) return [self]
 
-  const count = Math.min(MAX_REPEAT_INSTANCES, Math.max(0, Math.floor(ctx.counts[root.id] ?? 0)))
+  // Math.max/Math.min propagate NaN rather than ignoring it — a stray NaN
+  // count (a text field parsed from bad input, a corrupted local draft) would
+  // otherwise flow through untouched and zero the whole repeat group with no
+  // signal, the opposite of "ask again rather than silently drop" elsewhere
+  // in this module. This function is re-run on every change (see header), so
+  // the degrade stays silent rather than logging on every keystroke — a
+  // caller that wants to notice a persistently NaN count can inspect
+  // ctx.counts itself.
+  const rawCount = ctx.counts[root.id] ?? 0
+  const count = Number.isFinite(rawCount) ? Math.min(MAX_REPEAT_INSTANCES, Math.max(0, Math.floor(rawCount))) : 0
   return [self, ...buildRepeatGroup(members, count, ctx.index.byParent)]
 }
 

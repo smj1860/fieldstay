@@ -627,6 +627,17 @@ describe('a count sizes its repeat group, so it is clamped', () => {
     expect(build(-5)).toBe(0)
     expect(build(2.7)).toBe(2)
   })
+
+  it('a NaN count still degrades to zero rows, now explicitly rather than by accident', () => {
+    // `for (let i = 1; i <= count; i++)` already happens to no-op when count
+    // is NaN (1 <= NaN is false), so this assertion holds either way — this
+    // is a hardening fix, not a row-count behavior change: it stops NaN from
+    // silently propagating through Math.max/Math.min into whatever consumes
+    // `count` next, rather than the current loop shape being the only thing
+    // standing between a NaN count and an actual crash (e.g. `new
+    // Array(count)` throws RangeError for NaN where this loop wouldn't).
+    expect(build(NaN)).toBe(0)
+  })
 })
 
 describe('visibleNodes — the renderer and the gate share ONE definition', () => {
@@ -803,6 +814,28 @@ describe('per_unit — a named question repeats across the units of its type', (
     expect(pages.find((p) => p.sectionKey === 'kitchen')!.items).toHaveLength(1)
     expect(pages.find((p) => p.sectionKey === 'assets')!.items
       .map((i) => i.asset?.asset_type)).toEqual(['generator'])
+  })
+
+  it('a conditionally-hidden CHILD carrying an asset_type does not count as covered', () => {
+    // A show_when: 'fail' child that happens to carry an asset_type must not
+    // remove that type from the generic sweep — the child may never actually
+    // render at a given property (its parent's condition might never fire),
+    // so only a root, always-visible item's asset_type should count.
+    const kitchen = section({ key: 'kitchen', sort_order: 0 })
+    const sweep   = section({ key: 'assets',  sort_order: 1 })
+    const parent  = item({ section_id: kitchen.id, key: 'kitchen.fridge' })
+    const child   = item({
+      section_id: kitchen.id, key: 'kitchen.filter', parent_item_id: parent.id,
+      show_when: 'fail', asset_type: 'refrigerator',
+    })
+    const pages = resolveFormPages({
+      sections: [kitchen, sweep],
+      items: [parent, child, item({ section_id: sweep.id, key: 'assets.condition', repeat_per_asset: true })],
+      assets: [asset({ asset_type: 'refrigerator' })],
+    })
+
+    expect(pages.find((p) => p.sectionKey === 'assets')!.items
+      .map((i) => i.asset?.asset_type)).toEqual(['refrigerator'])
   })
 })
 

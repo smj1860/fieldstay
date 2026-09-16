@@ -29,7 +29,13 @@ const PILL_TONE: Record<ThumbtackProPill, 'gold' | 'slate' | 'blue' | 'green'> =
   low_price:  'green',
 }
 
-export function formatStartingCost(cents: number): string {
+// startingCostCents' unit and shape are unconfirmed against a live Thumbtack
+// response (see lib/integrations/thumbtack.ts) — a malformed payload could
+// hand this a non-numeric, negative, or NaN value. null omits the line the
+// same way every other optional field on this card already does, rather than
+// rendering "$NaN" or "$-5".
+export function formatStartingCost(cents: number): string | null {
+  if (!Number.isFinite(cents) || cents < 0) return null
   const dollars = cents / 100
   return dollars % 1 === 0 ? `$${dollars}` : `$${dollars.toFixed(2)}`
 }
@@ -78,7 +84,9 @@ export function ThumbtackProCard({ pro, onSelect }: Readonly<ThumbtackProCardPro
       <div className="flex items-center gap-3 flex-wrap mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
         {pro.yearsInBusiness != null && <span>{pro.yearsInBusiness} yrs in business</span>}
         {pro.numHires != null && <span>{pro.numHires} hires on Thumbtack</span>}
-        {pro.startingCostCents != null && <span>Starting at {formatStartingCost(pro.startingCostCents)}</span>}
+        {pro.startingCostCents != null && formatStartingCost(pro.startingCostCents) && (
+          <span>Starting at {formatStartingCost(pro.startingCostCents)}</span>
+        )}
       </div>
 
       {(pro.licenseVerified || pro.hasBackgroundCheck) && (

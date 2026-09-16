@@ -529,6 +529,11 @@ describe('properties/actions', () => {
       ['NaN',       'abc'],
       ['Infinity',  'Infinity'],
       ['over $1M',  '5000000'],
+      // Number.parseFloat stops at the first non-numeric character rather
+      // than rejecting the whole string, so a bare parseFloat(raw) would
+      // silently turn these into 100 before the schema ever ran.
+      ['trailing garbage',      '100abc'],
+      ['thousands separator',   '100,000'],
     ])('rejects a %s purchase price before any write', async (_label, value) => {
       const supabase = makeSupabase({})
       mockAuthed(supabase)

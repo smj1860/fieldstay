@@ -74,6 +74,39 @@ describe('assetWarrantyExpiryCheck', () => {
     expect(updateCall?.args[0]).toMatchObject({ warranty_warned_at: expect.any(String) })
   })
 
+  it('floors days-until at zero for an asset expiring "today" run off-schedule', async () => {
+    // The query's warranty_expiry_date >= todayStr guarantee is relative to
+    // whenever it ran, not to when this notification is built. Under the
+    // fixed 0 12 * * * schedule this rounds to 0, but a later-in-the-day
+    // invocation (manual replay, delayed retry, rescheduled cron) run after
+    // midnight UTC on the expiry date would otherwise go negative.
+    vi.setSystemTime(new Date('2026-08-01T18:00:00.000Z'))
+    const supabase = makeSupabase({
+      property_assets: [
+        {
+          data: [{
+            id: 'asset_3', org_id: 'org_1', name: 'Pool Pump',
+            warranty_expiry_date: '2026-08-01', warranty_provider: null,
+          }],
+          error: null,
+        },
+        { data: [{ id: 'asset_3' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(assetWarrantyExpiryCheck, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    expect(createPmNotifications).toHaveBeenCalledWith(
+      supabase,
+      [expect.objectContaining({ title: 'Pool Pump warranty expires in 0 days' })],
+    )
+  })
+
   it('is a no-op when nothing is entering the expiring-soon window', async () => {
     const supabase = makeSupabase({
       property_assets: [{ data: [], error: null }],

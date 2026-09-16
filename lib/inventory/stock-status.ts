@@ -87,6 +87,13 @@ function isUncounted(item: StockLevels): boolean {
  */
 export function stockStatus(item: StockLevels): StockStatus {
   if (isUncounted(item)) return 'uncounted'
+  // A NaN quantity/par (malformed upstream data coerced with Number() and no
+  // isFinite check) makes both < and > comparisons evaluate false in JS, which
+  // without this guard falls through to "exactly at par" — a yellow/green
+  // badge for a value that is actually corrupt, rather than surfacing it as
+  // unknown. 'uncounted' reuses the existing "no reliable level" badge rather
+  // than inventing a new status for this.
+  if (!Number.isFinite(item.current_quantity) || !Number.isFinite(item.par_level)) return 'uncounted'
   if (item.current_quantity < item.par_level) return 'red'
   if (item.current_quantity > item.par_level) return 'green'
 

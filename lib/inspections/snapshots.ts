@@ -307,9 +307,19 @@ export function recordedConditions(weather: WeatherLike | null): ConditionsSnaps
   }
 }
 
-/** The fallback. Kept as a distinct shape so the report can never conflate them. */
+/**
+ * The fallback. Kept as a distinct shape so the report can never conflate them.
+ *
+ * Capped unlike submit-payload.ts's MAX_TEXT (2,000) — this is a short
+ * weather note, not a general free-text field, and it gets frozen permanently
+ * into HeaderSnapshot rather than passing through the same bound every other
+ * free-text field in this pipeline gets before a device payload can balloon a
+ * jsonb column.
+ */
+const MAX_CONDITIONS_TEXT = 200
+
 export function reportedConditions(text: string): ConditionsSnapshot | null {
-  const trimmed = text.trim()
+  const trimmed = text.trim().slice(0, MAX_CONDITIONS_TEXT)
   return trimmed ? { source: 'reported', text: trimmed } : null
 }
 

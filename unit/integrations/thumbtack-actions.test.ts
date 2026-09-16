@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createSupabaseDouble } from '@/unit/stubs/supabase-query-double'
 
 vi.mock('@/lib/rate-limit', async () => {
   const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
@@ -12,6 +13,7 @@ vi.mock('@/lib/rate-limit', async () => {
 vi.mock('@/lib/auth', () => ({ requireOrgMember: vi.fn() }))
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
 vi.mock('@/lib/integrations/thumbtack', async () => {
   const actual = await vi.importActual<typeof import('@/lib/integrations/thumbtack')>('@/lib/integrations/thumbtack')
   return { ...actual, searchThumbtackPros: vi.fn() }
@@ -19,6 +21,7 @@ vi.mock('@/lib/integrations/thumbtack', async () => {
 
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
+import { createServiceClient } from '@/lib/supabase/server'
 import { thumbtackSearchRatelimit } from '@/lib/rate-limit'
 import { searchThumbtackPros } from '@/lib/integrations/thumbtack'
 import { searchThumbtackProsAction, recordThumbtackRequestCreatedAction } from '@/lib/integrations/thumbtack-actions'
@@ -80,6 +83,10 @@ describe('recordThumbtackRequestCreatedAction', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(requireOrgMember).mockResolvedValue({ user, membership } as never)
+    // Default: no prior audit row for this request_pk, so the write proceeds.
+    vi.mocked(createServiceClient).mockReturnValue(
+      createSupabaseDouble({ audit_events: { data: null, error: null } }) as never,
+    )
   })
 
   it('logs an audit event scoped to the work order when one is given', async () => {
@@ -106,5 +113,33 @@ describe('recordThumbtackRequestCreatedAction', () => {
   it('never throws — a logging failure must not surface to the caller as a UI error', async () => {
     vi.mocked(logAuditEvent).mockRejectedValueOnce(new Error('db down'))
     await expect(recordThumbtackRequestCreatedAction('wo_1', REQUEST_CREATED_EVENT)).resolves.toBeUndefined()
+  })
+
+  it('skips logging when an audit row for this request_pk already exists', async () => {
+    // Guards against RequestFlowModal's message listener re-subscribing on
+    // every parent re-render while the modal stays open, which could end up
+    // invoking onRequestCreated twice for the same underlying request.
+    vi.mocked(createServiceClient).mockReturnValue(
+      createSupabaseDouble({ audit_events: { data: { id: 'existing_row' }, error: null } }) as never,
+    )
+
+    await recordThumbtackRequestCreatedAction('wo_1', REQUEST_CREATED_EVENT)
+
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('checks for an existing row scoped to this org, action, and request_pk', async () => {
+    const double = createSupabaseDouble({ audit_events: { data: null, error: null } })
+    vi.mocked(createServiceClient).mockReturnValue(double as never)
+
+    await recordThumbtackRequestCreatedAction('wo_1', REQUEST_CREATED_EVENT)
+
+    expect(double.calls).toContainEqual({ table: 'audit_events', method: 'eq', args: ['org_id', 'org_1'] })
+    expect(double.calls).toContainEqual({
+      table: 'audit_events', method: 'eq', args: ['action', 'thumbtack.request_flow.completed'],
+    })
+    expect(double.calls).toContainEqual({
+      table: 'audit_events', method: 'contains', args: ['metadata', { request_pk: 'req_1' }],
+    })
   })
 })
