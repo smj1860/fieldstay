@@ -47,10 +47,17 @@ function req(body: Record<string, unknown>) {
 }
 
 function body(over: Record<string, unknown> = {}) {
+  // Relative to the clock at test-run time, not a hardcoded date — a fixed
+  // absolute timestamp here ages past MAX_PLAUSIBLE_OFFSET_SECONDS (24h) as
+  // soon as real time moves a day beyond whenever this file was written,
+  // turning every test that doesn't override these fields into a 400 from
+  // the device-clock-plausibility guard rather than what it's actually
+  // testing.
+  const now = new Date().toISOString()
   return {
     id: 'insp-1', property_id: 'prop-1', form_id: 'form-1', form_version: 1,
-    form_snapshot: {}, device_started_at: '2026-09-15T10:00:00.000Z',
-    device_now: '2026-09-15T10:00:00.000Z', source_schedule_id: 'sched-1',
+    form_snapshot: {}, device_started_at: now,
+    device_now: now, source_schedule_id: 'sched-1',
     ...over,
   }
 }
