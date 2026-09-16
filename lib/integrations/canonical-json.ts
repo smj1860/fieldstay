@@ -27,6 +27,14 @@ export class PayloadTooDeepError extends Error {
   }
 }
 
+/** Thrown for a payload with more than MAX_NODES nodes. Callers should answer 400. */
+export class PayloadTooLargeError extends Error {
+  constructor(readonly maxNodes: number) {
+    super(`Payload has more than ${maxNodes} nodes`)
+    this.name = 'PayloadTooLargeError'
+  }
+}
+
 /**
  * Depth ceiling, enforced by REJECTING rather than by a fallback.
  *
@@ -48,6 +56,28 @@ export class PayloadTooDeepError extends Error {
  * limit we discover in production.
  */
 const MAX_DEPTH = 64
+
+/**
+ * Node-count ceiling, enforced the same way as MAX_DEPTH: by REJECTING, not
+ * truncating (truncating would let two different oversized payloads collide
+ * on the same dedup key) and not by a fallback to `JSON.stringify` (which
+ * would just pay the same synchronous cost this cap exists to avoid).
+ *
+ * MAX_DEPTH bounds how DEEP a payload can nest; it says nothing about how
+ * WIDE one can be. A payload with tens of thousands of shallow siblings — a
+ * huge flat array, or an object with a huge number of keys — recurses only a
+ * few levels deep but still visits every element synchronously, on the
+ * request thread, before the route can do anything with it. `state.nodes`
+ * below counts every value visited (containers and primitives alike) across
+ * the WHOLE walk, not per array/object, so this catches width the same way
+ * MAX_DEPTH catches depth.
+ *
+ * 20,000 is far above any real webhook payload (Hospitable's deepest known
+ * payload is ~5 levels and a few dozen keys total) and picked the same way
+ * MAX_DEPTH was: a defensive ceiling pending real telemetry on the actual
+ * distribution, not a measured worst case.
+ */
+const MAX_NODES = 20_000
 
 /**
  * Key ordering for the canonical form: UTF-16 code unit, explicitly.
@@ -75,7 +105,21 @@ function byCodeUnit(a: string, b: string): number {
   return 0
 }
 
-export function canonicalJson(value: unknown, depth = 0): string {
+/**
+ * Mutable walk-wide counter, threaded through the recursion rather than
+ * returned/summed, so the ceiling can trip and THROW mid-walk instead of
+ * only being checkable after the (already paid for) full walk completes.
+ *
+ * Internal only: `canonicalJson`'s public contract is the single-argument
+ * call every real caller uses (`depth`/`state` both default), and no caller
+ * outside this file's own recursion should pass either explicitly.
+ */
+interface WalkState { nodes: number }
+
+export function canonicalJson(value: unknown, depth = 0, state: WalkState = { nodes: 0 }): string {
+  state.nodes++
+  if (state.nodes > MAX_NODES) throw new PayloadTooLargeError(MAX_NODES)
+
   // Primitives, null, and anything JSON.stringify drops (undefined, function,
   // symbol) — `?? 'null'` covers the drop, which stringify signals by
   // returning undefined rather than a string.
@@ -84,7 +128,7 @@ export function canonicalJson(value: unknown, depth = 0): string {
   if (depth >= MAX_DEPTH) throw new PayloadTooDeepError(MAX_DEPTH)
 
   if (Array.isArray(value)) {
-    return `[${value.map((v) => canonicalJson(v, depth + 1)).join(',')}]`
+    return `[${value.map((v) => canonicalJson(v, depth + 1, state)).join(',')}]`
   }
 
   const obj   = value as Record<string, unknown>
@@ -95,7 +139,7 @@ export function canonicalJson(value: unknown, depth = 0): string {
     // JSON.stringify omits undefined-valued properties; match that so an
     // explicitly-undefined key cannot change the hash.
     if (v === undefined) continue
-    parts.push(`${JSON.stringify(key)}:${canonicalJson(v, depth + 1)}`)
+    parts.push(`${JSON.stringify(key)}:${canonicalJson(v, depth + 1, state)}`)
   }
 
   return `{${parts.join(',')}}`

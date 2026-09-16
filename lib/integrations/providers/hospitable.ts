@@ -23,7 +23,9 @@ import { hospitableApiLimiter, checkLimit, outboundBackoffSeconds } from '@/lib/
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
-import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { PMS_API_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { NonRetriableError } from 'inngest'
+import { evaluateBreaker, recordFailure, recordSuccess, CircuitOpenError } from '@/lib/integrations/circuit-breaker'
 import type {
   HospitableUser,
   HospitableProperty,
@@ -456,6 +458,16 @@ export const hospitableProvider: IntegrationProvider = {
  * counter is structurally blind to those. The reactive branch below is
  * therefore the load-bearing one, not the fallback — which is why callers must
  * honour its retryAfter rather than leaving it to Inngest's generic backoff.
+ *
+ * Also gated by the shared platform-wide circuit breaker (see
+ * lib/integrations/circuit-breaker.ts) — checked AFTER the rate-limit budget
+ * (that bounds how fast WE call; this bounds whether we call at all while
+ * Hospitable is failing outright) and BEFORE the fetch. Without it, a
+ * Hospitable outage means every independent reconcile/sync step still waits
+ * out the full PMS_API_TIMEOUT_MS, throws, and gets retried by Inngest's
+ * backoff — N orgs x (1 + retries) full-timeout round-trips against a
+ * provider already struggling. Same wiring as krogerFetch in
+ * lib/kroger/client.ts.
  */
 export async function hospitableFetch(url: string, token: string): Promise<Response> {
   // Outbound quota against Hospitable's own 60/min ceiling → fails CLOSED:
@@ -471,10 +483,45 @@ export async function hospitableFetch(url: string, token: string): Promise<Respo
     throw new RateLimitError(outboundBackoffSeconds(budget))
   }
 
-  const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) })
+  const { decision: breakerDecision, priorFailures } = await evaluateBreaker('hospitable')
+  if (breakerDecision === 'open') {
+    // NonRetriable: retrying immediately is exactly the amplifying behaviour
+    // the breaker exists to stop. Inngest still schedules the NEXT tick/cron
+    // run normally — this only skips THIS attempt.
+    throw new NonRetriableError(new CircuitOpenError('hospitable').message)
+  }
+
+  let res: Response
+  try {
+    res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) })
+  } catch (err) {
+    // A timeout or transport failure is exactly what the breaker counts —
+    // record it before rethrowing so the Nth concurrent caller stops paying
+    // the full timeout once the threshold trips.
+    await recordFailure('hospitable')
+    if (isTimeoutError(err)) {
+      console.error('[Hospitable] request timed out', { timeoutMs: PMS_API_TIMEOUT_MS })
+      reportError(err, { site: 'lib.integrations.hospitable.hospitableFetch', extra: { timedOut: true } })
+      throw new Error(`Hospitable request timed out after ${PMS_API_TIMEOUT_MS}ms`)
+    }
+    throw err
+  }
 
   if (res.status === 429) {
+    // Deliberately NOT a breaker failure: 429 is Hospitable working correctly
+    // and telling us to slow down, already handled by RateLimitError above.
     throw new RateLimitError(parseRetryAfterSeconds(res.headers.get('Retry-After')))
+  }
+
+  // 5xx is the provider failing; other 4xx statuses (401, 404, …) are us
+  // sending something wrong and would never clear by waiting — only the
+  // former should trip the breaker.
+  if (res.status >= 500) {
+    await recordFailure('hospitable')
+  } else if (priorFailures > 0) {
+    // Only clear when there is something to clear — avoids a Redis
+    // round-trip on every healthy call.
+    await recordSuccess('hospitable')
   }
 
   return res

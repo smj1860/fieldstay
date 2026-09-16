@@ -34,7 +34,10 @@ vi.mock('@/lib/integrations/providers/hospitable', async () => {
   }
 })
 
-import { hospReservationReconcileCron }    from '@/lib/inngest/functions/hospitable/reservation-reconcile-cron'
+import {
+  hospReservationReconcileCron,
+  HOSPITABLE_RECONCILE_JITTER_WINDOW_SECONDS,
+}    from '@/lib/inngest/functions/hospitable/reservation-reconcile-cron'
 import { hospReservationReconcileHandler } from '@/lib/inngest/functions/hospitable/reservation-reconcile-handler'
 import { createServiceClient }   from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
@@ -131,17 +134,22 @@ describe('hospReservationReconcileCron', () => {
     }) as { dispatched: number }
 
     expect(res.dispatched).toBe(2)
-    const [, events] = step.sendEvent.mock.calls[0]
-    expect(events).toEqual([
-      {
-        name: 'integration/hospitable.reservation_reconcile.requested',
-        data: { user_id: 'u1', org_id: 'org_1', external_user_id: 'x1' },
-      },
-      {
-        name: 'integration/hospitable.reservation_reconcile.requested',
-        data: { user_id: 'u2', org_id: 'org_2', external_user_id: 'x2' },
-      },
-    ])
+    // Only one chunk (2 connections, well under SEND_EVENT_CHUNK_SIZE), so
+    // this cron's dispatch jitter (unlike teammate-sync's) means every event
+    // also carries a `ts` — a deterministic offset into
+    // [now, now + HOSPITABLE_RECONCILE_JITTER_WINDOW_SECONDS) rather than the
+    // instant of dispatch. See connection-dispatch.ts's jitterSecondsForConnection.
+    const before = Date.now()
+    const [stepId, events] = step.sendEvent.mock.calls[0]
+    expect(stepId).toBe('dispatch-reconcile-events-0')
+    expect(events).toHaveLength(2)
+    for (const e of events as { name: string; ts: number; data: unknown }[]) {
+      expect(e.name).toBe('integration/hospitable.reservation_reconcile.requested')
+      expect(e.ts).toBeGreaterThanOrEqual(before)
+      expect(e.ts).toBeLessThan(before + HOSPITABLE_RECONCILE_JITTER_WINDOW_SECONDS * 1000 + 1000)
+    }
+    expect(events[0].data).toEqual({ user_id: 'u1', org_id: 'org_1', external_user_id: 'x1' })
+    expect(events[1].data).toEqual({ user_id: 'u2', org_id: 'org_2', external_user_id: 'x2' })
   })
 
   it('sends nothing when no connection is active, rather than an empty batch', async () => {
@@ -179,8 +187,13 @@ describe('hospReservationReconcileCron', () => {
     }) as { dispatched: number }
 
     expect(res.dispatched).toBe(1001)
-    const [, events] = step.sendEvent.mock.calls[0] as [string, { data: { org_id: string } }[]]
-    expect(events[events.length - 1].data.org_id).toBe('org_last')
+    // 1001 connections span THREE sendEvent chunks now (500 + 500 + 1) —
+    // sendEventsChunked's SEND_EVENT_CHUNK_SIZE, not a single call with every
+    // event. The last connection lands in the last chunk's last event.
+    const calls = step.sendEvent.mock.calls as [string, { data: { org_id: string } }[]][]
+    expect(calls).toHaveLength(3)
+    const lastChunkEvents = calls[calls.length - 1][1]
+    expect(lastChunkEvents[lastChunkEvents.length - 1].data.org_id).toBe('org_last')
   })
 })
 

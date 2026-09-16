@@ -1,5 +1,6 @@
 import type { createServiceClient } from '@/lib/supabase/server'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
 import type { CrewRole } from '@/types/database'
 
 /**
@@ -36,8 +37,24 @@ import type { CrewRole } from '@/types/database'
  * that inference until someone edits it, even if the provider's labels later
  * get better.
  *
- * One read per batch keyed by external_id — never a lookup per staff member
- * (unit/guardrails/n-plus-one-loops.test.ts).
+ * ── Reading it back at scale ─────────────────────────────────────────────────
+ *
+ * `.in('external_id', externalIds).limit(externalIds.length)` used to be one
+ * call for the whole batch. `.limit()` only shrinks a result that already
+ * arrived — it cannot rescue rows PostgREST's `max_rows = 1000` had already
+ * dropped from the response before `.limit()` ever saw it, so a sync with
+ * more than 1000 staff in one payload silently stopped preserving roles past
+ * the thousandth. externalIds is now walked in `IN_CLAUSE_CHUNK_SIZE`-sized
+ * chunks (a classic bounded `for (let i = 0; …)` chunking loop, not a
+ * per-row one — see n-plus-one-loops.test.ts's own note on this shape), and
+ * each chunk is read through `fetchAllRows` rather than a bare `.limit()`:
+ * the upsert's own conflict target (org_id, external_id, external_source)
+ * means one external_id maps to exactly one row today, but paginating
+ * defensively rather than trusting that costs nothing and matches this
+ * codebase's standing rule against unpaginated platform reads.
+ *
+ * One batch of reads per chunk keyed by external_id — never a lookup per
+ * staff member (unit/guardrails/n-plus-one-loops.test.ts).
  */
 export async function preserveManualCrewRoles<
   T extends { external_id: string; role: CrewRole },
@@ -51,25 +68,33 @@ export async function preserveManualCrewRoles<
   if (!rows.length) return rows
 
   const externalIds = rows.map((r) => r.external_id)
+  const existing: { external_id: string | null; role: CrewRole }[] = []
 
-  const existingRes = await supabase
-    .from('crew_members')
-    .select('external_id, role')
-    .eq('org_id', orgId)
-    .eq('external_source', provider)
-    .in('external_id', externalIds)
-    // Bounded by the write being read back, so this can never be the thing
-    // that truncates — same convention as upsert-normalized's re-select.
-    .limit(externalIds.length)
+  for (let i = 0; i < externalIds.length; i += IN_CLAUSE_CHUNK_SIZE) {
+    const chunk = externalIds.slice(i, i + IN_CLAUSE_CHUNK_SIZE)
 
-  // A failed read must not fall through to overwriting every role: that is the
-  // exact behaviour being fixed, and returning `rows` unchanged on error would
-  // reintroduce it on any transient failure. unwrapList throws, and the
-  // enclosing step retries.
-  const existing = unwrapList(existingRes, { site, orgId })
+    // A failed read must not fall through to overwriting every role: that is
+    // the exact behaviour being fixed, and returning `rows` unchanged on
+    // error would reintroduce it on any transient failure. fetchAllRows
+    // throws on a query error, and the enclosing step retries.
+    const page = await fetchAllRows<{ external_id: string | null; role: CrewRole }>(
+      (from, to) => supabase
+        .from('crew_members')
+        .select('external_id, role')
+        .eq('org_id', orgId)
+        .eq('external_source', provider)
+        .in('external_id', chunk)
+        .order('external_id')
+        .range(from, to),
+      { label: site },
+    )
+    existing.push(...page)
+  }
 
   const roleByExternalId = new Map(
-    (existing ?? []).map((row) => [row.external_id as string, row.role as CrewRole]),
+    existing
+      .filter((row): row is { external_id: string; role: CrewRole } => row.external_id !== null)
+      .map((row) => [row.external_id, row.role]),
   )
 
   return rows.map((row) =>

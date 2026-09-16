@@ -146,7 +146,7 @@ const FAIL_SOFT_EMPTY_RETURNS: Record<string, string> = {
   // hospFetchReservationMessages' 404-returns-[] entry was here until
   // 2026-08-20. The function is gone: the message webhook carries the whole
   // message, so nothing fetches a thread any more.
-  'lib/integrations/providers/hospitable.ts:822':
+  'lib/integrations/providers/hospitable.ts:869':
     'hospFetchTeammates: 403 is the one expected non-ok — a connection predating the teammate:read scope. Nothing about it is retriable. Every OTHER status now throws, and the sole absence-based consumer carries an empty-set guard.',
 }
 
