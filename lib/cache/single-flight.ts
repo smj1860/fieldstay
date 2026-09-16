@@ -62,7 +62,7 @@ export async function acquireLock(
   if (!redis) return true
 
   try {
-    return (await withTimeout(redis.set(key, '1', { nx: true, ex: ttlSeconds }), REDIS_TIMEOUT_MS, `acquireLock(${key})`)) === 'OK'
+    return (await withTimeout(() => redis.set(key, '1', { nx: true, ex: ttlSeconds }), REDIS_TIMEOUT_MS, `acquireLock(${key})`)) === 'OK'
   } catch (err) {
     // A slow-not-down Redis lands here via withTimeout's TimeoutError the
     // same as a genuine error would — see REDIS_TIMEOUT_MS's header. Either
@@ -80,7 +80,7 @@ export async function releaseLock(key: string): Promise<void> {
   if (!redis) return
 
   try {
-    await withTimeout(redis.del(key), REDIS_TIMEOUT_MS, `releaseLock(${key})`)
+    await withTimeout(() => redis.del(key), REDIS_TIMEOUT_MS, `releaseLock(${key})`)
   } catch {
     // Non-fatal — the TTL expires it (or a slow release just landed late).
   }

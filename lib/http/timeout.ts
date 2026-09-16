@@ -197,23 +197,6 @@ export const INSPECTION_PHOTO_TIMEOUT_MS = 6_000
 export const REDIS_TIMEOUT_MS = 750
 
 /**
- * Race `promise` against a timeout, rejecting with the same TimeoutError
- * shape `isTimeoutError()` recognizes so callers can treat "gave up waiting"
- * uniformly whether the underlying call had its own AbortSignal or not.
- *
- * Does not cancel `promise` itself — for a client with no cancellation hook
- * (the Upstash HTTP client, an arbitrary retry sequence), there is nothing to
- * abort; this only bounds how long the CALLER waits before giving up on it.
- */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new DOMException(`${label}: timed out after ${ms}ms`, 'TimeoutError')), ms)
-  })
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
-}
-
-/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *
@@ -269,6 +252,12 @@ export class RaceTimeoutError extends Error {
  * documents why racing rather than aborting is safe there — the same
  * reasoning applies here: an abandoned `getSession()` call is idempotent and
  * has no side effect to leave dangling.
+ *
+ * Also the general-purpose wrapper for the Redis locking path
+ * (lib/cache/single-flight.ts): the Upstash HTTP client has no cancellation
+ * hook either, so `withTimeout(() => redis.set(...), REDIS_TIMEOUT_MS, label)`
+ * bounds how long the CALLER waits without needing the client itself to
+ * support abort.
  *
  * The timer is always cleared, including on the happy path — otherwise it
  * would keep whatever event loop it is running in alive for the rest of the

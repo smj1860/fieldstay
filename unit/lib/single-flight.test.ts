@@ -12,6 +12,7 @@ vi.mock('@/lib/redis', () => {
 
 import * as redisModule from '@/lib/redis'
 import { singleFlight, acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { REDIS_TIMEOUT_MS } from '@/lib/http/timeout'
 
 const redis = (redisModule as unknown as {
   __client: Record<'get' | 'set' | 'del', ReturnType<typeof vi.fn>>
@@ -150,10 +151,18 @@ describe('singleFlight', () => {
 
     vi.unstubAllGlobals()
 
+    // acquireLock()'s own internal withTimeout() also calls setTimeout — once
+    // per acquire attempt (the initial one plus the final retry-acquire), at
+    // REDIS_TIMEOUT_MS — a different mechanism (a race against a slow Redis)
+    // than the jittered retry-wait this test is exercising. Excluded here
+    // rather than asserted on, since it isn't what "jitters the wait delay"
+    // is about.
+    const waitDelays = delays.filter((d) => d !== REDIS_TIMEOUT_MS)
+
     // 5 waits at a fixed 100ms would all equal 100 — jitter means they don't.
-    expect(new Set(delays).size).toBeGreaterThan(1)
+    expect(new Set(waitDelays).size).toBeGreaterThan(1)
     // And every one stays within the documented 100-150ms jitter range.
-    for (const d of delays) {
+    for (const d of waitDelays) {
       expect(d).toBeGreaterThanOrEqual(100)
       expect(d).toBeLessThanOrEqual(150)
     }

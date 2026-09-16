@@ -99,7 +99,7 @@ async function acquireDedupLockOrThrow(key: string): Promise<DedupLockOutcome> {
 
   try {
     const result = await withTimeout(
-      redis.set(key, '1', { nx: true, ex: SINGLE_FLIGHT_DEFAULTS.DEFAULT_LOCK_TTL_SECONDS }),
+      () => redis.set(key, '1', { nx: true, ex: SINGLE_FLIGHT_DEFAULTS.DEFAULT_LOCK_TTL_SECONDS }),
       REDIS_TIMEOUT_MS,
       `applyStandardInventoryLock(${key})`,
     )
