@@ -118,7 +118,7 @@ describe('properties/actions', () => {
       await expect(createProperty(null, fd({ zip: '36853', door_code: '1234' })))
         .rejects.toThrow('REDIRECT:/properties/prop_1/setup/details')
 
-      expect(geocodeZip).toHaveBeenCalledWith('36853')
+      expect(geocodeZip).toHaveBeenCalledWith('36853', { boundToSave: true })
       expect(supabase.rpc).toHaveBeenCalledWith('store_property_door_code', {
         p_property_id: 'prop_1', p_org_id: 'org_1', p_door_code: '1234',
       })

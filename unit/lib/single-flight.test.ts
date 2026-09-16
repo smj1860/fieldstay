@@ -150,10 +150,21 @@ describe('singleFlight', () => {
 
     vi.unstubAllGlobals()
 
+    // acquireLock()/releaseLock() ALSO call setTimeout now — withTimeout()
+    // (lib/http/timeout.ts) races every Redis call against its own
+    // REDIS_TIMEOUT_MS (750ms) timer, cleared via clearTimeout() once the
+    // mocked redis.set() resolves. clearTimeout() stops it from ever firing,
+    // but this spy already recorded the call (with its 750ms argument) the
+    // moment setTimeout() was invoked — cancellation happens too late to
+    // un-record it. So the captured list is jitter delays interleaved with
+    // fixed 750ms entries from every acquire/retry-acquire, and only the
+    // former are what this test is about.
+    const jitterDelays = delays.filter((d) => d !== 750)
+
     // 5 waits at a fixed 100ms would all equal 100 — jitter means they don't.
-    expect(new Set(delays).size).toBeGreaterThan(1)
+    expect(new Set(jitterDelays).size).toBeGreaterThan(1)
     // And every one stays within the documented 100-150ms jitter range.
-    for (const d of delays) {
+    for (const d of jitterDelays) {
       expect(d).toBeGreaterThanOrEqual(100)
       expect(d).toBeLessThanOrEqual(150)
     }

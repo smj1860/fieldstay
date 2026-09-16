@@ -19,12 +19,24 @@ vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
 vi.mock('@/lib/inngest/helpers', () => ({ getPmMembers: vi.fn() }))
 vi.mock('@/lib/security/url-guard', () => ({ safeFetch: vi.fn(async () => new Response('ok')) }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter double below so
+  // `crewMessageSlackRatelimit.limit` assertions and the fail-open test still
+  // exercise a real branch.
+  const { checkLimitStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    crewMessageSlackRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:                checkLimitStub(),
+  }
+})
 
 import { POST } from '@/app/api/crew/messages/route'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { safeFetch } from '@/lib/security/url-guard'
+import { crewMessageSlackRatelimit } from '@/lib/rate-limit'
 
 const ORG = 'org_1'
 const CREW = { id: 'crew_1', org_id: ORG }
@@ -153,6 +165,61 @@ describe('POST /api/crew/messages — Slack notification', () => {
 
     const [, init] = vi.mocked(safeFetch).mock.calls[0]!
     expect(JSON.parse(String((init as RequestInit).body)).text).toContain('A crew member')
+  })
+})
+
+// The message itself is saved and delivered in-app regardless of this
+// throttle's outcome (it runs inside after(), after the insert already
+// committed) — only the redundant Slack ping is what a denied budget skips.
+describe('POST /api/crew/messages — Slack per-org throttle', () => {
+  beforeEach(() => {
+    deferred.length = 0
+    vi.clearAllMocks()
+    vi.mocked(requireCrewMember).mockResolvedValue({
+      ok: true, crew: CREW, user: { id: 'user_1' }, supabase: makeClient(),
+    } as never)
+    vi.mocked(getPmMembers).mockResolvedValue([{ userId: 'pm_1', email: 'pm@example.com' }] as never)
+    vi.mocked(createServiceClient).mockReturnValue(makeClient({
+      organizations: { data: { slack_webhook_url: 'https://hooks.slack.com/services/T/B/X' } },
+      crew_members:  { data: { name: 'Jamie Crew' } },
+    }) as never)
+  })
+
+  it('skips the Slack ping — but still saves the message and returns success — when the org is over budget', async () => {
+    vi.mocked(crewMessageSlackRatelimit.limit).mockResolvedValueOnce({ success: false } as never)
+
+    const res = await POST(post(validBody))
+    await flushAfter()
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ success: true })
+    expect(safeFetch).not.toHaveBeenCalled()
+  })
+
+  it('scopes the throttle check to the crew member’s org', async () => {
+    await POST(post(validBody))
+    await flushAfter()
+
+    expect(crewMessageSlackRatelimit.limit).toHaveBeenCalledWith(ORG)
+  })
+
+  it('sends the Slack ping when the org is under budget', async () => {
+    vi.mocked(crewMessageSlackRatelimit.limit).mockResolvedValueOnce({ success: true } as never)
+
+    await POST(post(validBody))
+    await flushAfter()
+
+    expect(safeFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails OPEN — still sends the Slack ping — when the limiter itself errors', async () => {
+    vi.mocked(crewMessageSlackRatelimit.limit).mockRejectedValueOnce(new Error('redis down'))
+
+    const res = await POST(post(validBody))
+    await flushAfter()
+
+    expect(res.status).toBe(200)
+    expect(safeFetch).toHaveBeenCalledTimes(1)
   })
 })
 

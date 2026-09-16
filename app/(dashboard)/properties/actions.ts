@@ -290,7 +290,7 @@ export async function createProperty(
     }
 
     if (zip) {
-      const coords = await geocodeZip(zip)
+      const coords = await geocodeZip(zip, { boundToSave: true })
       if (coords) {
         await writeCoords(supabase, property.id, coords, 'createProperty')
       } else {

@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { reportError } from '@/lib/observability/report-error'
 import { UUID_RE } from '@/lib/validation/uuid'
+import { checkLimit, crewMessageSlackRatelimit } from '@/lib/rate-limit'
 
 /**
  * POST /api/crew/messages
@@ -188,7 +189,18 @@ export async function POST(request: NextRequest) {
 
   // after(): the message is committed and the crew device is waiting on this
   // response to clear its outbox — a slow webhook must not hold that open.
-  after(() => notifyPmSlack(admin, crew.org_id, crew.id, content))
+  // The per-org throttle lives in here too, not before it: the message is
+  // already saved and delivered in-app regardless of this check's outcome —
+  // only the Slack side-channel ping is what a denied budget skips (see
+  // crewMessageSlackRatelimit's own header for why that split is safe).
+  after(async () => {
+    const slackBudget = await checkLimit(crewMessageSlackRatelimit, crew.org_id, {
+      onError: 'allow',
+      site:    'api.crew.messages.slack',
+    })
+    if (!slackBudget.allowed) return
+    await notifyPmSlack(admin, crew.org_id, crew.id, content)
+  })
 
   return NextResponse.json({ success: true })
 }

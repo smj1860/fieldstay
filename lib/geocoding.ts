@@ -19,6 +19,18 @@ export function distanceMiles(lat1: number, lng1: number, lat2: number, lng2: nu
 }
 
 /**
+ * Bound on TOTAL wall-clock time across both attempts plus backoff, for
+ * callers running synchronously inside a user-facing save (createProperty,
+ * and the crew/vendor settings actions). Without it, worst case is
+ * `2 * GEOCODE_TIMEOUT_MS` plus backoff (~10.2s) — a serverless invocation
+ * held open for the full multi-attempt budget on a merely slow provider.
+ * Slightly above GEOCODE_TIMEOUT_MS rather than equal to it: equal would
+ * leave a failed first attempt no room for a second try at all, which
+ * defeats the point of retrying.
+ */
+const GEOCODE_SAVE_DEADLINE_MS = GEOCODE_TIMEOUT_MS + 3_000
+
+/**
  * Resolves a US ZIP to coordinates via Mapbox. Returns null for every
  * failure mode — no token, a non-2xx response, a network error, or the
  * request exceeding GEOCODE_TIMEOUT_MS — and never throws.
@@ -29,9 +41,17 @@ export function distanceMiles(lat1: number, lng1: number, lat2: number, lng2: nu
  * coordinates". A thrown error here would abort a user's property save over
  * a third-party outage, and the bounded timeout is what stops a hung Mapbox
  * from holding that save open until the Vercel function timeout fires.
+ *
+ * `boundToSave: true` (the synchronous createProperty/updateProperty and
+ * crew/vendor settings-action callers) additionally caps the TOTAL retry
+ * budget via `overallDeadlineMs` — see GEOCODE_SAVE_DEADLINE_MS. Background/
+ * step-scoped callers (the geocoding-backfill cron, the PMS import's
+ * upsert-normalized batch) omit it and keep the full per-attempt budget,
+ * per fetchWithRetry's own documented rationale for that option.
  */
 export async function geocodeZip(
-  zip: string
+  zip: string,
+  opts: { boundToSave?: boolean } = {},
 ): Promise<{ lat: number; lng: number } | null> {
   const token = process.env.MAPBOX_PUBLIC_TOKEN
   if (!token) return null
@@ -49,6 +69,7 @@ export async function geocodeZip(
       attempts:  2,
       timeoutMs: GEOCODE_TIMEOUT_MS,
       label:     'mapbox-geocode',
+      ...(opts.boundToSave ? { overallDeadlineMs: GEOCODE_SAVE_DEADLINE_MS } : {}),
     })
     if (!res.ok) {
       console.warn('[geocodeZip] Mapbox returned a non-OK response', { zip, status: res.status })
