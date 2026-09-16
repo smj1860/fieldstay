@@ -181,6 +181,39 @@ export const PMS_API_TIMEOUT_MS = 30_000
 export const INSPECTION_PHOTO_TIMEOUT_MS = 6_000
 
 /**
+ * Upstash Redis calls made directly against the client (not through a
+ * fetch()-based SDK, so no AbortSignal integration) — the locking path in
+ * lib/cache/single-flight.ts and any other direct `getRedis()`/
+ * `getRedisIfConfigured()` call.
+ *
+ * "Fail open on error" (see lib/redis.ts's header) only helps when the call
+ * THROWS. A Redis instance that is merely slow — not down — under the shared
+ * multi-tenant edge Upstash's free/shared tier runs on hangs the awaiting
+ * request until the platform's own function timeout fires, which is a much
+ * worse outcome than the fast, cheap "proceed unlocked" degrade the fail-open
+ * design intends. Wrap every direct Redis call with `withTimeout()` at this
+ * budget so a slow Redis degrades the same way a down one does.
+ */
+export const REDIS_TIMEOUT_MS = 750
+
+/**
+ * Race `promise` against a timeout, rejecting with the same TimeoutError
+ * shape `isTimeoutError()` recognizes so callers can treat "gave up waiting"
+ * uniformly whether the underlying call had its own AbortSignal or not.
+ *
+ * Does not cancel `promise` itself — for a client with no cancellation hook
+ * (the Upstash HTTP client, an arbitrary retry sequence), there is nothing to
+ * abort; this only bounds how long the CALLER waits before giving up on it.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DOMException(`${label}: timed out after ${ms}ms`, 'TimeoutError')), ms)
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+}
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

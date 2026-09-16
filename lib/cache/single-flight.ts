@@ -1,4 +1,5 @@
 import { getRedisIfConfigured } from '@/lib/redis'
+import { withTimeout, REDIS_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 
 // ============================================================================
 // One expensive producer per key, across every concurrent caller and every
@@ -61,9 +62,14 @@ export async function acquireLock(
   if (!redis) return true
 
   try {
-    return (await redis.set(key, '1', { nx: true, ex: ttlSeconds })) === 'OK'
+    return (await withTimeout(redis.set(key, '1', { nx: true, ex: ttlSeconds }), REDIS_TIMEOUT_MS, `acquireLock(${key})`)) === 'OK'
   } catch (err) {
-    console.warn(`[single-flight] lock unavailable for ${key}, proceeding unlocked:`, err)
+    // A slow-not-down Redis lands here via withTimeout's TimeoutError the
+    // same as a genuine error would — see REDIS_TIMEOUT_MS's header. Either
+    // way, fail open: same call as a Redis outage.
+    if (!isTimeoutError(err)) {
+      console.warn(`[single-flight] lock unavailable for ${key}, proceeding unlocked:`, err)
+    }
     return true
   }
 }
@@ -74,9 +80,9 @@ export async function releaseLock(key: string): Promise<void> {
   if (!redis) return
 
   try {
-    await redis.del(key)
+    await withTimeout(redis.del(key), REDIS_TIMEOUT_MS, `releaseLock(${key})`)
   } catch {
-    // Non-fatal — the TTL expires it.
+    // Non-fatal — the TTL expires it (or a slow release just landed late).
   }
 }
 
