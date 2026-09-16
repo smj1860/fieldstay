@@ -63,6 +63,7 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { reportError } from '@/lib/observability/report-error'
+import { DASHBOARD_WARM_TIMEOUT_MS, withTimeout } from '@/lib/http/timeout'
 import type { Vendor, WorkOrder } from '@/types/database'
 
 import { getDashboardDb } from './schema'
@@ -76,8 +77,26 @@ function canWarm(): boolean {
 export interface MaintenanceBoardWarmResult {
   workOrders: number
   vendors:    number
-  skipped?:   'offline' | 'throttled' | 'unauthenticated'
+  /**
+   * How many open work orders exist on the server past WORK_ORDER_LIMIT —
+   * always present when known, 0 when nothing was truncated. Undefined only
+   * when the count itself could not be determined.
+   */
+  omittedCount?: number
+  skipped?:   'offline' | 'throttled' | 'unauthenticated' | 'timeout'
 }
+
+/**
+ * sync_meta key holding how many open work orders exist on the server past
+ * WORK_ORDER_LIMIT. Read by the dashboard's offline-cache-cap notice —
+ * CLAUDE.md's "a cap that applies must SAY SO in the output", applied to the
+ * one cache here that can silently truncate.
+ */
+export const WORK_ORDER_OMITTED_KEY = 'maintenance_board:work_orders_omitted_count'
+
+/** sync_meta key holding the last known TRUE server-side open-work-order
+ *  count — the cheap-invalidation watermark, distinct from the key above. */
+const WORK_ORDER_COUNT_WATERMARK = 'maintenance_board:work_orders_count_watermark'
 
 const EMPTY: MaintenanceBoardWarmResult = { workOrders: 0, vendors: 0 }
 
@@ -107,6 +126,14 @@ const WARM_INTERVAL_MS = 15 * 60 * 1000
 const inFlight = new Map<string, Promise<MaintenanceBoardWarmResult>>()
 
 /**
+ * Outer safety net on top of every individual query's own AbortSignal — see
+ * the identical constant in warm-inspections.ts for the full reasoning. This
+ * pass is lighter (two sequential Supabase reads plus a count-only
+ * aggregate, no route warms), so its budget is smaller.
+ */
+const WARM_PASS_TIMEOUT_MS = 60_000
+
+/**
  * Pulls the open work-order board into the local cache.
  *
  * Never throws — a device that misses a warm is no worse off than before this
@@ -121,9 +148,17 @@ export function warmMaintenanceBoardForOffline(
   const existing = inFlight.get(key)
   if (existing && !opts.force) return existing
 
-  const run = runWarm(userId, orgId, opts).finally(() => {
-    if (inFlight.get(key) === run) inFlight.delete(key)
-  })
+  const run = withTimeout(() => runWarm(userId, orgId, opts), WARM_PASS_TIMEOUT_MS, 'warmMaintenanceBoardForOffline')
+    .catch((err) => {
+      // Only ever fires from the outer race's own timer — runWarm() never
+      // throws on its own (see its top-level catch). See the identical
+      // comment in warm-inspections.ts.
+      console.warn('[warmMaintenanceBoard] warm pass abandoned by its outer timeout (non-fatal):', err)
+      return { ...EMPTY, skipped: 'timeout' as const }
+    })
+    .finally(() => {
+      if (inFlight.get(key) === run) inFlight.delete(key)
+    })
   inFlight.set(key, run)
   return run
 }
@@ -173,6 +208,46 @@ async function runWarm(
     const pending = await pendingLocalCreateIds(db)
 
     const supabase = createClient()
+
+    // Cheap invalidation, not a real delta pull: a `count`-only aggregate is
+    // far lighter than the bounded row fetch below. When it matches the last
+    // count this warm saw AND nothing is queued locally waiting to change
+    // that count (a local `work_order.create` would make the true server
+    // count stale the moment it lands), the full fetch+reconcile below is
+    // skipped — the cache cannot be wrong in the one way this warm corrects
+    // (reconcile-by-absence) if the set's SIZE has not moved and nothing on
+    // the device is about to change it.
+    //
+    // This is NOT a substitute for a real `updated_at`-watermark delta pull:
+    // it cannot distinguish "nothing changed" from "one was added and a
+    // different one was completed in the same window" — a same-size swap.
+    // A full delta+periodic-reconciliation design (tracking a watermark,
+    // fetching only rows past it, occasionally still doing a full pass to
+    // catch deletes) is real behavioural surgery on the one table every
+    // Maintenance page read also touches, and this fix scopes down to the
+    // smaller, safe improvement instead: skip the expensive replace when a
+    // cheap signal says nothing could have changed, accept the same-size-swap
+    // gap as a known, bounded limitation (the 15-minute throttle already
+    // means the board is never more than one interval stale regardless), and
+    // do the real fetch on every count mismatch, same as before this fix.
+    const { count: liveCount, error: countError } = await supabase
+      .from('work_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .in('status', OPEN_STATUSES)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
+
+    if (!countError && typeof liveCount === 'number' && pending.length === 0) {
+      const watermark = await db.sync_meta.get(WORK_ORDER_COUNT_WATERMARK)
+      const lastCount = watermark ? Number(watermark.value) : null
+      if (lastCount === liveCount) {
+        const omittedCount = Math.max(0, liveCount - Math.min(liveCount, WORK_ORDER_LIMIT))
+        await db.sync_meta.put({ key: WARM_WATERMARK, value: new Date().toISOString() })
+        await db.sync_meta.put({ key: WORK_ORDER_OMITTED_KEY, value: String(omittedCount) })
+        return { workOrders: await db.work_orders.count(), vendors, omittedCount }
+      }
+    }
+
     const { data, error } = await supabase
       .from('work_orders')
       .select(`
@@ -190,6 +265,7 @@ async function runWarm(
       .in('status', OPEN_STATUSES)
       .order('created_at', { ascending: false })
       .limit(WORK_ORDER_LIMIT)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
     // Stamped even on failure and even with nothing to warm — otherwise an org
     // with no open work orders (or a flaky query) re-runs this on every
@@ -204,8 +280,14 @@ async function runWarm(
     }
 
     const rows = (data ?? []) as unknown as WorkOrder[]
+    // The count query's OWN error/shape does not gate this fetch — a count
+    // that failed just means the omitted figure stays honestly unknown (0),
+    // never that the work orders themselves are stale.
+    const omittedCount = !countError && typeof liveCount === 'number'
+      ? Math.max(0, liveCount - rows.length)
+      : 0
 
-    await db.transaction('rw', db.work_orders, async () => {
+    await db.transaction('rw', db.work_orders, db.sync_meta, async () => {
       const covered = rows.map((r) => r.id)
       const keep = new Set([...covered, ...pending])
       // Reconciled by absence, but never against a row this device is still
@@ -216,9 +298,14 @@ async function runWarm(
       const stale = allIds.filter((id) => !keep.has(id))
       await db.work_orders.bulkDelete(stale)
       await db.work_orders.bulkPut(rows)
+      await db.sync_meta.put({
+        key:   WORK_ORDER_COUNT_WATERMARK,
+        value: String(!countError && typeof liveCount === 'number' ? liveCount : rows.length),
+      })
+      await db.sync_meta.put({ key: WORK_ORDER_OMITTED_KEY, value: String(omittedCount) })
     })
 
-    return { workOrders: rows.length, vendors }
+    return { workOrders: rows.length, vendors, omittedCount }
   } catch (err) {
     console.warn('[warmMaintenanceBoard] warm failed (non-fatal):', err)
     return EMPTY
@@ -244,6 +331,7 @@ async function cacheVendors(
       .eq('is_active', true)
       .order('name')
       .limit(VENDOR_LIMIT)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
     if (error) {
       reportError(error, { site: 'dexie.dashboard.warmMaintenanceBoard.vendors', orgId, level: 'warning' })

@@ -338,6 +338,22 @@ export class FieldStayDashboardDexie extends Dexie {
       work_orders:       'id, org_id, property_id, status',
       open_wo_concerns:  'id, propertyId, [propertyId+concernKey]',
     })
+
+    // v6 — index `status` on the photo queue.
+    //
+    // Uploaded rows are only ever STATUS-FLIPPED, never deleted (see the
+    // header comment in inspection-photos.ts — the UI needs to tell "no
+    // photo" from "photo taken, already sent"), so this table grows without
+    // bound over a device's lifetime. drainInspectionPhotos() used to read
+    // it with an unfiltered `.toArray()` on every photo capture and every
+    // reconnect — a full scan of every photo this device has ever queued,
+    // including ones long since uploaded and forgotten. `status` is what
+    // actually separates the actionable rows from the rest, so it is what
+    // needs the index; `pruneUploadedPhotoRows()` (inspection-photos.ts)
+    // keeps the table itself from growing forever in the first place.
+    this.version(6).stores({
+      pending_photo_uploads: 'id, targetId, failed, status',
+    })
   }
 }
 

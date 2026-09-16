@@ -58,6 +58,7 @@ import {
   captureInspectionPhoto,
   discardInspectionPhoto,
   drainInspectionPhotos,
+  pruneUploadedPhotoRows,
 } from '@/lib/dexie/dashboard/inspection-photos'
 import type { InspectionAnswerRow, OpenConcernRow } from '@/lib/dexie/dashboard/schema'
 import { enqueueDashboardMutation } from '@/lib/dexie/dashboard/syncService'
@@ -91,6 +92,10 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       if (!cancelled) setPullFailed(!outcome.ok)
     })
     void pruneFinishedInspections(userId, orgId)
+    // Same lifecycle point, same reason: uploaded photo rows are only ever
+    // status-flipped, never deleted on their own, so this table grows
+    // without bound over a device's lifetime otherwise.
+    void pruneUploadedPhotoRows(userId, orgId)
     // Any photo left queued from a previous visit — the drain is idempotent and
     // gates itself on being online.
     void drainInspectionPhotos(userId, orgId)

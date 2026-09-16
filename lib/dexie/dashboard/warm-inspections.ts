@@ -44,7 +44,7 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { reportError } from '@/lib/observability/report-error'
-import { ROUTE_WARM_TIMEOUT_MS } from '@/lib/http/timeout'
+import { DASHBOARD_WARM_TIMEOUT_MS, ROUTE_WARM_TIMEOUT_MS, withTimeout } from '@/lib/http/timeout'
 import { SHELL_CACHE } from '@/lib/pwa/cache-names'
 import type {
   Inspection,
@@ -89,7 +89,13 @@ export interface WarmResult {
   properties:  number
   /** §7 inspection schedules cached, so "what's due" survives losing signal. */
   schedules:   number
-  skipped?:    'offline' | 'throttled' | 'unauthenticated'
+  /**
+   * How many inspection schedules exist on the server past SCHEDULE_LIMIT —
+   * always present when known, 0 when nothing was truncated. Undefined only
+   * when the count itself could not be determined (see cacheInspectionSchedules).
+   */
+  omittedCount?: number
+  skipped?:    'offline' | 'throttled' | 'unauthenticated' | 'timeout'
 }
 
 // One in-flight run per (userId, orgId) — a concurrent caller AWAITS the
@@ -104,6 +110,23 @@ export interface WarmResult {
 // transactions interleave. Same pattern inspection-photos.ts's
 // drainInspectionPhotos already uses for the same reason.
 const inFlight = new Map<string, Promise<WarmResult>>()
+
+/**
+ * Outer safety net on top of every individual query's own AbortSignal.
+ *
+ * Generous on purpose — this covers a whole multi-query pass (the form
+ * library's own Promise.all of four queries, the schedule fetch, the open
+ * inspections fetch, the per-inspection assets/concerns fetches, then up to
+ * WARM_INSPECTION_LIMIT + 1 sequential route warms at ROUTE_WARM_TIMEOUT_MS
+ * each), so it must not fire on a merely slow-but-succeeding pass. It exists
+ * only for the case an individual AbortSignal cannot reach at all — a call
+ * with no signal parameter (`hasUsableSession()`'s `getSession()`), a paused
+ * background tab, or a hung IndexedDB transaction — so that `runWarm()`'s
+ * promise still SETTLES and the `.finally()` below still clears the
+ * in-flight entry, rather than wedging this tab's warm pipeline for the rest
+ * of the session.
+ */
+const WARM_PASS_TIMEOUT_MS = 120_000
 
 /**
  * Pulls every open inspection into the local cache and warms its page.
@@ -125,9 +148,20 @@ export function warmInspectionsForOffline(
   const existing = inFlight.get(key)
   if (existing && !opts.force) return existing
 
-  const run = runWarm(userId, orgId, opts).finally(() => {
-    if (inFlight.get(key) === run) inFlight.delete(key)
-  })
+  const run = withTimeout(() => runWarm(userId, orgId, opts), WARM_PASS_TIMEOUT_MS, 'warmInspectionsForOffline')
+    .catch((err) => {
+      // The pass itself never throws (see runWarm's own top-level catch) —
+      // this only ever fires from the outer race's own timer, i.e. every
+      // per-query AbortSignal below somehow did not stop the pass in time.
+      // Reported as a warning, not swallowed silently: a warm that never
+      // settles on its own is exactly the condition this whole fix exists
+      // for.
+      console.warn('[warmInspections] warm pass abandoned by its outer timeout (non-fatal):', err)
+      return { ...EMPTY, skipped: 'timeout' as const }
+    })
+    .finally(() => {
+      if (inFlight.get(key) === run) inFlight.delete(key)
+    })
   inFlight.set(key, run)
   return run
 }
@@ -160,7 +194,7 @@ async function runWarm(
     // Same reasoning, same independence: what is DUE is most useful to an org
     // with nothing open, and a schedule the PM cannot see is a walk they will
     // not do.
-    const schedules = await cacheInspectionSchedules(db, orgId)
+    const { count: schedules, omittedCount } = await cacheInspectionSchedules(db, orgId)
 
     // Re-checked, not just at the top: this pass makes five-plus sequential/
     // parallel round-trips (cacheFormLibrary's own Promise.all of four
@@ -169,10 +203,10 @@ async function runWarm(
     // expire mid-pass. A later query going out unauthenticated 42501s —
     // exactly the incident ./session-gate.ts documents, just narrowed to
     // whichever tail queries ran after expiry instead of all of them.
-    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, skipped: 'unauthenticated' }
+    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, omittedCount, skipped: 'unauthenticated' }
 
     const inspections = await fetchOpenInspections(orgId)
-    if (inspections === null) return { ...EMPTY, ...library, schedules }
+    if (inspections === null) return { ...EMPTY, ...library, schedules, omittedCount }
 
     // Stamped even when there is nothing further to warm. An org with no open
     // inspections would otherwise re-run every query on every dashboard mount,
@@ -182,10 +216,10 @@ async function runWarm(
       // Still warm the START route — an org with nothing open is exactly the
       // one whose next act is beginning a walk, possibly at the property.
       const routes = await warmRoutes(['/maintenance/inspections'])
-      return { ...EMPTY, ...library, schedules, routes }
+      return { ...EMPTY, ...library, schedules, omittedCount, routes }
     }
 
-    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, skipped: 'unauthenticated' }
+    if (!(await hasUsableSession())) return { ...EMPTY, ...library, schedules, omittedCount, skipped: 'unauthenticated' }
 
     await cacheInspectionsAndAssets(db, orgId, inspections)
     await cacheOpenConcerns(db, orgId, [...new Set(inspections.map((i) => i.property_id))])
@@ -198,7 +232,7 @@ async function runWarm(
       ...inspections.map((i) => `/maintenance/inspections/${i.id}`),
     ])
 
-    return { ...EMPTY, ...library, schedules, inspections: inspections.length, routes }
+    return { ...EMPTY, ...library, schedules, omittedCount, inspections: inspections.length, routes }
   } catch (err) {
     console.warn('[warmInspections] warm failed (non-fatal):', err)
     return EMPTY
@@ -233,9 +267,38 @@ const EMPTY: WarmResult = { inspections: 0, routes: 0, formItems: 0, properties:
 async function cacheInspectionSchedules(
   db:    ReturnType<typeof getDashboardDb>,
   orgId: string,
-): Promise<number> {
+): Promise<{ count: number; omittedCount: number }> {
   try {
     const supabase = createClient()
+
+    // Cheap invalidation, not a real delta pull: a `count`-only aggregate is
+    // far lighter than the bounded row fetch below (no row bytes at all), and
+    // there is no local mutation queue against this table — nothing on the
+    // device ever writes an inspection schedule — so an unchanged count means
+    // the set this cache needs to represent has not changed either. Skipping
+    // the fetch+clear+bulkPut on THAT case still leaves the cache correct.
+    // This is not a substitute for a real `updated_at`-watermark delta pull —
+    // it cannot tell "changed" from "one added, one removed", only "same size
+    // or not" — see the header note on the maintenance-board equivalent for
+    // why that gap was accepted here instead of a full delta design.
+    const { count: liveCount, error: countError } = await supabase
+      .from('maintenance_schedules')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('creates', 'inspection')
+      .eq('is_active', true)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
+
+    if (!countError && typeof liveCount === 'number') {
+      const watermark = await db.sync_meta.get(SCHEDULE_COUNT_WATERMARK)
+      const lastCount = watermark ? Number(watermark.value) : null
+      if (lastCount === liveCount) {
+        const omittedCount = Math.max(0, liveCount - Math.min(liveCount, SCHEDULE_LIMIT))
+        await db.sync_meta.put({ key: SCHEDULES_OMITTED_KEY, value: String(omittedCount) })
+        return { count: await db.maintenance_schedules.count(), omittedCount }
+      }
+    }
+
     const { data, error } = await supabase
       .from('maintenance_schedules')
       .select('*')
@@ -244,32 +307,56 @@ async function cacheInspectionSchedules(
       .eq('is_active', true)
       .order('next_due_date', { ascending: true, nullsFirst: false })
       .limit(SCHEDULE_LIMIT)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
     if (error) {
       reportError(error, { site: 'dexie.dashboard.warmInspections.schedules', level: 'warning' })
       // Left alone rather than cleared, same as the open concerns: a failed
       // fetch is not evidence that nothing is scheduled, and wiping here would
       // hide every due walk from a device that had a perfectly good copy.
-      return 0
+      return { count: 0, omittedCount: 0 }
     }
 
     const rows = (data ?? []) as unknown as MaintenanceSchedule[]
+    // The count query's OWN error/shape does not gate this fetch — a count
+    // that failed just means the omitted figure stays honestly unknown (0),
+    // never that the schedules themselves are stale.
+    const omittedCount = !countError && typeof liveCount === 'number'
+      ? Math.max(0, liveCount - rows.length)
+      : 0
 
-    await db.transaction('rw', db.maintenance_schedules, async () => {
+    await db.transaction('rw', db.maintenance_schedules, db.sync_meta, async () => {
       // Reconciled by absence, and empty IS a legitimate steady state here — an
       // org may genuinely have no inspection schedules, and one that deletes its
       // last must not keep being told a walk is due. Safe because the error
       // branch returned above, so an empty array means the server said empty.
       await db.maintenance_schedules.clear()
       await db.maintenance_schedules.bulkPut(rows)
+      await db.sync_meta.put({
+        key:   SCHEDULE_COUNT_WATERMARK,
+        value: String(!countError && typeof liveCount === 'number' ? liveCount : rows.length),
+      })
+      await db.sync_meta.put({ key: SCHEDULES_OMITTED_KEY, value: String(omittedCount) })
     })
 
-    return rows.length
+    return { count: rows.length, omittedCount }
   } catch (err) {
     console.warn('[warmInspections] schedule warm failed (non-fatal):', err)
-    return 0
+    return { count: 0, omittedCount: 0 }
   }
 }
+
+/** sync_meta key holding the last known TRUE server-side schedule count — the
+ *  cheap-invalidation watermark, distinct from SCHEDULES_OMITTED_KEY below. */
+const SCHEDULE_COUNT_WATERMARK = 'inspections:schedules_count_watermark'
+
+/**
+ * sync_meta key holding how many inspection schedules exist on the server
+ * past SCHEDULE_LIMIT. Read by the dashboard's offline-cache-cap notice —
+ * CLAUDE.md's "a cap that applies must SAY SO in the output", applied to the
+ * one cache here that can silently truncate.
+ */
+export const SCHEDULES_OMITTED_KEY = 'inspections:schedules_omitted_count'
 
 /**
  * Ceiling on cached schedules. Explicit because `max_rows` would otherwise
@@ -296,12 +383,16 @@ async function cacheFormLibrary(
   const supabase = createClient()
 
   const [forms, sections, items, properties] = await Promise.all([
-    supabase.from('inspection_forms').select('*').eq('is_active', true).limit(50),
-    supabase.from('inspection_form_sections').select('*').limit(500),
+    supabase.from('inspection_forms').select('*').eq('is_active', true).limit(50)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS)),
+    supabase.from('inspection_form_sections').select('*').limit(500)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS)),
     // Bounded well above the live 186. A truncated item list is the dangerous
     // failure here: it renders as a form that is simply missing questions.
-    supabase.from('inspection_form_items').select('*').limit(5000),
-    supabase.from('properties').select('*').eq('org_id', orgId).order('name').limit(500),
+    supabase.from('inspection_form_items').select('*').limit(5000)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS)),
+    supabase.from('properties').select('*').eq('org_id', orgId).order('name').limit(500)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS)),
   ])
 
   const failed = [forms, sections, items, properties].find((r) => r.error)
@@ -376,6 +467,7 @@ async function fetchOpenInspections(orgId: string): Promise<Inspection[] | null>
     // warms the ones a PM is most likely to be driving to.
     .order('started_at', { ascending: false })
     .limit(WARM_INSPECTION_LIMIT)
+    .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
   if (error) {
     reportError(error, { site: 'dexie.dashboard.warmInspections', level: 'warning' })
@@ -410,6 +502,7 @@ async function cacheInspectionsAndAssets(
     // One query for every property rather than one per property — the N+1 this
     // repo has a guardrail about. Bounded by properties × ~21 asset types.
     .limit(WARM_INSPECTION_LIMIT * 100)
+    .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
   if (error) {
     reportError(error, { site: 'dexie.dashboard.warmInspections.assets', level: 'warning' })
@@ -479,6 +572,7 @@ async function cacheOpenConcerns(
       // showing is the one that has been waiting longest.
       .order('created_at', { ascending: true })
       .limit(OPEN_CONCERN_LIMIT)
+      .abortSignal(AbortSignal.timeout(DASHBOARD_WARM_TIMEOUT_MS))
 
     if (error) {
       reportError(error, { site: 'dexie.dashboard.warmInspections.openConcerns', level: 'warning' })
