@@ -181,6 +181,22 @@ export const PMS_API_TIMEOUT_MS = 30_000
 export const INSPECTION_PHOTO_TIMEOUT_MS = 6_000
 
 /**
+ * Upstash Redis calls made directly against the client (not through a
+ * fetch()-based SDK, so no AbortSignal integration) — the locking path in
+ * lib/cache/single-flight.ts and any other direct `getRedis()`/
+ * `getRedisIfConfigured()` call.
+ *
+ * "Fail open on error" (see lib/redis.ts's header) only helps when the call
+ * THROWS. A Redis instance that is merely slow — not down — under the shared
+ * multi-tenant edge Upstash's free/shared tier runs on hangs the awaiting
+ * request until the platform's own function timeout fires, which is a much
+ * worse outcome than the fast, cheap "proceed unlocked" degrade the fail-open
+ * design intends. Wrap every direct Redis call with `withTimeout()` at this
+ * budget so a slow Redis degrades the same way a down one does.
+ */
+export const REDIS_TIMEOUT_MS = 750
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *
@@ -192,4 +208,71 @@ export function isTimeoutError(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false
   const name = (err as { name?: unknown }).name
   return name === 'TimeoutError' || name === 'AbortError'
+}
+
+/**
+ * Per-query budget for the PM dashboard's offline warm pipeline
+ * (lib/dexie/dashboard/session-gate.ts, warm-inspections.ts,
+ * warm-maintenance-board.ts).
+ *
+ * A warm pass tracks its own in-flight run in a module-level Map, cleared
+ * only in a `.finally()` on the pass's promise. Every Supabase call inside
+ * that pass used to have no AbortSignal at all — so one hung request (a
+ * captive portal, a backend that accepted the connection and never
+ * answered) meant that `.finally()` never fired, and the tab's warm
+ * pipeline was dead for the rest of the session: every later mount and
+ * every later 'online' event would see the stale in-flight entry and just
+ * await the same promise that was never going to settle. This is what
+ * bounds each individual query; see `withTimeout()` below for the second,
+ * outer layer that protects against a call this budget cannot reach at all
+ * (`auth.getSession()` takes no AbortSignal parameter).
+ */
+export const DASHBOARD_WARM_TIMEOUT_MS = 15_000
+
+/**
+ * Raised by `withTimeout()` when its own timer wins the race. Named
+ * 'TimeoutError' (not a custom name) so `isTimeoutError()` above classifies
+ * it exactly like an `AbortSignal.timeout()` rejection — the caller does not
+ * need to know which mechanism produced the timeout.
+ */
+export class RaceTimeoutError extends Error {
+  constructor(label: string) {
+    super(`${label} timed out`)
+    this.name = 'TimeoutError'
+  }
+}
+
+/**
+ * Races `run()` against a plain timer, for a call that accepts no
+ * `AbortSignal` of its own — supabase-js's `auth.getSession()` is the
+ * motivating case: it has no signal parameter, so nothing here can make the
+ * underlying request actually stop, but a caller that only needs to STOP
+ * WAITING (a best-effort warm pass, not a payment) benefits from resolving
+ * anyway. Same pattern as `sendWithTimeout()` in lib/resend/client.ts, which
+ * documents why racing rather than aborting is safe there — the same
+ * reasoning applies here: an abandoned `getSession()` call is idempotent and
+ * has no side effect to leave dangling.
+ *
+ * Also the general-purpose wrapper for the Redis locking path
+ * (lib/cache/single-flight.ts): the Upstash HTTP client has no cancellation
+ * hook either, so `withTimeout(() => redis.set(...), REDIS_TIMEOUT_MS, label)`
+ * bounds how long the CALLER waits without needing the client itself to
+ * support abort.
+ *
+ * The timer is always cleared, including on the happy path — otherwise it
+ * would keep whatever event loop it is running in alive for the rest of the
+ * budget after `run()` already settled.
+ */
+export async function withTimeout<T>(run: () => Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new RaceTimeoutError(label)), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }

@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { scoreCrewCandidates, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
+import { topCrewCandidate, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
@@ -243,17 +243,22 @@ export const autoAssignTurnover = inngest.createFunction(
 
     if (!context) return { skipped: true, reason: 'disabled or no candidates' }
 
-    const scored = await step.run('score-candidates', async () => {
+    const top = await step.run('score-candidates', async () => {
       // The scorer itself lives in lib/scoring/crew-candidates.ts. It was
       // inline here until the Friction Forecaster's Smart Fix needed the same
       // ranking: a second copy would have let the board's suggestion and the
       // exceptions panel's Smart Fix drift into recommending different people
       // for the same turnover, each looking correct in isolation.
+      //
+      // topCrewCandidate(), not scoreCrewCandidates(): only the best pick is
+      // ever read here, and doing a full O(n log n) sort of the roster just
+      // to throw away everything but index 0 is wasted work on every
+      // turnover assigned.
       const { isSameDay, property, crew, familiarCrewIds, workloadMap } = context
-      return scoreCrewCandidates({ isSameDay, property, crew, familiarCrewIds, workloadMap })
+      return topCrewCandidate({ isSameDay, property, crew, familiarCrewIds, workloadMap })
     })
 
-    if (!scored.length) {
+    if (!top) {
       await step.sendEvent('notify-assignment-gap', {
         name: 'crew/assignment-gap',
         data: {
@@ -271,8 +276,6 @@ export const autoAssignTurnover = inngest.createFunction(
       })
       return { gap: true }
     }
-
-    const top = scored[0]!
 
     const reasoning = crewSuggestionReasoning(top)
 

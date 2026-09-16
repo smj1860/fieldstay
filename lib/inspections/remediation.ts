@@ -1,8 +1,9 @@
 import 'server-only'
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js'
 
 import { reportQueryError } from '@/lib/supabase/unwrap'
+import { chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
 
 // What each inspection failure turned into, and where that record stands NOW.
 //
@@ -74,17 +75,25 @@ export async function loadRemediationIndex(
   const index: RemediationIndex = { byItem: new Map(), byInspection: new Map() }
   if (inspectionIds.length === 0) return index
 
-  // THREE QUERIES RATHER THAN AN `.or()`, and the reason is not style.
+  // THREE QUERY SHAPES RATHER THAN AN `.or()`, and the reason is not style.
   // PostgREST encodes `.in()` values into the query string, so a combined
   // `or=(a.in.(...),b.in.(...))` puts every failed-item id AND every inspection
   // id in one URL — and an oversized or malformed `.or()` fails the WHOLE read,
   // taking the two roll-ups down with the per-finding lookup. Split, each is
   // independently bounded and independently survivable.
   //
+  // Each shape is further CHUNKED (IN_CLAUSE_CHUNK_SIZE ids per `.in()`) rather
+  // than run as one query with an inflated `.limit(ids.length * 3)` — the same
+  // reasoning as PostgREST's `.or()` above applies to `.in()` itself: it is also
+  // encoded into the URL query string, so an id list sized by "how many failures
+  // /walks are in scope" (thousands, at real scale) risks a request that exceeds
+  // reverse-proxy request-line limits outright rather than degrading. A chunk
+  // that errors is reported and skipped independently — see fetchChunkedRows.
+  //
   // The per-item list is the only one that scales with data rather than with
   // the caller's cap, and it is bounded by failures across the walks in scope.
-  // .order('created_at', { ascending: false }) + a *3 headroom limit, not an
-  // exact 1:1 bet: the "one row per key" assumption below (a cancelled WO
+  // .order('created_at', { ascending: false }) + a *3 headroom limit per chunk,
+  // not an exact 1:1 bet: the "one row per key" assumption below (a cancelled WO
   // replaced by a new one, a retried request racing a unique constraint, a
   // manually duplicated PO) can be violated, and without an ORDER BY Postgres
   // is free to return the surviving rows in whatever order it finds
@@ -92,47 +101,64 @@ export async function loadRemediationIndex(
   // indexWorkOrders/indexPurchaseOrders keeping only the FIRST row seen per
   // key (below) makes "newest wins" deterministic instead of an array-order
   // coin flip.
-  const [byItemRes, byInspectionRes, poRes] = await Promise.all([
-    failedItemIds.length === 0 ? emptyWoResult() : supabase
+  const [byItemRows, byInspectionRows, poRows] = await Promise.all([
+    fetchChunkedRows<WoRow>(failedItemIds, `${site}.workOrders`, orgId, (chunk) => supabase
       .from('work_orders')
       .select('wo_number, status, source_inspection_item_id, source_inspection_id, created_at')
       .eq('org_id', orgId)
-      .in('source_inspection_item_id', failedItemIds)
+      .in('source_inspection_item_id', chunk)
       .order('created_at', { ascending: false })
-      .limit(failedItemIds.length * 3),
-    supabase
+      .limit(chunk.length * 3)),
+    fetchChunkedRows<WoRow>(inspectionIds, `${site}.rollups`, orgId, (chunk) => supabase
       .from('work_orders')
       .select('wo_number, status, source_inspection_item_id, source_inspection_id, created_at')
       .eq('org_id', orgId)
-      .in('source_inspection_id', inspectionIds)
+      .in('source_inspection_id', chunk)
       .order('created_at', { ascending: false })
-      .limit(inspectionIds.length * 3),
-    supabase
+      .limit(chunk.length * 3)),
+    fetchChunkedRows<PoRow>(inspectionIds, `${site}.purchaseOrders`, orgId, (chunk) => supabase
       .from('purchase_orders')
       .select('id, status, source_inspection_id, created_at')
       .eq('org_id', orgId)
-      .in('source_inspection_id', inspectionIds)
+      .in('source_inspection_id', chunk)
       .order('created_at', { ascending: false })
-      .limit(inspectionIds.length * 3),
+      .limit(chunk.length * 3)),
   ])
 
-  if (!reportQueryError(byItemRes.error, { site: `${site}.workOrders`, orgId })) {
-    indexWorkOrders(index, (byItemRes.data ?? []) as WoRow[])
-  }
-  if (!reportQueryError(byInspectionRes.error, { site: `${site}.rollups`, orgId })) {
-    indexWorkOrders(index, (byInspectionRes.data ?? []) as WoRow[])
-  }
-  if (!reportQueryError(poRes.error, { site: `${site}.purchaseOrders`, orgId })) {
-    indexPurchaseOrders(index, (poRes.data ?? []) as PoRow[])
-  }
+  indexWorkOrders(index, byItemRows)
+  indexWorkOrders(index, byInspectionRows)
+  indexPurchaseOrders(index, poRows)
 
   return index
 }
 
-/** A walk with zero failures needs no per-item lookup — and `in.()` with an
- *  empty list is a PostgREST syntax error rather than a match-nothing. */
-function emptyWoResult() {
-  return Promise.resolve({ data: [] as WoRow[], error: null })
+/**
+ * Runs one `.in()` query per chunk of `ids` (IN_CLAUSE_CHUNK_SIZE per chunk)
+ * and merges the rows, rather than one query sized by the whole list.
+ *
+ * A chunk that errors is reported and its rows dropped, independently of every
+ * other chunk — one bad chunk costs part of this section of the index, never
+ * the whole thing, matching this module's "never throws" contract above.
+ *
+ * `ids.length === 0` short-circuits before building any chunk: `.in()` with an
+ * empty list is a PostgREST syntax error rather than a match-nothing.
+ */
+async function fetchChunkedRows<Row>(
+  ids:  readonly string[],
+  site: string,
+  orgId: string,
+  runChunk: (chunk: readonly string[]) => PromiseLike<{ data: Row[] | null; error: PostgrestError | null }>,
+): Promise<Row[]> {
+  if (ids.length === 0) return []
+
+  const results = await Promise.all(chunkArray(ids, IN_CLAUSE_CHUNK_SIZE).map(runChunk))
+
+  const rows: Row[] = []
+  for (const res of results) {
+    if (reportQueryError(res.error, { site, orgId })) continue
+    rows.push(...(res.data ?? []))
+  }
+  return rows
 }
 
 /**

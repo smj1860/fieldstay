@@ -38,6 +38,9 @@ import { NonRetriableError } from 'inngest'
 import { RateLimitError } from '@/lib/integrations/types'
 import { checkLimit, hostexApiLimiter, hostexApiHourlyLimiter, outboundBackoffSeconds } from '@/lib/rate-limit'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { fetchWithRetry } from '@/lib/http/retry'
+import { rateLimitRetry } from '@/lib/inngest/retry-after'
+import { evaluateBreaker, recordFailure, recordSuccess, CircuitOpenError } from '@/lib/integrations/circuit-breaker'
 import {
   hostexProvider,
   isHostexSuccess,
@@ -144,26 +147,20 @@ export function isHostexAccountActionError(err: unknown): boolean {
 }
 
 /**
- * One authenticated Hostex GET, returning the unwrapped `data` payload.
+ * Throws BEFORE Hostex would throttle us. Fails CLOSED: these budgets exist
+ * to keep us under the provider's own ceiling, so a budget that cannot be
+ * consulted must not let a call through — Inngest's step retry handles the
+ * backoff either way.
  *
- * @throws RateLimitError when Hostex throttles (in-band, see the header).
- * @throws Error for any other non-success error_code, naming the code.
+ * Both windows, because Hostex enforces both and the minute one does not
+ * imply the hour — see the note above hostexApiLimiter. Sequential rather
+ * than concurrent so a burst that is already over the minute does not also
+ * spend an hourly token it will not use.
+ *
+ * Extracted out of hostexFetch to keep that function's own cognitive
+ * complexity under the enforced ceiling — behavior is unchanged.
  */
-export async function hostexFetch<T>(
-  path:   string,
-  token:  string,
-  /** The connection this call is spent against — Hostex quotas are per-token. */
-  userId: string,
-  init?:  { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown },
-): Promise<T> {
-  // Fails CLOSED: these budgets exist to throw before Hostex throttles us. If
-  // a budget cannot be consulted we must not blow through the provider's
-  // ceiling — Inngest's step retry handles the backoff.
-  //
-  // Both windows, because Hostex enforces both and the minute one does not
-  // imply the hour — see the note above hostexApiLimiter. Sequential rather
-  // than concurrent so a burst that is already over the minute does not also
-  // spend an hourly token it will not use.
+async function enforceHostexRateLimit(userId: string): Promise<void> {
   for (const [limiter, label] of [
     [hostexApiLimiter,       'minute'] as const,
     [hostexApiHourlyLimiter, 'hourly'] as const,
@@ -183,16 +180,86 @@ export async function hostexFetch<T>(
       // jitter:false because withRetryJitter below is this module's own spread
       // (0.75-1.25x, deliberately different from the shared 1.0-1.5x) and
       // applying both would compound them.
-      throw new RateLimitError(withRetryJitter(outboundBackoffSeconds(budget, { jitter: false })))
+      throw rateLimitRetry(new RateLimitError(withRetryJitter(outboundBackoffSeconds(budget, { jitter: false }))))
     }
   }
+}
 
-  const res = await fetch(`${HOSTEX_API_BASE}${path}`, {
-    method:  init?.method ?? 'GET',
-    headers: hostexProvider.getApiHeaders(token),
-    body:    init?.body === undefined ? undefined : JSON.stringify(init.body),
-    signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-  })
+/**
+ * The raw HTTP call, with the circuit breaker's failure bookkeeping around
+ * it. GET-only retry: fetchWithRetry refuses non-idempotent methods (see its
+ * header), and every hostexFetch caller in lib/inngest/functions/hostex/**
+ * that walks pages (fetchAllPages below) only ever does GET. This absorbs a
+ * transient timeout/5xx/429 on a single page without needing the caller's
+ * whole `step.run` — often hundreds of pages deep — to fail and be replayed
+ * from page 0 by Inngest's own retry.
+ *
+ * Extracted out of hostexFetch for the same cognitive-complexity reason as
+ * enforceHostexRateLimit above.
+ */
+async function hostexRawFetch(
+  path:   string,
+  token:  string,
+  method: 'GET' | 'POST' | 'DELETE',
+  body:   unknown,
+): Promise<Response> {
+  try {
+    return method === 'GET'
+      ? await fetchWithRetry(
+          `${HOSTEX_API_BASE}${path}`,
+          { method: 'GET', headers: hostexProvider.getApiHeaders(token) },
+          { timeoutMs: PMS_API_TIMEOUT_MS, label: `Hostex ${path}`, attempts: 3 },
+        )
+      : await fetch(`${HOSTEX_API_BASE}${path}`, {
+          method,
+          headers: hostexProvider.getApiHeaders(token),
+          body:    body === undefined ? undefined : JSON.stringify(body),
+          signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
+        })
+  } catch (err) {
+    // A timeout or transport failure that survived fetchWithRetry's own
+    // attempts (or a POST/DELETE's single unretried attempt) is exactly what
+    // the breaker counts.
+    await recordFailure('hostex')
+    throw err
+  }
+}
+
+/**
+ * One authenticated Hostex GET, returning the unwrapped `data` payload.
+ *
+ * @throws RetryAfterError (via rateLimitRetry) when Hostex throttles
+ *         (in-band, see the header) — so Inngest waits the interval Hostex
+ *         actually asked for instead of retrying on its own generic backoff
+ *         curve. A bare RateLimitError used to escape uncaught: nothing in
+ *         lib/inngest/functions/hostex/** ever converted one, so every
+ *         throttle was retried on Inngest's own schedule regardless of what
+ *         Hostex's Retry-After said.
+ * @throws Error for any other non-success error_code, naming the code.
+ */
+export async function hostexFetch<T>(
+  path:   string,
+  token:  string,
+  /** The connection this call is spent against — Hostex quotas are per-token. */
+  userId: string,
+  init?:  { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown },
+): Promise<T> {
+  await enforceHostexRateLimit(userId)
+
+  // Circuit breaker, checked BEFORE the fetch — same chokepoint pattern as
+  // krogerFetch (lib/kroger/client.ts). Without it, every independent Hostex
+  // sync (initial, reconcile, webhook — across every connected org) keeps
+  // calling through a provider-wide outage, each waiting out the full
+  // PMS_API_TIMEOUT_MS and getting retried by Inngest's backoff: N connections
+  // x (1 + retries) full-timeout round trips against a provider already
+  // struggling, at the exact moment it can least take the load.
+  const { decision: breakerDecision, priorFailures } = await evaluateBreaker('hostex')
+  if (breakerDecision === 'open') {
+    throw new NonRetriableError(new CircuitOpenError('hostex').message)
+  }
+
+  const method = init?.method ?? 'GET'
+  const res    = await hostexRawFetch(path, token, method, init?.body)
 
   let envelope: HostexEnvelope<T>
   try {
@@ -200,12 +267,16 @@ export async function hostexFetch<T>(
   } catch {
     // A body that isn't JSON is the one case where the HTTP status is the only
     // information available — an edge/proxy error page rather than Hostex.
+    await recordFailure('hostex')
     throw new Error(`Hostex ${path} returned a non-JSON body: HTTP ${res.status}`)
   }
 
   if (envelope.error_code === HOSTEX_RATE_LIMITED_CODE) {
+    // Deliberately NOT a breaker failure — Hostex working correctly and
+    // telling us to slow down is not the provider failing. Same exemption
+    // krogerFetch makes for its own 429.
     const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
-    throw new RateLimitError(withRetryJitter(Number.isFinite(retryAfter) ? retryAfter : 60))
+    throw rateLimitRetry(new RateLimitError(withRetryJitter(Number.isFinite(retryAfter) ? retryAfter : 60)))
   }
 
   if (!isHostexSuccess(envelope.error_code)) {
@@ -214,13 +285,23 @@ export async function hostexFetch<T>(
 
     // NonRetriableError stops Inngest at the first attempt. Wrapped rather
     // than thrown directly so the code survives for the caller to branch on:
-    // `cause` is what isHostexAccountActionError reads.
+    // `cause` is what isHostexAccountActionError reads. Not a breaker
+    // failure either — a 400/401/403/404/409/420/422/501 is US being wrong or
+    // an account-level condition, not Hostex's service degrading.
     if (HOSTEX_TERMINAL_CODES.has(envelope.error_code)) {
       throw new NonRetriableError(failure.message, { cause: failure })
     }
 
+    // Absent from HOSTEX_TERMINAL_CODES — a 5xx-shaped or unknown failure the
+    // adapter's own doc says stays retryable, and exactly what the breaker
+    // should count: Hostex FAILING, not us being wrong or being throttled.
+    await recordFailure('hostex')
     throw failure
   }
+
+  // Only clear when there is something to clear — see krogerFetch's identical
+  // comment on why this isn't unconditional.
+  if (priorFailures > 0) await recordSuccess('hostex')
 
   return envelope.data
 }

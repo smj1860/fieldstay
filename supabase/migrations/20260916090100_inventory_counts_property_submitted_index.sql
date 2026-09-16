@@ -1,0 +1,37 @@
+-- ============================================================================
+-- recordConsumptionFromCount()'s "previous count" lookup
+-- (lib/inventory/record-consumption.ts) is:
+--
+--   .eq('property_id', propertyId).eq('org_id', orgId)
+--   .lt('submitted_at', curr.data.submitted_at)
+--   .order('submitted_at', { ascending: false })
+--   .limit(1)
+--
+-- — an equality filter on property_id, a range filter + ORDER BY DESC + LIMIT
+-- 1 on submitted_at. Without a matching index this is index-then-sort (or a
+-- sequential scan): find every count for the property, then sort the whole
+-- set to pick the single most recent one older than the current count.
+--
+-- (property_id, submitted_at DESC) turns that into an index-ONLY range scan:
+-- Postgres seeks straight to property_id's slice of the index, which is
+-- already in DESCENDING submitted_at order, and the LIMIT 1 stops at the
+-- first row past the `<` bound — no sort step at all. org_id is deliberately
+-- NOT a leading column here: property_id already narrows to one property
+-- (which belongs to exactly one org), so adding org_id would only widen the
+-- key for no further selectivity — this is a single-tenant, single-property
+-- lookup, not a platform-wide scan.
+--
+-- CONCURRENTLY is why this file contains exactly ONE statement and nothing
+-- else — see 20260916090000_inventory_items_org_smart_index.sql's header for
+-- why: CREATE INDEX CONCURRENTLY cannot run inside a transaction block, and
+-- the migration runner sends a file's contents as one message, which
+-- implicitly wraps multiple statements in a transaction regardless of intent.
+-- Concurrent build matters here for the same reason as that migration: this
+-- table is a per-count-session ledger this codebase expects to grow into the
+-- millions, and a plain CREATE INDEX would hold its write lock for as long as
+-- the build takes, stalling every inventory count submission in the
+-- meantime.
+-- ============================================================================
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inventory_counts_property_submitted
+  ON public.inventory_counts (property_id, submitted_at DESC);

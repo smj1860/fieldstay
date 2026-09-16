@@ -126,8 +126,12 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     name:    'Process Inventory Count',
     retries: 2,
     // Batch-dispatched, and this handler both writes a purchase order and
-    // notifies the PM. Resend's default is 2 req/s.
-    concurrency: { limit: 5 },
+    // notifies the PM. Resend's default is 2 req/s. Tenant-keyed alongside
+    // the platform ceiling: a same-day-checkout wave from ONE large org
+    // (hundreds of counts in a short burst) must not consume the whole
+    // budget and starve every other org's restock alerts — see the sibling
+    // handler's identical reasoning.
+    concurrency: [{ limit: 25 }, { key: 'event.data.org_id', limit: 3 }],
     throttle:    { limit: 60, period: '1m' },
   },
   { event: 'inventory/count-submitted' as const },

@@ -26,7 +26,7 @@ vi.mock('@/lib/inngest/functions/shared/reconcile-shell', () => ({ runProviderRe
 
 import { hostawayIncrementalSyncHandler } from '@/lib/inngest/functions/hostaway/incremental-sync-handler'
 import { hostawayReservationReconcileHandler } from '@/lib/inngest/functions/hostaway/reservation-reconcile-handler'
-import { hostawaySyncLockKey } from '@/lib/inngest/functions/hostaway/sync-lock'
+import { hostawaySyncLockKey, HOSTAWAY_SYNC_LOCK_TTL_SECONDS } from '@/lib/inngest/functions/hostaway/sync-lock'
 import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -92,7 +92,7 @@ describe('hostawayIncrementalSyncHandler — cross-function lock', () => {
       event: { data: EVENT_DATA }, step: makeStep(), logger: makeLogger(),
     })
 
-    expect(acquireLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'), 300)
+    expect(acquireLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'), HOSTAWAY_SYNC_LOCK_TTL_SECONDS)
     expect(releaseLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'))
   })
 
@@ -127,7 +127,7 @@ describe('hostawayReservationReconcileHandler — cross-function lock', () => {
       event: { data: EVENT_DATA }, step: makeStep(), logger: makeLogger(),
     })
 
-    expect(acquireLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'), 300)
+    expect(acquireLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'), HOSTAWAY_SYNC_LOCK_TTL_SECONDS)
     expect(releaseLock).toHaveBeenCalledWith(hostawaySyncLockKey('org_1'))
   })
 })

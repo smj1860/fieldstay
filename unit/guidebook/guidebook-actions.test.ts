@@ -15,6 +15,10 @@ vi.mock('@/lib/stripe/client', () => ({
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
+// upsertSponsor() calls invalidateSponsorsCache() -> revalidateTag(), which
+// needs a real Next.js request's "static generation store" that doesn't
+// exist when a Server Action is invoked directly in a unit test.
+vi.mock('next/cache', () => ({ revalidateTag: vi.fn() }))
 vi.mock('@/lib/sms/telnyx', () => ({
   normalizePhoneToE164: vi.fn(),
 }))

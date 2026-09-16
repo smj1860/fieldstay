@@ -35,6 +35,7 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
+import { sendEventsChunked }   from '@/lib/inngest/chunk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
@@ -130,7 +131,8 @@ export const hostawayIncrementalSyncCron = inngest.createFunction(
     // function runs parked in a sleep for up to an hour.
     const now = Date.now()
 
-    await step.sendEvent(
+    await sendEventsChunked(
+      step,
       'dispatch-incremental-events',
       connections.map((c) => ({
         name: 'integration/hostaway.incremental_sync.requested' as const,

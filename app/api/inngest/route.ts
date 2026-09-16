@@ -97,7 +97,7 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
 import { preFlightFriction, preFlightFrictionForOrg } from '@/lib/inngest/functions/cron/pre-flight-friction'
-import { frictionGrading } from '@/lib/inngest/functions/cron/friction-grading'
+import { frictionGrading, gradeFrictionForOrg } from '@/lib/inngest/functions/cron/friction-grading'
 
 // Vendor auto-suggestion
 import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
@@ -120,7 +120,7 @@ import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-mas
 // Platform inventory template broadcasting
 import { broadcastPlatformInventoryTemplate, syncInventoryTemplateForOrg } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
 import { bootstrapNewOrgInventory } from '@/lib/inngest/functions/bootstrap-new-org-inventory'
-import { recomputeParLevelsFn } from '@/lib/inngest/functions/recompute-par-levels'
+import { recomputeParLevelsFn, recomputeParLevelsOrgFn } from '@/lib/inngest/functions/recompute-par-levels'
 import { recordInventoryConsumption } from '@/lib/inngest/functions/record-inventory-consumption'
 
 // Integration error notifications
@@ -311,6 +311,7 @@ export const { GET, POST, PUT } = serve({
     preFlightFriction,
     preFlightFrictionForOrg,
     frictionGrading,
+    gradeFrictionForOrg,
 
     // Vendor auto-suggestion
     autoAssignVendor,
@@ -337,6 +338,7 @@ export const { GET, POST, PUT } = serve({
     syncInventoryTemplateForOrg,
     bootstrapNewOrgInventory,
     recomputeParLevelsFn,
+    recomputeParLevelsOrgFn,
     recordInventoryConsumption,
 
     // Integration error notifications

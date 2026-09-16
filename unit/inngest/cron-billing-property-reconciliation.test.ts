@@ -94,7 +94,9 @@ describe('billingPropertyReconciliation (cron fan-out)', () => {
     })
 
     expect(result).toEqual({ dispatched: 2 })
-    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-property-reconciliation', [
+    // sendEventsChunked names each chunk's step `${prefix}-${i}` so Inngest
+    // can memoize per chunk — one chunk here, hence the `-0` suffix.
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-property-reconciliation-0', [
       { name: 'billing/reconcile-property-count.requested', data: { org_id: 'org_1' } },
       { name: 'billing/reconcile-property-count.requested', data: { org_id: 'org_2' } },
     ])
@@ -384,7 +386,9 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
     expect(Array.isArray(concurrency)).toBe(true)
     expect(concurrency).toContainEqual({ limit: 1, key: 'event.data.org_id' })
     // …without giving up the global cap that keeps a bulk fan-out from
-    // exhausting the connection pool.
-    expect(concurrency).toContainEqual({ limit: 10 })
+    // exhausting Stripe-side throughput — 30, not this codebase's usual
+    // per-org-fan-out { limit: 10 }, since this cron's per-org work is a
+    // Stripe round trip rather than a Supabase-connection-pool-bound one.
+    expect(concurrency).toContainEqual({ limit: 30 })
   })
 })

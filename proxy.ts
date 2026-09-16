@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  tokenResourceRatelimit,
+  tokenResourceRatelimit, unmatchedPathRatelimit,
   oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit, webhookRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
@@ -476,6 +476,55 @@ async function enforceTokenRouteRateLimit(
   ), nonce)
 }
 
+// ── Unmatched-path throttle ─────────────────────────────────────────────────
+// app/not-found.tsx is force-dynamic — see its header comment — because a
+// prerendered 404 cannot carry the per-request CSP nonce Next's inline
+// hydration scripts need. That makes it the one page pushed off the CDN, so
+// its cost scales directly with junk traffic: broken links, scanner probes,
+// a viral surge's stray 404s.
+//
+// proxy.ts cannot know in advance whether a path will 404 — that decision is
+// the Next.js router's, and it runs AFTER middleware — so this keys on the
+// next best signal instead: a session-less request to a path that is neither
+// PUBLIC, TOKEN, nor BYPASS. That bucket is exactly the traffic that either
+// ends up on the 404 render (a mistyped link, a scanner-shaped path) or gets
+// redirected to /login (an anonymous hit on a real protected URL, e.g. a
+// dashboard link shared while logged out) — behaviour that already exists
+// either way; this only adds a ceiling on top of it. A request carrying a
+// session cookie never reaches this check (`hasSessionCookie`, the same
+// cheap pre-check the "ANONYMOUS TRAFFIC PAYS NOTHING" block below uses), so
+// no authenticated user's own navigation is affected.
+//
+// Fails OPEN like every other abuse limiter in this file — a Redis outage
+// must never turn into every anonymous visitor being blocked.
+async function enforceUnmatchedPathRateLimit(
+  request: NextRequest,
+  nonce:   string,
+): Promise<NextResponse | null> {
+  const ip = extractClientIp(request) ?? '127.0.0.1'
+
+  const decision = await checkLimit(unmatchedPathRatelimit, ip, {
+    onError: 'allow',
+    site:    'proxy:unmatched-path',
+  })
+
+  if (decision.allowed) return null
+
+  return withCsp(new NextResponse(
+    JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+    {
+      status:  429,
+      headers: {
+        'Content-Type':          'application/json',
+        'X-RateLimit-Limit':     String(decision.limit),
+        'X-RateLimit-Remaining': String(decision.remaining),
+        'X-RateLimit-Reset':     String(decision.reset),
+        'Retry-After':           String(retryAfterSeconds(decision)),
+      },
+    }
+  ), nonce)
+}
+
 function bypassResponse(request: NextRequest, pathname: string, nonce: string): NextResponse {
   const response = withCsp(NextResponse.next({ request }), nonce, pathname)
 
@@ -541,6 +590,14 @@ export async function proxy(request: NextRequest) {
   if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce, pathname)
 
   const isPublic = classification === 'public'
+
+  // Session-less request to neither a public, token, nor bypass path — see
+  // enforceUnmatchedPathRateLimit's header comment for what this bucket is
+  // and why it can't be narrowed to "will actually 404" in advance.
+  if (classification === 'protected' && !hasSessionCookie(request)) {
+    const throttled = await enforceUnmatchedPathRateLimit(request, nonce)
+    if (throttled) return throttled
+  }
 
   // ANONYMOUS TRAFFIC PAYS NOTHING.
   //

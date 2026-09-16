@@ -21,10 +21,15 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({ fetchOrgRoomTemplateD
 vi.mock('@/lib/cache/single-flight', () => ({
   acquireLock: vi.fn(async () => true),
   releaseLock: vi.fn(async () => {}),
+  // renewLock is called once the sections read comes back, before the
+  // potentially-slow insert — see sync-room-counts.ts's header comment on
+  // why the TTL is re-armed there.
+  renewLock:   vi.fn(async () => {}),
+  SINGLE_FLIGHT_DEFAULTS: { DEFAULT_LOCK_TTL_SECONDS: 15, DEFAULT_WAIT_MS: 300, DEFAULT_MAX_WAITS: 3 },
 }))
 
 import { syncChecklistRoomCounts } from '@/lib/checklists/sync-room-counts'
-import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { acquireLock, releaseLock, renewLock } from '@/lib/cache/single-flight'
 
 const BEDROOM_TPL  = 'tpl-bedroom'
 const BATHROOM_TPL = 'tpl-bathroom'
@@ -234,6 +239,28 @@ describe('syncChecklistRoomCounts', () => {
       const keys = vi.mocked(acquireLock).mock.calls.map((c) => c[0])
       expect(new Set(keys).size).toBe(2)
       expect(keys.every((k) => k.includes('sync-checklist-room-counts'))).toBe(true)
+    })
+
+    it('renews the lock TTL once sections are actually being planned, but not when there is nothing to add', async () => {
+      // Re-arming the TTL is only needed right before the potentially-slow
+      // insert — a no-op sync (already matches, or no default template)
+      // never reaches that point and must not pay for a renewal either.
+      const noop = stubSupabase({
+        template: { id: 'tmpl-1' },
+        sections: [{ id: 's1', room_template_id: BEDROOM_TPL, sort_order: 0 }],
+      })
+      await syncChecklistRoomCounts('prop-1', 'org-1', noop.supabase, { bedrooms: 1, bathrooms: 0 }, ROOM_DATA)
+      expect(renewLock).not.toHaveBeenCalled()
+
+      vi.clearAllMocks()
+      vi.mocked(acquireLock).mockResolvedValue(true)
+      const real = stubSupabase({
+        template: { id: 'tmpl-1' },
+        sections: [{ id: 's1', room_template_id: BEDROOM_TPL, sort_order: 0 }],
+      })
+      await syncChecklistRoomCounts('prop-1', 'org-1', real.supabase, { bedrooms: 4, bathrooms: 0 }, ROOM_DATA)
+      expect(renewLock).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(renewLock).mock.calls[0]![0]).toContain('sync-checklist-room-counts')
     })
 
     it('always releases the lock, success or failure', async () => {

@@ -203,6 +203,29 @@ const SERVICE_ROLE_ONLY_BUCKETS = new Set([
   'guidebook-sponsor-photos',
 ])
 
+// FK columns whose covering index was deliberately dropped (or never added)
+// as a scalability trade — the FK itself stays, only the index guarding
+// against check 3's failure mode is intentionally absent. Shrink-only, same
+// discipline as ORG_ID_FK_EXCEPTIONS below, keyed by the FK's own constraint
+// name since that is what report.unindexed_fk_columns identifies it by.
+const UNINDEXED_FK_EXCEPTIONS = new Set([
+  // work_orders.assigned_crew_id is the deprecated predecessor to
+  // assigned_crew_member_id (CLAUDE.md's "Things That Will Break" table) —
+  // provably 100% NULL since before it was deprecated
+  // (20260605221147_fix_duplicate_crew_column_and_cleanup_policies.sql) and
+  // never read or written by app code (the .semgrep/chokepoints.yml ban on
+  // the column name enforces that going forward). Its covering index
+  // (idx_work_orders_assigned_crew_id) cost every work_orders write — the
+  // highest-write-volume table in the 2026-09 scalability audit — to protect
+  // a column nothing ever reads, so
+  // 20260916005000_drop_work_orders_assigned_crew_id_index.sql dropped it
+  // deliberately, per that migration's own header. The FK (ON DELETE SET
+  // NULL) stays; a crew_member delete now sequential-scans work_orders
+  // instead of seeking an index, which is acceptable because crew deletion
+  // is not a hot path the way work order creation is.
+  'work_orders_assigned_crew_id_fkey',
+])
+
 // Tables carrying org_id that deliberately have NO FK to organizations.
 // Shrink-only.
 const ORG_ID_FK_EXCEPTIONS = new Set([
@@ -319,15 +342,30 @@ if (staleAllowlist.length > 0) {
 }
 
 // ── 3. Unindexed FK columns ───────────────────────────────────────────────
-if (report.unindexed_fk_columns.length > 0) {
-  const rows = report.unindexed_fk_columns
+const unindexedFks = report.unindexed_fk_columns.filter(
+  (f) => !UNINDEXED_FK_EXCEPTIONS.has(f.constraint)
+)
+const staleUnindexedFkAllowlist = [...UNINDEXED_FK_EXCEPTIONS].filter(
+  (c) => !report.unindexed_fk_columns.some((f) => f.constraint === c)
+)
+
+if (unindexedFks.length > 0) {
+  const rows = unindexedFks
     .map((f) => `  ${f.table}(${f.columns}) — ${f.constraint}`)
     .join('\n')
   failures.push(
     `Foreign-key columns with no covering index:\n${rows}\n` +
       '  Add CREATE INDEX IF NOT EXISTS in the same migration as the FK — an ' +
       'unindexed FK sequential-scans the referencing table on every parent ' +
-      'DELETE/UPDATE.'
+      'DELETE/UPDATE. If this is a deliberate scalability trade like ' +
+      'work_orders_assigned_crew_id_fkey, add a justified entry to ' +
+      'UNINDEXED_FK_EXCEPTIONS instead.'
+  )
+}
+if (staleUnindexedFkAllowlist.length > 0) {
+  failures.push(
+    `Stale UNINDEXED_FK_EXCEPTIONS entries (FK now indexed, or was dropped): ${staleUnindexedFkAllowlist.join(', ')}\n` +
+      '  Remove them from scripts/check-db-invariants.mjs — the allowlist only shrinks.'
   )
 }
 

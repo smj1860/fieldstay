@@ -1,6 +1,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { sendEventsChunked, chunkArray } from '@/lib/inngest/chunk'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { frictionDateString, localDateFrom, frictionDayUtcBounds } from '@/lib/friction/date'
@@ -8,7 +9,7 @@ import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
 import { reportError }          from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
-import { scoreCrewCandidates, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
+import { topCrewCandidate, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
 import {
   computeFrictionScore, severityFromScore,
   crewDurationScore, weatherScore, weekendScore, holidayScore,
@@ -43,6 +44,24 @@ const MIN_BASELINE_SAMPLE = 3
 /** Upcoming-assignment window for the Smart Fix workload term — same 14 days as auto-assign. */
 const WORKLOAD_WINDOW_DAYS = 14
 
+/**
+ * Tomorrow.io forecast lookups in flight together per org, per chunk.
+ *
+ * One outbound call per distinct property LOCATION (already deduped and
+ * coordinate-rounded/cached upstream in getTomorrowForecastForLocation), so a
+ * 150-property org can still mean up to 150 sequential round-trips if run one
+ * at a time — 20-75s inside a single step. Bounded parallelism keeps the
+ * total wall time down without opening an unbounded number of connections to
+ * a rate-limited third party at once.
+ */
+const FORECAST_CONCURRENCY = 15
+
+/**
+ * Both the size of one `pre_flight_friction` upsert AND the step-boundary
+ * chunk size for scoring: each chunk of this many turnovers gets its own
+ * step.run(), so a large org's work is checkpointed instead of scored and
+ * upserted for the whole day inside one step. See "Score + upsert" below.
+ */
 const UPSERT_CHUNK = 200
 const MS_PER_DAY   = 86_400_000
 
@@ -95,7 +114,8 @@ export const preFlightFriction = inngest.createFunction(
     })
 
     if (orgIds.length) {
-      await step.sendEvent(
+      await sendEventsChunked(
+        step,
         'fan-out-friction-scoring',
         orgIds.map((orgId) => ({
           name: 'friction/pre_flight.requested' as const,
@@ -293,51 +313,79 @@ export const preFlightFrictionForOrg = inngest.createFunction(
     const forecasts = await step.run('fetch-forecasts', async () =>
       loadForecasts(orgId, turnoverDate, turnovers))
 
-    // ── 5. Score + upsert ──────────────────────────────────────────────────
-    const result = await step.run('score-and-upsert', async () => {
-      const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
+    // ── 5. Score + upsert, chunked into its own step boundary per UPSERT_CHUNK
+    //      turnovers ───────────────────────────────────────────────────────
+    //
+    // Per-org fan-out bounds work by TENANT, but not by how much work one
+    // tenant can generate on a single day. Self-serve is capped at
+    // MAX_SELF_SERVE_PROPERTIES (lib/stripe/brackets.ts), but an Enterprise
+    // org — a manually negotiated contract explicitly outside that ceiling —
+    // carries no such bound, and this step is where that shows up: Smart Fix
+    // scoring runs once per turnover, and the "what has the PM already done
+    // with today's rows" lookup below is an `.in('turnover_id', ...)` sized by
+    // the same count. Scoring and upserting the whole day in one step.run()
+    // would scale that one invocation's compute — and its `.in()` list — with
+    // a single org's turnover count instead of bounding it, which is exactly
+    // the shape this codebase converts to a dispatcher for when the unbounded
+    // axis is the TENANT rather than the row. Here the fix is the same idea
+    // applied one level down: each chunk is its own step, so a large org's
+    // work is checkpointed rather than risking one step's execution budget,
+    // and a failure partway through retries only the chunk that failed
+    // instead of re-scoring turnovers an earlier chunk already wrote.
+    let scored  = 0
+    let flagged = 0
 
-      // What the PM has already done with today's rows.
-      //
-      // The upsert below rewrites the whole row, so without this a retry — or
-      // any second run on the same date — would resurrect a card the PM had
-      // already dismissed an hour earlier, with no error and no way for them
-      // to tell it was not a new one. Bounded by the id list it is built from.
-      const existingRes = await supabase
-        .from('pre_flight_friction')
-        .select('turnover_id, status, severity')
-        .eq('org_id', orgId)
-        .in('turnover_id', turnovers.map((t) => t.id))
-        .limit(turnovers.length)
+    for (let i = 0; i < turnovers.length; i += UPSERT_CHUNK) {
+      const chunk = turnovers.slice(i, i + UPSERT_CHUNK)
 
-      const existing = new Map(
-        unwrapList<{ turnover_id: string; status: string; severity: string }>(
-          existingRes,
-          { site: 'inngest.pre-flight-friction.existing', orgId },
-        ).map((r) => [r.turnover_id, r]),
-      )
+      const chunkResult = await step.run(`score-and-upsert-chunk-${i}`, async () => {
+        const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
 
-      const rows = turnovers.map((t) =>
-        buildFrictionRow({
-          orgId, turnoverDate, turnover: t, baselines, crewContext, forecasts,
-          previous: existing.get(t.id) ?? null,
-        }))
+        // What the PM has already done with today's rows, scoped to this
+        // chunk's ids so the .in() list is bounded by UPSERT_CHUNK regardless
+        // of how many turnovers the org has today.
+        //
+        // The upsert below rewrites the whole row, so without this a retry —
+        // or any second run on the same date — would resurrect a card the PM
+        // had already dismissed an hour earlier, with no error and no way for
+        // them to tell it was not a new one.
+        const existingRes = await supabase
+          .from('pre_flight_friction')
+          .select('turnover_id, status, severity')
+          .eq('org_id', orgId)
+          .in('turnover_id', chunk.map((t) => t.id))
+          .limit(chunk.length)
 
-      for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+        const existing = new Map(
+          unwrapList<{ turnover_id: string; status: string; severity: string }>(
+            existingRes,
+            { site: 'inngest.pre-flight-friction.existing', orgId },
+          ).map((r) => [r.turnover_id, r]),
+        )
+
+        const rows = chunk.map((t) =>
+          buildFrictionRow({
+            orgId, turnoverDate, turnover: t, baselines, crewContext, forecasts,
+            previous: existing.get(t.id) ?? null,
+          }))
+
         const { error } = await supabase
           .from('pre_flight_friction')
-          .upsert(rows.slice(i, i + UPSERT_CHUNK), { onConflict: 'turnover_id' })
+          .upsert(rows, { onConflict: 'turnover_id' })
         if (error) throw new Error(`pre_flight_friction upsert failed: ${error.message}`)
-      }
 
-      return { scored: rows.length, flagged: rows.filter((r) => r.severity !== 'none').length }
-    })
+        return { scored: rows.length, flagged: rows.filter((r) => r.severity !== 'none').length }
+      })
+
+      scored  += chunkResult.scored
+      flagged += chunkResult.flagged
+    }
 
     logger.info(
-      `[preFlightFriction] org=${orgId} ${turnoverDate}: scored ${result.scored}, ` +
-      `${result.flagged} above threshold`
+      `[preFlightFriction] org=${orgId} ${turnoverDate}: scored ${scored}, ` +
+      `${flagged} above threshold`
     )
-    return { org_id: orgId, ...result }
+    return { org_id: orgId, scored, flagged }
   },
 )
 
@@ -363,50 +411,56 @@ async function loadCrewContext(
   const supabase = createServiceClient({ system: 'inngest:pre-flight-friction' })
   const propertyIds = [...new Set(turnovers.map((t) => t.property_id))]
 
-  const crew = await fetchAllRows<CrewCandidate>(
-    (from, to) => supabase
-      .from('crew_members')
-      .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')
-      .eq('org_id', orgId)
-      .eq('is_active', true)
-      .order('id', { ascending: true })
-      .range(from, to),
-    { label: `pre-flight-friction.crew[org=${orgId}]` },
-  )
+  const workloadEnd   = new Date(Date.now() + WORKLOAD_WINDOW_DAYS * MS_PER_DAY).toISOString()
+  const familiarSince = new Date(Date.now() - BASELINE_WINDOW_DAYS * MS_PER_DAY).toISOString()
 
-  const workloadEnd = new Date(Date.now() + WORKLOAD_WINDOW_DAYS * MS_PER_DAY).toISOString()
-  const upcoming = await fetchAllRows<{ crew_member_id: string }>(
-    (from, to) => supabase
-      .from('turnover_assignments')
-      .select('crew_member_id, turnovers!inner(checkout_datetime)')
-      .eq('org_id', orgId)
-      .gte('turnovers.checkout_datetime', new Date().toISOString())
-      .lte('turnovers.checkout_datetime', workloadEnd)
-      .order('crew_member_id', { ascending: true })
-      .range(from, to),
-    { label: `pre-flight-friction.workload[org=${orgId}]` },
-  )
+  // Three independent reads — none depends on another's result, only on
+  // orgId/turnovers already in hand — issued together instead of one after
+  // another. Each is its own round trip to Postgres, so running them
+  // sequentially paid their combined latency before scoring could even start;
+  // Promise.all pays only the slowest of the three.
+  const [crew, upcoming, history] = await Promise.all([
+    fetchAllRows<CrewCandidate>(
+      (from, to) => supabase
+        .from('crew_members')
+        .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: `pre-flight-friction.crew[org=${orgId}]` },
+    ),
+    fetchAllRows<{ crew_member_id: string }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('crew_member_id, turnovers!inner(checkout_datetime)')
+        .eq('org_id', orgId)
+        .gte('turnovers.checkout_datetime', new Date().toISOString())
+        .lte('turnovers.checkout_datetime', workloadEnd)
+        .order('crew_member_id', { ascending: true })
+        .range(from, to),
+      { label: `pre-flight-friction.workload[org=${orgId}]` },
+    ),
+    // ONE query for every property being scored, not one per property. The
+    // `!inner` embed filters by the turnover's property server-side, so the
+    // property id list is the only thing on the wire.
+    fetchAllRows<{ crew_member_id: string; turnovers: { property_id: string } | null }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('crew_member_id, turnovers!inner(property_id, checkout_datetime)')
+        .eq('org_id', orgId)
+        .in('turnovers.property_id', propertyIds)
+        .gte('turnovers.checkout_datetime', familiarSince)
+        .order('crew_member_id', { ascending: true })
+        .range(from, to),
+      { label: `pre-flight-friction.familiarity[org=${orgId}]` },
+    ),
+  ])
 
   const workloadMap: Record<string, number> = {}
   for (const row of upcoming) {
     workloadMap[row.crew_member_id] = (workloadMap[row.crew_member_id] ?? 0) + 1
   }
-
-  // ONE query for every property being scored, not one per property. The
-  // `!inner` embed filters by the turnover's property server-side, so the
-  // property id list is the only thing on the wire.
-  const familiarSince = new Date(Date.now() - BASELINE_WINDOW_DAYS * MS_PER_DAY).toISOString()
-  const history = await fetchAllRows<{ crew_member_id: string; turnovers: { property_id: string } | null }>(
-    (from, to) => supabase
-      .from('turnover_assignments')
-      .select('crew_member_id, turnovers!inner(property_id, checkout_datetime)')
-      .eq('org_id', orgId)
-      .in('turnovers.property_id', propertyIds)
-      .gte('turnovers.checkout_datetime', familiarSince)
-      .order('crew_member_id', { ascending: true })
-      .range(from, to),
-    { label: `pre-flight-friction.familiarity[org=${orgId}]` },
-  )
 
   const familiarByProperty: Record<string, string[]> = {}
   for (const row of history) {
@@ -443,25 +497,35 @@ async function loadForecasts(
   }
 
   const forecasts: Record<string, DayForecast | null> = {}
-  for (const [propertyId, coords] of located) {
-    try {
-      // Already Redis-cached and single-flighted upstream, so properties that
-      // round to the same coordinates cost one outbound call between them.
-      forecasts[propertyId] = await getTomorrowForecastForLocation(coords.lat, coords.lng, turnoverDate)
-    } catch (err) {
-      forecasts[propertyId] = null
-      reportError(err, {
-        site:  'inngest.pre-flight-friction.forecast',
-        orgId,
-        // A protective degradation that did the safe thing, not a fault: the
-        // turnover still scores on every other component. 'warning' is what
-        // keeps a slow provider out of the error triage queue while staying
-        // searchable.
-        level: 'warning',
-        extra: { property_id: propertyId, turnover_date: turnoverDate },
-      })
-    }
+
+  // Bounded-concurrency chunks rather than one call at a time: a fully
+  // sequential loop here is exactly the 20-75s-per-org latency finding this
+  // guards against at real portfolio scale. Each chunk still awaits fully
+  // before the next starts, so this never opens more than
+  // FORECAST_CONCURRENCY connections to Tomorrow.io at once — the existing
+  // Redis cache, single-flight lock and timeout budget inside
+  // getTomorrowForecastForLocation are untouched, only how many callers can
+  // reach them concurrently changes.
+  for (const chunk of chunkArray(Array.from(located.entries()), FORECAST_CONCURRENCY)) {
+    await Promise.all(chunk.map(async ([propertyId, coords]) => {
+      try {
+        forecasts[propertyId] = await getTomorrowForecastForLocation(coords.lat, coords.lng, turnoverDate)
+      } catch (err) {
+        forecasts[propertyId] = null
+        reportError(err, {
+          site:  'inngest.pre-flight-friction.forecast',
+          orgId,
+          // A protective degradation that did the safe thing, not a fault: the
+          // turnover still scores on every other component. 'warning' is what
+          // keeps a slow provider out of the error triage queue while staying
+          // searchable.
+          level: 'warning',
+          extra: { property_id: propertyId, turnover_date: turnoverDate },
+        })
+      }
+    }))
   }
+
   return forecasts
 }
 
@@ -555,7 +619,11 @@ function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string }
   const candidates = crewContext.crew.filter((c) => !assigned.has(c.id))
   if (!candidates.length) return null
 
-  const scored = scoreCrewCandidates({
+  // topCrewCandidate(), not scoreCrewCandidates(): only the best alternative
+  // is ever surfaced as the Smart Fix, so sorting the whole candidate array
+  // for one flagged turnover — repeated for every flagged turnover in the
+  // org — is O(n log n) work thrown away except for index 0.
+  const top = topCrewCandidate({
     isSameDay:       turnover.is_same_day_turnover ?? false,
     property:        { lat: property?.lat ?? null, lng: property?.lng ?? null },
     crew:            candidates,
@@ -563,7 +631,6 @@ function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string }
     workloadMap:     crewContext.workloadMap,
   })
 
-  const top = scored[0]
   return top ? { id: top.crew_member_id, reasoning: crewSuggestionReasoning(top) } : null
 }
 

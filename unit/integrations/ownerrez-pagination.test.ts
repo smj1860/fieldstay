@@ -13,9 +13,16 @@ vi.mock('@/lib/supabase/unwrap', () => ({ unwrap: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 // upstashConfigured() === false short-circuits the shared IP budget check, so
 // these tests exercise pagination without a Redis double.
+//
+// getRedisIfConfigured: () => null — the circuit breaker's own "unconfigured"
+// path (lib/integrations/circuit-breaker.ts), pulled in transitively now that
+// fetchUrl also gates on evaluateBreaker('ownerrez'). Returning null there
+// makes the breaker report 'closed' unconditionally, same as this file
+// deciding not to exercise Redis at all for pagination.
 vi.mock('@/lib/redis', () => ({
-  getRedis:           vi.fn(),
-  upstashConfigured:  vi.fn(() => false),
+  getRedis:              vi.fn(),
+  getRedisIfConfigured:  vi.fn(() => null),
+  upstashConfigured:     vi.fn(() => false),
 }))
 
 import { OwnerRezApiClient } from '@/lib/integrations/providers/ownerrez-api'

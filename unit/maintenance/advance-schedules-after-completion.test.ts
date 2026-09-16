@@ -21,24 +21,37 @@ import { reportError } from '@/lib/observability/report-error'
 // recurring schedule is routine + annual + a next_due_date on the month it
 // recurs in. The DEFECT it protected against is not gone, so these tests moved
 // to the annual path rather than being deleted with the column.
+//
+// SCALABILITY FIX (20260916120000): the per-schedule .update() fan-out is
+// gone, replaced by ONE bulk_advance_maintenance_schedules RPC call carrying
+// every schedule's update in a single p_updates array. These tests now read
+// that array off supabase.rpc's recorded call instead of one .update() call
+// per schedule.
 // ============================================================================
 
 const NOW = new Date('2026-04-15T12:00:00.000Z')
 
-function supabaseWith(schedules: Record<string, unknown>[]) {
-  const spec: Record<string, TableSpec> = {
-    maintenance_schedules: [
-      { data: schedules, error: null },
-      ...schedules.map(() => ({ data: null, error: null })),  // one write each
-    ],
-  }
-  return createSupabaseDouble(spec)
+interface ScheduleUpdate {
+  id: string
+  last_completed_date: string
+  next_due_date: string | null
 }
 
-function updatePayloads(supabase: ReturnType<typeof createSupabaseDouble>) {
-  return supabase.calls
-    .filter((c) => c.table === 'maintenance_schedules' && c.method === 'update')
-    .map((c) => c.args[0] as Record<string, unknown>)
+function supabaseWith(
+  schedules: Record<string, unknown>[],
+  rpcResult: { data?: unknown; error?: unknown } = { data: schedules.length, error: null },
+) {
+  const spec: Record<string, TableSpec> = {
+    maintenance_schedules: [{ data: schedules, error: null }],
+  }
+  return createSupabaseDouble(spec, { rpc: rpcResult })
+}
+
+/** The p_updates array from the single bulk_advance_maintenance_schedules call. */
+function rpcUpdates(supabase: ReturnType<typeof createSupabaseDouble>): ScheduleUpdate[] {
+  const call = supabase.rpc.mock.calls.find((c) => c[0] === 'bulk_advance_maintenance_schedules')
+  if (!call) return []
+  return (call[1] as { p_updates: ScheduleUpdate[] }).p_updates
 }
 
 beforeEach(() => {
@@ -48,6 +61,25 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
+})
+
+describe('advanceSchedulesAfterCompletion — one bulk RPC call, not one per schedule', () => {
+  it('sends every schedule in ONE rpc call, scoped to the org', async () => {
+    const supabase = supabaseWith([
+      { id: 's1', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' },
+      { id: 's2', schedule_type: 'routine', frequency: 'monthly',   next_due_date: '2026-04-01' },
+    ])
+
+    await advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
+      { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
+      { scheduleId: 's2', workOrderSource: 'maintenance_schedule' },
+    ])
+
+    const rpcCalls = supabase.rpc.mock.calls.filter((c) => c[0] === 'bulk_advance_maintenance_schedules')
+    expect(rpcCalls).toHaveLength(1)
+    expect(rpcCalls[0]![1]).toMatchObject({ p_org_id: 'org_1' })
+    expect(rpcUpdates(supabase).map((u) => u.id).sort()).toEqual(['s1', 's2'])
+  })
 })
 
 describe('advanceSchedulesAfterCompletion — annual, which is what seasonal became', () => {
@@ -75,8 +107,8 @@ describe('advanceSchedulesAfterCompletion — annual, which is what seasonal bec
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)).toEqual([
-      { last_completed_date: '2026-04-15', next_due_date: '2027-04-01' },
+    expect(rpcUpdates(supabase)).toEqual([
+      { id: 's1', last_completed_date: '2026-04-15', next_due_date: '2027-04-01' },
     ])
   })
 
@@ -91,7 +123,7 @@ describe('advanceSchedulesAfterCompletion — annual, which is what seasonal bec
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    const next = updatePayloads(supabase)[0]!['next_due_date'] as string
+    const next = rpcUpdates(supabase)[0]!.next_due_date!
     expect(next > '2026-04-15').toBe(true)
   })
 
@@ -106,10 +138,10 @@ describe('advanceSchedulesAfterCompletion — annual, which is what seasonal bec
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)[0]!['next_due_date']).toBe('2027-04-01')
+    expect(rpcUpdates(supabase)[0]!.next_due_date).toBe('2027-04-01')
   })
 
-  it('scopes the write to the org, not just the schedule id', async () => {
+  it('scopes the write to the org via p_org_id, not just the schedule id', async () => {
     const supabase = supabaseWith([
       { id: 's1', schedule_type: 'routine', frequency: 'annual', next_due_date: '2026-04-01' },
     ])
@@ -117,12 +149,11 @@ describe('advanceSchedulesAfterCompletion — annual, which is what seasonal bec
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    const updateIdx = supabase.calls.findIndex((c) => c.table === 'maintenance_schedules' && c.method === 'update')
-    const after = supabase.calls.slice(updateIdx).filter((c) => c.method === 'eq')
-    expect(after.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
+    const rpcCall = supabase.rpc.mock.calls.find((c) => c[0] === 'bulk_advance_maintenance_schedules')
+    expect(rpcCall![1]).toMatchObject({ p_org_id: 'org_1' })
   })
 
-  it('records the completion date only for a schedule with nothing to recur into', async () => {
+  it('records the completion date only for a schedule with nothing to recur into, leaving next_due_date null', async () => {
     // A row still carrying the retired `seasonal` type — nothing creates one
     // now, but the enum label remains and the broadcast path can still write a
     // schedule with no frequency. It must not invent a date.
@@ -133,7 +164,11 @@ describe('advanceSchedulesAfterCompletion — annual, which is what seasonal bec
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)).toEqual([{ last_completed_date: '2026-04-15' }])
+    // next_due_date is sent as null — the RPC's own COALESCE is what keeps
+    // this from clobbering the stored value, not the JS side.
+    expect(rpcUpdates(supabase)).toEqual([
+      { id: 's1', last_completed_date: '2026-04-15', next_due_date: null },
+    ])
   })
 })
 
@@ -146,7 +181,7 @@ describe('advanceSchedulesAfterCompletion — the branches seasonal sits between
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)[0]).toMatchObject({ next_due_date: '2026-06-01' })
+    expect(rpcUpdates(supabase)[0]).toMatchObject({ next_due_date: '2026-06-01' })
   })
 
   it('still anchors a gap-driven routine completion to the ACTUAL completion date', async () => {
@@ -158,7 +193,7 @@ describe('advanceSchedulesAfterCompletion — the branches seasonal sits between
     ])
 
     // Done early during a vacancy gap → the cadence restarts from today.
-    expect(updatePayloads(supabase)[0]).toMatchObject({ next_due_date: '2026-07-15' })
+    expect(rpcUpdates(supabase)[0]).toMatchObject({ next_due_date: '2026-07-15' })
   })
 
   it('leaves a one-time schedule\'s next_due_date alone — retiring it is a product call', async () => {
@@ -172,7 +207,9 @@ describe('advanceSchedulesAfterCompletion — the branches seasonal sits between
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)).toEqual([{ last_completed_date: '2026-04-15' }])
+    expect(rpcUpdates(supabase)).toEqual([
+      { id: 's1', last_completed_date: '2026-04-15', next_due_date: null },
+    ])
   })
 
   it('writes nothing for a schedule that has no due date at all', async () => {
@@ -183,73 +220,70 @@ describe('advanceSchedulesAfterCompletion — the branches seasonal sits between
       { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
     ])
 
-    expect(updatePayloads(supabase)).toEqual([])
+    // Nothing to advance at all — the RPC is never even called.
+    expect(supabase.rpc.mock.calls.filter((c) => c[0] === 'bulk_advance_maintenance_schedules')).toEqual([])
   })
 })
 
-describe('advanceSchedulesAfterCompletion — one write genuinely REJECTING must not hide the others', () => {
-  // Promise.all used to abort visibility into every OTHER schedule's write the
-  // instant ONE promise actually rejected (a network-level throw under the
-  // fetch, not merely a resolved `{error}`) — some schedules could silently
-  // advance while others silently didn't, with one opaque thrown error and no
-  // way to tell which was which. Promise.allSettled must let every write run
-  // to completion regardless of what any other one does.
-  it('still applies every OTHER schedule\'s update when one write rejects', async () => {
-    const applied: string[] = []
-    const REJECTING_ID = 's-boom'
+describe('advanceSchedulesAfterCompletion — bulk RPC failure is reported, never thrown', () => {
+  // The old Promise.allSettled isolated one rejecting write from the others.
+  // With one set-based RPC call there is exactly one outcome to report
+  // instead of up to N of them — this is the new failure mode, and it must
+  // still never throw out of this function (finalizeWorkOrderCompletion's
+  // whole contract depends on that).
+  it('reports a resolved RPC error and does not throw', async () => {
+    const supabase = supabaseWith(
+      [{ id: 's1', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' }],
+      { data: null, error: { message: 'permission denied' } },
+    )
 
-    // A minimal, purpose-built double: the shared stub's chain always
-    // resolves, so a genuine promise REJECTION needs its own thenable.
-    const supabase = {
-      from: (table: string) => {
-        if (table === 'maintenance_schedules') {
-          return {
-            select: () => ({
-              in: () => ({
-                eq: () => ({
-                  order: () => ({
-                    range: async () => ({
-                      data: [
-                        { id: REJECTING_ID, schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' },
-                        { id: 's-ok', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' },
-                      ],
-                      error: null,
-                    }),
-                  }),
-                }),
-              }),
-            }),
-            update: (payload: Record<string, unknown>) => ({
-              eq: (col1: string, id: string) => ({
-                eq: (_col2: string, _orgId: string) => {
-                  if (id === REJECTING_ID) {
-                    // A genuine rejection — e.g. a network-level throw under
-                    // the fetch — not a resolved `{ error }`.
-                    return Promise.reject(new Error('network blip'))
-                  }
-                  applied.push(id)
-                  return Promise.resolve({ data: null, error: null })
-                },
-              }),
-              _payload: payload,
-            }),
-          }
-        }
-        throw new Error(`unexpected table ${table}`)
-      },
+    await expect(
+      advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
+        { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
+      ]),
+    ).resolves.toBeUndefined()
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'permission denied' }),
+      expect.objectContaining({ site: 'maintenance.advanceSchedulesAfterCompletion.write' }),
+    )
+  })
+
+  it('reports a genuinely REJECTING rpc call (a network-level throw) and does not throw', async () => {
+    const spec: Record<string, TableSpec> = {
+      maintenance_schedules: [
+        { data: [{ id: 's1', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' }], error: null },
+      ],
     }
+    const supabase = createSupabaseDouble(spec, {
+      rpc: () => Promise.reject(new Error('network blip')),
+    })
 
-    await advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
-      { scheduleId: REJECTING_ID, workOrderSource: 'maintenance_schedule' },
-      { scheduleId: 's-ok', workOrderSource: 'maintenance_schedule' },
-    ])
+    await expect(
+      advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
+        { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
+      ]),
+    ).resolves.toBeUndefined()
 
-    // The non-rejecting schedule's write still went through.
-    expect(applied).toEqual(['s-ok'])
-    // The rejection was reported, not swallowed silently or left uncaught.
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'maintenance.advanceSchedulesAfterCompletion.write' }),
+    )
+  })
+
+  it('warns (does not error) when the RPC applies fewer rows than requested', async () => {
+    const supabase = supabaseWith(
+      [{ id: 's1', schedule_type: 'routine', frequency: 'quarterly', next_due_date: '2026-03-01' }],
+      { data: 0, error: null },
+    )
+
+    await advanceSchedulesAfterCompletion(supabase as never, 'org_1', [
+      { scheduleId: 's1', workOrderSource: 'maintenance_schedule' },
+    ])
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'maintenance.advanceSchedulesAfterCompletion.write', level: 'warning' }),
     )
   })
 })

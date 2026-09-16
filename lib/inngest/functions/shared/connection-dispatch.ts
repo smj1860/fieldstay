@@ -36,6 +36,7 @@
 import type { GetStepTools } from 'inngest'
 import { inngest }            from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
+import { sendEventsChunked }  from '@/lib/inngest/chunk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
@@ -82,6 +83,44 @@ export interface DispatchParams {
   eventName: ConnectionDispatchEvent
   /** Prefix for the one log line, e.g. '[Hostaway reconcile cron]'. */
   logPrefix: string
+  /**
+   * When set, spreads dispatch across this many seconds instead of sending
+   * every event for the same instant. Each connection gets a DETERMINISTIC
+   * offset (hashed from its user id, same technique as
+   * hostaway/incremental-sync-cron.ts's jitterSecondsForConnection) into
+   * `[0, jitterWindowSeconds)`, carried on the event's own future `ts` rather
+   * than a step.sleep — so N connections cost N scheduled events, not N
+   * function runs parked in a sleep.
+   *
+   * Omit (the default) to send every event at the current instant, unchanged
+   * behaviour for callers that don't need it (teammate-sync, hostex/hostaway
+   * reconcile — see hospitable-reservation-reconcile-cron.ts for why THAT one
+   * needs it: a shared, platform-wide external rate-limit budget that every
+   * connection's daily reconcile competes for).
+   */
+  jitterWindowSeconds?: number
+}
+
+/**
+ * A stable per-connection offset into `[0, windowSeconds)`.
+ *
+ * DETERMINISTIC, not random, and deliberately the same FNV-1a technique as
+ * hostaway/incremental-sync-cron.ts's jitterSecondsForConnection — see that
+ * file's doc comment for why determinism matters (a replayed Inngest run
+ * must compute the same offset, and a random one would make the interval
+ * between a connection's own runs drift rather than stay stable). Not
+ * shared code with that file: the two crons differ in exactly one axis (the
+ * window width — an hour there vs. many hours here), and duplicating one
+ * small pure function is cheaper than adding a parameter to a file this
+ * PR is not otherwise touching.
+ */
+function jitterSecondsForConnection(userId: string, windowSeconds: number): number {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < userId.length; i++) {
+    hash ^= userId.codePointAt(i) ?? 0
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash % windowSeconds
 }
 
 /**
@@ -92,7 +131,7 @@ export interface DispatchParams {
 export async function dispatchPerProviderConnection(
   params: DispatchParams,
 ): Promise<{ dispatched: number }> {
-  const { step, logger, provider, system, label, dispatchStepId, eventName, logPrefix } = params
+  const { step, logger, provider, system, label, dispatchStepId, eventName, logPrefix, jitterWindowSeconds } = params
 
   const connections = await step.run('fetch-active-connections', async () => {
     const supabase = createServiceClient({ system })
@@ -129,10 +168,25 @@ export async function dispatchPerProviderConnection(
 
   if (connections.length === 0) return { dispatched: 0 }
 
-  await step.sendEvent(
+  // Chunked, not one call for the whole platform: Inngest enforces a
+  // per-call event-count/payload ceiling, and a single call built from a
+  // platform-wide connection scan risks being rejected or truncated
+  // ATOMICALLY the moment that scan crosses it — failing dispatch for every
+  // tenant in this batch, not just the ones past the limit.
+  const now = Date.now()
+
+  await sendEventsChunked(
+    step,
     dispatchStepId,
     connections.map((c) => ({
       name: eventName,
+      // Only set when jitterWindowSeconds is configured — an explicit `ts`
+      // in the past or present is a no-op for Inngest, but leaving the key
+      // off entirely for the unjittered callers keeps their event payloads
+      // byte-identical to before this change.
+      ...(jitterWindowSeconds != null
+        ? { ts: now + jitterSecondsForConnection(c.user_id, jitterWindowSeconds) * 1000 }
+        : {}),
       data: {
         user_id:          c.user_id,
         org_id:           c.org_id!,

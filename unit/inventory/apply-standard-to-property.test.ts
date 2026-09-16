@@ -3,13 +3,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inventory/standard-template', () => ({ getStandardInventoryTemplateId: vi.fn() }))
 vi.mock('@/lib/cache/single-flight', () => ({
-  acquireLock: vi.fn(async () => true),
   releaseLock: vi.fn(async () => {}),
+  SINGLE_FLIGHT_DEFAULTS: { DEFAULT_LOCK_TTL_SECONDS: 15, DEFAULT_WAIT_MS: 300, DEFAULT_MAX_WAITS: 3 },
 }))
+// Default: Redis unconfigured, matching the pre-fix behaviour for every test
+// that doesn't care about the lock — acquireDedupLockOrThrow short-circuits
+// to 'acquired' without ever touching a client.
+vi.mock('@/lib/redis', () => ({ getRedisIfConfigured: vi.fn(() => null) }))
 
 import { applyStandardInventoryToProperty } from '@/lib/inventory/apply-standard-to-property'
 import { getStandardInventoryTemplateId } from '@/lib/inventory/standard-template'
-import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { releaseLock } from '@/lib/cache/single-flight'
+import { getRedisIfConfigured } from '@/lib/redis'
+
+/** A fake Upstash client exposing only the `set()` the dedup lock calls. */
+function fakeRedis(setImpl: (...args: unknown[]) => Promise<unknown>) {
+  return { set: vi.fn(setImpl) }
+}
 
 // ============================================================================
 // Leg 3: a new property is stocked from the standard template at creation.
@@ -62,7 +72,14 @@ const PLATFORM_ROW = {
 }
 
 describe('applyStandardInventoryToProperty', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // clearAllMocks() clears call history but not a mockReturnValue override
+    // from a previous test — reset the lock's Redis client explicitly so
+    // every test starts unconfigured (lock always 'acquired') unless it
+    // opts in to a fake client itself.
+    vi.mocked(getRedisIfConfigured).mockReturnValue(null)
+  })
 
   it('does nothing when no standard template is designated', async () => {
     vi.mocked(getStandardInventoryTemplateId).mockResolvedValue(null)
@@ -146,7 +163,9 @@ describe('applyStandardInventoryToProperty', () => {
 
   describe('concurrency lock', () => {
     it('does nothing, safely, when another call already holds the lock', async () => {
-      vi.mocked(acquireLock).mockResolvedValueOnce(false)
+      // A live NX SET that did NOT acquire (someone else holds it) resolves
+      // to null, never 'OK' — that is the real Upstash contract this fakes.
+      vi.mocked(getRedisIfConfigured).mockReturnValue(fakeRedis(async () => null) as never)
       vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
       const { client, inserts } = makeSupabase({
         inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
@@ -163,6 +182,8 @@ describe('applyStandardInventoryToProperty', () => {
     })
 
     it('scopes the lock key to the PROPERTY, not shared across properties', async () => {
+      const redis = fakeRedis(async () => 'OK')
+      vi.mocked(getRedisIfConfigured).mockReturnValue(redis as never)
       vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
       const { client } = makeSupabase({
         inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
@@ -172,9 +193,9 @@ describe('applyStandardInventoryToProperty', () => {
       await applyStandardInventoryToProperty(PROP, ORG, client)
       await applyStandardInventoryToProperty('prop-2', ORG, client)
 
-      const keys = vi.mocked(acquireLock).mock.calls.map((c) => c[0])
+      const keys = redis.set.mock.calls.map((c) => c[0])
       expect(new Set(keys).size).toBe(2)
-      expect(keys.every((k) => k.includes('apply-standard-inventory'))).toBe(true)
+      expect(keys.every((k) => (k as string).includes('apply-standard-inventory'))).toBe(true)
     })
 
     it('always releases the lock, success or failure', async () => {
@@ -188,6 +209,7 @@ describe('applyStandardInventoryToProperty', () => {
       expect(releaseLock).toHaveBeenCalledTimes(1)
 
       vi.clearAllMocks()
+      vi.mocked(getRedisIfConfigured).mockReturnValue(null)
       vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
       const failing = makeSupabase({
         inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
@@ -210,6 +232,29 @@ describe('applyStandardInventoryToProperty', () => {
       await expect(applyStandardInventoryToProperty(PROP, ORG, failing.client))
         .rejects.toBeTruthy()
       expect(releaseLock).toHaveBeenCalledTimes(1)
+    })
+
+    it('FAILS CLOSED — throws rather than proceeding unlocked — when Redis errors acquiring the lock', async () => {
+      // Under a real outage acquireLock() would swallow this and return
+      // `true` ("proceed unlocked"); this dedup lock must not, because
+      // proceeding unlocked under exactly this condition is what doubles a
+      // property's items.
+      vi.mocked(getRedisIfConfigured).mockReturnValue(
+        fakeRedis(() => Promise.reject(new Error('ECONNRESET'))) as never
+      )
+      vi.mocked(getStandardInventoryTemplateId).mockResolvedValue('plat-1')
+      const { client, inserts } = makeSupabase({
+        inventory_templates:      { data: { id: 'org-tpl-1' }, error: null },
+        inventory_template_items: { data: [ORG_ITEM], error: null },
+        inventory_items:          { data: [], error: null },
+      })
+
+      await expect(applyStandardInventoryToProperty(PROP, ORG, client)).rejects.toThrow()
+
+      // Never reached the dedup read or the insert — and the lock was never
+      // acquired, so there is nothing to release either.
+      expect(inserts).toHaveLength(0)
+      expect(releaseLock).not.toHaveBeenCalled()
     })
   })
 })

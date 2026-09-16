@@ -15,6 +15,11 @@ export interface StepStub {
 
 export interface HandlerContext {
   event:  unknown
+  // Optional — most handlers destructure `event` (singular) only. A handler
+  // built for Inngest's `batchEvents` (e.g. job-run-recorder) destructures
+  // `events` (plural) instead; Inngest's real context always carries both,
+  // with `events` a one-element tuple when the function isn't batched.
+  events?: unknown
   step:   StepStub
   // `warn` is optional but real — Inngest's logger exposes it and handlers use
   // it (e.g. inventory-events' zero-line-item PO repair path). Omitting it here

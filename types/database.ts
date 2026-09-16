@@ -1362,6 +1362,14 @@ export interface AuditEvent {
   metadata:    Record<string, unknown> | null
   ip_address:  string | null
   created_at:  string
+  /**
+   * Insert-time dedup for a write that might be delivered/invoked more than
+   * once for the same logical event (e.g. `thumbtack:${request_pk}`). Backed
+   * by a partial UNIQUE index (`WHERE dedupe_key IS NOT NULL`) — see
+   * 20260916120000_audit_events_dedupe_key.sql. NULL for every writer that
+   * doesn't opt into dedup, which is most of them.
+   */
+  dedupe_key:  string | null
 }
 
 export interface OrgInvite {

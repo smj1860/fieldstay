@@ -52,6 +52,11 @@ function makeSupabase(queued: QueuedByTable) {
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
+    // preserveManualCrewRoles now reads through fetchAllRows (chunked
+    // .in() + .range() pagination, replacing a bare .limit()) — see
+    // lib/inngest/functions/shared/preserve-crew-roles.ts.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

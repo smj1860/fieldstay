@@ -35,8 +35,9 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { fetchAllRows }         from '@/lib/inngest/paginate'
+import { sendEventsChunked }    from '@/lib/inngest/chunk'
 import { getPmMembers }         from '@/lib/inngest/helpers'
-import { resend, FROM }         from '@/lib/resend/client'
+import { resend, FROM, sendWithTimeout } from '@/lib/resend/client'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { reportError }          from '@/lib/observability/report-error'
 import { todayISO, scheduleIdsWithOpenWalk } from '@/lib/inspections/due-schedules'
@@ -132,6 +133,15 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
       // pull that org into the fan-out just to have the handler discover
       // it and skip — same reasoning as re-selecting per-org in the
       // handler below, one step earlier.
+      //
+      // Covered by a real index, not a sequential scan: the partial unique
+      // index `inspections_one_open_walk_per_schedule` (source_schedule_id)
+      // WHERE (source_schedule_id IS NOT NULL AND completed_at IS NULL) —
+      // supabase/migrations/20260915122230_inspections_one_open_walk_per_schedule.sql,
+      // added for the uniqueness constraint it enforces — happens to match
+      // this exact WHERE shape column-for-column, so Postgres can serve this
+      // scan from it directly. Verified against the live schema 2026-09-16 —
+      // if that index is ever dropped or narrowed, this query needs its own.
       const openWalks = await fetchAllRows<{ source_schedule_id: string | null; completed_at: string | null }>(
         (from, to) => supabase
           .from('inspections')
@@ -152,9 +162,11 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
       return { orgs: 0 }
     }
 
-    // ONE sendEvent with an array, not a loop of sends — a single call whose
-    // cost does not scale with tenant count.
-    await step.sendEvent('dispatch-overdue-emails', orgIds.map((org_id) => ({
+    // Chunked sendEvent, not a loop of individual sends OR one call for the
+    // whole platform — the former scales cost with tenant count, the latter
+    // risks Inngest's per-call event ceiling atomically failing dispatch for
+    // every org in the batch once the platform grows past it.
+    await sendEventsChunked(step, 'dispatch-overdue-emails', orgIds.map((org_id) => ({
       name: 'inspection/overdue.email.requested' as const,
       data: { org_id },
     })))
@@ -171,7 +183,14 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
     id:      'inspection-overdue-email-handler',
     name:    'Inspections: Overdue Email (per org)',
     retries: 2,
+    // `concurrency` here is keyed PER ORG (limit 4 concurrent runs for the
+    // SAME org), which is a no-op fan-out throttle: the dispatcher fires
+    // exactly one event per org, so no org ever has more than one invocation
+    // in flight regardless of this number. `throttle` is the real,
+    // function-scoped cap — the platform-wide Resend send rate stays bounded
+    // (20/s) no matter how many orgs the dispatcher fans out to in one run.
     concurrency: { limit: 4, key: 'event.data.org_id' },
+    throttle:    { limit: 20, period: '1s' },
   },
   { event: 'inspection/overdue.email.requested' as const },
   async ({ event, step, logger }) => {
@@ -299,7 +318,12 @@ async function sendOverdueEmail(
       : {}),
   })
 
-  const { error } = await resend.emails.send({
+  // sendWithTimeout — every other Resend call site goes through it (see
+  // lib/resend/client.ts). An untimed resend.emails.send() has no budget of
+  // its own and holds this step open until the PLATFORM kills the whole
+  // function; wrapping it here closes the one send in this file that bypassed
+  // that chokepoint.
+  const { error } = await sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to,
     replyTo: 'support@fieldstay.app',
@@ -311,7 +335,7 @@ async function sendOverdueEmail(
     // the retries and deliberately not next month's run — the
     // overdue_notified_month flag is what makes this once per month.
     idempotencyKey: `inspection-overdue-${orgId}-${firstOfMonth(todayISO())}`,
-  })
+  }))
 
   if (error) {
     // Thrown, not swallowed: nothing is marked yet, so a transient failure

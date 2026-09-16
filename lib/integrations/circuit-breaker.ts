@@ -4,11 +4,25 @@ import { getRedisIfConfigured } from '@/lib/redis'
 // A provider-level circuit breaker for outbound integrations.
 //
 // The audit's headline — "no circuit breaker on ANY external integration" —
-// is not accurate: OwnerRez has had a per-connection breaker since 2026-07
-// (lib/inngest/functions/ownerrez/incremental-sync.ts), with an in-memory
-// fallback and fail-closed semantics. But it is inline in that one function
-// and keyed by connection, so nothing else can use it, and Kroger, Telnyx,
-// Mapbox and Tomorrow.io genuinely have none.
+// was not accurate even before this file added 'hospitable'/'ownerrez':
+// Kroger has used this shared breaker since it was written (lib/kroger/
+// client.ts), and OwnerRez has had its OWN separate per-connection breaker
+// since 2026-07 (lib/inngest/functions/ownerrez/incremental-sync.ts), with an
+// in-memory fallback and fail-closed semantics. That one stays — it is inline
+// in that one function's dispatch tick, keyed by CONNECTION rather than
+// platform-wide, and decides whether to even attempt a given connection's
+// sync at all, which this shared, platform-wide breaker cannot express.
+//
+// What the audit found correctly is that Mapbox, Tomorrow.io, hospitableFetch,
+// hostexFetch, and OwnerRezApiClient's shared fetch transport (used by every
+// OwnerRez consumer EXCEPT incremental-sync — initial-sync, reviews-sync and
+// reconciliation-handler have no breaker of any kind today) genuinely had
+// none. 'hospitable', 'ownerrez' and 'hostex' were added to BreakerProvider
+// and wired into hospitableFetch / OwnerRezApiClient.fetchUrl / hostexFetch
+// for exactly that reason — as a platform-wide, transport-level backstop that
+// runs ALONGSIDE OwnerRez's existing per-connection one, not a replacement
+// for it. Mapbox and Tomorrow.io are unaddressed follow-up, out of scope for
+// this pass.
 //
 // The failure it prevents is amplification. During a provider outage every
 // independent job still calls through, waits out the full timeout budget,
@@ -67,7 +81,7 @@ const WINDOW_SECONDS = 60
  */
 const PROBE_TIMEOUT_SECONDS = 20
 
-export type BreakerProvider = 'kroger' | 'telnyx' | 'mapbox' | 'tomorrow'
+export type BreakerProvider = 'kroger' | 'telnyx' | 'mapbox' | 'tomorrow' | 'hostex' | 'hospitable' | 'ownerrez'
 
 function failuresKey(provider: BreakerProvider): string {
   return `circuit:${provider}:failures`

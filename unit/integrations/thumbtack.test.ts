@@ -1,4 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// getThumbtackAccessToken() now caches through Redis via singleFlight()
+// (unit/setup.ts sets dummy Upstash env vars globally, so without this mock
+// getRedisIfConfigured() would return a REAL client pointed at
+// 'https://unit-test.invalid' and every token fetch would attempt a genuine
+// network call). Defaults to "no Redis" — every test below gets the same
+// always-fetch behavior the old in-memory cache had before this suite ever
+// populated it, since nothing here asserts a cache HIT (that's
+// unit/lib/single-flight.test.ts's job, plus the call-site wiring proven by
+// unit/lib/weather-single-flight.test.ts's sibling coverage for Tomorrow.io).
+vi.mock('@/lib/redis', () => ({
+  getRedis:             vi.fn(),
+  getRedisIfConfigured: vi.fn(() => null),
+  upstashConfigured:    vi.fn(() => false),
+}))
+
 import {
   buildRequestFlowUrl,
   isThumbtackConfigured,
@@ -132,15 +148,17 @@ describe('THUMBTACK_CATEGORY_MAP', () => {
 describe('searchThumbtackPros', () => {
   let saved: Record<string, string | undefined>
 
-  beforeEach(() => {
+  beforeEach(async () => {
     saved = Object.fromEntries(THUMBTACK_ENV_KEYS.map((k) => [k, process.env[k]]))
-    // The module's token cache is keyed by authBase and persists across
-    // tests (it's real production behavior, not a test artifact) — several
-    // tests below reuse 'https://thumbtack.com' as THUMBTACK_ENVIRONMENT, so
-    // without this a token cached by an earlier test masks a later test's
-    // fetch mock entirely.
-    invalidateThumbtackToken('https://auth.thumbtack.com')
-    invalidateThumbtackToken('https://staging-auth.thumbtack.com')
+    // The token cache (Redis-backed; see getThumbtackAccessToken) is keyed by
+    // authBase and would otherwise persist across tests — several below reuse
+    // 'https://thumbtack.com' as THUMBTACK_ENVIRONMENT, so without this a
+    // token cached by an earlier test masks a later test's fetch mock
+    // entirely. In practice these tests run with no Redis configured, so
+    // there is nothing cached to begin with and this is a no-op — kept so the
+    // suite stays correct if that ever changes.
+    await invalidateThumbtackToken('https://auth.thumbtack.com')
+    await invalidateThumbtackToken('https://staging-auth.thumbtack.com')
   })
   afterEach(() => {
     for (const k of THUMBTACK_ENV_KEYS) {
@@ -267,7 +285,7 @@ describe('searchThumbtackPros', () => {
     // Without invalidating, the cached (unexpired) token would be reused —
     // this is exactly what the second call below would do if invalidation
     // didn't work, so the assertion is that it DOESN'T skip the fetch.
-    invalidateThumbtackToken('https://auth.thumbtack.com')
+    await invalidateThumbtackToken('https://auth.thumbtack.com')
     await expect(searchThumbtackPros({ categoryKey: 'plumbing', zipCode: '90210' })).rejects.toThrow(/not yet implemented/)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })

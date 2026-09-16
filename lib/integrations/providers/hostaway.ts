@@ -15,8 +15,11 @@
 // ============================================================
 
 import type { IntegrationProvider } from '@/lib/integrations/types'
+import { RateLimitError } from '@/lib/integrations/types'
 import { parseCidrAllowlist, validateBasicAuthWebhook } from '@/lib/integrations/webhook-verification'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { fetchWithRetry } from '@/lib/http/retry'
+import { rateLimitRetry } from '@/lib/inngest/retry-after'
 
 /**
  * Thrown by the three fetchers below (listings/reservations/reviews) when a
@@ -31,6 +34,47 @@ export class HostawayPaginationOverflowError extends Error {
     super(`[Hostaway] ${entity} pagination exceeded ${maxPages} pages (${rowsSoFar} so far) — refusing to return a partial result`)
     this.name = 'HostawayPaginationOverflowError'
   }
+}
+
+/**
+ * Hard ceiling on pages per paginated walk (listings/reservations/reviews).
+ * Exported so lib/inngest/functions/hostaway/sync-lock.ts can size the
+ * cross-function sync lock's TTL off it — a lock that guards a walk this long
+ * must outlive the walk.
+ */
+export const HOSTAWAY_PAGINATION_MAX_PAGES = 200
+
+/**
+ * One GET against the Hostaway API, with in-process retry for the transient
+ * failure classes a single page fetch can hit — a timeout, a 5xx, or a 429 —
+ * so a brief blip on page 150 of 200 does not have to fall all the way back
+ * to Inngest's step retry, which replays the WHOLE paginated walk from page 0
+ * (these three fetchers each run inside one `step.run`).
+ *
+ * fetchWithRetry only retries GET/HEAD, which is all three fetchers ever do,
+ * and it already classifies 5xx/429/timeout as retryable vs. everything else
+ * as fatal (see its header). What it does NOT do is honour a provider's own
+ * Retry-After: a persistent 429 (every in-process attempt still throttled)
+ * is converted here into a RetryAfterError via rateLimitRetry(), so that if
+ * Inngest DOES have to retry the step, it waits the interval Hostaway asked
+ * for instead of thrashing on its own generic backoff curve — the same
+ * "exhausted all retries: Rate limited — retry after Ns" failure mode
+ * documented in lib/inngest/retry-after.ts.
+ */
+async function hostawayGetWithRetry(url: string, token: string, label: string): Promise<Response> {
+  const res = await fetchWithRetry(
+    url,
+    { method: 'GET', headers: hostawayProvider.getApiHeaders(token) },
+    { timeoutMs: PMS_API_TIMEOUT_MS, label: `Hostaway ${label}`, attempts: 3 },
+  )
+
+  if (res.status === 429) {
+    const retryAfterHeader  = res.headers.get('Retry-After')
+    const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : Number.NaN
+    throw rateLimitRetry(new RateLimitError(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 60))
+  }
+
+  return res
 }
 
 // Exact field names from Hostaway API GET /v1/listings response
@@ -255,7 +299,7 @@ export async function hostawayFetchListings(
   const LIMIT = 100
   let offset  = 0
   let pageCount = 0
-  const MAX_PAGES = 200
+  const MAX_PAGES = HOSTAWAY_PAGINATION_MAX_PAGES
 
   while (true) {
     pageCount++
@@ -266,9 +310,10 @@ export async function hostawayFetchListings(
       throw new HostawayPaginationOverflowError('listings', listings.length, MAX_PAGES)
     }
 
-    const res = await fetch(
+    const res = await hostawayGetWithRetry(
       `${BASE_URL}/listings?limit=${LIMIT}&offset=${offset}&includeResources=0`,
-      { headers: hostawayProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) }
+      token,
+      'listings',
     )
 
     if (!res.ok) {
@@ -315,7 +360,7 @@ export async function hostawayFetchReservations(
   const LIMIT  = 100
   let   offset = 0
   let pageCount = 0
-  const MAX_PAGES = 200
+  const MAX_PAGES = HOSTAWAY_PAGINATION_MAX_PAGES
 
   while (true) {
     pageCount++
@@ -344,10 +389,7 @@ export async function hostawayFetchReservations(
         : { sortOrder: 'updatedOn',   latestActivityStart: filter.date }),
     })
 
-    const res = await fetch(`${BASE_URL}/reservations?${params}`, {
-      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-      headers: hostawayProvider.getApiHeaders(token),
-    })
+    const res = await hostawayGetWithRetry(`${BASE_URL}/reservations?${params}`, token, 'reservations')
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -398,7 +440,7 @@ export async function hostawayFetchReviews(
   const LIMIT = 100
   let offset = 0
   let pageCount = 0
-  const MAX_PAGES = 200
+  const MAX_PAGES = HOSTAWAY_PAGINATION_MAX_PAGES
 
   while (true) {
     pageCount++
@@ -420,10 +462,7 @@ export async function hostawayFetchReviews(
       sortOrder:          'asc',
     })
 
-    const res = await fetch(`${BASE_URL}/reviews?${params}`, {
-      signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-      headers: hostawayProvider.getApiHeaders(token),
-    })
+    const res = await hostawayGetWithRetry(`${BASE_URL}/reviews?${params}`, token, 'reviews')
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')

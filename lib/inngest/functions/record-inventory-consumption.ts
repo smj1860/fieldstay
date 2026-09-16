@@ -31,8 +31,11 @@ export const recordInventoryConsumption = inngest.createFunction(
     name:    'Inventory — record consumption from a count',
     retries: 3,
     // Matches the sibling handler's cap on the same event, so a batch of counts
-    // cannot open twice the connections one of them was sized for.
-    concurrency: { limit: 5 },
+    // cannot open twice the connections one of them was sized for. Tenant-keyed
+    // for the same reason as that sibling: a same-day-checkout wave from one
+    // large org must not exhaust the global budget and starve every other
+    // org's consumption recording and par recompute.
+    concurrency: [{ limit: 25 }, { key: 'event.data.org_id', limit: 3 }],
   },
   { event: 'inventory/count-submitted' },
   async ({ event, step, logger }) => {

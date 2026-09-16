@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 
+import { reconnectDelayWithJitterMs } from '../sync/signals'
 import { warmInspectionsForOffline } from './warm-inspections'
 
 /**
@@ -23,6 +24,17 @@ import { warmInspectionsForOffline } from './warm-inspections'
  *
  * Non-blocking and non-fatal, like DashboardCacheGuard beside it. A warm that
  * fails leaves the device exactly where it was.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THE RECONNECT WARM IS JITTERED
+ *
+ * A fleet-wide outage recovers at one instant for every device on it, and
+ * `online` fires on all of them at once. Warming immediately on that event
+ * turns "the backend came back" into a synchronized request stampede from
+ * every PM's tablet in the same second — exactly the herd `online`'s own
+ * comment in lib/dexie/context.tsx already spreads out for the crew realtime
+ * reconnect, via `reconnectDelayWithJitterMs()`. Reused here rather than
+ * inventing a second jitter formula for the same problem.
  */
 export function InspectionWarmer({ userId, orgId }: Readonly<{ userId: string; orgId: string }>) {
   useEffect(() => {
@@ -30,10 +42,17 @@ export function InspectionWarmer({ userId, orgId }: Readonly<{ userId: string; o
 
     // Also on reconnect. A tablet that woke up on a hotel wifi has a window to
     // catch up that the next mount may not provide — the PM may already be
-    // driving, with the app open the whole time.
-    const onOnline = () => { void warmInspectionsForOffline(userId, orgId) }
+    // driving, with the app open the whole time. Jittered — see above.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onOnline = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { void warmInspectionsForOffline(userId, orgId) }, reconnectDelayWithJitterMs())
+    }
     globalThis.addEventListener?.('online', onOnline)
-    return () => globalThis.removeEventListener?.('online', onOnline)
+    return () => {
+      globalThis.removeEventListener?.('online', onOnline)
+      if (timer) clearTimeout(timer)
+    }
   }, [userId, orgId])
 
   return null

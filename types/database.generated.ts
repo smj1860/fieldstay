@@ -408,6 +408,7 @@ export type Database = {
           action: string
           actor_id: string | null
           created_at: string
+          dedupe_key: string | null
           id: string
           ip_address: string | null
           metadata: Json | null
@@ -419,6 +420,7 @@ export type Database = {
           action: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null
@@ -430,6 +432,7 @@ export type Database = {
           action?: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null
@@ -6622,7 +6625,7 @@ export type Database = {
         Returns: number
       }
       apply_crew_score_recompute: { Args: never; Returns: Json }
-      apply_friction_grading: { Args: never; Returns: Json }
+      apply_friction_grading: { Args: { p_org_id: string }; Returns: Json }
       apply_inventory_counts: {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number
@@ -6862,6 +6865,10 @@ export type Database = {
       }
       property_defaults_report: { Args: never; Returns: Json }
       purge_expired_audit_events: { Args: never; Returns: Json }
+      purge_org_table_batch: {
+        Args: { p_batch_size?: number; p_org_id: string; p_table_name: string }
+        Returns: number
+      }
       read_integration_refresh_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: string

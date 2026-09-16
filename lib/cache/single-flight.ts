@@ -1,4 +1,5 @@
 import { getRedisIfConfigured } from '@/lib/redis'
+import { withTimeout, REDIS_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 
 // ============================================================================
 // One expensive producer per key, across every concurrent caller and every
@@ -61,10 +62,42 @@ export async function acquireLock(
   if (!redis) return true
 
   try {
-    return (await redis.set(key, '1', { nx: true, ex: ttlSeconds })) === 'OK'
+    return (await withTimeout(() => redis.set(key, '1', { nx: true, ex: ttlSeconds }), REDIS_TIMEOUT_MS, `acquireLock(${key})`)) === 'OK'
   } catch (err) {
-    console.warn(`[single-flight] lock unavailable for ${key}, proceeding unlocked:`, err)
+    // A slow-not-down Redis lands here via withTimeout's TimeoutError the
+    // same as a genuine error would — see REDIS_TIMEOUT_MS's header. Either
+    // way, fail open: same call as a Redis outage.
+    if (!isTimeoutError(err)) {
+      console.warn(`[single-flight] lock unavailable for ${key}, proceeding unlocked:`, err)
+    }
     return true
+  }
+}
+
+/**
+ * A plain read of whether `key` is currently held — does not attempt to
+ * acquire it, and never releases anything.
+ *
+ * For a caller that wants to know "is someone else working on this right
+ * now" WITHOUT taking a turn at the lock itself — e.g. a top-level Inngest
+ * step deciding whether to `step.sleep` before a later step tries the real
+ * acquire/produce/release cycle. Fails open (reports "not held") on a Redis
+ * error or when Redis is unconfigured, same posture as acquireLock: a stale
+ * "not held" reading costs a redundant attempt downstream, not a correctness
+ * failure, and failing closed here would block that caller on a Redis blip
+ * for a lock that may not even be real.
+ */
+export async function isLockHeld(key: string): Promise<boolean> {
+  const redis = getRedisIfConfigured()
+  if (!redis) return false
+
+  try {
+    return (await withTimeout(() => redis.get(key), REDIS_TIMEOUT_MS, `isLockHeld(${key})`)) !== null
+  } catch (err) {
+    if (!isTimeoutError(err)) {
+      console.warn(`[single-flight] lock-check unavailable for ${key}, assuming unheld:`, err)
+    }
+    return false
   }
 }
 
@@ -74,9 +107,41 @@ export async function releaseLock(key: string): Promise<void> {
   if (!redis) return
 
   try {
-    await redis.del(key)
+    await withTimeout(() => redis.del(key), REDIS_TIMEOUT_MS, `releaseLock(${key})`)
   } catch {
-    // Non-fatal — the TTL expires it.
+    // Non-fatal — the TTL expires it (or a slow release just landed late).
+  }
+}
+
+/**
+ * Extends an already-held lock's TTL. Best-effort — a failure here is not
+ * fatal, it just means the ORIGINAL ttlSeconds still governs when the lock
+ * self-heals.
+ *
+ * For a guarded operation whose runtime is not fixed (a variable-sized DB
+ * insert, say), a lock acquired with a fixed TTL can expire mid-operation:
+ * a concurrent retry then sees the key as free, acquires it, and duplicates
+ * the very write the lock exists to serialize. Calling this partway through
+ * — after the slow-and-variable part of the work has started — re-arms the
+ * TTL so the lock's lifetime tracks the operation's actual duration rather
+ * than a guess made before it started.
+ *
+ * Does not throw and does not distinguish "extended" from "key already
+ * gone" — a caller racing its own expiry has no correct action to take on
+ * either outcome beyond finishing as fast as possible, which it was already
+ * going to do.
+ */
+export async function renewLock(
+  key:        string,
+  ttlSeconds: number = DEFAULT_LOCK_TTL_SECONDS,
+): Promise<void> {
+  const redis = getRedisIfConfigured()
+  if (!redis) return
+
+  try {
+    await withTimeout(() => redis.expire(key, ttlSeconds), REDIS_TIMEOUT_MS, `renewLock(${key})`)
+  } catch {
+    // Non-fatal — see header comment. The original TTL still applies.
   }
 }
 
@@ -90,6 +155,39 @@ export interface SingleFlightOptions<T> {
   lockTtlSeconds?: number
   waitMs?:         number
   maxWaits?:       number
+}
+
+/**
+ * Waits `maxWaits` times, jittered, re-reading after each wait. Returns the
+ * first non-null/undefined read, or `undefined` if the whole cycle passes
+ * with nothing to read.
+ *
+ * Extracted so `singleFlight` can run this cycle TWICE (see the header
+ * comment on the second-stampede fix below) without duplicating the jitter
+ * math — a second hand-rolled copy is exactly how the two would drift out of
+ * sync with each other over time.
+ */
+async function waitAndPoll<T>(
+  read:      () => Promise<T | null | undefined>,
+  baseWaitMs: number,
+  maxWaits:   number,
+): Promise<T | undefined> {
+  for (let i = 0; i < maxWaits; i++) {
+    // Jittered, not a fixed interval: every loser that lost the race at
+    // roughly the same wall-clock moment is otherwise on the IDENTICAL
+    // wait schedule, so if the winner's produce() takes longer than the
+    // full wait budget (plausible for a real external call under load —
+    // exactly the situation this module exists to protect), every one of
+    // them falls through within the same narrow window right after the
+    // budget expires — a fresh, simultaneous stampede, worse than no lock
+    // at all because it also added latency first.
+    // eslint-disable-next-line no-restricted-properties -- desynchronise waiters, not id/token generation
+    const waitMs = baseWaitMs * (1 + Math.random() * 0.5) // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+    const settled = await read()
+    if (settled !== null && settled !== undefined) return settled
+  }
+  return undefined
 }
 
 /**
@@ -110,6 +208,30 @@ export interface SingleFlightOptions<T> {
  *
  * `read` is called BEFORE the lock is taken, so the common case (a warm cache)
  * costs exactly one round-trip and no lock traffic at all.
+ *
+ * ── The second-stampede fix ──────────────────────────────────────────────
+ *
+ * A slow-but-alive producer (a real external call under load, exactly what
+ * this module exists to protect against) can outlast the FIRST wait cycle.
+ * Every waiter then reaches the "try once more to acquire" step within the
+ * same narrow window, and if the original holder is still working (not
+ * crashed — just slow), that re-acquire fails for all of them too. Falling
+ * through to `produce()` unconditionally at that point reproduces the exact
+ * failure this module exists to prevent: every loser calling the expensive
+ * producer at once, synchronized by having just failed the same re-acquire
+ * at the same moment — a second stampede, now with the first wait's latency
+ * already paid.
+ *
+ * So a failed re-acquire runs a SECOND bounded wait-and-poll cycle (fresh
+ * jitter, same budget) before giving up. This does not fix a producer slower
+ * than 2x the wait budget — nothing short of `waitForEvent`-style signalling
+ * would — but it closes the common case (a producer that finishes somewhat
+ * after the first budget, e.g. a provider having a slow-but-not-timed-out
+ * moment) without every waiter free-running the expensive call. Callers with
+ * a known-slow producer (a third-party API with a realistic multi-second
+ * p99) should still size `waitMs`/`maxWaits` to their real latency rather
+ * than lean on this as the only protection — this is a backstop for the
+ * budget being merely a little short, not a substitute for sizing it right.
  */
 export async function singleFlight<T>(opts: SingleFlightOptions<T>): Promise<T> {
   const cached = await opts.read()
@@ -123,28 +245,15 @@ export async function singleFlight<T>(opts: SingleFlightOptions<T>): Promise<T> 
     const maxWaits   = opts.maxWaits ?? DEFAULT_MAX_WAITS
     const lockTtl    = opts.lockTtlSeconds ?? DEFAULT_LOCK_TTL_SECONDS
 
-    for (let i = 0; i < maxWaits; i++) {
-      // Jittered, not a fixed interval: every loser that lost the race at
-      // roughly the same wall-clock moment is otherwise on the IDENTICAL
-      // wait schedule, so if the winner's produce() takes longer than the
-      // full wait budget (plausible for a real external call under load —
-      // exactly the situation this module exists to protect), every one of
-      // them falls through to produce() within the same narrow window right
-      // after the budget expires — a fresh, simultaneous stampede, worse
-      // than no lock at all because it also added latency first.
-      // eslint-disable-next-line no-restricted-properties -- desynchronise waiters, not id/token generation
-      const waitMs = baseWaitMs * (1 + Math.random() * 0.5) // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
-      await new Promise((resolve) => setTimeout(resolve, waitMs))
-      const settled = await opts.read()
-      if (settled !== null && settled !== undefined) return settled
-    }
+    const firstWait = await waitAndPoll(opts.read, baseWaitMs, maxWaits)
+    if (firstWait !== undefined) return firstWait
 
-    // Wait budget exhausted with nothing to read. Try ONCE more to become
-    // the winner before falling through unconditionally — the original
-    // holder may have crashed, in which case its lock has already expired
-    // (or another waiter released it after a failed produce()), and taking
-    // over here is a real single-flight rather than every waiter producing
-    // independently at the same moment.
+    // First wait budget exhausted with nothing to read. Try ONCE more to
+    // become the winner before falling through — the original holder may
+    // have crashed, in which case its lock has already expired (or another
+    // waiter released it after a failed produce()), and taking over here is
+    // a real single-flight rather than every waiter producing independently
+    // at the same moment.
     if (await acquireLock(lockKey, lockTtl)) {
       try {
         return await opts.produce()
@@ -153,8 +262,14 @@ export async function singleFlight<T>(opts: SingleFlightOptions<T>): Promise<T> 
       }
     }
 
-    // Still held by someone else. Produce rather than fail — but do NOT
-    // release a lock we never held.
+    // Still held by someone else — a slow-but-alive producer, not a crashed
+    // one. Run a SECOND bounded wait-and-poll cycle with fresh jitter rather
+    // than falling through immediately: see the second-stampede note above.
+    const secondWait = await waitAndPoll(opts.read, baseWaitMs, maxWaits)
+    if (secondWait !== undefined) return secondWait
+
+    // Both wait cycles exhausted and the lock is still held. Produce rather
+    // than fail — but do NOT release a lock we never held.
     return opts.produce()
   }
 

@@ -45,6 +45,18 @@ export interface RetryOptions {
   baseDelayMs?: number
   /** For log lines — the service being called. */
   label: string
+  /**
+   * Hard ceiling on TOTAL wall-clock time across every attempt plus backoff.
+   *
+   * Without this, worst case is `attempts * timeoutMs` plus backoff — for a
+   * caller awaiting this synchronously inside a user-facing save (Mapbox
+   * geocoding inside createProperty/updateProperty), that is a serverless
+   * invocation held open for the full multi-attempt budget on a merely slow
+   * provider, not a down one. Optional because background/step-scoped callers
+   * (Tomorrow.io from an Inngest step) can legitimately afford the full
+   * per-attempt budget with no outer bound.
+   */
+  overallDeadlineMs?: number
 }
 
 const DEFAULT_ATTEMPTS = 3
@@ -71,6 +83,30 @@ function backoffMs(attempt: number, base: number): number {
  * propagates as a throw.
  */
 export async function fetchWithRetry(
+  input: string | URL,
+  init: RequestInit,
+  opts: RetryOptions,
+): Promise<Response> {
+  if (opts.overallDeadlineMs === undefined) {
+    return fetchWithRetryAttempts(input, init, opts)
+  }
+
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new DOMException(`${opts.label}: overall retry deadline of ${opts.overallDeadlineMs}ms exceeded`, 'TimeoutError')),
+      opts.overallDeadlineMs,
+    )
+  })
+
+  try {
+    return await Promise.race([fetchWithRetryAttempts(input, init, opts), deadline])
+  } finally {
+    clearTimeout(timer!)
+  }
+}
+
+async function fetchWithRetryAttempts(
   input: string | URL,
   init: RequestInit,
   opts: RetryOptions,

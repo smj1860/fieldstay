@@ -12,6 +12,7 @@ import { reportError } from '@/lib/observability/report-error'
 import {
   MAX_SPONSORS_PER_PROPERTY,
   ASSIGNMENT_MIN_PROPERTIES,
+  invalidateSponsorsCache,
 } from '@/lib/guidebook/resolve-property-sponsors'
 
 /**
@@ -154,6 +155,7 @@ export async function setSponsorProperties(
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.setSponsorProperties' })
@@ -233,6 +235,7 @@ export async function setPropertySponsors(
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.setPropertySponsors' })
@@ -285,6 +288,7 @@ export async function resetPropertyToAutomatic(propertyId: string): Promise<Assi
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.resetPropertyToAutomatic' })

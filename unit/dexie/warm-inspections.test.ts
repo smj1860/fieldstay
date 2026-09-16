@@ -46,7 +46,12 @@ let formRows:       { data: unknown; error: unknown } = { data: [], error: null 
 let sectionRows:    { data: unknown; error: unknown } = { data: [], error: null }
 let itemRows:       { data: unknown; error: unknown } = { data: [], error: null }
 let propertyRows:   { data: unknown; error: unknown } = { data: [], error: null }
-let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null }
+let scheduleRows:   { data: unknown; error: unknown; count?: number } = { data: [], error: null }
+
+/** How many times `.from('maintenance_schedules')` was called — the
+ *  cheap-invalidation tests use this to prove the expensive row fetch was
+ *  (or was not) skipped. */
+let fromCalls: Record<string, number> = {}
 
 // See the sibling note in warm-maintenance-board.test.ts: getSession() performs
 // the refresh, so null models a session that has lapsed and cannot be renewed.
@@ -82,7 +87,8 @@ function fakeSupabase() {
       },
     },
     from(table: string) {
-      const byTable: Record<string, () => { data: unknown; error: unknown }> = {
+      fromCalls[table] = (fromCalls[table] ?? 0) + 1
+      const byTable: Record<string, () => { data: unknown; error: unknown; count?: number }> = {
         inspections:              () => inspectionRows,
         property_assets:          () => assetRows,
         inspection_forms:         () => formRows,
@@ -93,7 +99,7 @@ function fakeSupabase() {
       }
       const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit']) {
+      for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit', 'abortSignal']) {
         builder[m] = () => builder
       }
       builder.then = (resolve: (v: unknown) => unknown) => {
@@ -121,6 +127,7 @@ beforeEach(async () => {
   sessionSequence   = null
   sessionCalls      = 0
   onInspectionsRead = null
+  fromCalls         = {}
   // A library that caches by default, since almost every test needs one and
   // only the library-specific tests care about its contents.
   formRows     = { data: [{ id: 'f1', key: 'safety', version: 1, is_active: true, name: 'Safety' }], error: null }
@@ -491,5 +498,55 @@ describe('warmInspectionsForOffline — concurrent callers', () => {
     while (releases.length < 2) await new Promise((r) => setTimeout(r, 0))
     releases[1]!()
     await Promise.all([forcedB, third])
+  })
+})
+
+// ── Scalability audit fix: cheap invalidation instead of a full delta pull ──
+//
+// Same scoped-down design as warm-maintenance-board.test.ts's equivalent
+// block: a `count`-only aggregate ahead of the bounded schedule fetch, so an
+// unchanged count skips the fetch+clear+bulkPut entirely rather than paying
+// for it every 15 minutes regardless of churn.
+describe('warmInspectionsForOffline — cheap invalidation on schedules', () => {
+  const schedule = (id: string, over: Record<string, unknown> = {}) => ({
+    id, org_id: ORG, property_id: 'prop-1', name: 'Quarterly safety walk',
+    creates: 'inspection', is_active: true,
+    next_due_date: '2026-09-01', inspection_form_id: 'f1', ...over,
+  })
+
+  it('skips the expensive schedule fetch when the count has not moved', async () => {
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 1 }
+    await warmInspectionsForOffline(USER, ORG)
+
+    fromCalls.maintenance_schedules = 0
+    // The count is UNCHANGED (1) even though the row payload now claims a
+    // second schedule — used here only to prove the skip took effect: if the
+    // full fetch ran anyway, sched-2 would land in the cache.
+    scheduleRows = { data: [schedule('sched-1'), schedule('sched-2')], error: null, count: 1 }
+
+    const result = await warmInspectionsForOffline(USER, ORG, { force: true })
+
+    expect(fromCalls.maintenance_schedules).toBe(1) // only the count-only aggregate ran
+    expect(result.schedules).toBe(1)
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-2')).toBeUndefined()
+  })
+
+  it('does the full fetch when the schedule count HAS changed', async () => {
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 1 }
+    await warmInspectionsForOffline(USER, ORG)
+
+    scheduleRows = { data: [schedule('sched-1'), schedule('sched-2')], error: null, count: 2 }
+    const result = await warmInspectionsForOffline(USER, ORG, { force: true })
+
+    expect(result.schedules).toBe(2)
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-2')).toBeTruthy()
+  })
+
+  it('surfaces omittedCount from the count aggregate', async () => {
+    // SCHEDULE_LIMIT (500) is impractical to actually exceed in a unit test;
+    // this exercises the arithmetic rather than the real cap.
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 5 }
+    const result = await warmInspectionsForOffline(USER, ORG)
+    expect(result.omittedCount).toBe(4)
   })
 })

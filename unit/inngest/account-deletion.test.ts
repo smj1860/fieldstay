@@ -12,6 +12,8 @@ import {
   ORG_PURGE_TABLES,
   ORG_TABLES_WITHOUT_CASCADE,
   ORG_TABLES_BLOCKING_CASCADE,
+  PURGE_BATCH_SIZE,
+  MAX_BATCHES_PER_TABLE,
 } from '@/lib/inngest/functions/account-deletion'
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
@@ -20,7 +22,7 @@ import { invokeHandler } from './test-helpers'
 
 // ============================================================================
 // The DESTRUCTIVE half of account deletion, moved off the request thread on
-// 2026-08-09.
+// 2026-08-09, and made BATCHED/resumable per table on 2026-09-16.
 //
 // Every guarantee asserted here used to be asserted against the route, and the
 // reason for each one is unchanged — only the place it has to hold. They are
@@ -44,14 +46,19 @@ function makeStep() {
 }
 
 interface QueuedByTable { [table: string]: { error?: unknown }[] }
+/** Queued RPC responses per table, consumed in order — one entry per batch call. */
+interface QueuedRpcByTable { [table: string]: { data?: number | null; error?: unknown }[] }
 
 function makeAdmin(
-  queued: QueuedByTable = {},
+  queued:    QueuedByTable = {},
+  queuedRpc: QueuedRpcByTable = {},
   opts: { deleteUserError?: { message: string; status?: number } } = {},
 ) {
   const counters: Record<string, number> = {}
+  const rpcCounters: Record<string, number> = {}
   const order: string[] = []
   const eqCalls: { table: string; column: string; value: unknown }[] = []
+  const rpcCalls: { table: string; orgId: string; batchSize: number }[] = []
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,12 +80,24 @@ function makeAdmin(
     return chain
   })
 
+  // purge_org_table_batch() is the ONLY rpc() this function calls. Every
+  // batch call not explicitly queued drains in one shot (data: 0) — the
+  // common case for a fresh fixture with nothing to delete.
+  const rpc = vi.fn((_fn: string, params: { p_table_name: string; p_org_id: string; p_batch_size: number }) => {
+    order.push(`rpc:${params.p_table_name}`)
+    rpcCalls.push({ table: params.p_table_name, orgId: params.p_org_id, batchSize: params.p_batch_size })
+    const idx = rpcCounters[params.p_table_name] ?? 0
+    rpcCounters[params.p_table_name] = idx + 1
+    const queuedEntry = queuedRpc[params.p_table_name]?.[idx]
+    return Promise.resolve(queuedEntry ?? { data: 0, error: null })
+  })
+
   const deleteUser = vi.fn(async (_id: string) => {
     order.push('deleteUser')
     return { error: opts.deleteUserError ?? null }
   })
 
-  return { from, order, eqCalls, auth: { admin: { deleteUser } } }
+  return { from, rpc, order, eqCalls, rpcCalls, auth: { admin: { deleteUser } } }
 }
 
 const USER_ID = 'user_1'
@@ -95,13 +114,15 @@ function run(admin: ReturnType<typeof makeAdmin>, ownedOrgIds: string[]) {
 describe('accountDeletion', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('purges every non-cascading table, THEN the organization, THEN the auth user', async () => {
+  it('purges every table (via the batched RPC), THEN the organization, THEN the auth user', async () => {
     // The order is the whole safety property, in both directions:
     //
-    //  * Tables before the organization, because work_order_invoices and
-    //    work_orders hold RESTRICT / NO ACTION edges INTO the cascade tree and
-    //    Postgres does not order cascade actions — left to the cascade they
-    //    abort the organizations DELETE with an FK violation.
+    //  * Tables before the organization, because work_order_invoices,
+    //    owner_transactions, purchase_orders and work_orders hold RESTRICT /
+    //    NO ACTION edges INTO the cascade tree and Postgres does not order
+    //    cascade actions among a parent's independent direct children — left
+    //    to the cascade they can abort the organizations DELETE with an FK
+    //    violation.
     //  * Organization before the auth user, because while the user exists the
     //    tenant is reachable and the purge is re-drivable. Reverse it and a
     //    failed purge becomes an orphan nobody can find.
@@ -110,21 +131,21 @@ describe('accountDeletion', () => {
     await run(admin, ['org_1'])
 
     for (const table of ORG_PURGE_TABLES) {
-      expect(admin.order).toContain(`delete:${table}`)
-      expect(admin.order.indexOf(`delete:${table}`))
+      expect(admin.order).toContain(`rpc:${table}`)
+      expect(admin.order.indexOf(`rpc:${table}`))
         .toBeLessThan(admin.order.indexOf('delete:organizations'))
     }
     expect(admin.order.indexOf('delete:organizations'))
       .toBeLessThan(admin.order.indexOf('deleteUser'))
   })
 
-  it('scopes every purge to the org, and the organization delete to its id', async () => {
+  it('scopes every batched purge to the org (via p_org_id), and the organization delete to its id', async () => {
     const admin = makeAdmin()
 
     await run(admin, ['org_1'])
 
     for (const table of ORG_PURGE_TABLES) {
-      expect(admin.eqCalls).toContainEqual({ table, column: 'org_id', value: 'org_1' })
+      expect(admin.rpcCalls).toContainEqual({ table, orgId: 'org_1', batchSize: PURGE_BATCH_SIZE })
     }
     expect(admin.eqCalls).toContainEqual({ table: 'organizations', column: 'id', value: 'org_1' })
   })
@@ -139,14 +160,14 @@ describe('accountDeletion', () => {
     expect(admin.order).toEqual(['deleteUser'])
   })
 
-  it('THROWS rather than continuing when a table purge fails — the auth user must survive a failed purge', async () => {
+  it('THROWS rather than continuing when a table purge batch fails — the auth user must survive a failed purge', async () => {
     // The route used to return a 500 here and leave the caller to notice.
     // Throwing gets the Inngest retry and, on exhaustion, the dead-letter
     // founder alert. Continuing to deleteUser would produce exactly the
     // orphaned tenant this whole flow exists to prevent.
-    const admin = makeAdmin({ work_order_invoices: [{ error: { message: 'deadlock detected' } }] })
+    const admin = makeAdmin({}, { work_order_invoices: [{ error: { message: 'deadlock detected' } }] })
 
-    await expect(run(admin, ['org_1'])).rejects.toThrow(/failed to purge work_order_invoices/)
+    await expect(run(admin, ['org_1'])).rejects.toThrow(/purge_org failed for work_order_invoices\/org_1 \(batch 0\)/)
 
     expect(admin.order).not.toContain('delete:organizations')
     expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
@@ -165,7 +186,7 @@ describe('accountDeletion', () => {
   })
 
   it('throws when the final auth-user deletion fails', async () => {
-    const admin = makeAdmin({}, { deleteUserError: { message: 'auth service down' } })
+    const admin = makeAdmin({}, {}, { deleteUserError: { message: 'auth service down' } })
 
     await expect(run(admin, [])).rejects.toThrow(/deleteUser failed/)
   })
@@ -173,7 +194,7 @@ describe('accountDeletion', () => {
   it('treats an already-deleted auth user as success — that is the retry case, not a failure', async () => {
     // The previous attempt got all the way here and died on the response. Any
     // other error still throws.
-    const admin = makeAdmin({}, { deleteUserError: { message: 'User not found' } })
+    const admin = makeAdmin({}, {}, { deleteUserError: { message: 'User not found' } })
 
     await expect(run(admin, [])).resolves.toEqual({ orgs_purged: 0 })
   })
@@ -182,14 +203,14 @@ describe('accountDeletion', () => {
     // A brittle regex against error.message is fragile against wording drift
     // in a third-party (Supabase GoTrue) error string this codebase does not
     // control. The HTTP status is the real signal.
-    const admin = makeAdmin({}, { deleteUserError: { message: 'Auth admin error', status: 404 } })
+    const admin = makeAdmin({}, {}, { deleteUserError: { message: 'Auth admin error', status: 404 } })
 
     await expect(run(admin, [])).resolves.toEqual({ orgs_purged: 0 })
     expect(reportError).not.toHaveBeenCalled()
   })
 
   it('still throws a non-404 error whose message does not mention not-found', async () => {
-    const admin = makeAdmin({}, { deleteUserError: { message: 'auth service down', status: 500 } })
+    const admin = makeAdmin({}, {}, { deleteUserError: { message: 'auth service down', status: 500 } })
 
     await expect(run(admin, [])).rejects.toThrow(/deleteUser failed/)
     expect(reportError).toHaveBeenCalledWith(
@@ -305,14 +326,14 @@ describe('accountDeletion', () => {
       await run(admin, ['org_1'])
 
       for (const table of ORG_TABLES_WITHOUT_CASCADE) {
-        const occurrences = admin.order.filter((entry) => entry === `delete:${table}`).length
+        const occurrences = admin.order.filter((entry) => entry === `rpc:${table}`).length
         expect(occurrences).toBe(2)
       }
       // Tables that already cascade correctly (or block it and must run
       // exactly once, before the cascade) get no second sweep — they were
       // never the race window this closes.
       for (const table of ORG_TABLES_BLOCKING_CASCADE) {
-        const occurrences = admin.order.filter((entry) => entry === `delete:${table}`).length
+        const occurrences = admin.order.filter((entry) => entry === `rpc:${table}`).length
         expect(occurrences).toBe(1)
       }
     })
@@ -324,18 +345,21 @@ describe('accountDeletion', () => {
 
       const orgIdx = admin.order.indexOf('delete:organizations')
       for (const table of ORG_TABLES_WITHOUT_CASCADE) {
-        const lastIdx = admin.order.lastIndexOf(`delete:${table}`)
-        expect(lastIdx).toBeGreaterThan(admin.order.indexOf(`delete:${table}`)) // a real second occurrence
+        const lastIdx = admin.order.lastIndexOf(`rpc:${table}`)
+        expect(lastIdx).toBeGreaterThan(admin.order.indexOf(`rpc:${table}`)) // a real second occurrence
         expect(lastIdx).toBeLessThan(orgIdx)
       }
     })
 
     it('THROWS rather than continuing when the final sweep fails, and never deletes the organization', async () => {
-      // The first purge pass over crew_availability succeeds; the final
-      // sweep for the same table is what fails.
-      const admin = makeAdmin({ crew_availability: [{ error: null }, { error: { message: 'deadlock detected' } }] })
+      // The first purge pass over crew_availability succeeds (drains in one
+      // batch); the final sweep's batch for the same table is what fails.
+      const admin = makeAdmin({}, {
+        crew_availability: [{ data: 0, error: null }, { error: { message: 'deadlock detected' } }],
+      })
 
-      await expect(run(admin, ['org_1'])).rejects.toThrow(/final sweep failed for crew_availability\/org_1/)
+      await expect(run(admin, ['org_1']))
+        .rejects.toThrow(/purge_org_final_sweep failed for crew_availability\/org_1 \(batch 0\)/)
 
       expect(admin.order).not.toContain('delete:organizations')
       expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
@@ -343,6 +367,57 @@ describe('accountDeletion', () => {
         expect.anything(),
         expect.objectContaining({ site: 'inngest.account-deletion.purge_org_final_sweep' }),
       )
+    })
+  })
+
+  describe('batched purge (2026-09-16 scalability pass)', () => {
+    // purge_org_table_batch() deletes at most PURGE_BATCH_SIZE rows per call
+    // and reports how many it removed. These tests pin the loop's contract
+    // against the three shapes the audit called out: 0 rows, exactly one full
+    // batch, and more than one batch.
+
+    it('stops after a single batch when the RPC reports fewer rows than a full batch (0 rows — nothing to purge)', async () => {
+      const admin = makeAdmin({}, { messages: [{ data: 0, error: null }] })
+
+      await run(admin, ['org_1'])
+
+      const calls = admin.rpcCalls.filter((c) => c.table === 'messages')
+      // One in the main pass, one in the final sweep (messages is in
+      // ORG_TABLES_WITHOUT_CASCADE) — neither takes a second batch.
+      expect(calls).toHaveLength(2)
+    })
+
+    it('takes a SECOND batch when the first reports exactly PURGE_BATCH_SIZE rows, then stops once a short batch confirms drained', async () => {
+      const admin = makeAdmin({}, {
+        // Main pass: full batch, then a short batch confirming drained.
+        // Final sweep: drains immediately (default).
+        messages: [
+          { data: PURGE_BATCH_SIZE, error: null },
+          { data: 12, error: null },
+        ],
+      })
+
+      await run(admin, ['org_1'])
+
+      const calls = admin.rpcCalls.filter((c) => c.table === 'messages')
+      // 2 batches for the main pass + 1 for the final sweep.
+      expect(calls).toHaveLength(3)
+    })
+
+    it('throws rather than looping forever when a table never reports a short batch', async () => {
+      // Every call reports a full batch — MAX_BATCHES_PER_TABLE guards
+      // against exactly this (a bug in the RPC, or a table whose org_id
+      // filter never converges), rather than an infinite per-batch step loop.
+      const fullBatches = Array.from({ length: MAX_BATCHES_PER_TABLE + 1 }, () => ({
+        data: PURGE_BATCH_SIZE,
+        error: null,
+      }))
+      const admin = makeAdmin({}, { messages: fullBatches })
+
+      await expect(run(admin, ['org_1']))
+        .rejects.toThrow(/messages\/org_1 did not drain after 1000 batches/)
+
+      expect(admin.order).not.toContain('delete:organizations')
     })
   })
 

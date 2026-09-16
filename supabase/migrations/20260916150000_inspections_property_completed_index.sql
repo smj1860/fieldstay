@@ -1,0 +1,50 @@
+-- Composite index backing the property-history report's query shape
+-- (lib/inspections/report/model.ts's loadInspectionRows, the `propertyId`
+-- branch): `.eq('property_id', …).not('completed_at', 'is', null)
+-- .order('completed_at', { ascending: false }).limit(MAX_HISTORY_INSPECTIONS)`,
+-- run with `count: 'exact'` for the omittedCount the cover page prints.
+--
+-- Without a covering index, that read is a full scan of `inspections` for the
+-- property filtered and sorted in memory — cheap today, not at the row counts
+-- the 100x-traffic / 10M-row audit is stress-testing for. `count: 'exact'`
+-- doubles the cost of an unindexed read (a full scan for the page PLUS a full
+-- scan for the count); a covering index turns both into a bounded index walk.
+--
+-- `property_id` leads because that is the query's equality filter;
+-- `completed_at DESC` matches `.order('completed_at', { ascending: false })`
+-- so the LIMIT can be satisfied by walking the index in order rather than
+-- sorting the matched rows after the fact. The partial `WHERE completed_at IS
+-- NOT NULL` mirrors `.not('completed_at', 'is', null)` exactly — an
+-- in-progress walk never belongs in this index, and excluding it keeps the
+-- index smaller than one covering every row regardless of completion state.
+--
+-- No `org_id` in the index: a property belongs to exactly one org, so
+-- `property_id` alone is already maximally selective for this query, and the
+-- route's own `.eq('org_id', …)` stays as defence-in-depth (see that route's
+-- header comment) rather than something this index needs to reason about.
+--
+-- ── CONCURRENTLY, AND WHY THIS FILE HOLDS NOTHING ELSE ─────────────────────
+--
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block — Postgres
+-- rejects it outright if it is. This repo has no other CONCURRENTLY migration
+-- to follow a precedent from (checked: the one other mention in
+-- supabase/migrations is a commented-out REFRESH MATERIALIZED VIEW, never
+-- executed), so the safest and most portable guarantee available is
+-- structural rather than a tool-specific flag: this statement is the ONLY
+-- statement in this file, with no surrounding BEGIN/COMMIT and nothing else
+-- to batch it with. Applying it — via `supabase db push` — must apply this
+-- file on its own rather than batched with other pending migrations into one
+-- transaction, exactly as CREATE INDEX CONCURRENTLY requires everywhere it is
+-- used, Supabase or otherwise.
+--
+-- IF NOT EXISTS makes a re-run (e.g. a retry after a partial failure, which
+-- CONCURRENTLY is itself prone to — it can leave behind an INVALID index that
+-- must be dropped and retried) a safe no-op rather than a duplicate-index
+-- error, matching every other DDL migration in this repo's idempotency rule.
+--
+-- NOT APPLIED to the live database by this change — see the task this
+-- migration was written for. `supabase db push` applies it when the operator
+-- runs it deliberately, in its own pass, per the note above.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inspections_property_completed
+  ON public.inspections (property_id, completed_at DESC)
+  WHERE completed_at IS NOT NULL;

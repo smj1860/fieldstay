@@ -15,6 +15,9 @@ vi.mock('@/lib/resend/client', () => ({
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
+// See guidebook-sponsor-activated.test.ts's comment: revalidateTag() needs a
+// real Next.js request context this direct-invocation test doesn't have.
+vi.mock('next/cache', () => ({ revalidateTag: vi.fn() }))
 
 import { guidebookSponsorDeactivated } from '@/lib/inngest/functions/guidebook-sponsor-deactivated'
 import { createServiceClient } from '@/lib/supabase/server'

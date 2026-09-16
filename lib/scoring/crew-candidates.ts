@@ -100,6 +100,38 @@ function coerceScore(value: PostgrestNumeric): number {
   return value !== null && value !== undefined ? Number(value) : DEFAULT_SCORE
 }
 
+/**
+ * Scores one candidate against pre-resolved weights/denominators. Shared by
+ * scoreCrewCandidates() (the full ranked list) and topCrewCandidate() (only
+ * the best) so the two can never drift into scoring the same crew member
+ * differently.
+ */
+function scoreOne(
+  c:           CrewCandidate,
+  weights:     typeof SAME_DAY_WEIGHTS,
+  property:    CrewScoringInput['property'],
+  maxWorkload: number,
+  familiarSet: Set<string>,
+  workloadMap: Record<string, number>,
+): ScoredCrewCandidate {
+  const breakdown: CrewScoreBreakdown = {
+    proximity:   candidateProximity(c, property),
+    reliability: coerceScore(c.reliability_score),
+    capacity:    coerceScore(c.capacity_score),
+    workload:    1 - (workloadMap[c.id] ?? 0) / maxWorkload,
+    familiarity: familiarSet.has(c.id) ? 1.0 : 0.0,
+  }
+
+  const score =
+    breakdown.proximity   * weights.proximity   +
+    breakdown.reliability * weights.reliability +
+    breakdown.capacity    * weights.capacity    +
+    breakdown.workload    * weights.workload    +
+    breakdown.familiarity * weights.familiarity
+
+  return { crew_member_id: c.id, name: c.name, score, breakdown }
+}
+
 export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidate[] {
   const { isSameDay, property, crew, familiarCrewIds, workloadMap } = input
 
@@ -108,25 +140,36 @@ export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidat
   const familiarSet = new Set(familiarCrewIds)
 
   return crew
-    .map((c) => {
-      const breakdown: CrewScoreBreakdown = {
-        proximity:   candidateProximity(c, property),
-        reliability: coerceScore(c.reliability_score),
-        capacity:    coerceScore(c.capacity_score),
-        workload:    1 - (workloadMap[c.id] ?? 0) / maxWorkload,
-        familiarity: familiarSet.has(c.id) ? 1.0 : 0.0,
-      }
-
-      const score =
-        breakdown.proximity   * weights.proximity   +
-        breakdown.reliability * weights.reliability +
-        breakdown.capacity    * weights.capacity    +
-        breakdown.workload    * weights.workload    +
-        breakdown.familiarity * weights.familiarity
-
-      return { crew_member_id: c.id, name: c.name, score, breakdown }
-    })
+    .map((c) => scoreOne(c, weights, property, maxWorkload, familiarSet, workloadMap))
     .sort((a, b) => b.score - a.score)
+}
+
+/**
+ * The single best candidate, in one O(n) pass rather than the O(n log n) sort
+ * scoreCrewCandidates() does — which every real caller (auto-assign-
+ * turnover's suggestion, the Friction Forecaster's Smart Fix) then throws
+ * away except for index 0. At a 150-property org's full crew roster scored
+ * once per flagged turnover, the discarded sort work is pure waste multiplied
+ * by every turnover scored that day.
+ *
+ * scoreCrewCandidates() stays exported and unchanged for the one caller that
+ * genuinely needs the ranked list — its own test suite — and for any future
+ * caller that does too.
+ */
+export function topCrewCandidate(input: CrewScoringInput): ScoredCrewCandidate | null {
+  const { isSameDay, property, crew, familiarCrewIds, workloadMap } = input
+  if (!crew.length) return null
+
+  const weights     = isSameDay ? SAME_DAY_WEIGHTS : STANDARD_WEIGHTS
+  const maxWorkload = Math.max(...Object.values(workloadMap), 1)
+  const familiarSet = new Set(familiarCrewIds)
+
+  let best: ScoredCrewCandidate | null = null
+  for (const c of crew) {
+    const candidate = scoreOne(c, weights, property, maxWorkload, familiarSet, workloadMap)
+    if (!best || candidate.score > best.score) best = candidate
+  }
+  return best
 }
 
 /**
