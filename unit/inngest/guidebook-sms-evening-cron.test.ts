@@ -85,8 +85,11 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.or     = (...a: unknown[]) => record('or', a)
-    // Terminal, unlike the others: the sponsor resolver ends its reads on
-    // .limit(), so this has to resolve the queued row rather than chain.
+    // Terminal, unlike the others: the manual-assignment read
+    // (guidebook_sponsor_assignments) still ends on .limit(), so this has to
+    // resolve the queued row rather than chain. The auto-resolution read
+    // (guidebook_sponsors) no longer calls .limit() at all — it paginates via
+    // fetchAllRows()/.range() instead, which resolves through chain.then below.
     chain.limit  = (...a: unknown[]) => { record('limit', a); return resolveNext() }
 
     const resolveNext = () => {

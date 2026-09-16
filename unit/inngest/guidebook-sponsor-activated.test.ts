@@ -12,6 +12,12 @@ vi.mock('@/lib/audit', () => ({
 vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
 }))
+// revalidateTag() requires a real Next.js request's "static generation
+// store" (workAsyncStorage), which does not exist when this Inngest function
+// is invoked directly in a unit test rather than through the actual
+// /api/inngest Route Handler — same reason every Server Action test in this
+// repo mocks 'next/cache' rather than letting the real one run.
+vi.mock('next/cache', () => ({ revalidateTag: vi.fn() }))
 
 import { guidebookSponsorActivated } from '@/lib/inngest/functions/guidebook-sponsor-activated'
 import { createServiceClient } from '@/lib/supabase/server'

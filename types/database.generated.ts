@@ -408,6 +408,7 @@ export type Database = {
           action: string
           actor_id: string | null
           created_at: string
+          dedupe_key: string | null
           id: string
           ip_address: string | null
           metadata: Json | null
@@ -419,6 +420,7 @@ export type Database = {
           action: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null
@@ -430,6 +432,7 @@ export type Database = {
           action?: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null

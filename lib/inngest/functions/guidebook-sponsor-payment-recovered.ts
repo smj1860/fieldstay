@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { logAuditEvent } from '@/lib/audit'
+import { invalidateSponsorsCache } from '@/lib/guidebook/resolve-property-sponsors'
 
 export const guidebookSponsorPaymentRecovered = inngest.createFunction(
   { id: 'guidebook-sponsor-payment-recovered', name: 'Guidebook: Sponsor Payment Recovered' },
@@ -22,6 +23,12 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
         .eq('org_id', orgId)
 
       if (error) throw new Error(`Failed to reactivate sponsor: ${error.message}`)
+    })
+
+    // Recovered payment reactivates the sponsor — same reasoning as the
+    // activated/deactivated handlers: don't make a guest wait out the TTL.
+    await step.run('invalidate-sponsors-cache', async () => {
+      invalidateSponsorsCache(orgId)
     })
 
     const activeSponsorCount = await step.run('count-active-sponsors', async () => {

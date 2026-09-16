@@ -8,7 +8,7 @@ import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailab
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookPropertyConfig, Property } from '@/types/database'
 import { unwrap } from '@/lib/supabase/unwrap'
-import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { resolveSponsorsForPropertyCached } from '@/lib/guidebook/resolve-property-sponsors'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asOfferType } from '@/lib/guidebook/offer'
 
@@ -118,7 +118,7 @@ export default async function GuestGuidebookPage({
   // which is the nearest sponsor per named category — for a 1-4 property org
   // with at most six sponsors that is the same set it saw before, so nothing
   // changes for them.
-  const resolution = await resolveSponsorsForProperty(
+  const resolution = await resolveSponsorsForPropertyCached(
     supabase,
     config.org_id,
     {

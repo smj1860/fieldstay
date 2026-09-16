@@ -1,8 +1,9 @@
 import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
-import { reportError } from '@/lib/observability/report-error'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asSlotType } from '@/lib/guidebook/offer'
 // Only MAX_SPONSORS_PER_PROPERTY is read inside this module; the re-export
@@ -141,6 +142,80 @@ export async function resolveSponsorsForProperty(
 }
 
 /**
+ * The Next.js cache tag every sponsor/assignment write must revalidate.
+ * One tag per org — a sponsor change in one org never needs to invalidate
+ * another org's guest pages, and per-org is the natural invalidation
+ * boundary here since every read in this module is already org-scoped.
+ */
+export function sponsorsCacheTag(orgId: string): string {
+  return `sponsors-${orgId}`
+}
+
+/** How long a guest-facing sponsor resolution may be served stale. */
+const SPONSOR_CACHE_REVALIDATE_SECONDS = 60
+
+/**
+ * Cached wrapper around `resolveSponsorsForProperty`, for the guest-facing
+ * guidebook pages (`app/g/[slug]/page.tsx`, `app/g/b/[token]/page.tsx`).
+ *
+ * Every guest page load used to run resolveAuto's org-wide sponsor read (now
+ * paginated, so potentially several round trips) plus resolveManual's
+ * assignment join fresh, on a PUBLIC route with no per-request cost control —
+ * a page that gets hit by every guest, every reload, with no session to key a
+ * per-user cache off. 60s is generous enough that a sponsor swap is visible
+ * within a minute even with nobody explicitly invalidating, and
+ * `revalidateTag(sponsorsCacheTag(orgId))` on every sponsor/assignment write
+ * (see `app/actions/sponsor-assignments.ts` and `app/actions/guidebook.ts`)
+ * clears it immediately when a PM actually changes something, so a guest
+ * never has to wait out the TTL for a real edit to show up.
+ *
+ * `unstable_cache` is called fresh on every invocation rather than once at
+ * module scope, specifically so the TAG can be computed per `orgId` — the key
+ * PARTS (not the closure arguments) are what Next.js uses for cache identity,
+ * so a deterministic keyParts array here is what makes this a real cache
+ * rather than a one-shot memoization.
+ *
+ * Deliberately NOT used by the SMS nudge crons or the PM dashboard: a cron
+ * deciding who gets texted, and a PM checking a change they just saved, both
+ * need the live picture, not a minute-old one.
+ */
+export async function resolveSponsorsForPropertyCached(
+  supabase: AnySupabase,
+  orgId:    string,
+  property: ResolvablePropertyRow,
+  site = 'lib.guidebook.resolve-property-sponsors.cached',
+): Promise<PropertySponsorResolution> {
+  const cached = unstable_cache(
+    () => resolveSponsorsForProperty(supabase, orgId, property, site),
+    ['resolve-sponsors-for-property', orgId, property.id, property.sponsor_assignment_mode],
+    { revalidate: SPONSOR_CACHE_REVALIDATE_SECONDS, tags: [sponsorsCacheTag(orgId)] },
+  )
+  return cached()
+}
+
+/**
+ * Call after any write that changes what a property's guests should see:
+ * a sponsor's own fields, which properties it's assigned to, or a property's
+ * auto/manual mode. Safe to call even when nothing was cached yet.
+ *
+ * `revalidateTag(tag, 'max')`, not the single-argument call (Next.js 16 made
+ * the second `profile` argument required and deprecated the one-arg form —
+ * see the `revalidateTag` header comment) and not `updateTag(tag)` (Next's
+ * suggested replacement, but it throws unless called from within a Server
+ * Action). This helper is called both from Server Actions
+ * (`app/actions/sponsor-assignments.ts`, `app/actions/guidebook.ts`) AND from
+ * Inngest `step.run()` callbacks reached through the `/api/inngest` Route
+ * Handler, so it needs the form that works in both. `'max'` has no bearing
+ * here regardless — this cache is tagged the classic `unstable_cache({
+ * revalidate, tags })` way, not through the newer per-segment "cacheLife"
+ * profile system the argument configures — it only satisfies the type and
+ * matches Next's own migration guidance for a plain "purge this tag now".
+ */
+export function invalidateSponsorsCache(orgId: string): void {
+  revalidateTag(sponsorsCacheTag(orgId), 'max')
+}
+
+/**
  * The same, for a caller that has only an id. Reads the property, then
  * delegates — so there is still exactly one implementation of the rule.
  */
@@ -229,57 +304,46 @@ async function resolveAuto(
 }
 
 /**
- * Headroom above the schema's actual per-org ceiling
- * (`guidebook_sponsors.slot_number` CHECK 1..6, UNIQUE(org_id, slot_number)),
- * not the literal 6 — so a modest widening of that constraint does not
- * immediately start silently truncating here. It is still a bound, not
- * "unbounded": determinism matters on a public guest page, and an
- * accidentally-unbounded query here is the same `max_rows = 1000` class of
- * silent truncation this codebase treats as a systemic risk elsewhere.
- *
- * If the schema's ceiling is EVER raised past this, `fetchActiveSponsors`
- * below reports it rather than quietly returning a short list.
- */
-export const MAX_ACTIVE_SPONSORS_PER_ORG = 64
-
-/**
  * The org's active sponsors, ordered by id.
  *
  * `.order('id')` is not cosmetic: it is what makes the coordinate-less
  * fallback in `pickNearestSponsor` deterministic, and this runs on a public
- * page.
+ * page — a UUID's own ordering has no business meaning, so it doubles as the
+ * tie-break "random" order the auto-selection logic wants while staying
+ * perfectly stable across pages and across requests.
+ *
+ * Used to be a hard `.limit(64)` — generous headroom above the schema's
+ * actual per-org ceiling (`guidebook_sponsors.slot_number` CHECK 1..6), but
+ * still a hardcoded bound that would silently truncate the moment that
+ * constraint was ever widened past it, on a page that decides which sponsors
+ * a guest actually sees. `fetchAllRows()` paginates via `.range()` instead —
+ * the same stable `.order('id')` this already had is exactly what
+ * `fetchAllRows` requires for its page boundaries to be consistent, so
+ * removing the cap needed no other change to the query.
  */
 async function fetchActiveSponsors(
   supabase: AnySupabase,
   orgId:    string,
   site:     string,
 ): Promise<ResolverSponsorRow[]> {
-  const res = await supabase
-    .from('guidebook_sponsors')
-    .select(RESOLVER_SPONSOR_COLUMNS)
-    .eq('org_id', orgId)
-    .eq('status', 'active')
-    .order('id')
-    .limit(MAX_ACTIVE_SPONSORS_PER_ORG)
-
-  // `as unknown as` because the select string is built from a constant rather
-  // than a literal, so postgrest-js infers GenericStringError[] for it.
-  const rows = unwrapList(res, { site, orgId }) as unknown as (Omit<ResolverSponsorRow, 'slot_type'> & { slot_type: string })[]
-
-  if (rows.length === MAX_ACTIVE_SPONSORS_PER_ORG) {
-    // The result set exactly filled the bound. Cannot tell from here whether
-    // that is a coincidence or the schema's slot ceiling having grown past
-    // what this limit was sized for — and on a page that decides which
-    // sponsors a guest actually sees, guessing "coincidence" is the wrong
-    // side to be wrong on.
-    reportError(
-      new Error(
-        `fetchActiveSponsors hit its ${MAX_ACTIVE_SPONSORS_PER_ORG}-row cap for org ${orgId} — ` +
-        'the schema\'s per-org sponsor ceiling may have grown past what this limit was sized for',
-      ),
-      { site, orgId, level: 'warning' },
-    )
-  }
+  const rows = await fetchAllRows<Omit<ResolverSponsorRow, 'slot_type'> & { slot_type: string }>(
+    (from, to) => (
+      supabase
+        .from('guidebook_sponsors')
+        .select(RESOLVER_SPONSOR_COLUMNS)
+        .eq('org_id', orgId)
+        .eq('status', 'active')
+        .order('id')
+        .range(from, to)
+      // `as unknown as` because the select string is built from a constant
+      // rather than a literal, so postgrest-js infers GenericStringError[].
+    ) as unknown as PromiseLike<{ data: (Omit<ResolverSponsorRow, 'slot_type'> & { slot_type: string })[] | null; error: { message: string } | null }>,
+    // fetchAllRows() throws a generic Error rather than routing through
+    // unwrapList()/reportError() — the `site` this function was always
+    // called with (from resolveAuto -> resolveSponsorsForProperty's callers)
+    // still goes into the label so a thrown error is attributable.
+    { label: `${site}.guidebook_sponsors(${orgId})` },
+  )
 
   return rows.map(toResolverRow)
 }
