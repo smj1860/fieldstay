@@ -4,7 +4,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { Constants, type InventoryCategory } from '@/types/database'
 import { unwrapList, tryUnwrap } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { releaseLock, SINGLE_FLIGHT_DEFAULTS } from '@/lib/cache/single-flight'
+import { getRedisIfConfigured } from '@/lib/redis'
+import { withTimeout, REDIS_TIMEOUT_MS } from '@/lib/http/timeout'
 import { getStandardInventoryTemplateId } from './standard-template'
 
 /**
@@ -66,6 +68,49 @@ function toInventoryCategory(value: string | null): InventoryCategory {
 /** Bounded: a template is a curated list (86 items today). The explicit cap
  *  documents that and keeps this out of the unbounded-select class. */
 const TEMPLATE_ITEM_CAP = 500
+
+/**
+ * Fail-CLOSED acquisition for the dedup lock below — deliberately NOT the
+ * shared `acquireLock()` from lib/cache/single-flight.ts, whose fail-OPEN
+ * default is correct for its own callers (a redundant token refresh, a
+ * redundant weather fetch — see that file's header) but wrong for this one.
+ * `acquireLock()` also can't be told apart from the outside: it swallows a
+ * genuine Redis error internally and returns `true` either way, so there is
+ * no way to distinguish "acquired" from "Redis is down, proceeding
+ * unlocked" from its return value alone — wrapping its call is not enough
+ * to change the outcome, this has to talk to Redis directly.
+ *
+ * Two outcomes mean "go ahead" ('acquired') or "someone else legitimately
+ * holds it" ('held') — both ordinary. A REAL Redis error throws instead of
+ * guessing: this dedup has no DB constraint backing it (see the comment on
+ * the call site below), so racing under an outage is exactly what silently
+ * doubles a property's restock counts — precisely the infra stress a 100x
+ * traffic surge causes, i.e. the moment two concurrent callers are most
+ * likely. Redis simply being UNCONFIGURED (no Upstash credentials at all —
+ * every local run and preview deploy) still proceeds unlocked: that mirrors
+ * every other lock in this codebase and is no worse than the behaviour
+ * before this lock existed.
+ */
+type DedupLockOutcome = 'acquired' | 'held'
+
+async function acquireDedupLockOrThrow(key: string): Promise<DedupLockOutcome> {
+  const redis = getRedisIfConfigured()
+  if (!redis) return 'acquired'
+
+  try {
+    const result = await withTimeout(
+      redis.set(key, '1', { nx: true, ex: SINGLE_FLIGHT_DEFAULTS.DEFAULT_LOCK_TTL_SECONDS }),
+      REDIS_TIMEOUT_MS,
+      `applyStandardInventoryLock(${key})`,
+    )
+    return result === 'OK' ? 'acquired' : 'held'
+  } catch (err) {
+    throw new Error(
+      `apply-standard-inventory dedup lock unavailable for ${key} — failing closed rather than ` +
+      `risking a doubled insert: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
 
 async function loadOrgTemplateItems(
   supabase: SupabaseClient,
@@ -170,11 +215,18 @@ export async function applyStandardInventoryToProperty(
   // double-submitted create, a retried step) would both read the SAME
   // existing set, both decide the SAME items are missing, and both insert —
   // doubling every restock count, exactly what the dedup below exists to
-  // prevent. Fails OPEN like every other lock in lib/cache/single-flight.ts:
-  // no Redis means "proceed unlocked", which is the behaviour before this
-  // lock existed and no worse than that.
+  // prevent.
+  //
+  // FAILS CLOSED on a genuine Redis error (see acquireDedupLockOrThrow above)
+  // — a deliberate departure from every other lock in
+  // lib/cache/single-flight.ts, which fail open by design for their own
+  // best-effort callers. This one is correctness-critical: proceeding
+  // unlocked under exactly the outage/traffic-surge conditions that make two
+  // concurrent callers likely is what doubles a property's items. Redis
+  // simply being unconfigured (no Upstash credentials) still proceeds
+  // unlocked, matching every other lock's behaviour.
   const lockKey = `apply-standard-inventory:${propertyId}`
-  if (!(await acquireLock(lockKey))) {
+  if ((await acquireDedupLockOrThrow(lockKey)) === 'held') {
     // Someone else is applying standard inventory to this property right
     // now. Their insert already covers it — this caller doing nothing is the
     // correct outcome, not a missed one. createProperty already treats a

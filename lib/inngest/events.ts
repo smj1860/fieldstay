@@ -1197,14 +1197,29 @@ export type FieldStayEvents = {
   }
 
   // Recompute smart par levels. property_id scopes it to one property; omit it
-  // (or pass null) to cover every active property in the org. Emitted after a
-  // property is stocked, after the standard template lands on an org, and
-  // whenever a property's bedrooms/bathrooms/max_guests change — all three are
-  // inputs resolvePar() reads.
+  // (or pass null) to cover every active property in the org — which now
+  // dispatches inventory/par-recompute-org-requested (below) rather than
+  // resolving every property's items in one un-checkpointed step. Emitted
+  // after a property is stocked, after the standard template lands on an org,
+  // and whenever a property's bedrooms/bathrooms/max_guests change — all
+  // three are inputs resolvePar() reads.
   'inventory/par-recompute-requested': {
     data: {
       org_id:       string
       property_id?: string | null
+    }
+  }
+
+  // Org-wide fan-out dispatcher for the above: fetches every active property
+  // id for the org (bounded — a property list, not an item list) and sends
+  // one inventory/par-recompute-requested event per property, so each
+  // property gets its own retry boundary and its own bounded item read
+  // instead of one un-checkpointed scan across the whole org that throws once
+  // PROPERTY_CAP/ITEM_CAP is exceeded. See
+  // lib/inngest/functions/recompute-par-levels.ts.
+  'inventory/par-recompute-org-requested': {
+    data: {
+      org_id: string
     }
   }
 
