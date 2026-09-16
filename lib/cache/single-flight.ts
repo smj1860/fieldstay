@@ -92,7 +92,7 @@ export async function isLockHeld(key: string): Promise<boolean> {
   if (!redis) return false
 
   try {
-    return (await withTimeout(redis.get(key), REDIS_TIMEOUT_MS, `isLockHeld(${key})`)) !== null
+    return (await withTimeout(() => redis.get(key), REDIS_TIMEOUT_MS, `isLockHeld(${key})`)) !== null
   } catch (err) {
     if (!isTimeoutError(err)) {
       console.warn(`[single-flight] lock-check unavailable for ${key}, assuming unheld:`, err)
