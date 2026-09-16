@@ -1,6 +1,8 @@
 import 'server-only'
 
 import { THUMBTACK_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { singleFlight } from '@/lib/cache/single-flight'
+import { getRedisIfConfigured } from '@/lib/redis'
 import type { WoCategory, CrewRole } from '@/types/database'
 
 // ============================================================================
@@ -234,19 +236,24 @@ interface ThumbtackTokenResponse {
 }
 
 /**
- * In-memory only — fine for a single Vercel function instance's lifetime,
- * and this module already has no other persistent state. A cold start just
- * means the next call re-fetches, which is cheap and correct; there is no
- * multi-instance consistency requirement here the way there would be for,
- * say, a rate limit budget.
- *
+ * Seconds of safety margin subtracted from the token's real `expires_in` when
+ * choosing the Redis TTL — matches the old in-memory cache's "refresh 30s
+ * before actual expiry" margin: a normal request never pays for a token fetch
+ * on top of the search call it's making the token for, and nobody is ever
+ * handed a token that expires mid-request.
+ */
+const TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS = 30
+
+/**
  * Keyed by `authBase` (not a single bare value) so a cached production token
  * can never be served for a staging call or vice versa. THUMBTACK_ENVIRONMENT
  * is a fixed per-deployment value in real use, so this never matters in
- * production — but it's a real gap otherwise (nothing about a bare cache
- * variable would stop it), not just a testing convenience.
+ * production — but it's a real gap otherwise (nothing about a bare cache key
+ * would stop it), not just a testing convenience.
  */
-const cachedTokensByAuthBase = new Map<string, { accessToken: string; expiresAtMs: number }>()
+function thumbtackTokenCacheKey(authBase: string): string {
+  return `thumbtack:token:${authBase}`
+}
 
 /**
  * Extracts a human-readable message from a Thumbtack error response body.
@@ -277,17 +284,38 @@ async function readThumbtackErrorDetail(res: Response): Promise<string> {
  * clock. Exported now, ahead of that implementation, the same way
  * buildRequestFlowUrl() and this file's other pieces are — not yet called
  * from within this module, but real infrastructure the next piece needs.
+ *
+ * Async because the cache itself moved to Redis (see getThumbtackAccessToken)
+ * — there is no longer an in-process Map to delete from synchronously. A
+ * missing/unconfigured Redis makes this a harmless no-op: no cache, nothing
+ * to invalidate.
  */
-export function invalidateThumbtackToken(authBase: string): void {
-  cachedTokensByAuthBase.delete(authBase)
+export async function invalidateThumbtackToken(authBase: string): Promise<void> {
+  const redis = getRedisIfConfigured()
+  if (!redis) return
+  try {
+    await redis.del(thumbtackTokenCacheKey(authBase))
+  } catch {
+    // Non-fatal — the key's own TTL still expires it.
+  }
 }
 
 /**
  * OAuth2 client_credentials token exchange — confirmed shape from
  * Thumbtack's Environments doc (Authorization Server, Token URL,
- * per-environment clientID/clientSecret). Cached in memory and refreshed
- * 30s before actual expiry, so a normal request never pays for a token
- * fetch on top of the search call it's making the token for.
+ * per-environment clientID/clientSecret).
+ *
+ * Cached in REDIS, not an in-process Map: a bare in-memory cache is only ever
+ * warm for the ONE serverless instance that populated it, so scale-out means
+ * every concurrent instance independently misses and independently exchanges
+ * a token at the same moment — a stampede against Thumbtack's own auth
+ * server, worst exactly when traffic (and therefore instance count) is
+ * highest. `singleFlight()` (lib/cache/single-flight.ts) is the shared fix
+ * already used for Kroger's and Hospitable's token refreshes and for
+ * Tomorrow.io's weather cache: one instance produces per key across every
+ * instance, and Redis is the read side every instance shares. Unconfigured
+ * Redis (every preview deploy) degrades to the old per-instance behaviour —
+ * see that module's fail-open note — not to zero caching become failure.
  *
  * THUMBTACK_AUDIENCE is optional and omitted from the request unless set —
  * their Troubleshooting doc's proxy_oauth_failed entry ("Requested audience
@@ -303,12 +331,21 @@ export function invalidateThumbtackToken(authBase: string): void {
  */
 async function getThumbtackAccessToken(): Promise<string> {
   const { authBase } = resolveThumbtackEnvironment()
+  const cacheKey = thumbtackTokenCacheKey(authBase)
+  const redis    = getRedisIfConfigured()
 
-  const cached = cachedTokensByAuthBase.get(authBase)
-  if (cached && cached.expiresAtMs > Date.now() + 30_000) {
-    return cached.accessToken
-  }
+  return singleFlight<string>({
+    key:     cacheKey,
+    read:    async () => (redis ? await redis.get<string>(cacheKey) : null),
+    produce: () => fetchAndCacheThumbtackToken(authBase, cacheKey),
+    // The producer is bounded by THUMBTACK_TIMEOUT_MS, so the lock only has
+    // to outlive that plus the Redis write.
+    lockTtlSeconds: Math.ceil(THUMBTACK_TIMEOUT_MS / 1000) + 5,
+  })
+}
 
+/** The uncached token exchange, plus writing the result to Redis. */
+async function fetchAndCacheThumbtackToken(authBase: string, cacheKey: string): Promise<string> {
   const clientId     = process.env.THUMBTACK_CLIENT_ID
   const clientSecret = process.env.THUMBTACK_CLIENT_SECRET
   if (!clientId || !clientSecret) {
@@ -344,9 +381,14 @@ async function getThumbtackAccessToken(): Promise<string> {
   }
 
   const data = await res.json() as ThumbtackTokenResponse
-  const token = { accessToken: data.access_token, expiresAtMs: Date.now() + data.expires_in * 1000 }
-  cachedTokensByAuthBase.set(authBase, token)
-  return token.accessToken
+
+  const redis = getRedisIfConfigured()
+  if (redis) {
+    const ttlSeconds = Math.max(data.expires_in - TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS, 5)
+    await redis.set(cacheKey, data.access_token, { ex: ttlSeconds })
+  }
+
+  return data.access_token
 }
 
 /**

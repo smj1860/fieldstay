@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { invalidateSponsorsCache } from '@/lib/guidebook/resolve-property-sponsors'
 
 export const guidebookSponsorActivated = inngest.createFunction(
   { id: 'guidebook-sponsor-activated', name: 'Guidebook: Sponsor Activated' },
@@ -55,6 +56,16 @@ export const guidebookSponsorActivated = inngest.createFunction(
         .eq('org_id', orgId) // explicit tenant guard
 
       if (error) throw new Error(`Failed to activate sponsor: ${error.message}`)
+    })
+
+    // A newly-active sponsor is invisible to the guest-facing guidebook pages
+    // for up to SPONSOR_CACHE_REVALIDATE_SECONDS otherwise — the whole point
+    // of paying for this slot is showing up right away, not a minute later.
+    // Not Inngest step tooling (sendEvent/sleep/waitForEvent/invoke/run) — an
+    // ordinary Next.js cache side effect, memoized in its own step like every
+    // other write in this function.
+    await step.run('invalidate-sponsors-cache', async () => {
+      invalidateSponsorsCache(orgId)
     })
 
     const activeSponsorCount = await step.run('count-active-sponsors', async () => {
