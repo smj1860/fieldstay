@@ -226,6 +226,34 @@ function historySources(propertyId: string): {
 }
 
 /**
+ * Runs one source's capped data read, and its `count: 'exact'` companion
+ * ONLY when the data read actually came back at the cap.
+ *
+ * Below the cap, the row count IS the true total — truncation is
+ * impossible, so the aggregate query would be pure waste, paid on every
+ * property-history page view regardless of whether the cap was ever in
+ * play. `count` is a lazy PromiseLike (constructing it does not fire the
+ * request — see buildSourceQueries), so skipping the `await` here means the
+ * query is never sent at all, not merely discarded after the fact.
+ */
+async function loadSource<Row>(
+  supabase: SupabaseClient,
+  spec:     HistorySourceSpec,
+  from:     string,
+  to:       string,
+  cap:      number,
+  site:     string,
+  orgId:    string,
+): Promise<{ rows: Row[]; count: number }> {
+  const { data, count } = buildSourceQueries<Row>(supabase, spec, from, to, cap)
+  const rows = unwrapList<Row>(await data, { site, orgId })
+
+  if (rows.length < cap) return { rows, count: rows.length }
+
+  return { rows, count: unwrapCount(await count, { site, orgId }) }
+}
+
+/**
  * Loads everything that happened at one property in one date range, merged
  * into one chronological timeline. Every query is scoped to `propertyId`
  * (already verified to belong to `orgId` by the caller — see
@@ -234,49 +262,34 @@ function historySources(propertyId: string): {
  * RLS-scoped `supabase` client, so tenant isolation is enforced twice.
  */
 export async function loadPropertyHistory(params: LoadParams): Promise<PropertyHistoryResult> {
-  const { supabase, propertyId, from, to } = params
-  const CAP = MAX_HISTORY_EVENTS_PER_SOURCE
+  const { supabase, propertyId, from, to, orgId } = params
+  const CAP  = MAX_HISTORY_EVENTS_PER_SOURCE
+  const site = 'lib.history.loadPropertyHistory'
 
   const sources = historySources(propertyId)
-  const checklist   = buildSourceQueries<ChecklistRow>(supabase, sources.checklist, from, to, CAP)
-  const woUpdates   = buildSourceQueries<WoUpdateRow>(supabase, sources.woUpdates, from, to, CAP)
-  const woPhotos    = buildSourceQueries<WoPhotoRow>(supabase, sources.woPhotos, from, to, CAP)
-  const assignments = buildSourceQueries<AssignmentRow>(supabase, sources.assignments, from, to, CAP)
-  const inspections = buildSourceQueries<InspectionRow>(supabase, sources.inspections, from, to, CAP)
-  const counts      = buildSourceQueries<CountRow>(supabase, sources.counts, from, to, CAP)
 
-  const [
-    checklistRes, checklistCountRes,
-    woUpdatesRes, woUpdatesCountRes,
-    woPhotosRes, woPhotosCountRes,
-    assignmentsRes, assignmentsCountRes,
-    inspectionsRes, inspectionsCountRes,
-    countsRes, countsCountRes,
-  ] = await Promise.all([
-    checklist.data, checklist.count,
-    woUpdates.data, woUpdates.count,
-    woPhotos.data, woPhotos.count,
-    assignments.data, assignments.count,
-    inspections.data, inspections.count,
-    counts.data, counts.count,
+  const [checklist, woUpdates, woPhotos, assignments, inspections, counts] = await Promise.all([
+    loadSource<ChecklistRow>(supabase, sources.checklist, from, to, CAP, site, orgId),
+    loadSource<WoUpdateRow>(supabase, sources.woUpdates, from, to, CAP, site, orgId),
+    loadSource<WoPhotoRow>(supabase, sources.woPhotos, from, to, CAP, site, orgId),
+    loadSource<AssignmentRow>(supabase, sources.assignments, from, to, CAP, site, orgId),
+    loadSource<InspectionRow>(supabase, sources.inspections, from, to, CAP, site, orgId),
+    loadSource<CountRow>(supabase, sources.counts, from, to, CAP, site, orgId),
   ])
 
-  const site = 'lib.history.loadPropertyHistory'
-  const orgId = params.orgId
+  const checklistRows    = checklist.rows
+  const woUpdateRows      = woUpdates.rows
+  const woPhotoRows       = woPhotos.rows
+  const assignmentRows    = assignments.rows
+  const inspectionRows    = inspections.rows
+  const countRows         = counts.rows
 
-  const checklistRows    = unwrapList<ChecklistRow>(checklistRes, { site, orgId })
-  const woUpdateRows      = unwrapList<WoUpdateRow>(woUpdatesRes, { site, orgId })
-  const woPhotoRows       = unwrapList<WoPhotoRow>(woPhotosRes, { site, orgId })
-  const assignmentRows    = unwrapList<AssignmentRow>(assignmentsRes, { site, orgId })
-  const inspectionRows    = unwrapList<InspectionRow>(inspectionsRes, { site, orgId })
-  const countRows         = unwrapList<CountRow>(countsRes, { site, orgId })
-
-  const checklistCount    = unwrapCount(checklistCountRes, { site, orgId })
-  const woUpdatesCount    = unwrapCount(woUpdatesCountRes, { site, orgId })
-  const woPhotosCount     = unwrapCount(woPhotosCountRes, { site, orgId })
-  const assignmentsCount  = unwrapCount(assignmentsCountRes, { site, orgId })
-  const inspectionsCount  = unwrapCount(inspectionsCountRes, { site, orgId })
-  const countsCount       = unwrapCount(countsCountRes, { site, orgId })
+  const checklistCount    = checklist.count
+  const woUpdatesCount    = woUpdates.count
+  const woPhotosCount     = woPhotos.count
+  const assignmentsCount  = assignments.count
+  const inspectionsCount  = inspections.count
+  const countsCount       = counts.count
 
   const events: PropertyHistoryEvent[] = [
     ...checklistRows.map((row): PropertyHistoryEvent => ({

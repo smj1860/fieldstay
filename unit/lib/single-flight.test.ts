@@ -152,11 +152,11 @@ describe('singleFlight', () => {
     vi.unstubAllGlobals()
 
     // acquireLock()'s own internal withTimeout() also calls setTimeout — once
-    // per acquire attempt (the initial one plus the final retry-acquire), at
-    // REDIS_TIMEOUT_MS — a different mechanism (a race against a slow Redis)
-    // than the jittered retry-wait this test is exercising. Excluded here
-    // rather than asserted on, since it isn't what "jitters the wait delay"
-    // is about.
+    // per acquire attempt (the initial one plus the retry-acquire between the
+    // two wait-and-poll cycles), at REDIS_TIMEOUT_MS — a different mechanism
+    // (a race against a slow Redis) than the jittered retry-wait this test is
+    // exercising. Excluded here rather than asserted on, since it isn't what
+    // "jitters the wait delay" is about.
     const waitDelays = delays.filter((d) => d !== REDIS_TIMEOUT_MS)
 
     // 5 waits at a fixed 100ms would all equal 100 — jitter means they don't.

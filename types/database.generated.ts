@@ -6865,6 +6865,10 @@ export type Database = {
       }
       property_defaults_report: { Args: never; Returns: Json }
       purge_expired_audit_events: { Args: never; Returns: Json }
+      purge_org_table_batch: {
+        Args: { p_batch_size?: number; p_org_id: string; p_table_name: string }
+        Returns: number
+      }
       read_integration_refresh_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: string

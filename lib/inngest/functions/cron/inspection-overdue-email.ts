@@ -133,6 +133,15 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
       // pull that org into the fan-out just to have the handler discover
       // it and skip — same reasoning as re-selecting per-org in the
       // handler below, one step earlier.
+      //
+      // Covered by a real index, not a sequential scan: the partial unique
+      // index `inspections_one_open_walk_per_schedule` (source_schedule_id)
+      // WHERE (source_schedule_id IS NOT NULL AND completed_at IS NULL) —
+      // supabase/migrations/20260915122230_inspections_one_open_walk_per_schedule.sql,
+      // added for the uniqueness constraint it enforces — happens to match
+      // this exact WHERE shape column-for-column, so Postgres can serve this
+      // scan from it directly. Verified against the live schema 2026-09-16 —
+      // if that index is ever dropped or narrowed, this query needs its own.
       const openWalks = await fetchAllRows<{ source_schedule_id: string | null; completed_at: string | null }>(
         (from, to) => supabase
           .from('inspections')

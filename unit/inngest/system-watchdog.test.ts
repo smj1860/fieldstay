@@ -59,6 +59,8 @@ function makeSupabase(
     chain.select = (_sel?: string, o?: { head?: boolean }) => { if (o?.head) head = true; return chain }
     chain.eq = () => chain
     chain.gte = () => chain
+    chain.in  = () => chain
+    chain.or  = () => chain
     chain.order = vi.fn(() => chain)
     chain.range = vi.fn(() => chain)
     chain.limit = vi.fn(() => chain)
@@ -342,11 +344,12 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     const res = await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-job-run-recorder', run_id: 'r1' } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-job-run-recorder', run_id: 'r1' } }],
       step: runAllStep(), logger: makeLogger(),
-    }) as { skipped: boolean; reason: string }
+    }) as { recorded: number; skippedSelf: number }
 
-    expect(res).toEqual({ skipped: true, reason: 'self' })
+    expect(res).toEqual({ recorded: 0, skippedSelf: 1, skippedNoId: 0 })
     expect(writes).toHaveLength(0)
   })
 
@@ -357,11 +360,16 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-cron-daily-wrapup', run_id: 'r2' } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-cron-daily-wrapup', run_id: 'r2' } }],
       step: runAllStep(), logger: makeLogger(),
     })
 
-    const row = writes[0]!.rows as { function_id: string; status: string }
+    // The batched upsert writes an ARRAY of rows now, one per event —
+    // exactly one here.
+    const rows = writes[0]!.rows as { function_id: string; status: string }[]
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
     expect(row.function_id).toBe('cron-daily-wrapup')
     // 'succeeded' is one of the three values system_job_runs_status_check
     // permits. This assertion is the only thing in the suite pinning it —
@@ -375,11 +383,13 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-cron-asset-health', run_id: 'r3', error: { message: 'boom' } } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-cron-asset-health', run_id: 'r3', error: { message: 'boom' } } }],
       step: runAllStep(), logger: makeLogger(),
     })
 
-    const row = writes[0]!.rows as { status: string; error_message: string }
+    const rows = writes[0]!.rows as { status: string; error_message: string }[]
+    const row = rows[0]!
     expect(row.status).toBe('failed')
     expect(row.error_message).toBe('boom')
   })

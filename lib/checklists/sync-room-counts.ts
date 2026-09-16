@@ -34,7 +34,7 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
-import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { acquireLock, releaseLock, renewLock, SINGLE_FLIGHT_DEFAULTS } from '@/lib/cache/single-flight'
 import {
   fetchOrgRoomTemplateData,
   type OrgRoomTemplateData,
@@ -181,6 +181,16 @@ async function insertPlannedSections(
  * The lock is acquired only after confirming there is a default template to
  * work against — a property with none (the common no-op case) never pays for
  * it.
+ *
+ * The lock's TTL is fixed at acquisition and Redis does not know how long the
+ * guarded insert will actually take, so it is RENEWED once the sections read
+ * comes back and the potentially-slow part (inserting up to a many-bedroom
+ * property's worth of sections plus their items) is about to start. Without
+ * this, a correction of a studio to a large multi-bedroom property that took
+ * longer than the TTL would let a concurrent retry see the lock as expired,
+ * acquire it, and duplicate the insert — exactly the race this lock exists to
+ * prevent. Best-effort (renewLock never throws): a failed renewal just means
+ * the original TTL still applies, no worse than before this existed.
  */
 export async function syncChecklistRoomCounts(
   propertyId: string,
@@ -226,6 +236,10 @@ export async function syncChecklistRoomCounts(
 
       const planned = planMissingSections(templateId, sections ?? [], roomData, counts)
       if (!planned.length) return { added: 0 }
+
+      // Re-arm the TTL before the two inserts below — see the header
+      // comment's note on why a fixed TTL can't be trusted to outlive this.
+      await renewLock(lockKey, SINGLE_FLIGHT_DEFAULTS.DEFAULT_LOCK_TTL_SECONDS)
 
       return await insertPlannedSections(supabase, templateId, planned, roomData)
     } finally {

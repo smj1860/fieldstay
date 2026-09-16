@@ -337,7 +337,7 @@ export async function addCrewMember(
 
     // Geocode from home ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
     if (home_zip) {
-      const coords = await geocodeZip(home_zip)
+      const coords = await geocodeZip(home_zip, { boundToSave: true })
       if (coords) {
         const { error: geocodeErr } = await supabase
           .from('crew_members')
@@ -434,7 +434,7 @@ export async function updateCrewMember(
     const zipChanged = data.home_zip !== undefined && data.home_zip !== (existing?.home_zip ?? null)
 
     if (zipChanged && data.home_zip) {
-      const coords = await geocodeZip(data.home_zip)
+      const coords = await geocodeZip(data.home_zip, { boundToSave: true })
       if (coords) {
         // .eq('org_id') here as well as on the update above: the RLS policy on
         // crew_members already refuses a cross-org write, but an id filter
@@ -628,7 +628,7 @@ export async function addVendor(
 
     // Geocode from service ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
     if (service_zip) {
-      const coords = await geocodeZip(service_zip)
+      const coords = await geocodeZip(service_zip, { boundToSave: true })
       if (coords) {
         const { error: geocodeErr } = await supabase
           .from('vendors')
@@ -721,7 +721,7 @@ export async function updateVendor(
     const zipChanged = service_zip !== (existing?.service_zip ?? null)
 
     if (zipChanged && service_zip) {
-      const coords = await geocodeZip(service_zip)
+      const coords = await geocodeZip(service_zip, { boundToSave: true })
       if (coords) {
         // Org-scoped for the same reason as the crew_members twin above.
         const { error: geocodeErr } = await supabase
