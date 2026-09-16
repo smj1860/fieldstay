@@ -39,8 +39,14 @@ const workOrder = (id: string, over: Partial<WorkOrder> = {}): WorkOrder => ({
   ...over,
 } as WorkOrder)
 
-let workOrderRows: { data: unknown; error: unknown } = { data: [], error: null }
-let vendorRows:    { data: unknown; error: unknown } = { data: [], error: null }
+let workOrderRows: { data: unknown; error: unknown; count?: number } = { data: [], error: null }
+let vendorRows:    { data: unknown; error: unknown; count?: number } = { data: [], error: null }
+
+/** How many times `.from(table)` was called — the cheap-invalidation tests
+ *  use this to prove the expensive row fetch was (or was not) skipped, since
+ *  the fake builder cannot otherwise distinguish a count-only call from the
+ *  full row select against the same table. */
+let fromCalls: Record<string, number> = {}
 
 // Fires exactly when the work_orders SELECT's response is being read — lets a
 // test model something completing concurrently with that request, the same
@@ -69,15 +75,29 @@ function fakeSupabase() {
       },
     },
     from(table: string) {
-      const byTable: Record<string, () => { data: unknown; error: unknown }> = {
+      fromCalls[table] = (fromCalls[table] ?? 0) + 1
+      const byTable: Record<string, () => { data: unknown; error: unknown; count?: number }> = {
         work_orders: () => workOrderRows,
         vendors:     () => vendorRows,
       }
       const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'in', 'order', 'limit']) builder[m] = () => builder
+      // `select` is captured rather than a no-op passthrough like the other
+      // filters, so the cheap-invalidation count-only aggregate
+      // (`.select('id', { count: 'exact', head: true })`) can be told apart
+      // from the real row fetch — the onXRead hooks below model a race at the
+      // MAIN select specifically (see warm-maintenance-board.ts's header
+      // comment on why `pending` is captured before THAT select fires), not
+      // at a count-only call this fix added ahead of it.
+      let isCountOnly = false
+      builder.select = (_cols: unknown, opts?: { head?: boolean }) => {
+        isCountOnly = !!opts?.head
+        return builder
+      }
+      for (const m of ['eq', 'in', 'order', 'limit', 'abortSignal']) builder[m] = () => builder
       builder.then = (resolve: (v: unknown) => unknown) => {
-        const hook = table === 'work_orders' ? onWorkOrdersRead
+        const hook = isCountOnly ? null
+          : table === 'work_orders' ? onWorkOrdersRead
           : table === 'vendors' ? onVendorsRead
           : null
         return (hook ? hook() : Promise.resolve()).then(() => resolve(result()))
@@ -97,6 +117,7 @@ beforeEach(async () => {
   vendorRows       = { data: [], error: null }
   onWorkOrdersRead = null
   onVendorsRead    = null
+  fromCalls        = {}
   session          = { access_token: 'jwt' }
   sessionCalls     = 0
   vi.stubGlobal('navigator', { onLine: true })
@@ -333,5 +354,76 @@ describe('warmMaintenanceBoardForOffline', () => {
     while (releases.length < 2) await new Promise((r) => setTimeout(r, 0))
     releases[1]!()
     await Promise.all([forcedB, third])
+  })
+})
+
+// ── Scalability audit fix: cheap invalidation instead of a full delta pull ──
+//
+// A real `updated_at`-watermark delta pull was judged too much surgery on the
+// one table every Maintenance page read also touches, in this sitting. What
+// shipped instead: a `count`-only aggregate ahead of the bounded row fetch,
+// skipping the fetch+reconcile entirely when the count has not moved and
+// nothing is queued locally waiting to change it.
+describe('warmMaintenanceBoardForOffline — cheap invalidation before the full replace', () => {
+  it('skips the expensive row fetch when the open count has not moved', async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null, count: 1 }
+    await warmMaintenanceBoardForOffline(USER, ORG)
+
+    fromCalls.work_orders = 0
+    // The count is UNCHANGED (1) even though the row payload now claims a
+    // second row — a scenario that cannot happen for real (the count and the
+    // rows come from the same server state), used here only to prove the
+    // skip actually took effect: if the full fetch ran anyway, wo-2 would
+    // land in the cache.
+    workOrderRows = { data: [workOrder('wo-1'), workOrder('wo-2')], error: null, count: 1 }
+
+    const result = await warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    expect(fromCalls.work_orders).toBe(1) // only the count-only aggregate ran
+    expect(result.workOrders).toBe(1)
+    const db = getDashboardDb(USER, ORG)
+    expect(await db.work_orders.get('wo-1')).toBeTruthy()
+    expect(await db.work_orders.get('wo-2')).toBeUndefined()
+  })
+
+  it('does the full fetch when the open count HAS changed', async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null, count: 1 }
+    await warmMaintenanceBoardForOffline(USER, ORG)
+
+    workOrderRows = { data: [workOrder('wo-1'), workOrder('wo-2')], error: null, count: 2 }
+    const result = await warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    expect(result.workOrders).toBe(2)
+    expect(await getDashboardDb(USER, ORG).work_orders.get('wo-2')).toBeTruthy()
+  })
+
+  it('never takes the shortcut while a local create is still queued, even if the count matches', async () => {
+    workOrderRows = { data: [workOrder('wo-1')], error: null, count: 1 }
+    await warmMaintenanceBoardForOffline(USER, ORG)
+
+    const db = getDashboardDb(USER, ORG)
+    await db.mutations.add({
+      kind: 'work_order.create', targetId: 'local-1', orgId: ORG,
+      payload: {}, createdAt: new Date().toISOString(), retryCount: 0,
+    })
+
+    fromCalls.work_orders = 0
+    workOrderRows = { data: [workOrder('wo-1')], error: null, count: 1 }
+    await warmMaintenanceBoardForOffline(USER, ORG, { force: true })
+
+    // Two calls: the count-only aggregate AND the full row fetch — the
+    // shortcut must not fire while something local could make the true
+    // server count stale the moment it lands.
+    expect(fromCalls.work_orders).toBe(2)
+  })
+
+  it('surfaces omittedCount from the count aggregate', async () => {
+    // The cap itself (WORK_ORDER_LIMIT = 2000) is impractical to actually
+    // exceed in a unit test; this exercises the arithmetic — a live count
+    // ahead of what the bounded fetch returned — the same computation that
+    // applies once the real cap is reached.
+    workOrderRows = { data: [workOrder('wo-1')], error: null, count: 5 }
+    const result = await warmMaintenanceBoardForOffline(USER, ORG)
+    expect(result.omittedCount).toBe(4)
   })
 })

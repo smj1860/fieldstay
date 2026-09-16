@@ -41,16 +41,33 @@
 // while a warm that runs unauthenticated costs a false security alert.
 
 import { createClient } from '@/lib/supabase/client'
+import { DASHBOARD_WARM_TIMEOUT_MS, withTimeout } from '@/lib/http/timeout'
 
 /**
  * Whether the browser still holds a Supabase session it can authenticate with.
  *
  * Call this before any warm pass's first query. Never throws.
+ *
+ * RACED, not aborted: `auth.getSession()` takes no `AbortSignal` parameter,
+ * so nothing here can make gotrue-js actually stop trying. What this closes
+ * is the same failure every other warm-path call closes with a real
+ * AbortSignal — a hung request that never settles, which meant this gate's
+ * caller never got an answer either, and the whole warm pass (and the
+ * module-level in-flight entry tracking it) was wedged for the tab's life.
+ * Abandoning a `getSession()` call has no side effect to leave dangling, so
+ * racing it is safe the same way it is for `sendWithTimeout()` in
+ * lib/resend/client.ts.
  */
+type SessionResponse = Awaited<ReturnType<ReturnType<typeof createClient>['auth']['getSession']>>
+
 export async function hasUsableSession(): Promise<boolean> {
   try {
-    const { data: { session } } = await createClient().auth.getSession()
-    return Boolean(session)
+    const { data } = await withTimeout<SessionResponse>(
+      () => createClient().auth.getSession(),
+      DASHBOARD_WARM_TIMEOUT_MS,
+      'hasUsableSession',
+    )
+    return Boolean(data.session)
   } catch {
     return false
   }

@@ -163,6 +163,33 @@ export async function discardInspectionPhoto(
 }
 
 /**
+ * Drops queue rows for photos that have already finished uploading.
+ *
+ * A row survives its own upload deliberately — see the header comment: the
+ * UI distinguishes "no photo" from "photo taken, still sending" by whether
+ * the row exists at all, and `uploadOne()` already deletes the BLOB the
+ * moment the server has the bytes, leaving only this bookkeeping row behind.
+ * Left in place forever, that row count only grows: every photo capture and
+ * every reconnect calls `drainInspectionPhotos()`, which (before this fix)
+ * read the WHOLE table on every one of those, uploaded rows included, and by
+ * the time a PM has run a season of inspections nothing will ever act on most
+ * of them again.
+ *
+ * Called at the same lifecycle point as `pruneFinishedInspections()`
+ * (inspection-draft.ts) — the fill screen's mount — since both exist for the
+ * identical reason and neither has anything the other needs to sequence
+ * against.
+ */
+export async function pruneUploadedPhotoRows(userId: string, orgId: string): Promise<void> {
+  const db = getDashboardDb(userId, orgId)
+  // Index-backed: `status` is exactly what separates "done, never touched
+  // again" from every row a query elsewhere still needs to find.
+  const stale = await db.pending_photo_uploads.where('status').equals('uploaded').primaryKeys()
+  if (stale.length === 0) return
+  await db.pending_photo_uploads.bulkDelete(stale)
+}
+
+/**
  * The drain in flight for each (user, org), so a concurrent caller AWAITS it
  * rather than being turned away.
  *
@@ -177,13 +204,32 @@ export async function discardInspectionPhoto(
 const inFlight = new Map<string, Promise<void>>()
 
 /**
+ * How many INSPECTIONS' worth of photos this drain uploads at once.
+ *
+ * Photos have no ordering relationship with each other (unlike the mutation
+ * outbox's `inspection.create` → `inspection.submit` dependency) — see the
+ * header comment. Partitioning by `targetId` (the inspection each photo
+ * belongs to) and draining a handful of inspections concurrently is
+ * therefore purely a head-of-line-blocking fix, not a correctness change:
+ * a stuck upload on one inspection's photo used to block EVERY OTHER
+ * inspection's photos behind it in the same strict queue, and the deeper the
+ * queue the worse that got — a PM who ran ten inspections in one day with one
+ * photo silently rejected on the first would see all nine others stall too.
+ * Bounded rather than unbounded so a portfolio-wide catch-up sync (many
+ * inspections, one per property) does not open dozens of simultaneous
+ * Storage uploads at once.
+ */
+const MAX_CONCURRENT_PARTITIONS = 4
+
+/**
  * Uploads every queued photo for this (user, org).
  *
- * Mirrors the vendor drain's shape: an in-process guard, insertion order, and
- * a retry policy where a TRANSPORT failure costs no budget. That last part is
- * the one worth stating — a tablet in a basement would otherwise burn all five
- * attempts on "no network" and dead-letter a photograph that was never actually
- * rejected by anything.
+ * Mirrors the vendor drain's shape: an in-process guard, insertion order
+ * WITHIN each inspection's own photos, and a retry policy where a TRANSPORT
+ * failure costs no budget. That last part is the one worth stating — a
+ * tablet in a basement would otherwise burn all five attempts on "no
+ * network" and dead-letter a photograph that was never actually rejected by
+ * anything.
  *
  * Never throws. A photo that cannot upload must not take the walk with it.
  */
@@ -203,23 +249,73 @@ async function runDrain(userId: string, orgId: string): Promise<void> {
   try {
     await withTabLock(`fieldstay-dashboard-photos-${lockKey}`, async () => {
       const db = getDashboardDb(userId, orgId)
-      const pending = (await db.pending_photo_uploads.toArray())
-        .filter((r) => r.status === 'pending' && !r.failed)
+      // Index-backed on `status`, not `.toArray()` — see schema.ts version(6).
+      // Uploaded rows are only ever status-flipped, never deleted on their
+      // own (pruneUploadedPhotoRows() is what actually removes them), so an
+      // unfiltered scan here re-read every photo this device has EVER
+      // queued, on every capture and every reconnect.
+      const pending = (await db.pending_photo_uploads.where('status').equals('pending').toArray())
+        .filter((r) => !r.failed)
         .filter((r) => !r.nextAttemptAt || r.nextAttemptAt <= Date.now())
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
+      const partitions = new Map<string, DashboardPendingPhotoRow[]>()
       for (const row of pending) {
-        const done = await uploadOne(userId, orgId, row)
-        // Stop on the first failure rather than skipping ahead. Photos have no
-        // ordering relationship with each other, but a run of failures is
-        // almost always one cause — a lost connection — and hammering the rest
-        // of the queue against it just burns retry budget in parallel.
-        if (!done) break
+        const list = partitions.get(row.targetId)
+        if (list) list.push(row)
+        else partitions.set(row.targetId, [row])
       }
+
+      await runPartitionsConcurrently(
+        [...partitions.values()],
+        MAX_CONCURRENT_PARTITIONS,
+        (rows) => drainPartition(userId, orgId, rows),
+      )
     })
   } catch (err) {
     console.warn('[drainInspectionPhotos] drain failed (non-fatal):', err)
   }
+}
+
+/** One inspection's photos, in order, stopping at the first failure. */
+async function drainPartition(
+  userId: string,
+  orgId:  string,
+  rows:   DashboardPendingPhotoRow[],
+): Promise<void> {
+  for (const row of rows) {
+    const done = await uploadOne(userId, orgId, row)
+    // Stop on the first failure within THIS inspection's own photos rather
+    // than skipping ahead — a run of failures inside one partition is almost
+    // always one cause (a lost connection, a policy denial), and hammering
+    // the rest of that inspection's queue against it just burns retry budget
+    // in parallel. Never affects any OTHER inspection's partition, which is
+    // the whole point of partitioning.
+    if (!done) break
+  }
+}
+
+/**
+ * Runs each partition to completion, at most `limit` running at once.
+ *
+ * `run()` never throws — `drainPartition()`'s only call is `uploadOne()`,
+ * which classifies every failure into a row update rather than rejecting —
+ * so this pool is purely about concurrency, not error propagation between
+ * partitions.
+ */
+async function runPartitionsConcurrently<T>(
+  items: T[],
+  limit: number,
+  run:   (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const item = items[next++]!
+      await run(item)
+    }
+  })
+  await Promise.all(workers)
 }
 
 /** True when the row is finished with; false when the drain should stop. */
