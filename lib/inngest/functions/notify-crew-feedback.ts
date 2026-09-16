@@ -3,6 +3,12 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 
+// See lib/env.ts's CREW_FEEDBACK_NOTIFY_EMAIL entry for why this is
+// configurable rather than a bare literal: every crew feedback submission
+// platform-wide goes to this one inbox, with no fallback distribution list
+// and nothing here that would ever signal it had become unmonitored.
+const STAFF_NOTIFY_EMAIL = process.env.CREW_FEEDBACK_NOTIFY_EMAIL ?? 'stephen@fieldstay.app'
+
 export const notifyCrewFeedback = inngest.createFunction(
   { id: 'notify-crew-feedback', name: 'Notify Platform Staff: Crew Feedback Submitted', retries: 3 },
   { event: 'crew/feedback.submitted' as const },
@@ -40,7 +46,7 @@ export const notifyCrewFeedback = inngest.createFunction(
       // exactly the identity wanted here.
       const { error } = await resend.emails.send({
         from:    FROM,
-        to:      'stephen@fieldstay.app',
+        to:      STAFF_NOTIFY_EMAIL,
         subject: `New crew feedback from ${cm?.name ?? 'a crew member'}`,
         html: await renderPmAlert({
           heading: 'New crew feedback submitted',

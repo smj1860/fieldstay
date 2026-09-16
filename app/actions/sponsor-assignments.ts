@@ -2,6 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
+
+/** What every call site in this file actually passes — createServiceClient()'s own return type. */
+type ServiceClient = ReturnType<typeof createServiceClient>
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
@@ -58,8 +61,7 @@ function assignmentErrorMessage(err: { code?: string; message?: string }): strin
  * this one decides what is allowed, and only the second one is a rule.
  */
 async function orgIsAboveAssignmentTier(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: ServiceClient,
   orgId:    string,
 ): Promise<boolean> {
   const { count, error } = await supabase
@@ -297,8 +299,7 @@ export async function resetPropertyToAutomatic(propertyId: string): Promise<Assi
  * and a bulk assign touches every property in the org at once.
  */
 async function markManual(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase:    any,
+  supabase:    ServiceClient,
   orgId:       string,
   propertyIds: string[],
 ): Promise<void> {

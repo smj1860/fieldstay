@@ -197,6 +197,12 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   RESEND_API_KEY:    { tier: 'production', schema: prefixed('re_'), why: 'every transactional email' },
   RESEND_FROM_EMAIL: { tier: 'production', schema: email,           why: 'the From address on every email' },
   RESEND_FROM_NAME:  { tier: 'production', schema: nonEmpty,        why: 'interpolated into FROM — unset renders the literal "undefined"' },
+  CREW_FEEDBACK_NOTIFY_EMAIL: {
+    tier: 'optional', schema: email,
+    why: 'lib/inngest/functions/notify-crew-feedback.ts — every crew feedback submission platform-wide '
+      + 'goes to this one inbox; falls back to stephen@fieldstay.app when unset, but this makes the '
+      + 'recipient an operator-configurable value rather than a hardcoded literal with no way to change it',
+  },
 
   // ── Inngest ───────────────────────────────────────────────────────────────
   // Read by the Inngest SDK itself, not by any process.env reference in this
