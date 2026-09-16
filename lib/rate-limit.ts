@@ -356,6 +356,23 @@ export const workOrderRatelimit = new Ratelimit({
   prefix:    'rl:wo',
 })
 
+// Unmatched-path throttle (proxy.ts's enforceUnmatchedPathRateLimit) — every
+// session-less request to a path that is not PUBLIC/TOKEN/BYPASS, which is
+// exactly the bucket app/not-found.tsx's force-dynamic render (plus the
+// anonymous redirect-to-login branch for a real protected URL) actually
+// serves. That page cannot be prerendered — it needs a per-request CSP nonce,
+// see its own header comment — so it is the one page whose cost scales
+// directly with junk traffic: broken links, scanner probes
+// (/wp-login.php-, /.env-shaped paths), a viral surge's stray 404s. 60/minute
+// per IP is generous enough for a real visitor who fat-fingers a URL a few
+// times, tight enough to blunt a scanning/probing burst from one source.
+export const unmatchedPathRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(60, '1 m'),
+  analytics: false,
+  prefix:    'rl:unmatched-path',
+})
+
 // Public vendor Stripe Connect onboarding routes (/vendor-connect/[token]/*,
 // /api/vendor-connect/[token]/*) — same rationale and limit as workOrderRatelimit:
 // guards against stripe_connect_token enumeration on this unauthenticated route.

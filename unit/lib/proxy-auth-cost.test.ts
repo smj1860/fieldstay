@@ -28,7 +28,7 @@ vi.mock('@/lib/rate-limit', () => ({
     allowed: true, skipped: true, errored: false, limit: 0, remaining: 0, reset: 0,
   })),
   ownerPortalRatelimit:  {}, workOrderTokenRatelimit: {}, guidebookRatelimit: {},
-  inviteAcceptRatelimit: {}, tokenResourceRatelimit:  {},
+  inviteAcceptRatelimit: {}, tokenResourceRatelimit:  {}, unmatchedPathRatelimit: {},
 }))
 
 import { createServerClient } from '@supabase/ssr'
