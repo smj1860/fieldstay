@@ -1223,6 +1223,28 @@ orphans its ledger row. `scripts/check-migration-ledger.mjs` now fails CI on
 either; run `pnpm run check:migration-ledger:prod` after any out-of-band
 apply.
 
+**"The SAME version the ledger recorded" is not the version you asked for.**
+The MCP `apply_migration` tool's `name` argument becomes the ledger row's
+`name` column — it does NOT become the row's `version`. `version` is always
+whatever timestamp the tool happened to run at, regardless of the filename
+prefix you're trying to match. Applying `20260916140000_audit_events_dedupe_
+key.sql` via `apply_migration(name: "audit_events_dedupe_key", ...)` records
+a ledger row at version `20260916132257` (or whatever the wall clock read),
+not `20260916140000` — which is a fresh, self-inflicted mismatch on both
+sides at once: a "local file with no ledger row" (the real filename) and a
+"ledger row with no local file" (the auto-assigned one), even though the
+schema change genuinely landed. This shipped live on 2026-09-16, twice in
+one sitting (5 migrations, on two projects), caught only because
+`check-migration-ledger.mjs` failed CI afterward. After any `apply_migration`
+call, immediately reconcile the row yourself:
+```sql
+UPDATE supabase_migrations.schema_migrations
+SET version = '20260916140000', name = '20260916140000_audit_events_dedupe_key'
+WHERE version = '<whatever apply_migration actually recorded>';
+```
+Don't trust that the call "recorded the right version" just because it
+returned success — query `supabase_migrations.schema_migrations` and check.
+
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
