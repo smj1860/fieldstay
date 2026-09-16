@@ -34,6 +34,7 @@
 import type { GetStepTools } from 'inngest'
 import { inngest }            from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
+import { chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { reportError }        from '@/lib/observability/report-error'
@@ -41,6 +42,75 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 
 type SyncStep = GetStepTools<typeof inngest>
+
+/**
+ * Bounded concurrency for the chunked `.in('external_id', …)` lookups below.
+ * Each chunk is its own PostgREST request; running a handful at once keeps a
+ * multi-thousand-reservation sync from becoming fully sequential without
+ * opening dozens of connections against one org's data at once.
+ */
+const ID_CHUNK_CONCURRENCY = 5
+
+/**
+ * Bulk upsert batch size for `bookings`. The same oversized-request failure
+ * mode `.in()` chunking exists to avoid also applies to a single `.upsert()`
+ * call carrying every row a sync just fetched — chunked here for the same
+ * reason, at the same size `sendEventsChunked` defaults to.
+ */
+const UPSERT_CHUNK_SIZE = 500
+
+/**
+ * Bounded concurrency for per-property turnover generation. This used to be
+ * a fully sequential `for` loop inside one `step.run` — one property's
+ * `generateTurnoversForProperty` waiting on the previous one's DB round trips
+ * for no reason, since each property's turnovers are independent. 8 in
+ * flight turns a 50-property sync into ~7 waves instead of 50 sequential
+ * calls, without opening enough concurrent connections to pressure Postgres.
+ */
+const TURNOVER_GENERATION_CONCURRENCY = 8
+
+/**
+ * Runs `fn` over `items` with at most `limit` in flight at once, collecting
+ * results in the ORIGINAL order (unlike a naive `Promise.all` over manually
+ * sliced batches, whose per-batch ordering is fine but which still runs every
+ * batch's tasks fully in lockstep). A worker-pool shape rather than
+ * build-shopping-cart.ts's `mapWithConcurrency` (which discards results):
+ * every caller here needs the per-item return value.
+ */
+async function mapWithConcurrency<T, R>(
+  items:  readonly T[],
+  limit:  number,
+  fn:     (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i]!, i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+/**
+ * `.in('external_id', ids)` in bounded chunks, run with bounded concurrency,
+ * merged into one array.
+ *
+ * PostgREST encodes `.in()` as a URL query parameter, not a request body — a
+ * list sized by however many reservations a sync just fetched (thousands, at
+ * scale) produces a multi-hundred-KB query string that fails outright (414 /
+ * connection reset) before the query is ever evaluated. See lib/inngest/chunk.ts.
+ */
+async function fetchRowsByExternalIdChunks<TRow>(
+  externalIds: string[],
+  fetchChunk:  (chunk: string[]) => Promise<TRow[]>,
+): Promise<TRow[]> {
+  const chunks  = chunkArray(externalIds, IN_CLAUSE_CHUNK_SIZE)
+  const results = await mapWithConcurrency(chunks, ID_CHUNK_CONCURRENCY, fetchChunk)
+  return results.flat()
+}
 
 /**
  * Narrow structural type for Inngest's logger. Deliberately not `any` (banned)
@@ -216,29 +286,46 @@ export async function runReservationPipeline(
       // `external_id` is nullable on bookings (iCal rows have none), so the
       // row type must admit null even though this filtered read cannot return
       // one — the Set below drops them regardless.
-      const existing = await fetchAllRows<{ external_id: string | null }>(
-        (from, to) => supabase
-          .from('bookings')
-          .select('external_id')
-          .eq('org_id', orgId)
-          .eq('external_source', provider)
-          .in('external_id', revenueEligible)
-          .order('external_id', { ascending: true })
-          .range(from, to),
-        { label: `existing-bookings(${provider})[org=${orgId}]` },
+      //
+      // Chunked: revenueEligible is sized by this sync's whole batch (can be
+      // 10-20k at scale), and a single `.in()` over all of it produces an
+      // oversized query string. See fetchRowsByExternalIdChunks's header.
+      const existing = await fetchRowsByExternalIdChunks<{ external_id: string | null }>(
+        revenueEligible,
+        (chunk) => fetchAllRows<{ external_id: string | null }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('external_id')
+            .eq('org_id', orgId)
+            .eq('external_source', provider)
+            .in('external_id', chunk)
+            .order('external_id', { ascending: true })
+            .range(from, to),
+          { label: `existing-bookings(${provider})[org=${orgId}]` },
+        ),
       )
       const seen = new Set(existing.map((r) => r.external_id))
       postable = revenueEligible.filter((id) => !seen.has(id))
     }
 
     if (bookingRows.length) {
-      const { error } = await supabase
-        .from('bookings')
-        .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
+      // Chunked for the same reason the `.in()` reads above are: a single
+      // `.upsert()` call carrying every row this sync fetched is sized by the
+      // sync's whole batch, not a fixed constant. Sequential, not concurrent —
+      // these all write the same table under the same onConflict target, and a
+      // batch upsert is not latency-sensitive the way a read is. A classic
+      // numeric pagination loop (bounded chunk size, not per-row iteration),
+      // same shape as the paginated fetchers elsewhere in this codebase.
+      for (let i = 0; i < bookingRows.length; i += UPSERT_CHUNK_SIZE) {
+        const chunk = bookingRows.slice(i, i + UPSERT_CHUNK_SIZE)
+        const { error } = await supabase
+          .from('bookings')
+          .upsert(chunk, { onConflict: 'org_id,external_id,external_source' })
 
-      if (error) {
-        logger.error(`${label} bookings upsert failed: ${error.message}`)
-        throw new Error(`Bookings upsert failed: ${error.message}`)
+        if (error) {
+          logger.error(`${label} bookings upsert failed: ${error.message}`)
+          throw new Error(`Bookings upsert failed: ${error.message}`)
+        }
       }
     }
 
@@ -268,16 +355,22 @@ export async function runReservationPipeline(
       // reservations — a silent financial omission that the sync then reports
       // as a clean run. fetchAllRows throws on a page error, so the step gets
       // an Inngest retry instead.
-      const rows = await fetchAllRows<{ id: string; property_id: string; actual_total_amount: number | null }>(
-        (from, to) => supabase
-          .from('bookings')
-          .select('id, property_id, actual_total_amount')
-          .eq('org_id', orgId)
-          .eq('external_source', provider)
-          .in('external_id', revenueEligibleExternalIds)
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: `bookings-for-revenue(${provider})[org=${orgId}]` },
+      //
+      // Chunked for the same reason as the existing-bookings lookup above —
+      // one row per reservation just imported, sized by the whole batch.
+      const rows = await fetchRowsByExternalIdChunks<{ id: string; property_id: string; actual_total_amount: number | null }>(
+        revenueEligibleExternalIds,
+        (chunk) => fetchAllRows<{ id: string; property_id: string; actual_total_amount: number | null }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('id, property_id, actual_total_amount')
+            .eq('org_id', orgId)
+            .eq('external_source', provider)
+            .in('external_id', chunk)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: `bookings-for-revenue(${provider})[org=${orgId}]` },
+        ),
       )
 
       return rows.map((b) => ({
@@ -303,17 +396,26 @@ export async function runReservationPipeline(
   const newTurnoverIds = await step.run('generate-turnovers', async () => {
     if (!affectedPropertyIds.length) return []
     const supabase = createServiceClient({ system })
-    const ids: string[] = []
-    for (const propertyId of affectedPropertyIds) {
-      try {
-        const newIds = await generateTurnoversForProperty(propertyId, orgId, supabase)
-        ids.push(...newIds)
-      } catch (err) {
-        logger.error(`${label} Turnover generation failed for ${propertyId}: ${err}`)
-        reportError(err, { site: `inngest.${provider}-reservation-sync.generate-turnovers` })
-      }
-    }
-    return ids
+
+    // Bounded concurrency, not a sequential for-loop: each property's
+    // generateTurnoversForProperty is independent, so waiting on one before
+    // starting the next only serialised a sync's whole property set for no
+    // reason. A per-property failure is caught individually — same as the
+    // sequential version — so one bad property never aborts the others'.
+    const perProperty = await mapWithConcurrency(
+      affectedPropertyIds,
+      TURNOVER_GENERATION_CONCURRENCY,
+      async (propertyId): Promise<string[]> => {
+        try {
+          return await generateTurnoversForProperty(propertyId, orgId, supabase)
+        } catch (err) {
+          logger.error(`${label} Turnover generation failed for ${propertyId}: ${err}`)
+          reportError(err, { site: `inngest.${provider}-reservation-sync.generate-turnovers` })
+          return []
+        }
+      },
+    )
+    return perProperty.flat()
   })
 
   if (newTurnoverIds.length > 0) {

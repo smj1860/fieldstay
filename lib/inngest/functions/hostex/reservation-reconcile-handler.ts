@@ -39,6 +39,7 @@ import { syncHostexStaff } from './staff-sync'
 import { isHostexAccountActionError } from '@/lib/integrations/providers/hostex-api'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { waitForHostexTokenRefresh } from './token-lock-wait'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-reservation-reconcile'
@@ -70,14 +71,38 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
     id:      'hostex-reservation-reconcile-handler',
     name:    'Hostex: Reservation Reconcile (per connection)',
     retries: 3,
+    // Platform-wide ceiling — raised from 4, which meant the daily reconcile
+    // cron (dispatching one event per active Hostex connection, see
+    // reservation-reconcile-cron.ts) could only run 4 of these at once
+    // regardless of how many connections exist. At 100x connection growth 4
+    // in flight cannot drain a whole day's fan-out within 24h before the
+    // NEXT day's cron dispatches on top of it — a backlog that only grows.
+    //
+    // Follow-up NOT done here: this still re-sweeps EVERY connection every
+    // day regardless of how recently it last succeeded. A per-connection
+    // "last reconciled" watermark (recording a real completion timestamp,
+    // then having reservation-reconcile-cron.ts's dispatch skip a connection
+    // reconciled within some recent window) would cut the daily fan-out to
+    // only what's actually stale — but integration_connections has no column
+    // for that today: last_synced_at is written by hostexInitialSync's
+    // mark-complete step, not by this reconcile pass (see reconcile-shell.ts,
+    // which never touches connection metadata), so it can't be repurposed
+    // without also deciding whether an initial-sync timestamp and a
+    // reconcile timestamp should share one column. That's a real schema
+    // decision, not a risk worth taking inside this pass — documented here
+    // as follow-up work rather than done blind.
     concurrency: [
-      { limit: 4 },
+      { limit: 25 },
       { limit: 1, key: 'event.data.org_id' },
     ],
   },
   { event: 'integration/hostex.reservation_reconcile.requested' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
+
+    // Top-level, before any step below spends a token — see
+    // token-lock-wait.ts's header.
+    await waitForHostexTokenRefresh(step, user_id)
 
     try {
       return await runProviderReconcile({

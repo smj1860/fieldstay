@@ -32,6 +32,22 @@ vi.mock('@/lib/rate-limit', () => ({
     d.errored ? 60 : Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
 }))
 
+// This file is about hostexFetch's own request/response handling, not the
+// breaker — unit/lib/circuit-breaker.test.ts and a dedicated wiring test
+// cover that. Stubbed closed (same pattern as
+// unit/lib/kroger-client-rate-limit.test.ts) so it never touches Redis:
+// unit/setup.ts sets FAKE-but-present Upstash credentials, so an unmocked
+// evaluateBreaker/recordFailure/recordSuccess here would make a REAL fetch to
+// a bogus host and silently consume the very fetchMock responses these tests
+// stage for the Hostex API call itself.
+vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
+  ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
+  evaluateBreaker: vi.fn(async () => ({ decision: 'closed', priorFailures: 0 })),
+  recordFailure:   vi.fn(async () => undefined),
+  recordSuccess:   vi.fn(async () => undefined),
+}))
+
+import { RetryAfterError } from 'inngest'
 import {
   hostexDeleteWebhook,
   hostexFetch,
@@ -43,6 +59,17 @@ import {
 } from '@/lib/integrations/providers/hostex-api'
 import { RateLimitError } from '@/lib/integrations/types'
 import { checkLimit } from '@/lib/rate-limit'
+
+/** Every hostexFetch throttle escapes as a RetryAfterError wrapping the
+ * original RateLimitError as `cause` — see lib/inngest/retry-after.ts. A bare
+ * RateLimitError used to reach Inngest uncaught, which retried on its own
+ * generic backoff rather than the interval Hostex actually asked for. */
+function causeRateLimit(err: unknown): RateLimitError {
+  expect(err).toBeInstanceOf(RetryAfterError)
+  const cause = (err as { cause?: unknown }).cause
+  expect(cause).toBeInstanceOf(RateLimitError)
+  return cause as RateLimitError
+}
 
 const USER = 'user_1'
 
@@ -84,9 +111,10 @@ describe('hostexFetch', () => {
     await expect(hostexFetch('/properties', 'tok', USER)).rejects.toThrow(/error_code 200/)
   })
 
-  it('throws RateLimitError on an IN-BAND 429 carried by a 200 response', async () => {
+  it('throws a RetryAfterError (wrapping RateLimitError) on an IN-BAND 429 carried by a 200 response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope(null, 429, { 'Retry-After': '17' })))
-    await expect(hostexFetch('/properties', 'tok', USER)).rejects.toBeInstanceOf(RateLimitError)
+    const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+    causeRateLimit(err)
   })
 
   it('jitters Retry-After by ±25% so throttled connections do not retry in lockstep', async () => {
@@ -98,9 +126,8 @@ describe('hostexFetch', () => {
 
     const seen = new Set<number>()
     for (let i = 0; i < 25; i++) {
-      const err = await hostexFetch('/properties', 'tok', USER).catch((e: RateLimitError) => e)
-      expect(err).toBeInstanceOf(RateLimitError)
-      const { retryAfter } = err as RateLimitError
+      const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+      const { retryAfter } = causeRateLimit(err)
       expect(retryAfter).toBeGreaterThanOrEqual(75)
       expect(retryAfter).toBeLessThanOrEqual(125)
       seen.add(retryAfter)
@@ -114,8 +141,8 @@ describe('hostexFetch', () => {
     // straight back into the window that just rejected us.
     vi.stubGlobal('fetch', vi.fn(async () => envelope(null, 429, { 'Retry-After': '1' })))
     for (let i = 0; i < 10; i++) {
-      const err = await hostexFetch('/properties', 'tok', USER).catch((e: RateLimitError) => e)
-      expect((err as RateLimitError).retryAfter).toBeGreaterThanOrEqual(1)
+      const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+      expect(causeRateLimit(err).retryAfter).toBeGreaterThanOrEqual(1)
     }
   })
 
@@ -186,7 +213,8 @@ describe('hostexFetch', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(hostexFetch('/properties', 'tok', USER)).rejects.toBeInstanceOf(RateLimitError)
+    const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+    causeRateLimit(err)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

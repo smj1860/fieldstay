@@ -31,6 +31,7 @@ import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
 import { isHostexAccountActionError } from '@/lib/integrations/providers/hostex-api'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { waitForHostexTokenRefresh } from './token-lock-wait'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-webhook-handler'
@@ -54,10 +55,15 @@ export const hostexWebhookHandler = inngest.createFunction(
     retries: 3,
     // Serialized per connection, not per org: two deliveries for the same
     // connection racing would run two pipelines whose turnover regeneration
-    // touches the same properties. A modest platform cap keeps a busy account
-    // from monopolising function capacity.
+    // touches the same properties. The platform cap keeps a busy account
+    // from monopolising function capacity — raised from 10, which was sized
+    // for pilot-scale webhook volume and does not scale with connection
+    // count: at 100x growth, active listings firing reservation_updated
+    // sub-events (see the debounce below) would queue behind a 10-wide cap
+    // regardless of how many distinct connections are involved, since the
+    // per-connection key only serialises each one against ITSELF.
     concurrency: [
-      { limit: 10 },
+      { limit: 40 },
       { limit: 1, key: 'event.data.user_id' },
     ],
     // One reservation's state is worth reading at most once per few seconds.
@@ -77,6 +83,10 @@ export const hostexWebhookHandler = inngest.createFunction(
   { event: 'integration/hostex.webhook.received' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id, event: hostexEvent, reservation_code, property_id } = event.data
+
+    // Top-level, before any step below spends a token — see
+    // token-lock-wait.ts's header.
+    await waitForHostexTokenRefresh(step, user_id)
 
     try {
       // A GETTER, invoked inside each step that spends it — see the

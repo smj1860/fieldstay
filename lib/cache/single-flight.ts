@@ -74,6 +74,33 @@ export async function acquireLock(
   }
 }
 
+/**
+ * A plain read of whether `key` is currently held — does not attempt to
+ * acquire it, and never releases anything.
+ *
+ * For a caller that wants to know "is someone else working on this right
+ * now" WITHOUT taking a turn at the lock itself — e.g. a top-level Inngest
+ * step deciding whether to `step.sleep` before a later step tries the real
+ * acquire/produce/release cycle. Fails open (reports "not held") on a Redis
+ * error or when Redis is unconfigured, same posture as acquireLock: a stale
+ * "not held" reading costs a redundant attempt downstream, not a correctness
+ * failure, and failing closed here would block that caller on a Redis blip
+ * for a lock that may not even be real.
+ */
+export async function isLockHeld(key: string): Promise<boolean> {
+  const redis = getRedisIfConfigured()
+  if (!redis) return false
+
+  try {
+    return (await withTimeout(redis.get(key), REDIS_TIMEOUT_MS, `isLockHeld(${key})`)) !== null
+  } catch (err) {
+    if (!isTimeoutError(err)) {
+      console.warn(`[single-flight] lock-check unavailable for ${key}, assuming unheld:`, err)
+    }
+    return false
+  }
+}
+
 /** Release early so the next caller doesn't wait out the TTL. Never throws. */
 export async function releaseLock(key: string): Promise<void> {
   const redis = getRedisIfConfigured()
