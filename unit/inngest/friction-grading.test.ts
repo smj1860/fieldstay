@@ -1,55 +1,111 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
-vi.mock('@/lib/inngest/client', () => ({
-  inngest: { createFunction: (_c: unknown, _t: unknown, handler: unknown) => handler },
-}))
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { frictionGrading } from '@/lib/inngest/functions/cron/friction-grading'
+import { frictionGrading, gradeFrictionForOrg } from '@/lib/inngest/functions/cron/friction-grading'
+import { invokeHandler } from './test-helpers'
 
-// The cron is a thin shell over apply_friction_grading() — the grading LOGIC
-// is SQL and is verified against the live function, not mocked here. What
-// these cover is the shell: that it calls the right RPC, reports what came
-// back, and fails loudly rather than reporting a silent success.
+// Grading used to be one platform-wide RPC call with no per-tenant fan-out —
+// the one exception to this codebase's disciplined per-org fan-out
+// convention for a platform-wide Inngest scan. It is now a dispatcher (finds
+// orgs with an ungraded row, fans out one event per org) plus a per-org
+// handler that calls apply_friction_grading(p_org_id), same shape as
+// billing-property-reconciliation.ts. The grading LOGIC is SQL and is
+// verified against the live function, not mocked here — what these cover is
+// the shell: dispatch, the per-org RPC call, and failing loudly rather than
+// reporting a silent success.
 
-const runHandler = () => {
-  const step = { run: vi.fn(async (_name: string, fn: () => unknown) => fn()) }
-  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  return { step, logger, invoke: () => (frictionGrading as unknown as
-    (a: { step: typeof step; logger: typeof logger }) => Promise<{ graded: number }>)({ step, logger }) }
+function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
+  const counters: Record<string, number> = {}
+
+  const from = vi.fn((table: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chain: any = {}
+    for (const m of ['select', 'is', 'order', 'range']) chain[m] = () => chain
+    const resolveNext = () => {
+      const idx = counters[table] ?? 0
+      counters[table] = idx + 1
+      return Promise.resolve(queued[table]?.[idx] ?? { data: [], error: null })
+    }
+    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+      resolveNext().then(resolve, reject)
+    return chain
+  })
+
+  return { from, rpc: vi.fn() }
 }
 
-describe('cron: friction grading', () => {
+describe('frictionGrading (cron fan-out)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('calls apply_friction_grading and reports the count', async () => {
-    const rpc = vi.fn(async () => ({ data: { graded: 7 }, error: null }))
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc })
+  it('dispatches one event per org carrying an ungraded row', async () => {
+    const supabase = makeSupabase({
+      pre_flight_friction: [{ data: [{ org_id: 'org_1' }, { org_id: 'org_2' }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const { invoke, logger } = runHandler()
-    expect(await invoke()).toEqual({ graded: 7 })
-    expect(rpc).toHaveBeenCalledWith('apply_friction_grading')
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('7'))
+    const step = { run: vi.fn((_n: string, cb: () => unknown) => cb()), sendEvent: vi.fn() }
+    const logger = { info: vi.fn(), error: vi.fn() }
+    const result = await invokeHandler(frictionGrading, { event: {}, step, logger })
+
+    expect(result).toEqual({ dispatched: 2 })
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-friction-grading', [
+      { name: 'friction/grading.requested', data: { org_id: 'org_1' } },
+      { name: 'friction/grading.requested', data: { org_id: 'org_2' } },
+    ])
+  })
+
+  it('dispatches nothing when no org has an ungraded row', async () => {
+    const supabase = makeSupabase({ pre_flight_friction: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = { run: vi.fn((_n: string, cb: () => unknown) => cb()), sendEvent: vi.fn() }
+    const logger = { info: vi.fn(), error: vi.fn() }
+    const result = await invokeHandler(frictionGrading, { event: {}, step, logger })
+
+    expect(result).toEqual({ dispatched: 0 })
+    expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('gradeFrictionForOrg — per-org handler', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function run(orgId: string, rpc: ReturnType<typeof vi.fn>) {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc })
+    const step = { run: vi.fn((_n: string, cb: () => unknown) => cb()) }
+    const logger = { info: vi.fn(), error: vi.fn() }
+    return invokeHandler(gradeFrictionForOrg, { event: { data: { org_id: orgId } }, step, logger })
+  }
+
+  it('calls apply_friction_grading scoped to the one org and reports the count', async () => {
+    const rpc = vi.fn(async () => ({ data: { graded: 7 }, error: null }))
+    const result = await run('org_1', rpc)
+
+    expect(result).toEqual({ org_id: 'org_1', graded: 7 })
+    expect(rpc).toHaveBeenCalledWith('apply_friction_grading', { p_org_id: 'org_1' })
   })
 
   it('throws on an RPC error rather than reporting a silent success', async () => {
     // A swallowed error here would log "graded 0" forever while the loop was
     // dead — the calibration view would just look like there is no data yet.
     const rpc = vi.fn(async () => ({ data: null, error: { message: 'permission denied' } }))
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc })
-
-    const { invoke } = runHandler()
-    await expect(invoke()).rejects.toThrow(/apply_friction_grading failed: permission denied/)
+    await expect(run('org_1', rpc)).rejects.toThrow(
+      /apply_friction_grading failed for org org_1: permission denied/,
+    )
   })
 
-  it('passes no arguments to the RPC — grading takes no parameters', async () => {
-    const rpc = vi.fn(async () => ({ data: { graded: 0 }, error: null }))
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue({ rpc })
+  it('is naturally idempotent under a per-org concurrency key', () => {
+    // Same guarantee as reconcilePropertyCountForOrg: a retried dispatcher
+    // step.sendEvent() can re-queue a second event for the same org, and
+    // this is what stops two concurrent invocations from doing redundant
+    // work, alongside a global cap that bounds the daily burst.
+    const concurrency = (gradeFrictionForOrg as unknown as {
+      opts: { concurrency: Array<{ limit: number; key?: string }> }
+    }).opts.concurrency
 
-    const { invoke } = runHandler()
-    await invoke()
-    expect(rpc).toHaveBeenCalledTimes(1)
-    expect(rpc.mock.calls[0]).toEqual(['apply_friction_grading'])
+    expect(concurrency).toContainEqual({ limit: 1, key: 'event.data.org_id' })
+    expect(concurrency).toContainEqual({ limit: 10 })
   })
 })
