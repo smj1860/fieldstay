@@ -28,6 +28,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
+import { parseCSV } from './csv.mjs';
+
 const CSV = process.env.CSV || './STR_Property_Managers_DB-MASTER.csv';
 const OUT = process.env.OUT || './out';
 const CACHE = path.join(OUT, 'cache');
@@ -41,31 +43,6 @@ const MAX_RETRIES = 3;
 const DISALLOWED = ['/api/', '/writeareview', '/connect', '/filedata/cache/xml-sitemaps/'];
 
 fs.mkdirSync(CACHE, { recursive: true });
-
-// ---------------------------------------------------------------- CSV parsing
-
-/** Minimal RFC4180 parser — handles quoted fields and embedded commas/newlines. */
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  const header = rows.shift().map((h) => h.trim());
-  return rows
-    .filter((r) => r.some((v) => v && v.trim()))
-    .map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()])));
-}
 
 // ------------------------------------------------------------------- fetching
 
@@ -536,7 +513,7 @@ function extractProfile(html, url) {
 // --------------------------------------------------------------------- stages
 
 function cityUrlsFromCsv() {
-  const rows = parseCSV(fs.readFileSync(CSV, 'utf8'));
+  const { rows } = parseCSV(fs.readFileSync(CSV, 'utf8'));
   const urls = new Set();
   for (const r of rows) {
     const s = (r['Source'] || '').trim();

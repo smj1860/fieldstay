@@ -16,39 +16,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { parseCSV, toCSV } from './csv.mjs';
+
 const CSV = process.env.CSV || './STR_Property_Managers_DB-MASTER.csv';
 const OUT = process.env.OUT || './out';
-
-// --------------------------------------------------------------- csv helpers
-
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
-      else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  const header = rows.shift().map((h) => h.trim());
-  return {
-    header,
-    rows: rows.filter((r) => r.some((v) => v && v.trim()))
-              .map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()]))),
-  };
-}
-
-const esc = (v) => {
-  const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-const toCSV = (header, rows) =>
-  [header.map(esc).join(','), ...rows.map((r) => header.map((h) => esc(r[h])).join(','))].join('\n');
 
 // --------------------------------------------------------------- normalizing
 
