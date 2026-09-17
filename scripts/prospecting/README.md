@@ -126,8 +126,10 @@ prose pattern:
   refused by the fetcher, not merely avoided.
 - **Politeness** — concurrency 2, 800ms spacing, identified user-agent with a contact
   address, exponential backoff on 429/5xx.
-- **Caching** — every fetched page lands in `$OUT/cache/` keyed by URL hash. Re-runs and
-  extractor fixes cost zero requests.
+- **Caching** — every fetched page lands in `$OUT/cache/` keyed by a sha256 of the URL.
+  Re-runs and extractor fixes cost zero requests. **The key changed from sha1 to sha256 on
+  2026-09-17**, so a cache written before that date is orphaned and its pages will be
+  re-fetched; nothing else about it changed.
 - **Resumability** — `profiles` skips anything already in the jsonl.
 
 robots.txt permits `/str/`, but their terms of service are a separate question from

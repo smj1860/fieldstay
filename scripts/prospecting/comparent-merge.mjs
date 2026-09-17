@@ -25,8 +25,8 @@ const OUT = process.env.OUT || './out';
 
 const slug = (s) =>
   (s || '').toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[''`]/g, '')
+    .replaceAll('&', ' and ')
+    .replace(/['‘’ʼ`]/g, '')
     .replace(/\b(llc|inc|co|company|the|a)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim().replace(/\s+/g, '-');
@@ -56,7 +56,7 @@ const rootDomain = (d) => {
 const parseSize = (s) => {
   const nums = String(s || '').match(/\d[\d,]*/g);
   if (!nums) return null;
-  const v = nums.map((n) => Number(n.replace(/,/g, ''))).filter((n) => n > 0 && n < 100000);
+  const v = nums.map((n) => Number(n.replaceAll(',', ''))).filter((n) => n > 0 && n < 100000);
   if (!v.length) return null;
   return v.length >= 2 ? Math.round((v[0] + v[1]) / 2) : v[0];
 };
@@ -150,12 +150,18 @@ for (const r of rows) {
   applyProfile(r, p);
 }
 
+/** Which of the two sizes won, and where the winner came from. */
+function sizeMethod(r, exact, est) {
+  if (exact) return `comparent_${r['properties_exact_source'] || 'exact'}`;
+  return est ? 'original_estimate' : '';
+}
+
 // resolved portfolio size: an exact count from the directory beats the estimate
 for (const r of rows) {
   const exact = parseSize(r['properties_exact']);
   const est = parseSize(r['Portfolio Size (est.)']);
   r['portfolio_size'] = exact ?? est ?? '';
-  r['portfolio_size_method'] = exact ? `comparent_${r['properties_exact_source'] || 'exact'}` : (est ? 'original_estimate' : '');
+  r['portfolio_size_method'] = sizeMethod(r, exact, est);
   if (exact && est && Math.abs(exact - est) / Math.max(exact, est) > 0.25) {
     r['size_conflict'] = `csv=${est} comparent=${exact}`;
   }
@@ -181,7 +187,8 @@ const extra = ['domain', 'root_domain', 'website_origin', 'phone_origin', 'compa
   'founded_year', 'employees_ft', 'markets_served', 'crew_model', 'services', 'faq_answered',
   'google_rating', 'google_reviews', 'airbnb_reviews', 'vrbo_reviews', 'owner_rating',
   'owner_reviews', 'adr', 'occupancy', 'business_type', 'address', 'dupe_of'];
-const header = [...Object.keys(rows[0]).filter((k) => !extra.includes(k)), ...extra];
+const extraKeys = new Set(extra);
+const header = [...Object.keys(rows[0]).filter((k) => !extraKeys.has(k)), ...extra];
 
 fs.writeFileSync(path.join(OUT, 'enriched.csv'), toCSV(header, rows));
 fs.writeFileSync(path.join(OUT, 'unmatched.json'), JSON.stringify(unmatched, null, 2));
@@ -210,7 +217,7 @@ fs.writeFileSync(path.join(OUT, 'new-prospects.csv'), toCSV(freshHeader, freshRo
 
 const n = rows.length;
 const pct = (c) => `${c} (${(c / n * 100).toFixed(1)}%)`;
-const count = (f) => rows.filter(f).length;
+const count = (f) => rows.filter((r) => f(r)).length;
 const tally = (items, f) => Object.entries(items.reduce((a, x) => {
   const k = f(x) || '(none)'; a[k] = (a[k] ?? 0) + 1; return a;
 }, {})).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`).join('  ');

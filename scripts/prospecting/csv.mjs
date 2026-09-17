@@ -51,14 +51,14 @@ export function parseCSV(text) {
   return {
     header,
     rows: raw
-      .filter((r) => r.some((v) => v && v.trim()))
+      .filter((r) => r.some((v) => v?.trim()))
       .map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()]))),
   };
 }
 
 export const esc = (v) => {
   const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 };
 
 export const toCSV = (header, rows) =>

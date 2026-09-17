@@ -49,7 +49,10 @@ fs.mkdirSync(CACHE, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function cachePath(url) {
-  return path.join(CACHE, crypto.createHash('sha1').update(url).digest('hex') + '.html');
+  // sha256, not sha1 — a cache key needs no cryptographic strength, but a weak
+  // hash fails SonarCloud's security rating and the swap is free. NOTE: this
+  // changed the key, so a cache written before 2026-09-17 is orphaned.
+  return path.join(CACHE, `${crypto.createHash('sha256').update(url).digest('hex')}.html`);
 }
 
 function allowed(url) {
@@ -102,21 +105,48 @@ async function pool(items, worker, label) {
 
 // ------------------------------------------------------------------ extractors
 
+const NAMED_ENTITIES = {
+  '&amp;': '&', '&apos;': "'", '&quot;': '"', '&nbsp;': ' ', '&lt;': '<', '&gt;': '>',
+};
+
 const decode = (s) =>
-  s.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
-   .replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"')
-   .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  s.replace(/&#(\d+);|&[a-z]+;/gi, (m, dec) =>
+    (dec === undefined ? (NAMED_ENTITIES[m.toLowerCase()] ?? m) : String.fromCodePoint(Number(dec))));
+
+const RAW_TEXT_TAGS = ['script', 'style'];
+
+/** Drops <script>/<style> bodies by index scan — no backtracking, linear. */
+function dropRawTextElements(html) {
+  const low = html.toLowerCase();
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const opens = RAW_TEXT_TAGS.map((t) => [t, low.indexOf(`<${t}`, i)]).filter(([, at]) => at >= 0);
+    if (!opens.length) return out + html.slice(i);
+    const [tag, at] = opens.reduce((a, b) => (b[1] < a[1] ? b : a));
+    out += `${html.slice(i, at)} `;
+    const close = low.indexOf(`</${tag}`, at);
+    const after = close < 0 ? -1 : low.indexOf('>', close);
+    if (after < 0) return out;
+    i = after + 1;
+  }
+}
 
 const stripTags = (html) =>
-  decode(html.replace(/<script[\s\S]*?<\/script>/gi, ' ')
-             .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-             .replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  decode(dropRawTextElements(html).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 
 function hrefs(html) {
   return [...html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map((m) => decode(m[1]));
 }
 
 const safeUrl = (h) => { try { return new URL(h); } catch { return null; } };
+
+/** Linear trailing-slash strip. `/\/+$/` backtracks on a run of slashes. */
+function stripTrailingSlash(str) {
+  let end = str.length;
+  while (end > 0 && str[end - 1] === '/') end -= 1;
+  return str.slice(0, end);
+}
 
 const num = (s) => {
   if (s == null) return null;
@@ -130,7 +160,7 @@ function extractProfileLinks(html, baseUrl) {
   for (const h of hrefs(html)) {
     const u = safeUrl(new URL(h, baseUrl).href);
     if (!u || !/(^|\.)comparent\.com$/.test(u.hostname)) continue;
-    const p = u.pathname.replace(/\/+$/, '');
+    const p = stripTrailingSlash(u.pathname);
     // /str/<state>/<city>/<company>  (4 segments) or /united-states/<city>/<company> (3)
     const segs = p.split('/').filter(Boolean);
     const isStrProfile = segs[0] === 'str' && segs.length === 4;
@@ -179,7 +209,7 @@ function localBusiness({ parsed, src }) {
     const item = b?.['@type'] === 'ListItem' ? b.item : null;
     if (item?.['@type'] === 'LocalBusiness' && item.name) return item;
   }
-  const grab = (key) => src.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`))?.[1]?.trim() || null;
+  const grab = (key) => src.match(new RegExp(String.raw`"${key}"\s*:\s*"([^"]*)"`))?.[1]?.trim() || null;
   const name = src.match(/"@type"\s*:\s*"LocalBusiness"\s*,\s*"name"\s*:\s*"([^"]*)"/)?.[1]?.trim();
   if (!name) return null;
   return {
@@ -224,7 +254,7 @@ function offerCatalogServices({ parsed, src }) {
  */
 function faqAnswers({ src }) {
   const out = {};
-  const re = /"name"\s*:\s*"([\s\S]*?)"\s*,\s*"acceptedAnswer"\s*:\s*\{\s*"@type"\s*:\s*"Answer"\s*,\s*"text"\s*:\s*"([\s\S]*?)"\}\}(?=\s*[,\]])/g;
+  const re = /"name":"([\s\S]*?)","acceptedAnswer":\{"@type":"Answer","text":"([\s\S]*?)"\}\}/g;
   for (const m of src.matchAll(re)) {
     const answer = m[2].trim();
     if (answer) out[m[1].trim()] = answer;
@@ -234,16 +264,18 @@ function faqAnswers({ src }) {
 
 /** `<section id='x'>…</section>` — the id is single- OR double-quoted on live pages. */
 function sectionHtml(html, id) {
-  const esc = id.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-  return html.match(new RegExp(`<section\\s+id=["']${esc}["'][\\s\\S]*?<\\/section>`, 'i'))?.[0] ?? null;
+  const esc = id.replace(/[-/\\^$*+?.()|[\]{}]/g, String.raw`\$&`);
+  return html.match(new RegExp(String.raw`<section\s+id=["']${esc}["'][\s\S]*?<\/section>`, 'i'))?.[0] ?? null;
 }
 
 /** The `<p class="data-point">VALUE</p><p class="data-label">LABEL</p>` pairs in a section. */
 function dataPoints(markup) {
   const out = {};
   if (!markup) return out;
-  const re = /<p[^>]*class="[^"]*data-point[^"]*"[^>]*>\s*([^<]*?)\s*<\/p>\s*<p[^>]*class="[^"]*data-label[^"]*"[^>]*>\s*([^<]*?)\s*<\/p>/gi;
-  for (const m of markup.matchAll(re)) out[decode(m[2]).toLowerCase()] = decode(m[1]);
+  const re = /<p[^>]*data-point[^>]*>([^<]*)<\/p>\s*<p[^>]*data-label[^>]*>([^<]*)<\/p>/gi;
+  for (const m of markup.matchAll(re)) {
+    out[decode(m[2]).trim().toLowerCase()] = decode(m[1]).trim();
+  }
   return out;
 }
 
@@ -273,10 +305,10 @@ function headerStats(html) {
   const i = html.indexOf('id="member-header-details"');
   if (i < 0) return {};
   const text = stripTags(html.slice(i, i + 6000));
-  const n = (label) => num(text.match(new RegExp(`${label}\\s+([\\d,]+)`, 'i'))?.[1]);
-  const stop = `${HEADER_LABELS.join('|')}|\\d+ homeowner views|Save to My Lists`;
+  const n = (label) => num(text.match(new RegExp(String.raw`${label}\s+([\d,]+)`, 'i'))?.[1]);
+  const stop = String.raw`${HEADER_LABELS.join('|')}|\d+ homeowner views|Save to My Lists`;
   return {
-    headquarters: text.match(new RegExp(`Headquarters\\s+(.+?)(?=\\s+(?:${stop})|$)`, 'i'))?.[1] ?? null,
+    headquarters: text.match(new RegExp(String.raw`Headquarters\s+(.+?)(?=\s+(?:${stop})|$)`, 'i'))?.[1] ?? null,
     founded_year: n('Founded In'),
     employees_full_time: n('Number of Full Time Employees'),
     properties_total: n('Total managed properties'),
@@ -303,16 +335,26 @@ function starRatings(html) {
   return out;
 }
 
+const COUNT_IN_PLACE = /^([\d,]+)(?: Propert(?:y|ies))? in (.+)$/i;
+
+/** "95 Properties in Tennessee" / "81 in Gatlinburg" -> { properties, place }. */
+function parseCountInPlace(raw) {
+  const m = COUNT_IN_PLACE.exec(decode(raw).replace(/\s+/g, ' ').trim());
+  return m ? { place: m[2], properties: num(m[1]) } : null;
+}
+
 /** `<h4>95 Properties in Tennessee</h4>` + `<p>81 in Gatlinburg</p>` city rows. */
 function marketsServed(html) {
   const sec = sectionHtml(html, 'markets_served');
   if (!sec) return [];
   const out = [];
-  const re = /<h4[^>]*>\s*([\d,]+)\s+Propert(?:y|ies)\s+in\s+([^<]+?)\s*<\/h4>([\s\S]*?)(?=<h4|$)/gi;
-  for (const m of sec.matchAll(re)) {
-    const cities = [...m[3].matchAll(/>\s*([\d,]+)\s+in\s+([^<]+?)\s*<\/p>/g)]
-      .map((c) => ({ city: decode(c[2]).trim(), properties: num(c[1]) }));
-    out.push({ state: decode(m[2]).trim(), properties: num(m[1]), cities });
+  for (const m of sec.matchAll(/<h4[^>]*>([^<]*)<\/h4>([\s\S]*?)(?=<h4|$)/gi)) {
+    const head = parseCountInPlace(m[1]);
+    if (!head) continue;
+    const cities = [...m[2].matchAll(/<p[^>]*>([^<]*)<\/p>/g)]
+      .map((c) => parseCountInPlace(c[1])).filter(Boolean)
+      .map((c) => ({ city: c.place, properties: c.properties }));
+    out.push({ state: head.place, properties: head.properties, cities });
   }
   return out;
 }
@@ -320,8 +362,30 @@ function marketsServed(html) {
 // CDNs, socials and OTAs — anything here is never the company's own site. The
 // first cut had no CDN entries and so returned optimizecdn.com (comparent's OWN
 // asset host) as the "website" for every profile lacking an outbound CTA.
-const NOT_A_COMPANY_SITE =
-  /(^|\.)(comparent|optimizecdn|cloudfront|akamai|fbcdn|facebook|instagram|twitter|x|linkedin|youtube|tiktok|google|googleapis|gstatic|googletagmanager|doubleclick|airbnb|vrbo|homeaway|booking|expedia|yelp|pinterest|apple|schema|w3|jquery|bootstrapcdn|fontawesome|jsdelivr|unpkg|cdnjs|cloudflare|clearbit|gravatar|hotjar)\.|\.(r2\.dev|b-cdn\.net|amazonaws\.com|blob\.core\.windows\.net|imgix\.net|wp\.com)$/i;
+const BLOCKED_HOST_LABELS = new Set([
+  'comparent', 'optimizecdn', 'cloudfront', 'akamai', 'fbcdn', 'facebook', 'instagram',
+  'twitter', 'x', 'linkedin', 'youtube', 'tiktok', 'google', 'googleapis', 'gstatic',
+  'googletagmanager', 'doubleclick', 'airbnb', 'vrbo', 'homeaway', 'booking', 'expedia',
+  'yelp', 'pinterest', 'apple', 'schema', 'w3', 'jquery', 'bootstrapcdn', 'fontawesome',
+  'jsdelivr', 'unpkg', 'cdnjs', 'cloudflare', 'clearbit', 'gravatar', 'hotjar',
+]);
+
+const BLOCKED_HOST_SUFFIXES = [
+  'r2.dev', 'b-cdn.net', 'amazonaws.com', 'blob.core.windows.net', 'imgix.net', 'wp.com',
+];
+
+/**
+ * A CDN, social network, OTA or object store — never the company's own site.
+ *
+ * This was one regex of the shape `(^|\.)a|b$`, which mixed two anchors under a
+ * top-level alternation: the precedence a reader (and SonarCloud) has to guess
+ * at. A deny-list is a set membership test, so it is written as one.
+ */
+function notACompanySite(hostname) {
+  const h = hostname.toLowerCase();
+  if (BLOCKED_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith(`.${suffix}`))) return true;
+  return h.split('.').some((label) => BLOCKED_HOST_LABELS.has(label));
+}
 
 // Words that carry no identity — every third company in the directory has them.
 const GENERIC_NAME_TOKENS = new Set([
@@ -373,7 +437,7 @@ function extractWebsite(html, companyName) {
   //    which is the only trace of the domain anywhere on the page.
   for (const m of html.matchAll(/https?:\/\/[^\s"'<>)\\]+/gi)) {
     const u = safeUrl(decode(m[0]));
-    if (!u || NOT_A_COMPANY_SITE.test(u.hostname)) continue;
+    if (!u || notACompanySite(u.hostname)) continue;
     if (domainMatchesName(u.hostname, companyName)) return { url: u.origin, source: 'name_match_asset' };
   }
   return { url: null, source: null };
@@ -392,7 +456,7 @@ function resolvePortfolio(head, markets, supplied, airbnb, vrbo) {
 
 /** Properties in the city this profile is listed under — the true local density. */
 function localCount(markets, locality, url) {
-  const slugCity = (url.split('/').filter(Boolean)[4] ?? '').replace(/-/g, ' ');
+  const slugCity = (url.split('/').filter(Boolean)[4] ?? '').replaceAll('-', ' ');
   const want = (locality || slugCity).toLowerCase().trim();
   if (!want) return null;
   for (const m of markets) {
@@ -441,7 +505,8 @@ function stateFromUrl(url) {
 /** Fallback name only — the <title> carries " in City, ST - Comparent". */
 function titleName(html) {
   const t = decode(html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? '').trim();
-  return t.replace(/\s*[-|]\s*Comparent\s*$/i, '').replace(/\s+in\s+[^,]+,\s*[A-Z]{2}\s*$/, '').trim() || null;
+  return t.replace(/[-|] ?Comparent$/i, '').trim()
+    .replace(/ in [^,]+, [A-Z]{2}$/, '').trim() || null;
 }
 
 const normalizePhone = (p) => {
@@ -517,7 +582,7 @@ function cityUrlsFromCsv() {
   const urls = new Set();
   for (const r of rows) {
     const s = (r['Source'] || '').trim();
-    if (/^https?:\/\/(www\.)?comparent\.com\//i.test(s)) urls.add(s.replace(/\/+$/, ''));
+    if (/^https?:\/\/(www\.)?comparent\.com\//i.test(s)) urls.add(stripTrailingSlash(s));
   }
   return { rows, cityUrls: [...urls] };
 }
@@ -664,4 +729,9 @@ if (!run) {
   console.error('usage: node comparent-crawl.mjs <probe|harvest|profiles|reextract> [--limit N | --sample N]');
   process.exit(1);
 }
-run().catch((e) => { console.error('FATAL', e); process.exit(1); });
+try {
+  await run();
+} catch (e) {
+  console.error('FATAL', e);
+  process.exit(1);
+}
