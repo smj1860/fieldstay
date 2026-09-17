@@ -87,27 +87,35 @@ export function OnboardingForm({ userEmail, initialStep = 'name-org', inviteFail
 
   return (
     <>
-      {/* Step indicator */}
+      {/* Step indicator. Each circle+label is one shrinkable flex item
+          (min-w-0 + truncate) rather than five siblings competing for space
+          directly — on a narrow phone the old flat layout let the divider
+          and labels fight for the same row with nothing to stop a label from
+          wrapping across the divider or overflowing off the right edge. */}
       <div className="flex items-center gap-2 mb-6">
-        <div
-          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent-gold)', color: '#000' }}
-        >
-          1
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{ background: 'var(--accent-gold)', color: '#000' }}
+          >
+            1
+          </div>
+          <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+            Name your organization
+          </span>
         </div>
-        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-          Name your organization
-        </span>
-        <div className="flex-1 h-px mx-1" style={{ background: 'var(--border)' }} />
-        <div
-          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)' }}
-        >
-          2
+        <div className="flex-1 h-px mx-1 min-w-[12px]" style={{ background: 'var(--border)' }} />
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)' }}
+          >
+            2
+          </div>
+          <span className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>
+            Connect your PMS
+          </span>
         </div>
-        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Connect your PMS
-        </span>
       </div>
 
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
@@ -168,27 +176,32 @@ export function OnboardingForm({ userEmail, initialStep = 'name-org', inviteFail
 function ConnectPmsStep() {
   return (
     <>
-      {/* Step indicator */}
+      {/* Step indicator — same shrinkable-pair structure as the step-1 view
+          above, for the same reason. */}
       <div className="flex items-center gap-2 mb-6">
-        <div
-          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent-green)', color: '#000' }}
-        >
-          <CheckCircle2 className="w-4 h-4" />
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{ background: 'var(--accent-green)', color: '#000' }}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+          </div>
+          <span className="text-sm line-through truncate" style={{ color: 'var(--text-muted)' }}>
+            Name your organization
+          </span>
         </div>
-        <span className="text-sm line-through" style={{ color: 'var(--text-muted)' }}>
-          Name your organization
-        </span>
-        <div className="flex-1 h-px mx-1" style={{ background: 'var(--border)' }} />
-        <div
-          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent-gold)', color: '#000' }}
-        >
-          2
+        <div className="flex-1 h-px mx-1 min-w-[12px]" style={{ background: 'var(--border)' }} />
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{ background: 'var(--accent-gold)', color: '#000' }}
+          >
+            2
+          </div>
+          <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+            Connect your PMS
+          </span>
         </div>
-        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-          Connect your PMS
-        </span>
       </div>
 
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
