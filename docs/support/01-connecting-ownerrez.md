@@ -6,7 +6,7 @@ automatically — no manual data entry required.
 Using Hospitable instead? See [Connecting Hospitable](./25-connecting-hospitable.md).
 
 ## Before You Start
-- Active FieldStay account (Starter plan or higher)
+- Active FieldStay account
 - OwnerRez login credentials
 - Initial sync takes 1–2 minutes after authorization
 

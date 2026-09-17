@@ -95,16 +95,17 @@ instead of the crew's `crew_member_id`/assignment-scoped filter.
 
 ### What does not exist and is genuinely new work
 
-- **Real offline-shell loading is 100% new, for either app.** A
+- **Real offline-shell loading was 100% new at the time this was scoped —
+  since built, see "Phase 0 — done" below.** At scoping time, a
   repo-wide search for `caches.open`, `workbox`, `CACHE_NAME`, or any
-  `self.addEventListener('fetch'` returns zero matches anywhere in
-  FieldStay today. `public/sw.js` only handles `push` and
-  `notificationclick` — there is no app-shell precache, no
-  fetch-interception, no Cache Storage usage. This means the crew app's
-  own "yes, it works offline" claim is only true for pages/data already
+  `self.addEventListener('fetch'` returned zero matches anywhere in
+  FieldStay. `public/sw.js` only handled `push` and
+  `notificationclick` — there was no app-shell precache, no
+  fetch-interception, no Cache Storage usage. This meant the crew app's
+  own "yes, it works offline" claim was only true for pages/data already
   loaded into Dexie before connectivity dropped — a cold navigation
-  with zero connectivity today falls back to whatever the browser's own
-  HTTP cache happens to hold, which is unreliable. **Any real "open the
+  with zero connectivity fell back to whatever the browser's own
+  HTTP cache happened to hold, which is unreliable. **Any real "open the
   installed app with no signal and see something" experience — for
   crew or this new PM app — requires adding actual `fetch`-event
   caching to the service worker.** This is foundational work, not a

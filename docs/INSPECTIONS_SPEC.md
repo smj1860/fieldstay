@@ -1,6 +1,17 @@
 # Inspections & Audits — Design Spec
 
-**Status:** draft for review. Nothing here is built yet.
+**Status:** STALE — this was drafted as a pre-build design spec, but the
+feature has since been substantially built. As of 2026-09-17 there are
+inspection migrations dated 2026-08-22 through 2026-09-16 (schema, RPCs,
+immutability, remediation, scheduling, retention exclusion), a live UI at
+`app/(dashboard)/maintenance/inspections/*`, `app/(dashboard)/setup/inspections/*`,
+API routes under `app/api/inspections/*` and `app/api/owner/[token]/inspections/*`
+(including a report/export route), and guardrail/unit tests. §10 "Phasing"
+below still shows most phases as un-annotated (only 0, 2, 2a are marked
+DONE there) even though file evidence suggests later phases shipped too —
+that table was not re-verified phase-by-phase against source in this pass,
+so treat the live code as authoritative over this document for any specific
+implementation claim, not just the phase table.
 **Owner:** @smj1860. Drafted 2026-08-19.
 
 Automates the PM's quality-control inspections, pre-peak-season property
