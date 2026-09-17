@@ -115,17 +115,26 @@ const decode = (s) =>
 
 const RAW_TEXT_TAGS = ['script', 'style'];
 
+/** The earliest `<script`/`<style` at or after `from`, or null. */
+function nextRawTextOpen(low, from) {
+  let best = null;
+  for (const tag of RAW_TEXT_TAGS) {
+    const at = low.indexOf(`<${tag}`, from);
+    if (at >= 0 && (best === null || at < best.at)) best = { tag, at };
+  }
+  return best;
+}
+
 /** Drops <script>/<style> bodies by index scan — no backtracking, linear. */
 function dropRawTextElements(html) {
   const low = html.toLowerCase();
   let out = '';
   let i = 0;
   for (;;) {
-    const opens = RAW_TEXT_TAGS.map((t) => [t, low.indexOf(`<${t}`, i)]).filter(([, at]) => at >= 0);
-    if (!opens.length) return out + html.slice(i);
-    const [tag, at] = opens.reduce((a, b) => (b[1] < a[1] ? b : a));
-    out += `${html.slice(i, at)} `;
-    const close = low.indexOf(`</${tag}`, at);
+    const open = nextRawTextOpen(low, i);
+    if (!open) return out + html.slice(i);
+    out += `${html.slice(i, open.at)} `;
+    const close = low.indexOf(`</${open.tag}`, open.at);
     const after = close < 0 ? -1 : low.indexOf('>', close);
     if (after < 0) return out;
     i = after + 1;
@@ -133,7 +142,7 @@ function dropRawTextElements(html) {
 }
 
 const stripTags = (html) =>
-  decode(dropRawTextElements(html).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  decode(dropRawTextElements(html).replace(/<[^<>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 
 function hrefs(html) {
   return [...html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map((m) => decode(m[1]));
