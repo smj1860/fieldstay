@@ -1,5 +1,18 @@
 # Dynamic PAR Engine — port state & open design
 
+> **STATUS UPDATE (verified 2026-09-17): the port described below has
+> completed.** `lib/inventory/par-engine.ts`, `lib/inventory/recompute-par.ts`
+> and `lib/inngest/functions/recompute-par-levels.ts` are live; the "parked,
+> not applied" pipeline/RPC migrations from §2 shipped as
+> `20260811130000_apply_resolved_par_levels_rpc.sql` (further hardened by
+> `20260915156000_apply_resolved_par_levels_dedupe_batch.sql`). The four §3
+> defects were fixed in the process — the recompute now writes through the
+> `apply_resolved_par_levels` RPC (not the silently-failing `.upsert()`), and
+> its reads go through `fetchAllRows()`. This document is kept as the design
+> record; treat live source over this handoff for implementation questions,
+> and see §6–§8 (seed sheet, design gaps, open owner questions) for anything
+> not yet confirmed resolved.
+
 Handoff written 2026-08-10 at the end of a long session. Everything below is
 verified against the live code and databases unless explicitly marked as a
 decision or an open question.

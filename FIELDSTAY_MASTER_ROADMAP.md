@@ -62,17 +62,17 @@ They are not represented in Tracks 1–9 below.
 - Per-property fan-out for detail API calls (memoized Inngest steps)
 - Guidebook property configs auto-created from sync with slug generation
 
-### Hostaway Integration ⛔ DISABLED (2026-07-25) — not reachable, not live
-- Adapter is built and functional at `lib/integrations/providers/hostaway.ts`
-  and `lib/inngest/functions/hostaway/`, but fully unregistered: not in
-  `lib/integrations/registry.ts`, not in `app/api/inngest/route.ts`'s
-  `serve()` call, and excluded from every connect UI entry point
-- Blocker: its sync never fires `booking/confirmed`, so a connected org
-  would get properties/bookings synced in with no automatic revenue
-  posting — unlike OwnerRez/Hospitable. See CLAUDE_INTEGRATIONS.md's
-  "Hostaway Integration" section for the full re-enable checklist
-- O(n²) array scan replaced with Map-based O(1) lookup (this fix shipped;
-  it just isn't reachable while the integration is disabled)
+### Hostaway Integration ✅ re-enabled — live (was ⛔ DISABLED 2026-07-25)
+- Adapter at `lib/integrations/providers/hostaway.ts` and
+  `lib/inngest/functions/hostaway/` is registered in
+  `lib/integrations/registry.ts` and `app/api/inngest/route.ts`'s
+  `serve()` call, and reachable from the connect UI
+- The original blocker (no automatic revenue posting) is fixed — sync now
+  posts booking revenue and a daily reconcile keeps it current. No
+  webhook is registered with Hostaway yet, so updates still sync once
+  daily rather than in real time. See CLAUDE_INTEGRATIONS.md's "Hostaway
+  Integration" section for details
+- O(n²) array scan replaced with Map-based O(1) lookup
 
 ### Crew PWA — Dexie.js ✅ (PowerSync replaced)
 - Full offline-first capability via Dexie.js IndexedDB + custom mutation outbox
@@ -95,13 +95,14 @@ They are not represented in Tracks 1–9 below.
 - Vendor assignment email fires on ALL assignment paths including post-creation
   assignment and bulk assign (previously only fired at creation time)
 
-### 10DLC / SMS ✅ (campaign submitted, pending carrier verification)
-- Telnyx A2P registration submitted: Low Volume Mixed, Account Notification +
+### 10DLC / SMS ✅ (campaign verified, live in production since 2026-08-28)
+- Telnyx A2P registration: Low Volume Mixed, Account Notification +
   Marketing use cases
 - Ed25519 webhook signature verification live
 - STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT/HELP/INFO/SUPPORT all handled
 - Campaign description, opt-in workflow, sample messages submitted
-- Flip `SMS_ENABLED=true` after campaign verification clears
+- `SMS_ENABLED=true` in production since 2026-08-28 (10DLC verified) — the
+  gate itself stays, to keep previews/local runs from texting real guests
 
 ---
 
@@ -414,13 +415,12 @@ No Google API integration needed until 2027.
 - Self-Funding Guidebook ✅
 - RepuGuard ✅
 - OwnerRez Integration (full) ✅
-- Hostaway adapter ⛔ built, but DISABLED (2026-07-25) — not live, not reachable
+- Hostaway adapter ✅ re-enabled and live
 - Crew PWA (Dexie) ✅
-- 10DLC submitted, pending carrier verification ✅
+- 10DLC campaign verified, `SMS_ENABLED=true` in production since 2026-08-28 ✅
 
 ### Active — Paul Testing
 - OwnerRez marketplace listing review
-- SMS: flip `SMS_ENABLED=true` after 10DLC campaign clears
 
 ### Next — Unblocked
 1. **Track 2 remaining** — Owner portal `visible_to_owner` toggle (2.9), non-integration revenue input (2.10)

@@ -45,7 +45,7 @@ There are no plan-tier feature gates — every FieldStay subscription includes t
 - Inventory tracking and Kroger cart building
 - Asset health tracking and depreciation reporting
 - Owner portal and financial ledger
-- OwnerRez, Hospitable, and Hostex integrations (Hostaway integration in progress)
+- OwnerRez, Hospitable, Hostex, and Hostaway integrations
 - RepuGuard AI review response drafting
 - Guest Guidebook with SMS delivery — unlocked during your trial, and
   after that once you have 3 active sponsors, staying unlocked for as long

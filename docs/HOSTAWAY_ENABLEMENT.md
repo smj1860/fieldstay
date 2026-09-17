@@ -89,7 +89,8 @@ scans `OAUTH_PROVIDERS = ['hospitable','kroger']` **and** requires
 there is nothing to refresh: `hostawayExchangeCredentials()` discards the API
 key and only the Bearer token is stored. So this needs a **warn-and-reconnect**
 path, not a refresh path. Without it, sync goes silent at month six and the
-only thing that notices is `cron/watchdog.ts`.
+only thing that notices is `cron/watchdog.ts`. **DONE** — see the Phase 1
+note below.
 
 **4. Owner-blocked calendar time is hardcoded `is_block: false`,** with an
 in-code comment saying the mapping is unconfirmed. `/v1/reservations` probably
@@ -162,8 +163,13 @@ time does not surface through `/reservations` at all — it lives on the calenda
 endpoints — and syncing those is a later phase for both providers. This
 replaces the old `⚠️ Unconfirmed` comment with a decision.
 
-**Still open from Phase 1:** the token-expiry warning + reconnect path. No
-refresh grant exists, so there is no Hostex template for it.
+**Token-expiry warning + reconnect path — DONE.** `integration-token-refresh.ts`
+now carries a `NON_REFRESHABLE_PROVIDERS = ['hostaway']` list alongside
+`OAUTH_PROVIDERS`, scanned on the same 90-minute window: when a Hostaway
+connection's token nears expiry, the handler's fallthrough marks it `revoked`
+and emails the PM to reconnect — the only correct outcome for a provider with
+no refresh grant, reached through the same claim-before-send path the
+refreshable providers use rather than a second notification route.
 
 **Known caveat, since narrowed (see "Netting owner revenue" below):**
 `actual_total_amount` was Hostaway's `totalPrice` — the GUEST-FACING GROSS —

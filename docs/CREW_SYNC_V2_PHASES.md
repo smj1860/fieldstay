@@ -36,7 +36,7 @@ anything missed.
 | 2 | Broadcast infrastructure (DB triggers + RLS on `realtime.messages`) | ✅ Done — migration `20260725191358_crew_sync_broadcast_triggers.sql`, merged via PR #508 (2026-07-26), applied to prod **and** e2e project. Deploys dark per design — no client subscribes yet |
 | 3 | Client cutover (single private broadcast channel, behind a flag) | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/context.tsx`. Ships dormant: `NEXT_PUBLIC_CREW_SYNC_V2` defaults off (unset in `.env.example`) |
 | 4 | Outbox retry backoff | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/syncService.ts`'s `computeNextAttemptAt()` |
-| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | 🟡 **In progress** — 5e (convention + `unit/guardrails/crew-sync-coverage.test.ts`) done 2026-07-29. 5b two-device acceptance test passed 2026-08-12; flag set in Vercel and client default inverted to on the same day, so **v2 is the serving path**. Still open: 5a Realtime quota check, 5c soak, 5d deletion of the v1 path |
+| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | 🟡 **In progress** — 5e (convention + `unit/guardrails/crew-sync-coverage.test.ts`) done 2026-07-29. 5a (Realtime quota check + flag set in Vercel) done 2026-07-29/2026-08-12 — see 5a below. 5b two-device acceptance test passed 2026-08-12; flag set in Vercel and client default inverted to on the same day, so **v2 is the serving path**. Still open: 5c soak, 5d deletion of the v1 path (confirmed still present in `lib/dexie/context.tsx` as of 2026-09-17, behind the `CREW_SYNC_V2` flag — v1's `postgres_changes` channels and generation-token machinery are unchanged and still compile) |
 
 > **2026-08-12 — v2 is the DEFAULT and is live.** `NEXT_PUBLIC_CREW_SYNC_V2`
 > is set to `true` in Vercel and many builds have shipped since it was set, so
@@ -50,9 +50,14 @@ anything missed.
 > nothing in config to show it. Rollback is `NEXT_PUBLIC_CREW_SYNC_V2=false`
 > plus a rebuild — still a build-time change, not a runtime toggle.
 >
-> 5b (two-device acceptance test) passed 2026-08-12. Still open: 5a's Realtime
-> quota check, the 5c soak, and 5d deletion of the v1 path — which stays in the
-> tree, compiling and guardrail-covered, until then.
+> 5b (two-device acceptance test) passed 2026-08-12. 5a (Realtime quota check
+> and setting the flag in Vercel) is also done — see the checkmark under 5a
+> below. Still open: the 5c soak, and 5d deletion of the v1 path — which stays
+> in the tree, compiling and guardrail-covered, until then. Verified against
+> `lib/dexie/context.tsx` as of 2026-09-17: the `if (CREW_SYNC_V2)` branch and
+> the untouched v1 code below it (three `postgres_changes` channels,
+> `refreshChecklistSubscription`/`refreshAssetsSubscription`) are both still
+> there, so 5d genuinely has not happened yet — this is not a stale claim.
 
 
 ### Phase 1 artifacts you will build on (read these before touching code)
@@ -794,4 +799,4 @@ already uses).
 - Broadcast topic: `crew:{auth user id}` · event: `sync` · payload: `{ entity }` only.
 - Entities: `turnovers` | `checklists` | `work_orders`.
 - Cursor rules: forward-only, full-scope pulls only, fresh ids pulled cursorless, deletion via reconciliation only.
-- Flag: `NEXT_PUBLIC_CREW_SYNC_V2` (default off until Phase 5).
+- Flag: `NEXT_PUBLIC_CREW_SYNC_V2` — **default ON since 2026-08-12** (`!== 'false'` in `lib/dexie/context.tsx`); set to `false` to roll back to v1. Originally shipped default-off; see the 2026-08-12 note under the phase table.
