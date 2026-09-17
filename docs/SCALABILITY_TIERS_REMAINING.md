@@ -23,10 +23,10 @@ status (checked against the live codebase, not assumed):
 | 7. Dexie delta sync + outbox backoff | 2 | ✅ Done — delta sync shipped as Crew Sync v2 Phase 1; outbox backoff shipped as Phase 4 (PR #508, 2026-07-26) |
 | 8. Bound the unbounded queries | 2 | ✅ Done — `checklist-signals` has a 180-day rolling window, reviews/owners pages are `.limit()`-bounded |
 | 9. Enforcement Tiers 1–3 (ESLint/guardrails → typed ServiceRoleContext → DB invariant CI gate) | — | ✅ Done — Tier 3 is PR #505 |
-| 10. Tier 3 hygiene list | 3 | ✅ Done — sections 1, 3, 4, 5 shipped; section 2 (Hostaway) deliberately disabled instead of built, see below |
+| 10. Tier 3 hygiene list | 3 | ✅ Done — all 5 sections shipped, including section 2 (Hostaway), once Hostaway was re-enabled — see below |
 
 So the only work still open is **Crew Sync v2 Phase 5** (the other
-document) — everything in this doc is closed out.
+document) — everything else in this doc is closed out.
 
 ---
 
@@ -61,37 +61,33 @@ append-heavy table already has one (`audit-retention.ts`,
 
 ## 2. Hostaway incremental sync
 
-**Status: ⏸️ Deliberately NOT built — Hostaway fully disabled instead,
-per product decision (2026-07-25).** Hostaway isn't ready to be live yet.
-Rather than build incremental sync on top of an integration that
-shouldn't be reachable, the whole integration was commented out (not
-deleted) at its two chokepoints:
-- `lib/integrations/registry.ts` — `hostawayProvider` import + its
-  `['hostaway', hostawayProvider]` map entry.
-- `app/api/inngest/route.ts` — `hostawayInitialSync` import + its
-  `serve()` array entry.
-
-The connect UI (`setup/pms/page.tsx`, `settings/integrations/
-integrations-client.tsx`/`actions.ts`) was already disabled by an earlier,
-unrelated commit (no revenue-posting yet). The provider implementation
-(`lib/integrations/providers/hostaway.ts`) and the sync job
-(`lib/inngest/functions/hostaway/initial-sync.ts`) are untouched
-internally — each has a top-of-file note naming the exact lines to
-uncomment to re-enable. To resume this item once Hostaway is ready to
-launch: uncomment those two chokepoints, re-enable the connect UI, THEN
-come back to the original instructions below for incremental sync.
+**Status: ✅ Done.** Hostaway has been re-enabled (both chokepoints this
+section used to describe as commented-out — `lib/integrations/
+registry.ts`'s `hostawayProvider` map entry and `app/api/inngest/route.ts`'s
+Hostaway imports — are live) and incremental sync was built matching the
+OwnerRez pattern this section specified: `lib/inngest/functions/hostaway/
+incremental-sync-cron.ts` fans out one event per connection,
+`incremental-sync-handler.ts` does the per-connection work, and a
+`reservation-reconcile-cron.ts`/`-handler.ts` pair covers the daily
+reconcile pass. The Hostaway integration was subsequently covered by the
+2026-09 scalability audit (13 Hostaway+Hostex findings fixed in that pass,
+including a real incremental-sweep/daily-reconcile race and an unbounded
+webhook 'ids' fetch mode) — see CLAUDE.md and PR #740's history for that
+work. This section is now historical; kept for the reference implementation
+notes below in case a THIRD PMS integration needs the same pattern.
 
 **Original problem:** Hostaway sync is initial-import only / full-refetch —
 no incremental cursor, unlike OwnerRez which has
 `ownerrez/incremental-sync.ts`.
 
-**Instructions (for when Hostaway is re-enabled):**
+**Instructions (reference, for a future third PMS integration needing the
+same shape):**
 
 1. Read `lib/integrations/providers/` for the Hostaway provider and the
    OwnerRez incremental sync function as the reference implementation.
 2. Mirror the OwnerRez pattern: a cron that fans out one event per
-   Hostaway connection (`step.sendEvent`), a per-connection handler with
-   a `latestActivity`/modified-since cursor stored on
+   connection (`step.sendEvent`), a per-connection handler with a
+   `latestActivity`/modified-since cursor stored on
    `integration_connections` (check what cursor fields already exist
    before adding columns — if a migration is needed, update
    `types/database.ts` in the same commit).
