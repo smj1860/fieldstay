@@ -71,7 +71,8 @@ const BASELINE = new Set([
  * not a rubber stamp.
  */
 const BASELINE_JUSTIFIED: Record<string, string> = {
-  // (none yet — every current unkeyed site is in BASELINE, unreviewed)
+  'lib/inngest/functions/prospecting-crawl.ts':
+    'prospect_accounts has no org_id — this is platform go-to-market data, not tenant data, so there is no tenant to key concurrency on. The limit:2 caps requests against the one genuinely global, singleton resource being protected (comparent.com itself, politeness budget), the same shape this guardrail\'s own header comment calls out as a legitimate unkeyed case.',
 }
 
 /** Matching close-bracket index for the bracket opened at `openIdx`. */

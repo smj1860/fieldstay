@@ -4350,6 +4350,153 @@ export type Database = {
         }
         Relationships: []
       }
+      prospect_accounts: {
+        Row: {
+          bucket: string | null
+          city: string | null
+          company: string
+          comparent_url: string | null
+          contact_name: string | null
+          contact_title: string | null
+          crawl_error: string | null
+          crawl_status: string | null
+          created_at: string
+          domain: string | null
+          email: string | null
+          email_is_generic: boolean | null
+          gate: string | null
+          id: string
+          last_crawled_at: string | null
+          last_touch_at: string | null
+          linkedin_url: string | null
+          market: string | null
+          next_action_at: string | null
+          notes: string | null
+          phone: string | null
+          pms: string | null
+          pms_note: string | null
+          portfolio_size: number | null
+          portfolio_size_method: string | null
+          region: string | null
+          score_a: number | null
+          score_b: number | null
+          source: string | null
+          state: string | null
+          status: string
+          status_note: string | null
+          track: string | null
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          bucket?: string | null
+          city?: string | null
+          company: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          bucket?: string | null
+          city?: string | null
+          company?: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: []
+      }
+      prospect_touches: {
+        Row: {
+          actor_id: string | null
+          id: string
+          note: string | null
+          occurred_at: string
+          prospect_id: string
+          touch_type: string
+        }
+        Insert: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id: string
+          touch_type: string
+        }
+        Update: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id?: string
+          touch_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_touches_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       properties: {
         Row: {
           access_instructions: string | null
