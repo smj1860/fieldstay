@@ -1287,4 +1287,34 @@ export type FieldStayEvents = {
       org_id: string
     }
   },
+
+  // ----------------------------------------------------------
+  // Prospecting funnel — admin-triggered comparent.com re-crawl
+  // ----------------------------------------------------------
+
+  /**
+   * Dispatcher trigger for /admin/prospects' "Refresh from Comparent"
+   * button. Selects up to `limit` prospect_accounts rows (comparent_url set,
+   * oldest-crawled-first) and fans out one 'prospecting/crawl_profile
+   * .requested' event per row — see lib/inngest/functions/prospecting-crawl.ts.
+   */
+  'prospecting/crawl.requested': {
+    data: {
+      requested_by: string
+      limit:        number
+    }
+  },
+
+  /**
+   * One prospect_accounts row's comparent_url is ready to be (re-)fetched.
+   * Fanned out by the dispatcher above so one slow or failing profile page
+   * cannot spend the whole batch's retry budget — same per-item fan-out
+   * shape as billing/reconcile-property-count.requested.
+   */
+  'prospecting/crawl_profile.requested': {
+    data: {
+      prospect_id: string
+      url:         string
+    }
+  },
 }

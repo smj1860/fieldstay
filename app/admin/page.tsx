@@ -49,6 +49,18 @@ export default function AdminOverviewPage() {
             </p>
           </Link>
         </Card>
+        <Card>
+          <Link href="/admin/prospects" className="block">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Prospecting Funnel
+            </h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              The outbound account list — search and filter by market, PMS,
+              score or contact channel, edit contact details in place, and move
+              accounts through the funnel.
+            </p>
+          </Link>
+        </Card>
       </div>
     </div>
   )
