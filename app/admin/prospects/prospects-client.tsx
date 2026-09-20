@@ -94,8 +94,8 @@ function uniqueSorted(values: (string | null)[]): string[] {
     .sort((a, b) => a.localeCompare(b))
 }
 
-function csvCell(value: unknown): string {
-  const s = value === null || value === undefined ? '' : String(value)
+function csvCell(value: string | number | boolean | null): string {
+  const s = value === null ? '' : String(value)
   // Quote whenever the value could break the row apart, and double any inner
   // quote — pms_note routinely holds commas and quoted fingerprints.
   return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s

@@ -69,9 +69,9 @@ function hrefs(html: string): string[] {
 
 const safeUrl = (h: string): URL | null => { try { return new URL(h) } catch { return null } }
 
-const num = (s: unknown): number | null => {
+const num = (s: string | undefined): number | null => {
   if (s == null) return null
-  const n = Number(String(s).replace(/[,$%\s]/g, ''))
+  const n = Number(s.replace(/[,$%\s]/g, ''))
   return Number.isFinite(n) ? n : null
 }
 
@@ -161,8 +161,8 @@ function localBusinessFromParsed(parsed: unknown[]): LocalBusiness | null {
  */
 function localBusinessFromRawSource(src: string): LocalBusiness | null {
   const grab = (key: string): string | null =>
-    src.match(new RegExp(String.raw`"${key}"\s*:\s*"([^"]*)"`))?.[1]?.trim() || null
-  const name = src.match(/"@type"\s*:\s*"LocalBusiness"\s*,\s*"name"\s*:\s*"([^"]*)"/)?.[1]?.trim()
+    new RegExp(String.raw`"${key}"\s*:\s*"([^"]*)"`).exec(src)?.[1]?.trim() || null
+  const name = /"@type"\s*:\s*"LocalBusiness"\s*,\s*"name"\s*:\s*"([^"]*)"/.exec(src)?.[1]?.trim()
   if (!name) return null
   return {
     name,
@@ -184,7 +184,7 @@ function localBusiness({ parsed, src }: JsonLd): LocalBusiness | null {
 /** `<section id='x'>…</section>` — the id is single- OR double-quoted on live pages. */
 function sectionHtml(html: string, id: string): string | null {
   const esc = id.replace(/[-/\\^$*+?.()|[\]{}]/g, String.raw`\$&`)
-  return html.match(new RegExp(String.raw`<section\s+id=["']${esc}["'][\s\S]*?<\/section>`, 'i'))?.[0] ?? null
+  return new RegExp(String.raw`<section\s+id=["']${esc}["'][\s\S]*?<\/section>`, 'i').exec(html)?.[0] ?? null
 }
 
 /** The `<p class="data-point">VALUE</p><p class="data-label">LABEL</p>` pairs in a section. */
@@ -242,10 +242,10 @@ function headerStats(html: string): Partial<HeaderStats> {
   const i = html.indexOf('id="member-header-details"')
   if (i < 0) return {}
   const text = stripTags(html.slice(i, i + 6000))
-  const n = (label: string): number | null => num(text.match(new RegExp(String.raw`${label}\s+([\d,]+)`, 'i'))?.[1])
+  const n = (label: string): number | null => num(new RegExp(String.raw`${label}\s+([\d,]+)`, 'i').exec(text)?.[1])
   const stop = String.raw`${HEADER_LABELS.join('|')}|\d+ homeowner views|Save to My Lists`
   return {
-    headquarters: text.match(new RegExp(String.raw`Headquarters\s+(.+?)(?=\s+(?:${stop})|$)`, 'i'))?.[1] ?? null,
+    headquarters: new RegExp(String.raw`Headquarters\s+(.+?)(?=\s+(?:${stop})|$)`, 'i').exec(text)?.[1] ?? null,
     founded_year: n('Founded In'),
     employees_full_time: n('Number of Full Time Employees'),
     properties_total: n('Total managed properties'),
@@ -340,7 +340,7 @@ function extractWebsite(html: string, companyName: string | null): WebsiteResult
   }
   // 2. stub profiles have no CTA, but their logo is proxied through clearbit,
   //    which keys on the real company domain: logo.clearbit.com/example.com
-  const cb = html.match(/logo\.clearbit\.com\\?\/(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i)?.[1]
+  const cb = /logo\.clearbit\.com\\?\/(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(html)?.[1]
   if (cb) return { url: `https://${cb}`, source: 'clearbit_logo' }
   // 3. last resort: any absolute URL on the page whose host echoes the
   //    company name — a stub profile's About prose routinely hotlinks images
@@ -382,7 +382,7 @@ function stateFromUrl(url: string): string | null {
 
 /** Fallback name only — the <title> carries " in City, ST - Comparent". */
 function titleName(html: string): string | null {
-  const t = decode(html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? '').trim()
+  const t = decode(/<title>([^<]*)<\/title>/i.exec(html)?.[1] ?? '').trim()
   return t.replace(/[-|] ?Comparent$/i, '').trim()
     .replace(/ in [^,]+, [A-Z]{2}$/, '').trim() || null
 }

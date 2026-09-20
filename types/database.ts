@@ -2402,6 +2402,8 @@ export interface HandWrittenRowMap {
   inspection_form_items:               InspectionFormItem
   inspections:                         Inspection
   inspection_items:                    InspectionItem
+  prospect_accounts:                   ProspectAccount
+  prospect_touches:                    ProspectTouch
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */

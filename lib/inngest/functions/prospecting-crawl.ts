@@ -109,17 +109,13 @@ export const prospectingCrawlProfile = inngest.createFunction(
         return { ok: false, status: null, error: 'robots-disallowed or not a comparent.com URL' }
       }
 
-      let res: Response
-      try {
-        res = await safeFetch(url, {
-          headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml' },
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        })
-      } catch (err) {
-        // Network/timeout/SSRF-guard failure — retryable, let Inngest's own
-        // backoff handle it rather than hand-rolling a retry loop here.
-        throw err
-      }
+      // Network/timeout/SSRF-guard failures propagate uncaught — retryable,
+      // and letting them through lets Inngest's own backoff handle it
+      // rather than hand-rolling a retry loop here.
+      const res = await safeFetch(url, {
+        headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml' },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      })
 
       // 429/5xx are transient on comparent's side — throwing lets this whole
       // step retry on Inngest's own backoff curve, same as every other
