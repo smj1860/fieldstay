@@ -191,11 +191,14 @@ import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospit
 import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
+import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     inspectionCompleted,
+    prospectingCrawlDispatch,
+    prospectingCrawlProfile,
     inspectionOverdueEmailCron,
     inspectionOverdueEmailHandler,
     // iCal sync pipeline

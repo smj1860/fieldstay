@@ -2402,6 +2402,8 @@ export interface HandWrittenRowMap {
   inspection_form_items:               InspectionFormItem
   inspections:                         Inspection
   inspection_items:                    InspectionItem
+  prospect_accounts:                   ProspectAccount
+  prospect_touches:                    ProspectTouch
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
@@ -2667,3 +2669,111 @@ export interface InspectionItem {
   created_at:  string
   updated_at:  string
 }
+
+/**
+ * Outbound prospecting funnel (20260919120000_prospect_accounts.sql).
+ *
+ * Platform-internal go-to-market data, not tenant data — there is no
+ * org_id and no per-org policy; every row is gated on
+ * is_platform_staff_admin(). Backs /admin/prospects.
+ */
+export interface ProspectAccount {
+  id:            string
+
+  company:       string
+  domain:        string | null
+  website:       string | null
+  comparent_url: string | null
+
+  city:          string | null
+  state:         string | null
+  market:        string | null
+  region:        string | null
+
+  portfolio_size:        number | null
+  portfolio_size_method: string | null
+
+  pms:      string | null
+  /** The fingerprint or source the PMS was identified from, not just the label. */
+  pms_note: string | null
+
+  /** Written by the offline scorer; read-only in the admin UI. */
+  score_a: number | null
+  score_b: number | null
+  track:   string | null
+  bucket:  string | null
+  gate:    string | null
+
+  contact_name:  string | null
+  contact_title: string | null
+  email:         string | null
+  /**
+   * GENERATED ALWAYS — true when email is a role inbox (info@, reservations@ …).
+   * Never name this column in an insert/update payload: Postgres rejects the
+   * whole statement with 428C9.
+   */
+  email_is_generic: boolean
+  phone:            string | null
+  linkedin_url:     string | null
+
+  status:         ProspectAccountStatus
+  status_note:    string | null
+  notes:          string | null
+  last_touch_at:  string | null
+  next_action_at: string | null
+
+  /**
+   * When comparent_url was last fetched by the admin-triggered re-crawl
+   * (20260919140000_prospect_accounts_crawl_tracking.sql). NULL = never
+   * crawled. Drives the crawl dispatcher's oldest-first batch selection.
+   */
+  last_crawled_at: string | null
+  crawl_status:    ProspectAccountCrawlStatus | null
+  crawl_error:     string | null
+
+  source:     string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProspectAccountStatus =
+  | 'new'
+  | 'researching'
+  | 'needs_contact_info'
+  | 'queued'
+  | 'emailed'
+  | 'called'
+  | 'texted'
+  | 'visited_no_contact'
+  | 'replied'
+  | 'meeting_set'
+  | 'in_trial'
+  | 'won'
+  | 'lost'
+  | 'disqualified'
+
+export type ProspectAccountCrawlStatus = 'ok' | 'no_website' | 'error'
+
+/**
+ * Append-only outreach log for prospect_accounts
+ * (20260919130000_prospect_touches.sql). One row per touch — distinct from
+ * prospect_accounts.status (current stage only) and .last_touch_at (most
+ * recent touch only). No UPDATE/DELETE grant: history is never edited.
+ */
+export interface ProspectTouch {
+  id:          string
+  prospect_id: string
+  touch_type:  ProspectTouchType
+  note:        string | null
+  actor_id:    string | null
+  occurred_at: string
+}
+
+export type ProspectTouchType =
+  | 'emailed'
+  | 'called'
+  | 'texted'
+  | 'visited_no_contact'
+  | 'replied'
+  | 'meeting_set'
+  | 'note'

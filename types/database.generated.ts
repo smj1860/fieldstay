@@ -4695,6 +4695,155 @@ export type Database = {
           },
         ]
       }
+      prospect_accounts: {
+        Row: {
+          bucket: string | null
+          city: string | null
+          company: string
+          comparent_url: string | null
+          contact_name: string | null
+          contact_title: string | null
+          crawl_error: string | null
+          crawl_status: string | null
+          created_at: string
+          domain: string | null
+          email: string | null
+          email_is_generic: boolean | null
+          gate: string | null
+          id: string
+          last_crawled_at: string | null
+          last_touch_at: string | null
+          linkedin_url: string | null
+          market: string | null
+          next_action_at: string | null
+          notes: string | null
+          phone: string | null
+          pms: string | null
+          pms_note: string | null
+          portfolio_size: number | null
+          portfolio_size_method: string | null
+          region: string | null
+          score_a: number | null
+          score_b: number | null
+          source: string | null
+          state: string | null
+          status: string
+          status_note: string | null
+          track: string | null
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          bucket?: string | null
+          city?: string | null
+          company: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          email_is_generic?: boolean | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          bucket?: string | null
+          city?: string | null
+          company?: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          email_is_generic?: boolean | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: []
+      }
+      prospect_touches: {
+        Row: {
+          actor_id: string | null
+          id: string
+          note: string | null
+          occurred_at: string
+          prospect_id: string
+          touch_type: string
+        }
+        Insert: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id: string
+          touch_type: string
+        }
+        Update: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id?: string
+          touch_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_touches_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchase_order_items: {
         Row: {
           created_at: string
@@ -5360,6 +5509,84 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      str_prospects: {
+        Row: {
+          address: string | null
+          city: string | null
+          confidence: number | null
+          dedupe_key: string
+          domain: string | null
+          email: string | null
+          evidence_url: string | null
+          first_seen: string | null
+          kind: string | null
+          last_seen: string | null
+          name: string
+          name_canonical: string | null
+          owner_notes: string | null
+          phone: string | null
+          pms: string | null
+          properties_sample: string | null
+          property_count: number | null
+          source: string | null
+          source_detail: string | null
+          state: string | null
+          status: string | null
+          updated_at: string | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          city?: string | null
+          confidence?: number | null
+          dedupe_key: string
+          domain?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          first_seen?: string | null
+          kind?: string | null
+          last_seen?: string | null
+          name: string
+          name_canonical?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          properties_sample?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string
+          domain?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          first_seen?: string | null
+          kind?: string | null
+          last_seen?: string | null
+          name?: string
+          name_canonical?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          properties_sample?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Relationships: []
       }
       stripe_processed_events: {
         Row: {
@@ -6582,6 +6809,69 @@ export type Database = {
         }
         Relationships: []
       }
+      str_prospects_icp: {
+        Row: {
+          city: string | null
+          confidence: number | null
+          dedupe_key: string | null
+          email: string | null
+          evidence_url: string | null
+          icp_band: string | null
+          kind: string | null
+          last_seen: string | null
+          name: string | null
+          owner_notes: string | null
+          phone: string | null
+          pms: string | null
+          property_count: number | null
+          source: string | null
+          source_detail: string | null
+          state: string | null
+          status: string | null
+          website: string | null
+        }
+        Insert: {
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          icp_band?: never
+          kind?: string | null
+          last_seen?: string | null
+          name?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          website?: string | null
+        }
+        Update: {
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          icp_band?: never
+          kind?: string | null
+          last_seen?: string | null
+          name?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          website?: string | null
+        }
+        Relationships: []
+      }
       vendor_compliance_status: {
         Row: {
           active_doc_count: number | null
@@ -6643,6 +6933,10 @@ export type Database = {
       broadcast_maintenance_schedules: {
         Args: { p_org_id: string; p_rows: Json; p_template_id: string }
         Returns: Json
+      }
+      bulk_advance_maintenance_schedules: {
+        Args: { p_org_id: string; p_updates: Json }
+        Returns: number
       }
       claim_hospitable_promo_slot: {
         Args: { p_org_id: string; p_price_cents: number; p_tier: string }
