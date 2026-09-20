@@ -51,3 +51,4 @@ load-tests/results/
 
 # Prospecting data (local prospect lists + crawl cache — never commit)
 /data/
+.claude/settings.local.json
