@@ -90,7 +90,8 @@ function matchesSearch(r: ProspectRow, q: string): boolean {
 }
 
 function uniqueSorted(values: (string | null)[]): string[] {
-  return [...new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v))].sort()
+  return [...new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v))]
+    .sort((a, b) => a.localeCompare(b))
 }
 
 function csvCell(value: unknown): string {
