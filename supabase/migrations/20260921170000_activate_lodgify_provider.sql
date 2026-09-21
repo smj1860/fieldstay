@@ -1,0 +1,45 @@
+-- Lodgify is now a selectable PMS integration: API-key connect, property
+-- import, booking import, automatic owner-ledger revenue posting, and a daily
+-- reconcile. is_active = true makes it selectable in Settings -> Integrations
+-- and Setup -> PMS, which both filter on this flag.
+--
+-- Held at false since 20260910143000 precisely so it could be flipped in its
+-- own commit once the sync existed, per the Hostex convention
+-- (20260816092239 held, 20260816122829 flipped).
+--
+-- ── APPLY THIS ONE AFTER THE DEPLOY, NOT BEFORE ─────────────────────────────
+--
+-- Ordering matters here in a way it did not for the row this replaces. The
+-- Settings page reads integration_providers from the DATABASE while the
+-- connect flow resolves the adapter from CODE (lib/integrations/registry.ts).
+-- Flip this while production is still running a build without the Lodgify
+-- adapter and the provider appears in the list, but getProvider('lodgify')
+-- throws the moment a PM clicks Connect. The row is only correct once the
+-- code that backs it is live.
+--
+-- ── WHAT IS STILL UNVERIFIED, AND WHY THAT IS ACCEPTABLE NOW ────────────────
+--
+-- No Lodgify account has ever been connected, so the response shapes in
+-- lodgify.types.ts remain documentation-derived. What makes shipping
+-- reasonable rather than reckless is that every one of those guesses fails
+-- LOUDLY rather than silently: an unrecognised list shape throws and reports
+-- the keys it actually saw, an unrecognised booking status reports to Sentry,
+-- absent room counts stay null instead of overwriting a PM's correction, and
+-- money is gross or null. The failure mode of a wrong guess is a visible error
+-- on a connection, not quietly wrong data on an owner statement.
+--
+-- Rolling back is one statement, and it takes effect immediately with no
+-- deploy:
+--   UPDATE public.integration_providers SET is_active = false WHERE id = 'lodgify';
+-- An org that already connected keeps working — settings/integrations/page.tsx
+-- deliberately still renders a provider row for an EXISTING connection even
+-- when is_active is false; the flag governs what can be newly CONNECTED.
+--
+-- Webhooks stay off regardless of this flag: registration is gated on
+-- LODGIFY_WEBHOOKS_ENABLED (see lib/integrations/providers/lodgify-webhook.ts),
+-- so a connected org syncs on the daily reconcile until Lodgify's delivery
+-- contract is verified. That is a latency limit, not a correctness one, and the
+-- customer docs say so.
+UPDATE public.integration_providers
+SET    is_active = true
+WHERE  id = 'lodgify';

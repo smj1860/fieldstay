@@ -80,6 +80,14 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   // cold start or a network blip. Silence here is not "the backup didn't run",
   // it is "nothing is catching what the webhooks drop".
   { id: 'hostex-reservation-reconcile-cron',        maxSilentHours: 30 },
+  // Watched for a STRONGER version of the reason above: Hostex's sweep is the
+  // only thing that recovers a DROPPED delivery, but Lodgify's is currently the
+  // only sync of any kind. Webhook registration is gated off until Lodgify's
+  // delivery contract is verified (see lib/integrations/providers/
+  // lodgify-webhook.ts), so a Lodgify org receives nothing at all between runs
+  // of this cron. Silence here is not degraded latency, it is a connection that
+  // has stopped syncing entirely while still looking healthy in Settings.
+  { id: 'lodgify-reservation-reconcile-cron',       maxSilentHours: 30 },
   { id: 'cron-asset-health',                        maxSilentHours: 30 },
   { id: 'cron-maintenance-schedule-check',          maxSilentHours: 30 },
   { id: 'cron-daily-wrapup',                        maxSilentHours: 30 },

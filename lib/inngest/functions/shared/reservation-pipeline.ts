@@ -140,7 +140,7 @@ export interface SyncLogger {
 export type RevenueMode = 'all' | 'new-only'
 
 /** The providers whose reservations flow through here. */
-export type ReservationProvider = 'hospitable' | 'hostex' | 'hostaway'
+export type ReservationProvider = 'hospitable' | 'hostex' | 'hostaway' | 'lodgify'
 
 /**
  * Log-line prefix per provider. A lookup rather than a ternary chain: with
@@ -152,6 +152,7 @@ const PROVIDER_LABELS: Record<ReservationProvider, string> = {
   hospitable: 'Hospitable',
   hostex:     'Hostex',
   hostaway:   'Hostaway',
+  lodgify:    'Lodgify',
 }
 
 export interface ReservationPipelineParams {

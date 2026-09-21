@@ -65,6 +65,12 @@ const REVIEW_SOURCE_LABELS: Record<PmsProviderId, string> = {
   hospitable: 'Hospitable',
   hostex:     'Hostex',
   hostaway:   'Hostaway',
+  // Present because this map is keyed by PmsProviderId and the build says so —
+  // not because a Lodgify review can reach this screen. Lodgify's Public API
+  // exposes no reviews resource, so nothing syncs one; the label is here so
+  // that if it ever does, it arrives named rather than as a bare "Response
+  // posted", which is the exact drift this typing exists to catch.
+  lodgify:    'Lodgify',
 }
 
 /**

@@ -62,6 +62,27 @@ const PMS_OPTIONS = [
     connectUrl:  null,
     authType:    'api_key' as const,
   },
+  {
+    id:          'lodgify',
+    name:        'Lodgify',
+    // Narrowest of the five, and accurately so: Lodgify's API publishes no
+    // reviews resource and no staff concept at all, so this promises only what
+    // the sync actually delivers.
+    //
+    // THIS LIST IS HARDCODED, unlike Settings -> Integrations and Setup -> PMS,
+    // which both read integration_providers and filter on is_active. Flipping
+    // that flag therefore does NOT reach this screen — which is the one a brand
+    // new signup sees first. Leaving Lodgify out of it would have told exactly
+    // the customers the docs were rewritten for that FieldStay does not support
+    // their PMS.
+    description: 'Bookings and properties',
+    // api_key, like Hostaway: no OAuth redirect, so this routes to
+    // /settings/integrations?connect=lodgify, which auto-opens the credential
+    // modal (API_KEY_PROVIDER_FIELDS in integrations-client.tsx is what makes
+    // that modal exist for a given provider).
+    connectUrl:  null,
+    authType:    'api_key' as const,
+  },
   // Guesty is not yet wired — hidden until the integration is live.
   // {
   //   id:          'guesty',

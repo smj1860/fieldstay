@@ -6,7 +6,14 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 ## Does FieldStay work with the PMS I already use?
 
-FieldStay integrates with OwnerRez, Hospitable, Hostex, and Hostaway today — connect any one of them from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
+FieldStay integrates with OwnerRez, Hospitable, Hostex, Hostaway, and Lodgify today — connect any one of them from onboarding to sync properties and bookings automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
+
+Two things differ by provider and are worth knowing before you pick:
+
+- **Reviews** sync from OwnerRez, Hospitable, Hostex and Hostaway. Lodgify's API has no reviews resource, so Lodgify reviews have to be added manually. See **Connecting Lodgify to FieldStay**.
+- **Lodgify syncs once daily** rather than within seconds — see "How often does my PMS sync?" below.
+
+**Any PMS that publishes an iCal link** works too, connected or not: paste the calendar link on each property and your bookings and turnovers flow in. That gets you dates and turnovers, but not revenue or guest details.
 
 ---
 
@@ -140,7 +147,13 @@ If a crew member's Start Turnover button seems to have "done nothing," it almost
 
 Bookings sync in real time via webhooks — when a booking is confirmed, modified, or cancelled in your PMS, FieldStay processes the change within seconds.
 
-Hostex is the one exception worth knowing about: it sends each webhook once and never retries a delivery that fails. FieldStay runs a full reservation sweep every morning to catch anything a missed delivery would have lost, so the worst case for a Hostex booking is that it appears by the next morning rather than within seconds. **Trigger Resync** pulls it in immediately.
+Two exceptions are worth knowing about.
+
+**Hostex** sends each webhook once and never retries a delivery that fails. FieldStay runs a full reservation sweep every morning to catch anything a missed delivery would have lost, so the worst case for a Hostex booking is that it appears by the next morning rather than within seconds.
+
+**Lodgify syncs once daily, not in real time.** Lodgify's webhook delivery is held off until we have verified how it behaves against a live account, so a change made in Lodgify can take up to 24 hours to appear on its own. When that is switched on, existing connections pick it up automatically — nothing to reconnect.
+
+For both, **Trigger Resync** on Settings → Integrations pulls everything in immediately.
 
 Property data (WiFi, amenities, instructions) syncs during the initial connection and can be manually refreshed anytime by clicking **Sync** on the Turnovers dashboard.
 

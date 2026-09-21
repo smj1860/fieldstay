@@ -181,11 +181,11 @@ export const HOSTS_CREW_REQUIRED_FAQ = {
 export const HOSTS_REPLACES_PMS_FAQ = {
   question: 'Does FieldStay replace Airbnb, VRBO, or my PMS?',
   answer:
-    'No. Airbnb, VRBO, OwnerRez, Hospitable, and Hostex handle bookings, rates, and guest messaging — FieldStay ' +
-    'handles what happens on the ground after a guest books: turnovers, checklists, inventory, vendor work ' +
-    'orders, and your own P&L. If you\'re on OwnerRez, Hospitable, or Hostex, connect it in about 2 minutes ' +
-    'and everything syncs automatically. If you\'re on none of them, paste your Airbnb or VRBO iCal link ' +
-    'instead — ' +
+    'No. Airbnb, VRBO, OwnerRez, Hospitable, Hostex, and Lodgify handle bookings, rates, and guest messaging — ' +
+    'FieldStay handles what happens on the ground after a guest books: turnovers, checklists, inventory, vendor ' +
+    'work orders, and your own P&L. If you\'re on OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify, connect it ' +
+    'in about 2 minutes and everything syncs automatically. If you\'re on none of them, paste your Airbnb or ' +
+    'VRBO iCal link instead — ' +
     'same result.',
 } as const
 
@@ -235,8 +235,8 @@ export const ENTERPRISE_TEAM_ACCESS_FAQ = {
 export const ENTERPRISE_MIGRATION_FAQ = {
   question: 'What happens to our existing data when we switch to FieldStay?',
   answer:
-    'If you\'re on OwnerRez, Hospitable, or Hostex, connecting your account pulls in your full booking ' +
-    'history — not just upcoming stays — on the first sync, so nothing before today is lost. There isn\'t a ' +
+    'If you\'re on OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify, connecting your account pulls in your ' +
+    'booking history — not just upcoming stays — on the first sync, so nothing before today is lost. There isn\'t a ' +
     'separate white-glove migration product beyond that connection: it\'s the same sync every FieldStay ' +
     'account uses, just at your scale. Portfolio and Enterprise accounts get custom onboarding and dedicated ' +
     'account support to walk through the cutover with you.',
@@ -553,7 +553,8 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'How do I switch from Breezeway to FieldStay?',
     answer:
       'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway — it connects TO ' +
-      'your booking platform (OwnerRez, Hospitable, Hostex, or Hostaway) and builds your turnover schedule ' +
+      'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+      'schedule ' +
       'from your existing bookings automatically. Most teams run FieldStay on a handful of properties during ' +
       'a free trial alongside their current setup before moving the rest of the portfolio over.',
   },
@@ -594,7 +595,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-connect',
         question: 'How do I connect my PMS to FieldStay?',
         answer:
-          'Go to Settings → Integrations and click "Connect" next to OwnerRez, Hospitable, or Hostex — whichever you use. You\'ll be redirected to authorize the connection with your PMS. Once approved, your properties and upcoming bookings sync automatically within a few minutes.',
+          'Go to Settings → Integrations and click "Connect" next to whichever you use. OwnerRez, Hospitable and Hostex redirect you to authorize the connection with your PMS; Hostaway and Lodgify instead ask you to paste an API key you generate in their settings (for Lodgify, that\'s Settings → Public API, and your plan needs to include API access). Either way, your properties and upcoming bookings sync automatically within a few minutes.',
       },
       {
         id:       'or-sync-time',
@@ -692,7 +693,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing, and how is the price calculated?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
       },
       {
         id:       'billing-crew-seats',
@@ -740,7 +741,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'tech-security',
         question: 'Is my data secure?',
         answer:
-          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS access tokens (OwnerRez, Hospitable, Hostex) are stored in an encrypted vault, never in the application database.',
+          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS credentials — OAuth tokens for OwnerRez, Hospitable and Hostex, API keys for Hostaway and Lodgify — are stored in an encrypted vault, never in the application database.',
       },
       {
         id:       'tech-password',

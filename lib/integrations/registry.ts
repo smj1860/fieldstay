@@ -16,6 +16,7 @@ import { krogerProvider } from './providers/kroger'
 import { hostawayProvider } from './providers/hostaway'
 import { hospitableProvider } from './providers/hospitable'
 import { hostexProvider } from './providers/hostex'
+import { lodgifyProvider } from './providers/lodgify'
 // Future: import { guestyProvider } from './providers/guesty'
 
 const providers = new Map<string, IntegrationProvider>([
@@ -30,6 +31,11 @@ const providers = new Map<string, IntegrationProvider>([
   // Live: integration_providers.hostex.is_active flipped to true by
   // 20260816122829_activate_hostex_provider.sql once sync and webhooks shipped.
   ['hostex',     hostexProvider],
+  // Live since 20260921170000_activate_lodgify_provider.sql. Unlike the four
+  // above, its response shapes have never been checked against a real account —
+  // see the header of providers/lodgify.ts for why that ships and what it costs
+  // if a guess is wrong.
+  ['lodgify',    lodgifyProvider],
   // ['guesty',   guestyProvider],
 ])
 
@@ -49,7 +55,7 @@ const providers = new Map<string, IntegrationProvider>([
  * Ordered most-established first, which is the order the connect surfaces
  * render them in.
  */
-export const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex', 'hostaway'] as const
+export const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex', 'hostaway', 'lodgify'] as const
 
 export type PmsProviderId = typeof PMS_PROVIDER_IDS[number]
 

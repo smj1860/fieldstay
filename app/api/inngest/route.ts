@@ -64,6 +64,10 @@ import { hostexInitialSync }                from '@/lib/inngest/functions/hostex
 import { hostexReservationReconcileCron }    from '@/lib/inngest/functions/hostex/reservation-reconcile-cron'
 import { hostexReservationReconcileHandler } from '@/lib/inngest/functions/hostex/reservation-reconcile-handler'
 import { hostexWebhookHandler }              from '@/lib/inngest/functions/hostex/webhook-handler'
+import { lodgifyInitialSync }                 from '@/lib/inngest/functions/lodgify/initial-sync'
+import { lodgifyReservationReconcileCron }    from '@/lib/inngest/functions/lodgify/reservation-reconcile-cron'
+import { lodgifyReservationReconcileHandler } from '@/lib/inngest/functions/lodgify/reservation-reconcile-handler'
+import { lodgifyWebhookHandler }              from '@/lib/inngest/functions/lodgify/webhook-handler'
 
 // Proactive token refresh — unified cron covering all OAuth providers
 // (Hospitable, Kroger)
@@ -282,6 +286,10 @@ export const { GET, POST, PUT } = serve({
     hostexReservationReconcileCron,
     hostexReservationReconcileHandler,
     hostexWebhookHandler,
+    lodgifyInitialSync,
+    lodgifyReservationReconcileCron,
+    lodgifyReservationReconcileHandler,
+    lodgifyWebhookHandler,
 
     // Proactive token refresh — all OAuth providers
     integrationTokenRefreshCron,
