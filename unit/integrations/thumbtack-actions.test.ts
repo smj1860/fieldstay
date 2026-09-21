@@ -50,6 +50,21 @@ describe('searchThumbtackProsAction', () => {
     expect(searchThumbtackPros).not.toHaveBeenCalled()
   })
 
+  it('fails CLOSED (denies) rather than open when the limiter itself errors — a metered partner API, not an abuse limiter', async () => {
+    // checkLimitStub reproduces the real helper's onError policy: it returns
+    // `allowed: options.onError === 'allow'` when limiter.limit() throws. This
+    // asserts the call site passes 'deny', matching CLAUDE.md's fail-closed
+    // posture for a spend ceiling (same reasoning as the SMS nudge budget) —
+    // the opposite of the abuse-rate limiters in lib/rate-limit.ts/proxy.ts,
+    // which deliberately fail open.
+    vi.mocked(thumbtackSearchRatelimit.limit).mockRejectedValueOnce(new Error('redis down'))
+
+    const result = await searchThumbtackProsAction('plumbing', '90210')
+
+    expect(result.success).toBe(false)
+    expect(searchThumbtackPros).not.toHaveBeenCalled()
+  })
+
   it('returns an error for a category with no configured category_pk, without calling searchThumbtackPros', async () => {
     const result = await searchThumbtackProsAction('other', '90210')
 
@@ -106,5 +121,18 @@ describe('recordThumbtackRequestCreatedAction', () => {
   it('never throws — a logging failure must not surface to the caller as a UI error', async () => {
     vi.mocked(logAuditEvent).mockRejectedValueOnce(new Error('db down'))
     await expect(recordThumbtackRequestCreatedAction('wo_1', REQUEST_CREATED_EVENT)).resolves.toBeUndefined()
+  })
+
+  it('passes a dedupeKey derived from request_pk — the write itself is the dedup check, not a pre-read', async () => {
+    // No more pre-check SELECT (the unindexed `.contains('metadata', ...)`
+    // JSONB scan): logAuditEvent's own dedupe_key unique index, and its
+    // internal 23505 handling, is what makes a duplicate invocation
+    // (RequestFlowModal's listener re-subscribing on every parent re-render)
+    // a no-op instead of a double-logged row.
+    await recordThumbtackRequestCreatedAction('wo_1', REQUEST_CREATED_EVENT)
+
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      dedupeKey: 'thumbtack:req_1',
+    }))
   })
 })

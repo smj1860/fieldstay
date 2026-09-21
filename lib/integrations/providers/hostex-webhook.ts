@@ -63,13 +63,42 @@ export async function ensureHostexWebhookRegistration(
     // key AND the tenant boundary for an unauthenticated inbound request.
     webhookToken = randomBytes(32).toString('hex')
 
-    const { error } = await admin
+    // Atomic claim, mirrored from the inbound secret-hash TOFU claim in
+    // app/api/webhooks/hostex/[token]/route.ts. Initial-sync and the daily
+    // reconcile can both reach this function for the same user concurrently
+    // (a connection is dispatchable by the reconcile cron the instant OAuth
+    // completes, well before initial-sync's own register-webhook step runs).
+    // Without `.is('webhook_token', null)`, both processes would mint a
+    // DIFFERENT random token, both UPDATE with no guard, and each would still
+    // register ITS OWN locally-minted token with Hostex regardless of which
+    // write won — leaving Hostex pushing events to two URLs while the DB
+    // remembers only one, silently and permanently dropping every delivery
+    // that lands on the orphaned one (Hostex never retries a rejected
+    // delivery).
+    const claimRes = await admin
       .from('integration_connections')
       .update({ webhook_token: webhookToken, updated_at: new Date().toISOString() })
       .eq('user_id', userId)
       .eq('provider_id', PROVIDER)
+      .is('webhook_token', null)
+      .select('webhook_token')
+      .maybeSingle()
 
-    if (error) throw new Error(`[Hostex] Failed to store webhook token: ${error.message}`)
+    if (claimRes.error) throw new Error(`[Hostex] Failed to store webhook token: ${claimRes.error.message}`)
+
+    if (!claimRes.data) {
+      // Someone else claimed it concurrently — re-read and register THEIR
+      // token, never our own locally-minted one that lost the race.
+      const recheckRes = await admin
+        .from('integration_connections')
+        .select('webhook_token')
+        .eq('user_id', userId)
+        .eq('provider_id', PROVIDER)
+        .maybeSingle()
+
+      const recheck = unwrap(recheckRes, { site: 'lib.integrations.hostex-webhook.recheck-token' })
+      webhookToken = recheck?.webhook_token ?? webhookToken
+    }
   }
 
   const { created } = await hostexEnsureWebhook(

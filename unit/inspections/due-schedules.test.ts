@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   dueLabel,
+  scheduleIdsWithOpenWalk,
   selectDueSchedules,
   selectUpcomingSchedules,
   todayISO,
@@ -111,36 +112,55 @@ describe('selectDueSchedules', () => {
   })
 })
 
-/**
- * A Date that reports a timezone offset of our choosing.
- *
- * `todayISO` reads exactly two things — `getTime()` and `getTimezoneOffset()` —
- * so this is enough, and it is the only way to test the distinction that
- * matters: CI runs in UTC, where `getTimezoneOffset()` is 0 and the correct
- * implementation and a bare `toISOString().slice(0,10)` produce identical
- * output for every input. A test written against the real Date in this
- * environment passes whether the correction is there or not.
- */
-function dateInZone(utcIso: string, offsetMinutes: number): Date {
-  const real = new Date(utcIso)
-  return Object.assign(Object.create(Date.prototype) as Date, {
-    getTime:            () => real.getTime(),
-    getTimezoneOffset:  () => offsetMinutes,
+describe('scheduleIdsWithOpenWalk', () => {
+  // The shared suppression rule selectUpcomingSchedules delegates to, and
+  // that lib/inspections/overdue-email.ts's selectOverdueForDigest now
+  // reuses too — one rule, so the "what is due" list and the overdue digest
+  // cannot drift on what counts as already-handled.
+  it('includes a schedule backing an open (uncompleted) inspection', () => {
+    const ids = scheduleIdsWithOpenWalk([inspection({ source_schedule_id: 'sched-1' })])
+    expect(ids.has('sched-1')).toBe(true)
   })
-}
+
+  it('excludes a schedule whose inspection has been completed', () => {
+    const ids = scheduleIdsWithOpenWalk([
+      inspection({ source_schedule_id: 'sched-1', completed_at: '2026-09-01T00:00:00Z' }),
+    ])
+    expect(ids.has('sched-1')).toBe(false)
+  })
+
+  it('ignores an ad-hoc walk with no schedule link', () => {
+    const ids = scheduleIdsWithOpenWalk([inspection({ source_schedule_id: null })])
+    expect(ids.size).toBe(0)
+  })
+
+  it('is empty for no inspections at all', () => {
+    expect(scheduleIdsWithOpenWalk([]).size).toBe(0)
+  })
+})
 
 describe('todayISO', () => {
-  it('is the LOCAL calendar day west of Greenwich, not the UTC one', () => {
-    // 04:30Z on the 16th is 23:30 on the 15th in Chicago — and the evening is
-    // exactly when a PM plans tomorrow. The UTC reading would show a walk as
-    // due a day early, every evening.
-    expect(todayISO(dateInZone('2026-09-16T04:30:00Z', 300))).toBe('2026-09-15')
+  it('is the LOCAL calendar day in the given zone, west of Greenwich', () => {
+    // 04:30Z on the 16th is 23:30 on the 15th in Chicago (CDT, UTC-5 in
+    // September) — and the evening is exactly when a PM plans tomorrow. The
+    // UTC reading would show a walk as due a day early, every evening.
+    expect(todayISO(new Date('2026-09-16T04:30:00Z'), 'America/Chicago')).toBe('2026-09-15')
   })
 
   it('and east of it, where the error runs the other way', () => {
-    // 23:30Z on the 15th is 00:30 on the 16th in Berlin. Same defect, opposite
+    // 23:30Z on the 15th is 00:30 on the 16th in Lagos (WAT, UTC+1, no DST —
+    // picked to avoid a DST-transition edge case). Same defect, opposite
     // sign: the UTC reading would keep yesterday's walk on the queue.
-    expect(todayISO(dateInZone('2026-09-15T23:30:00Z', -60))).toBe('2026-09-16')
+    expect(todayISO(new Date('2026-09-15T23:30:00Z'), 'Africa/Lagos')).toBe('2026-09-16')
+  })
+
+  it("defaults to UTC — the SERVER's own day, never an inferred viewer day", () => {
+    // getTimezoneOffset() used to read the offset of the process EXECUTING
+    // the JS, not the browser that would read the result — silently wrong
+    // for every server-side caller (a Server Component default parameter, an
+    // Inngest cron). The fix makes that default explicit instead of implicit:
+    // UTC unless a caller names a real zone.
+    expect(todayISO(new Date('2026-09-16T04:30:00Z'))).toBe('2026-09-16')
   })
 })
 

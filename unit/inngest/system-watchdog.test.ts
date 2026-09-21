@@ -59,6 +59,8 @@ function makeSupabase(
     chain.select = (_sel?: string, o?: { head?: boolean }) => { if (o?.head) head = true; return chain }
     chain.eq = () => chain
     chain.gte = () => chain
+    chain.in  = () => chain
+    chain.or  = () => chain
     chain.order = vi.fn(() => chain)
     chain.range = vi.fn(() => chain)
     chain.limit = vi.fn(() => chain)
@@ -154,10 +156,17 @@ describe('systemWatchdog — cold start', () => {
 
   it('stays silent about jobs never recorded when recording only just began', async () => {
     // Recording live for 2h. Every daily job (30h budget) is unobservable —
-    // it simply has not been due yet.
+    // it simply has not been due yet. Some non-watched function (or the
+    // watchdog's own prior run) has recorded within the window — a real
+    // system whose oldest row is 2h old would show it here too — which is
+    // what tells noRunsRecorded (now derived from this same windowed read,
+    // not a separate all-time count) that the recorder is alive.
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
       makeSupabase(
-        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        {
+          system_job_runs: [{ data: [{ function_id: 'some-other-cron', started_at: hoursAgo(2) }], error: null }],
+          integration_connections: [{ data: [], error: null }],
+        },
         [],
         { oldestStartedAt: hoursAgo(2), jobRunCount: 5 },
       ),
@@ -236,6 +245,39 @@ describe('systemWatchdog — cold start', () => {
     expect(reportError).toHaveBeenCalledTimes(1)
     expect(String((reportError as ReturnType<typeof vi.fn>).mock.calls[0][0])).toContain('empty')
   })
+
+  it('reports the recorder as dead again after it worked for months and then stopped', async () => {
+    // The bug this guards: noRunsRecorded used to be a plain, unbounded
+    // `count` over the whole table with no time filter. Once system_job_runs
+    // held even one historical row that count could never return to zero
+    // again — so it could only ever catch the recorder being broken from the
+    // very first deploy, never a recorder that worked fine for months (50
+    // historical rows, oldest nearly 8 days old) and then silently stopped
+    // (a regression, an RLS change, the table going away). Recording has
+    // matured well past every watched budget, so every job below would also
+    // eventually be reported individually — but this is the one clean signal
+    // that should fire immediately, not up to 30h later and scattered across
+    // up to twelve alerts.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        // The 31h-windowed read (what noRunsRecorded is now derived from)
+        // comes back empty — nothing, for any function, in over a day —
+        // while the old table-wide jobRunCount stays a healthy-looking 50.
+        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        RECORDING_MATURE,
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { noRunsRecorded: boolean }
+
+    expect(res.noRunsRecorded).toBe(true)
+    expect(reportError).toHaveBeenCalled()
+    const messages = (reportError as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+    expect(messages.some((m) => m.includes('empty') || m.includes('not recording'))).toBe(true)
+  })
 })
 
 describe('systemWatchdog — quiet integrations', () => {
@@ -302,11 +344,12 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     const res = await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-job-run-recorder', run_id: 'r1' } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-job-run-recorder', run_id: 'r1' } }],
       step: runAllStep(), logger: makeLogger(),
-    }) as { skipped: boolean; reason: string }
+    }) as { recorded: number; skippedSelf: number }
 
-    expect(res).toEqual({ skipped: true, reason: 'self' })
+    expect(res).toEqual({ recorded: 0, skippedSelf: 1, skippedNoId: 0 })
     expect(writes).toHaveLength(0)
   })
 
@@ -317,11 +360,16 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-cron-daily-wrapup', run_id: 'r2' } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-cron-daily-wrapup', run_id: 'r2' } }],
       step: runAllStep(), logger: makeLogger(),
     })
 
-    const row = writes[0]!.rows as { function_id: string; status: string }
+    // The batched upsert writes an ARRAY of rows now, one per event —
+    // exactly one here.
+    const rows = writes[0]!.rows as { function_id: string; status: string }[]
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
     expect(row.function_id).toBe('cron-daily-wrapup')
     // 'succeeded' is one of the three values system_job_runs_status_check
     // permits. This assertion is the only thing in the suite pinning it —
@@ -335,11 +383,13 @@ describe('jobRunRecorder', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}, writes))
 
     await invokeHandler(jobRunRecorder, {
-      event: { data: { function_id: 'fieldstay-cron-asset-health', run_id: 'r3', error: { message: 'boom' } } },
+      event: null,
+      events: [{ data: { function_id: 'fieldstay-cron-asset-health', run_id: 'r3', error: { message: 'boom' } } }],
       step: runAllStep(), logger: makeLogger(),
     })
 
-    const row = writes[0]!.rows as { status: string; error_message: string }
+    const rows = writes[0]!.rows as { status: string; error_message: string }[]
+    const row = rows[0]!
     expect(row.status).toBe('failed')
     expect(row.error_message).toBe('boom')
   })

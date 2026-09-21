@@ -168,8 +168,9 @@ describe('getValidHospitableToken — refresh lock (H-1)', () => {
 
     const resultPromise = getValidHospitableToken(USER_ID)
 
-    // 60 waits * 250ms = 15s ceiling
-    await vi.advanceTimersByTimeAsync(60 * 250)
+    // REFRESH_LOCK_MAX_WAITS * REFRESH_LOCK_WAIT_MS — sized off
+    // PMS_API_TIMEOUT_MS + margin, ~40s — see hospitable-token.ts.
+    await vi.advanceTimersByTimeAsync(160 * 250)
 
     const token = await resultPromise
 

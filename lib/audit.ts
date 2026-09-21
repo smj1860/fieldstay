@@ -163,6 +163,10 @@ export type AuditAction =
   | 'platform_admin.inventory_template.created'
   | 'platform_admin.inventory_template.updated'
   | 'platform_admin.inventory_template.deleted'
+  | 'platform_admin.prospect_account.created'
+  | 'platform_admin.prospect_account.updated'
+  | 'platform_admin.prospect_account.bulk_status'
+  | 'platform_admin.prospect_account.crawl_triggered'
   | 'platform_admin.inventory_template.items_saved'
   | 'platform_admin.inventory_template.broadcast_requested'
   | 'platform_admin.inventory_template.broadcast_synced'
@@ -194,6 +198,17 @@ interface AuditParams {
   metadata?:      Record<string, unknown>
   ipAddress?:     string
   correlationId?: string
+  /**
+   * Backed by `audit_events.dedupe_key`'s partial unique index
+   * (`WHERE dedupe_key IS NOT NULL`). Set this instead of a pre-write SELECT
+   * to dedup a write that might be delivered/invoked more than once for the
+   * same logical event — the insert itself becomes the check, closing the
+   * TOCTOU window a separate "does this already exist" read cannot. The
+   * caller catches Postgres 23505 (unique violation) on `logAuditEvent`/
+   * `logAuditEvents` throwing and treats it as "already recorded", not an
+   * error — see `recordThumbtackRequestCreatedAction` for the pattern.
+   */
+  dedupeKey?:     string
 }
 
 export async function logAuditEvent(params: AuditParams): Promise<void> {
@@ -217,6 +232,7 @@ export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
         target_type: params.targetType ?? null,
         target_id:   params.targetId   ?? null,
         ip_address:  params.ipAddress  ?? null,
+        dedupe_key:  params.dedupeKey  ?? null,
         metadata: {
           ...(params.metadata ?? {}),
           ...(params.correlationId ? { correlation_id: params.correlationId } : {}),
@@ -224,6 +240,14 @@ export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
       }))
     )
     if (error) {
+      // audit_events_dedupe_key_idx firing means this exact event was already
+      // recorded — the whole point of passing dedupeKey — not a write
+      // failure. A caller like recordThumbtackRequestCreatedAction relies on
+      // this: the insert IS the dedup check (closing the TOCTOU window a
+      // separate pre-check SELECT can't), so a re-delivery/duplicate
+      // invocation hitting the unique index must be silent, not reported —
+      // otherwise every ordinary dedup hit would page as a Sentry error.
+      if (error.code === '23505' && entries.some((e) => e.dedupeKey)) return
       console.error('[Audit] Failed to write audit event:', error)
       reportError(error, { site: 'lib.audit.Audit' })
     }

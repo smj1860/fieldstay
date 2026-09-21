@@ -98,8 +98,9 @@ export type BroadcastResult = {
   skipped?: number
 }
 
-// Idempotent: skip if a maintenance_schedule with the same name
-// already exists on the property
+// Idempotent: skip if a schedule from the SAME template item already exists
+// on the property (falling back to name for schedules with no template
+// item) — see existingByTemplateItem/existingByName below.
 type BroadcastItem = {
   id: string; name: string; description: string | null
   schedule_frequency: ScheduleFrequency; vendor_specialty_hint: VendorSpecialty | null
@@ -210,10 +211,12 @@ export async function broadcastMaintenanceTemplate(
     // same property on purpose), so a truncated read here silently re-created
     // schedules that already existed — 50 properties × a 25-item template is
     // already past the cap.
-    const existingSchedules = await fetchAllRows<{ property_id: string; name: string }>(
+    const existingSchedules = await fetchAllRows<{
+      property_id: string; name: string; source_template_item_id: string | null
+    }>(
       (from, to) => supabase
         .from('maintenance_schedules')
-        .select('property_id, name')
+        .select('property_id, name, source_template_item_id')
         .eq('org_id', membership.org_id)
         .in('property_id', (properties as { id: string }[]).map((p) => p.id))
         .order('id', { ascending: true })
@@ -221,7 +224,29 @@ export async function broadcastMaintenanceTemplate(
       { label: 'broadcastMaintenanceTemplate.existing_schedules' },
     )
 
-    const existingNames = new Set(existingSchedules.map((s) => `${s.property_id}::${s.name}`))
+    // Keyed on the TEMPLATE ITEM, not the name. Two unrelated templates can
+    // legitimately share an item name ("HVAC Filter Replacement" is exactly
+    // the kind of name the standard catalog ships), and a name-only key would
+    // silently skip Template B's item as "already exists" because Template
+    // A's broadcast happened to use the same words. Renaming a saved
+    // template's item keeps its row id, so this key also stops a rename from
+    // orphaning the old schedule into a duplicate rather than being
+    // recognized as the same maintenance item on re-broadcast.
+    //
+    // A schedule with no source_template_item_id (hand-created, or from
+    // duplicateMaintenanceScheduleItem) falls back to the name key — the
+    // legacy dedup this table has always used for schedules nothing else can
+    // key off of.
+    const existingByTemplateItem = new Set(
+      existingSchedules
+        .filter((s) => s.source_template_item_id)
+        .map((s) => `${s.property_id}::${s.source_template_item_id}`),
+    )
+    const existingByName = new Set(
+      existingSchedules
+        .filter((s) => !s.source_template_item_id)
+        .map((s) => `${s.property_id}::${s.name}`),
+    )
 
     const fallbackDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
 
@@ -247,8 +272,9 @@ export async function broadcastMaintenanceTemplate(
 
     for (const property of properties) {
       for (const item of items) {
-        const key = `${property.id}::${item.name}`
-        if (existingNames.has(key)) {
+        const byTemplateItem = `${property.id}::${item.id}`
+        const byName         = `${property.id}::${item.name}`
+        if (existingByTemplateItem.has(byTemplateItem) || existingByName.has(byName)) {
           skipped++
           continue
         }
@@ -274,29 +300,65 @@ export async function broadcastMaintenanceTemplate(
       }
     }
 
+    // Via the broadcast_maintenance_schedules RPC, not a plain .insert(): the
+    // pre-lock existingNames read above is only a fast estimate for the loop
+    // that BUILDS rowsToInsert — it is not itself a safe dedup guard, because
+    // there is deliberately no unique constraint behind it
+    // (duplicateMaintenanceScheduleItem copies a row's name onto the same
+    // property on purpose). The RPC takes an advisory lock scoped to
+    // (org_id, template_id) and RE-VERIFIES existence under that lock
+    // immediately before inserting, so two concurrent broadcasts of the same
+    // template serialize instead of both reading "not yet created" and both
+    // inserting duplicate schedules that would each generate their own
+    // recurring work orders forever.
+    let actuallyInserted = rowsToInsert.length
     if (rowsToInsert.length > 0) {
-      const { error } = await supabase.from('maintenance_schedules').insert(rowsToInsert)
+      const { data, error } = await supabase.rpc('broadcast_maintenance_schedules', {
+        p_org_id:      membership.org_id,
+        p_template_id: templateId,
+        p_rows:        rowsToInsert,
+      })
       if (error) {
         console.error('[broadcastMaintenanceTemplate]', error)
         return { error: 'Failed to broadcast template' }
       }
+      actuallyInserted = Number((data as { inserted?: number } | null)?.inserted ?? 0)
+      // A row this action computed as "new" can still lose the race to a
+      // concurrent broadcast between the estimate above and the lock being
+      // taken — those rows the RPC skipped are real skips, same as a
+      // pre-existing name.
+      skipped += rowsToInsert.length - actuallyInserted
     }
 
-    await inngest.send({
-      name: 'maintenance/template-broadcast' as const,
-      data: {
-        org_id:       membership.org_id,
-        template_id:  templateId,
-        property_ids: (properties as { id: string }[]).map((p) => p.id),
-        triggered_by: user.id,
-      },
-    })
+    // Non-fatal, and deliberately outside the outer try/catch's failure path:
+    // the schedules are already committed by the RPC above — that IS the
+    // broadcast. A send failure here must not turn a write that already
+    // succeeded into "Operation failed. Please try again." for the PM, who
+    // would then have every reason to retry a broadcast that already ran,
+    // relying on the RPC's advisory lock to sort out the resulting no-op
+    // rather than seeing an accurate result the first time.
+    try {
+      await inngest.send({
+        name: 'maintenance/template-broadcast' as const,
+        data: {
+          org_id:       membership.org_id,
+          template_id:  templateId,
+          property_ids: (properties as { id: string }[]).map((p) => p.id),
+          triggered_by: user.id,
+        },
+      })
+    } catch (sendErr) {
+      console.error('[broadcastMaintenanceTemplate] event send failed', sendErr)
+      reportError(sendErr, {
+        site: 'serverAction.maintenance.broadcastMaintenanceTemplate.event', orgId: membership.org_id,
+      })
+    }
 
     revalidatePath('/maintenance')
     revalidatePath('/templates/maintenance/create')
     revalidatePath('/templates/maintenance/saved')
     revalidatePath('/templates/maintenance/schedules')
-    return { success: true, created: rowsToInsert.length, skipped }
+    return { success: true, created: actuallyInserted, skipped }
   } catch (err) {
     console.error('[broadcastMaintenanceTemplate]', err)
     reportError(err, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate' })

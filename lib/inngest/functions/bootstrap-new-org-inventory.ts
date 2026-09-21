@@ -33,10 +33,13 @@ export const bootstrapNewOrgInventory = inngest.createFunction(
     id:      'bootstrap-new-org-inventory',
     name:    'New Org — seed inventory catalog and standard template',
     retries: 3,
-    // One bootstrap per org, ever. Signup cannot legitimately fire twice for
-    // the same org (create_organization_with_owner is advisory-locked per
-    // user), but a retried Inngest delivery can, and the work below is cheap
-    // to skip rather than repeat.
+    // Collapses redeliveries WITHIN Inngest's dedup window — not "ever". A
+    // replay outside that window (a manual re-send from the dashboard during
+    // an incident, say) is a new run, and this key alone would not stop it
+    // from repeating the work. Safe anyway because both downstream operations
+    // are independently idempotent: seedOrgInventoryCatalogIfNeeded
+    // short-circuits on a count, and syncInventoryTemplateForOrg only inserts
+    // items the org does not already have.
     idempotency: 'event.data.org_id',
   },
   { event: 'organization/created' },

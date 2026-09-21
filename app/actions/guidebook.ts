@@ -8,6 +8,7 @@ import { inngest } from '@/lib/inngest/client'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
 import { MAX_FEATURED_AMENITIES } from '@/lib/guidebook/featured-amenities'
+import { invalidateSponsorsCache } from '@/lib/guidebook/resolve-property-sponsors'
 import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 import { z } from 'zod'
 
@@ -267,6 +268,8 @@ export async function upsertSponsor(
       targetId:   data.id,
       metadata:   { slot_number: input.slotNumber, slot_type: input.slotType },
     })
+
+    invalidateSponsorsCache(membership.org_id)
 
     return { mediaKitToken: data.media_kit_token }
   } catch (err) {

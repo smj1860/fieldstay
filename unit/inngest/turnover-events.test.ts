@@ -193,17 +193,35 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
   function makeSupabase(opts: {
     checklistInstance?:  { data: unknown; error?: unknown }
     checklistItems?:     { data: unknown; error?: unknown }
+    /**
+     * The quality-ratio read, which is a DIFFERENT query over the same table:
+     * every item's completion/photo state rather than the two timestamp
+     * extremes. Defaults to empty — a fixture that only describes completion
+     * TIMESTAMPS says nothing about item state, and inventing one would make
+     * these tests assert a ratio nobody wrote.
+     */
+    checklistQualityItems?: { data: unknown; error?: unknown }
     turnoverRow?:        { data: unknown; error?: unknown }
     lastInventoryEdit?:  { data: unknown; error?: unknown }
     assignmentOutcomesUpdated?: { data: unknown; error?: unknown }
   }) {
     let turnoverCallCount = 0
+    // Every .eq() on the assignment_outcomes update chain, recorded so a test
+    // can assert WHAT the write is scoped by — a crew_member_id appearing here
+    // would silently turn one turnover's quality figures into per-person ones.
+    const assignmentOutcomesEqCalls: [string, unknown][] = []
     const assignmentOutcomesUpdate = vi.fn(() => ({
-      eq: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          select: vi.fn(() => Promise.resolve(opts.assignmentOutcomesUpdated ?? { data: [{ id: 'ao_1' }], error: null })),
-        })),
-      })),
+      eq: vi.fn((col: string, val: unknown) => {
+        assignmentOutcomesEqCalls.push([col, val])
+        return {
+          eq: vi.fn((col2: string, val2: unknown) => {
+            assignmentOutcomesEqCalls.push([col2, val2])
+            return {
+              select: vi.fn(() => Promise.resolve(opts.assignmentOutcomesUpdated ?? { data: [{ id: 'ao_1' }], error: null })),
+            }
+          }),
+        }
+      }),
     }))
     const turnoverUpdate = vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve({ error: null })) })) }))
 
@@ -234,6 +252,9 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
                   })),
                 })),
               })),
+              // The quality-ratio read: .eq(...).limit(...) with no .not()/
+              // .order(), so it terminates here rather than at maybeSingle.
+              limit: vi.fn(() => Promise.resolve(opts.checklistQualityItems ?? { data: [], error: null })),
             })),
           })),
         }
@@ -254,7 +275,10 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
       throw new Error(`Unexpected table in test: ${table}`)
     })
 
-    return { from, assignmentOutcomesUpdate, turnoverUpdate }
+    return {
+      from, assignmentOutcomesUpdate, turnoverUpdate,
+      assignmentOutcomesEqArgs: () => assignmentOutcomesEqCalls,
+    }
   }
 
   beforeEach(() => {
@@ -307,6 +331,96 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
     expect(supabase.turnoverUpdate).not.toHaveBeenCalled()
   })
 
+  // ── Automated quality signal ──────────────────────────────────────────────
+  //
+  // The turnover is what is rated, not the crew member: one figure per
+  // checklist instance, written to every crew row for that turnover. These
+  // cover the four cases the ratios must distinguish, and the NULL cases
+  // matter most — 0 would read as "totally failed" for something that never
+  // happened, and the recompute would penalise a crew member for it.
+
+  /** The timestamp fixture every quality test shares, so only item state varies. */
+  const qualityBase = {
+    checklistInstance: { data: { id: 'inst_1' }, error: null },
+    checklistItems: {
+      data: [
+        { completed_at: '2026-07-25T10:00:00.000Z' },
+        { completed_at: '2026-07-25T10:45:00.000Z' },
+      ],
+      error: null,
+    },
+    turnoverRow: { data: { property_id: 'prop_1', inventory_started_at: null, inventory_confirmed_complete_at: null }, error: null },
+  }
+
+  async function runWithQualityItems(items: unknown) {
+    const supabase = makeSupabase({ ...qualityBase, checklistQualityItems: { data: items, error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const { step } = onlyRecordCrewDurationStep()
+    await invokeHandler(handleTurnoverCompleted, { event: { data: baseEvent }, step, logger: makeLogger() })
+    return supabase
+  }
+
+  it('computes both ratios from item state', async () => {
+    const supabase = await runWithQualityItems([
+      { is_completed: true,  requires_photo: true,  photo_storage_path: 'a.jpg' },
+      { is_completed: true,  requires_photo: true,  photo_storage_path: null },
+      { is_completed: true,  requires_photo: false, photo_storage_path: null },
+      { is_completed: false, requires_photo: false, photo_storage_path: null },
+    ])
+
+    expect(supabase.assignmentOutcomesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completion_rate:       0.75, // 3 of 4 completed
+        photo_compliance_rate: 0.5,  // 1 of 2 completed photo-required items has a photo
+      }),
+    )
+  })
+
+  it('stores NULL, not 0, when the turnover has no checklist items', async () => {
+    const supabase = await runWithQualityItems([])
+
+    expect(supabase.assignmentOutcomesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ completion_rate: null, photo_compliance_rate: null }),
+    )
+  })
+
+  it('nulls ONLY photo compliance when no photo-required item was completed', async () => {
+    // completion_rate must still compute normally — the two ratios are
+    // independently applicable, and blanking both would discard a real signal.
+    const supabase = await runWithQualityItems([
+      { is_completed: true,  requires_photo: false, photo_storage_path: null },
+      { is_completed: false, requires_photo: true,  photo_storage_path: null },
+    ])
+
+    expect(supabase.assignmentOutcomesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ completion_rate: 0.5, photo_compliance_rate: null }),
+    )
+  })
+
+  it('scores a fully clean turnover as 1 on both ratios', async () => {
+    const supabase = await runWithQualityItems([
+      { is_completed: true, requires_photo: true,  photo_storage_path: 'a.jpg' },
+      { is_completed: true, requires_photo: false, photo_storage_path: null },
+    ])
+
+    expect(supabase.assignmentOutcomesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ completion_rate: 1, photo_compliance_rate: 1 }),
+    )
+  })
+
+  it('writes the ratios with no crew_member_id filter, so every crew row gets them', async () => {
+    // "Rate the turnover, not the person." The update is scoped by
+    // turnover_id + org_id ONLY; a crew filter here would give two cleaners
+    // sharing one job two different quality scores for the same work.
+    const supabase = await runWithQualityItems([
+      { is_completed: true, requires_photo: false, photo_storage_path: null },
+    ])
+
+    const eqCalls = supabase.assignmentOutcomesEqArgs()
+    expect(eqCalls).toEqual([['turnover_id', 'to_1'], ['org_id', 'org_1']])
+    expect(eqCalls.map(([col]) => col)).not.toContain('crew_member_id')
+  })
+
   it('computes duration from checklist items alone (MAX - MIN of completed_at)', async () => {
     const supabase = makeSupabase({
       checklistInstance: { data: { id: 'inst_1' }, error: null },
@@ -338,8 +452,13 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
     // nothing, silently. The equality assertion is the point; toMatchObject
     // would pass with the column present.
     expect(supabase.assignmentOutcomesUpdate).toHaveBeenCalledWith({
-      started_at:   '2026-07-25T10:00:00.000Z',
-      completed_at: '2026-07-25T10:45:00.000Z',
+      started_at:            '2026-07-25T10:00:00.000Z',
+      completed_at:          '2026-07-25T10:45:00.000Z',
+      // Null because this fixture describes completion TIMESTAMPS only and
+      // says nothing about item state — not applicable, and stored as NULL
+      // rather than 0 so the recompute contributes nothing for it.
+      completion_rate:       null,
+      photo_compliance_rate: null,
     })
 
     // turnovers.crew_duration_minutes is an ordinary column and DOES carry the

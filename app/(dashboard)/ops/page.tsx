@@ -6,6 +6,8 @@ import { OpsSnapshot, type OpsTurnover } from './ops-snapshot'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { addDays, subDays, startOfDay, endOfDay } from 'date-fns'
 import { loadUpcomingInspections } from '@/lib/inspections/upcoming-for-dashboard'
+import { loadFlaggedTurnovers } from '@/lib/friction/flagged-for-dashboard'
+import { frictionDateString } from '@/lib/friction/date'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Ops Snapshot' }
@@ -181,6 +183,16 @@ export default async function OpsSnapshotPage() {
     supabase, membership.org_id, todayIso,
   )
 
+  // Today's pre-flight friction flags, written by cron-pre-flight-friction at
+  // ~2am CT. RLS-scoped read on the caller's own client — this page needs no
+  // service-role bypass for it.
+  // frictionDateString(), NOT this page's `todayIso`: that one is UTC-derived
+  // and is already tomorrow from ~7pm CT, which would query a date the 2am run
+  // has not written and render a clean panel over a day still carrying flags.
+  const frictionExceptions = await loadFlaggedTurnovers(
+    supabase, membership.org_id, frictionDateString(),
+  )
+
   const todayTurnovers  = allTurnovers.filter(t => t.checkout_datetime.startsWith(todayIso))
   const todayAssigned   = todayTurnovers.filter(t => t.status !== 'pending_assignment').length
   const todayUnassigned = todayTurnovers.filter(t => t.status === 'pending_assignment').length
@@ -222,6 +234,7 @@ export default async function OpsSnapshotPage() {
       }}
       metrics={{ occupancyRate, confirmedBookings, turnoversCompleted }}
       upcomingInspections={upcomingInspections}
+      frictionExceptions={frictionExceptions}
       showPmsRevenueNudge={showPmsRevenueNudge}
     />
   )

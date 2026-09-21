@@ -19,6 +19,15 @@
     },
     "app/api/repuguard/generate/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/inspections/[id]/report/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/properties/[id]/inspections/report/route.ts": {
+      "maxDuration": 90
+    },
+    "app/api/owner/[token]/inspections/[id]/report/route.ts": {
+      "maxDuration": 30
     }
   },
   "headers": [

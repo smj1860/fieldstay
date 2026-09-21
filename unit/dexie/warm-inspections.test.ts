@@ -46,7 +46,29 @@ let formRows:       { data: unknown; error: unknown } = { data: [], error: null 
 let sectionRows:    { data: unknown; error: unknown } = { data: [], error: null }
 let itemRows:       { data: unknown; error: unknown } = { data: [], error: null }
 let propertyRows:   { data: unknown; error: unknown } = { data: [], error: null }
-let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null }
+let scheduleRows:   { data: unknown; error: unknown; count?: number } = { data: [], error: null }
+
+/** How many times `.from('maintenance_schedules')` was called — the
+ *  cheap-invalidation tests use this to prove the expensive row fetch was
+ *  (or was not) skipped. */
+let fromCalls: Record<string, number> = {}
+
+// See the sibling note in warm-maintenance-board.test.ts: getSession() performs
+// the refresh, so null models a session that has lapsed and cannot be renewed.
+let session: unknown = { access_token: 'jwt' }
+
+// When set, each getSession() call SHIFTS the next value off this queue
+// instead of reading the standing `session` var above — lets a test model a
+// session that is valid for the pass's first check and lapses partway
+// through, without disturbing every other test's simpler `session` toggle.
+// The last value repeats once the queue is exhausted.
+let sessionSequence: unknown[] | null = null
+let sessionCalls = 0
+
+// Fires exactly when the `inspections` SELECT's response is being read — lets
+// a test hold one call's pass open at a controlled point, the same way
+// warm-maintenance-board.test.ts's onWorkOrdersRead does.
+let onInspectionsRead: (() => Promise<void>) | null = null
 
 /**
  * A minimal PostgREST builder. Every filter returns `this`, so the chain under
@@ -54,8 +76,19 @@ let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null 
  */
 function fakeSupabase() {
   return {
+    auth: {
+      getSession: async () => {
+        sessionCalls++
+        if (sessionSequence) {
+          const next = sessionSequence.length > 1 ? sessionSequence.shift() : sessionSequence[0]
+          return { data: { session: next }, error: null }
+        }
+        return { data: { session }, error: null }
+      },
+    },
     from(table: string) {
-      const byTable: Record<string, () => { data: unknown; error: unknown }> = {
+      fromCalls[table] = (fromCalls[table] ?? 0) + 1
+      const byTable: Record<string, () => { data: unknown; error: unknown; count?: number }> = {
         inspections:              () => inspectionRows,
         property_assets:          () => assetRows,
         inspection_forms:         () => formRows,
@@ -66,10 +99,13 @@ function fakeSupabase() {
       }
       const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit']) {
+      for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit', 'abortSignal']) {
         builder[m] = () => builder
       }
-      builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result()).then(resolve)
+      builder.then = (resolve: (v: unknown) => unknown) => {
+        const hook = table === 'inspections' ? onInspectionsRead : null
+        return (hook ? hook() : Promise.resolve()).then(() => resolve(result()))
+      }
       return builder
     },
   }
@@ -85,8 +121,13 @@ const { warmInspectionsForOffline } = await import('@/lib/dexie/dashboard/warm-i
 const { SHELL_CACHE } = await import('@/lib/pwa/cache-names')
 
 beforeEach(async () => {
-  inspectionRows = { data: [], error: null }
-  assetRows      = { data: [], error: null }
+  inspectionRows    = { data: [], error: null }
+  assetRows         = { data: [], error: null }
+  session           = { access_token: 'jwt' }
+  sessionSequence   = null
+  sessionCalls      = 0
+  onInspectionsRead = null
+  fromCalls         = {}
   // A library that caches by default, since almost every test needs one and
   // only the library-specific tests care about its contents.
   formRows     = { data: [{ id: 'f1', key: 'safety', version: 1, is_active: true, name: 'Safety' }], error: null }
@@ -292,6 +333,57 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  // ── The 2026-09-11 false alarm ────────────────────────────────────────────
+  //
+  // Four Sentry issues in 1.1 seconds — 42501 on maintenance_schedules,
+  // inspection_forms, vendors and inspections — read as an RLS regression
+  // across four tables in one org. They were one tab whose session had lapsed:
+  // 42501 is a GRANT failure checked before RLS, `anon` holds no table grants,
+  // so every read of the pass failed the same way. The gate runs before the
+  // first query, and `force` must not bypass it — the inspections view passes
+  // force on every mount, which is exactly the mount a lapsed tab performs.
+  it('makes no query at all when the session has lapsed', async () => {
+    session        = null
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+    scheduleRows   = { data: [{ id: 'sched-1', org_id: ORG, creates: 'inspection' }], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', inspections: 0, formItems: 0, schedules: 0 })
+    const db = getDashboardDb(USER, ORG)
+    expect(await db.inspections.get('insp-1')).toBeUndefined()
+    expect(await db.maintenance_schedules.get('sched-1')).toBeUndefined()
+    // The route half is auth-gated too: an uncredentialed warm caches a login
+    // redirect, which is worse than caching nothing.
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a lapsed session does not bypass the gate via force', async () => {
+    session = null
+    expect(await warmInspectionsForOffline(USER, ORG, { force: true }))
+      .toMatchObject({ skipped: 'unauthenticated' })
+  })
+
+  // A session that is fine at the TOP of the pass but lapses before the
+  // mid-pass query is a different failure than the all-or-nothing case above
+  // — this is the flaky-connection case the mid-pass re-check exists for. The
+  // queue's second entry (null) is what the second hasUsableSession() call
+  // reads; without that re-check, fetchOpenInspections would run anyway and
+  // 'insp-1' would land in the cache despite the lapsed session.
+  it('bails mid-pass when the session lapses AFTER the form library warms but before inspections fetch', async () => {
+    sessionSequence = [{ access_token: 'jwt' }, null]
+    inspectionRows  = { data: [inspection('insp-1')], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ skipped: 'unauthenticated', inspections: 0 })
+    // The library warm, which ran BEFORE the session lapsed, is still kept —
+    // only the tail of the pass is abandoned.
+    expect(result.formItems).toBeGreaterThan(0)
+    expect(await getDashboardDb(USER, ORG).inspections.get('insp-1')).toBeUndefined()
+    expect(sessionCalls).toBeGreaterThanOrEqual(2)
+  })
+
   it('throttles, so mounting on every dashboard page is not a request storm', async () => {
     inspectionRows = { data: [inspection('insp-1')], error: null }
     await warmInspectionsForOffline(USER, ORG)
@@ -326,5 +418,135 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
     inspectionRows = { data: [inspection('insp-1')], error: null }
 
     expect((await warmInspectionsForOffline(USER, ORG)).inspections).toBe(1)
+  })
+})
+
+describe('warmInspectionsForOffline — concurrent callers', () => {
+  // React Strict Mode's mount/cleanup/remount double-invoke, and a tablet
+  // reconnecting right as the layout mounts, both call this before either
+  // call has written the watermark. Without the in-flight map, both would
+  // read isDue() as false and run a full pass each — doubling outbound
+  // requests on the flaky connection this feature exists for, and letting
+  // two reconcile-by-absence transactions interleave.
+  it('two un-forced calls started back to back share ONE pass', async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    const first  = warmInspectionsForOffline(USER, ORG)
+    const second = warmInspectionsForOffline(USER, ORG)
+
+    // Same promise, not just an equivalent result — the second call never
+    // started its own pass at all.
+    expect(second).toBe(first)
+
+    const sessionCallsBefore = sessionCalls
+    await Promise.all([first, second])
+    // Exactly the calls one pass makes (the top check plus mid-pass
+    // re-checks) — a second concurrent pass would double this.
+    expect(sessionCalls - sessionCallsBefore).toBeLessThanOrEqual(3)
+  })
+
+  it('a FORCED call does not join an un-forced pass already in flight, and each forced call gets its own run', async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    const background = warmInspectionsForOffline(USER, ORG)
+    const forcedA     = warmInspectionsForOffline(USER, ORG, { force: true })
+    const forcedB     = warmInspectionsForOffline(USER, ORG, { force: true })
+
+    // force always starts a new run rather than joining ANY existing one —
+    // the in-flight map exists to dedupe accidental double-mounts, not to
+    // throttle a deliberate re-warm.
+    expect(forcedA).not.toBe(background)
+    expect(forcedB).not.toBe(forcedA)
+
+    await Promise.all([background, forcedA, forcedB])
+  })
+
+  // The `.finally()` cleanup only deletes the map entry when it still points
+  // at ITS OWN run: `if (inFlight.get(key) === run)`. This is what stops an
+  // OLDER call's cleanup from evicting a NEWER call's still-running entry —
+  // exercised here by making the first forced call finish before the second
+  // one does, then confirming a third (un-forced) call still JOINS the
+  // second rather than starting a redundant fourth pass because the map
+  // entry was wiped out from under it.
+  it("an older forced call's cleanup does not evict a newer forced call's still-running entry", async () => {
+    inspectionRows = { data: [inspection('insp-1')], error: null }
+
+    // A queue rather than two nullable variables — avoids TS narrowing a
+    // closure-mutated `let` back to `never` across the `await` below, and
+    // reads just as clearly: releases[0] is the first read to arrive, [1]
+    // the second.
+    const releases: Array<() => void> = []
+    onInspectionsRead = () => new Promise<void>((resolve) => { releases.push(resolve) })
+
+    const forcedA = warmInspectionsForOffline(USER, ORG, { force: true })
+    const forcedB = warmInspectionsForOffline(USER, ORG, { force: true })
+
+    // Both calls have several real (non-microtask) awaits ahead of the
+    // inspections read — the session checks, the form-library Promise.all,
+    // the schedule query — so the gate isn't installed synchronously. Poll
+    // with a macrotask tick rather than assuming a fixed number of microtask
+    // flushes gets there.
+    while (releases.length < 1) await new Promise((r) => setTimeout(r, 0))
+    releases[0]!()
+    await forcedA
+
+    // forcedB is still pending (its release not yet called). A plain call
+    // now must JOIN it, not start a third pass.
+    const third = warmInspectionsForOffline(USER, ORG)
+    expect(third).toBe(forcedB)
+
+    while (releases.length < 2) await new Promise((r) => setTimeout(r, 0))
+    releases[1]!()
+    await Promise.all([forcedB, third])
+  })
+})
+
+// ── Scalability audit fix: cheap invalidation instead of a full delta pull ──
+//
+// Same scoped-down design as warm-maintenance-board.test.ts's equivalent
+// block: a `count`-only aggregate ahead of the bounded schedule fetch, so an
+// unchanged count skips the fetch+clear+bulkPut entirely rather than paying
+// for it every 15 minutes regardless of churn.
+describe('warmInspectionsForOffline — cheap invalidation on schedules', () => {
+  const schedule = (id: string, over: Record<string, unknown> = {}) => ({
+    id, org_id: ORG, property_id: 'prop-1', name: 'Quarterly safety walk',
+    creates: 'inspection', is_active: true,
+    next_due_date: '2026-09-01', inspection_form_id: 'f1', ...over,
+  })
+
+  it('skips the expensive schedule fetch when the count has not moved', async () => {
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 1 }
+    await warmInspectionsForOffline(USER, ORG)
+
+    fromCalls.maintenance_schedules = 0
+    // The count is UNCHANGED (1) even though the row payload now claims a
+    // second schedule — used here only to prove the skip took effect: if the
+    // full fetch ran anyway, sched-2 would land in the cache.
+    scheduleRows = { data: [schedule('sched-1'), schedule('sched-2')], error: null, count: 1 }
+
+    const result = await warmInspectionsForOffline(USER, ORG, { force: true })
+
+    expect(fromCalls.maintenance_schedules).toBe(1) // only the count-only aggregate ran
+    expect(result.schedules).toBe(1)
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-2')).toBeUndefined()
+  })
+
+  it('does the full fetch when the schedule count HAS changed', async () => {
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 1 }
+    await warmInspectionsForOffline(USER, ORG)
+
+    scheduleRows = { data: [schedule('sched-1'), schedule('sched-2')], error: null, count: 2 }
+    const result = await warmInspectionsForOffline(USER, ORG, { force: true })
+
+    expect(result.schedules).toBe(2)
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-2')).toBeTruthy()
+  })
+
+  it('surfaces omittedCount from the count aggregate', async () => {
+    // SCHEDULE_LIMIT (500) is impractical to actually exceed in a unit test;
+    // this exercises the arithmetic rather than the real cap.
+    scheduleRows = { data: [schedule('sched-1')], error: null, count: 5 }
+    const result = await warmInspectionsForOffline(USER, ORG)
+    expect(result.omittedCount).toBe(4)
   })
 })

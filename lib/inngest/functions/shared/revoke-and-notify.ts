@@ -43,9 +43,37 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
 import { markProviderConnectionRevoked } from '@/lib/integrations/connection-revoked'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 import type { SyncLogger } from '@/lib/inngest/functions/shared/reservation-pipeline'
 
 type SyncStep = GetStepTools<typeof inngest>
+
+/**
+ * Serializes the read-decide-send-record sequence below across every Inngest
+ * function that can hit the SAME connection at once. Hospitable alone has
+ * three cron-fanned callers (calendar-sync, teammate-sync,
+ * reservation-reconcile) that can all discover the same dead token in the
+ * same run — each would read shouldNotifyConnectionError's throttle BEFORE
+ * any of them had written recordConnectionErrorNotified, so all three would
+ * decide "due" and the PM would get three identical "reconnect" emails for
+ * one revocation.
+ *
+ * Keyed on (userId, providerId) rather than the connection id: that pair is
+ * known before markProviderConnectionRevoked runs its own lookup, and it
+ * identifies the same connection markProviderConnectionRevoked's own
+ * `.eq('user_id', ...).eq('provider_id', ...)` query does.
+ */
+export function connectionRevokeLockKey(userId: string, providerId: string): string {
+  return `integration:revoke-notify-lock:${userId}:${providerId}`
+}
+
+/**
+ * Covers mark-revoked's two queries, the Inngest sendEvent round trip and
+ * record-revoked-notified's write. Generous on purpose: losing the race here
+ * means a duplicate PM email, not a lost one, but the TTL still needs to
+ * comfortably outlast the sequence it guards.
+ */
+const REVOKE_NOTIFY_LOCK_TTL_SECONDS = 120
 
 export interface RevokeAndNotifyParams {
   step:   SyncStep
@@ -77,37 +105,57 @@ export interface RevokeAndNotifyParams {
 export async function revokeAndNotify(params: RevokeAndNotifyParams): Promise<void> {
   const { step, logger, userId, orgId, providerId, providerLabel, err, system, fnId } = params
 
-  // Decision only. The send is deliberately NOT in here — see the header.
-  const decision = await step.run(`${fnId}-mark-revoked`, async () => {
-    const admin = createServiceClient({ system })
-    return markProviderConnectionRevoked(admin, {
-      userId, orgId, providerId, providerLabel, err,
-      site: `inngest.${fnId}.notify-revoked.throttle`,
-    })
-  })
+  const lockKey = connectionRevokeLockKey(userId, providerId)
+  const gotLock = await acquireLock(lockKey, REVOKE_NOTIFY_LOCK_TTL_SECONDS)
 
-  if (decision) {
-    await step.sendEvent(`${fnId}-notify-revoked`, {
-      name: 'integration/connection.error',
-      data: { user_id: userId, org_id: orgId, provider_id: providerId, reason: decision.humanError },
-    })
-
-    // Its own step, deliberately: a failure here retries just this write, with
-    // the send already memoized, so it can neither duplicate the notification
-    // nor replay the audit event written during mark-revoked.
-    await step.run(`${fnId}-record-revoked-notified`, async () => {
-      const admin = createServiceClient({ system })
-      await recordConnectionErrorNotified(admin, {
-        orgId,
-        connectionId: decision.connectionId,
-        site: `inngest.${fnId}.notify-revoked.record`,
+  if (!gotLock) {
+    // Another Inngest function is already running this exact sequence for
+    // this connection — it will mark it revoked and decide the notification
+    // for both of us. Proceeding here would re-read the not-yet-updated
+    // throttle and send a second identical email.
+    logger.warn(
+      `[${providerLabel}] org ${orgId}: revoke-and-notify already in flight for this ` +
+      `connection — skipping the duplicate mark/notify`
+    )
+  } else {
+    try {
+      // Decision only. The send is deliberately NOT in here — see the header.
+      const decision = await step.run(`${fnId}-mark-revoked`, async () => {
+        const admin = createServiceClient({ system })
+        return markProviderConnectionRevoked(admin, {
+          userId, orgId, providerId, providerLabel, err,
+          site: `inngest.${fnId}.notify-revoked.throttle`,
+        })
       })
-    })
+
+      if (decision) {
+        await step.sendEvent(`${fnId}-notify-revoked`, {
+          name: 'integration/connection.error',
+          data: { user_id: userId, org_id: orgId, provider_id: providerId, reason: decision.humanError },
+        })
+
+        // Its own step, deliberately: a failure here retries just this write, with
+        // the send already memoized, so it can neither duplicate the notification
+        // nor replay the audit event written during mark-revoked.
+        await step.run(`${fnId}-record-revoked-notified`, async () => {
+          const admin = createServiceClient({ system })
+          await recordConnectionErrorNotified(admin, {
+            orgId,
+            connectionId: decision.connectionId,
+            site: `inngest.${fnId}.notify-revoked.record`,
+          })
+        })
+      }
+    } finally {
+      await releaseLock(lockKey)
+    }
   }
 
-  // Reported once, not every run. Revoking removes this connection from
-  // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it — which is
-  // the difference between one alert and the hourly repeat that made the
+  // Reported every run, lock or no lock — this is a Sentry signal for THIS
+  // occurrence of the failure, not part of the notify throttle. Revoking
+  // removes the connection from SYNCABLE_CONNECTION_STATUSES, so the cron
+  // stops fanning to it once the lock holder's write lands — which is the
+  // difference between one alert and the hourly repeat that made the
   // original Sentry cluster unreadable.
   reportError(err instanceof Error ? err : new Error(String(err)), {
     site:  `inngest.${fnId}.connection-revoked`,

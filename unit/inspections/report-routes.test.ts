@@ -84,7 +84,7 @@ const inspection = (over: Partial<ReportInspection> = {}): ReportInspection => (
 const report = (over: Partial<InspectionReport> = {}): InspectionReport => ({
   orgId: 'o', propertyName: 'Cedar Point Lake House',
   generatedAt: '2026-08-25T12:00:00.000Z',
-  inspections: [inspection()], photosIncluded: false, omittedCount: 0, ...over,
+  inspections: [inspection()], photosIncluded: false, omittedCount: 0, omittedPhotoCount: 0, ...over,
 })
 
 describe('reportFilename', () => {

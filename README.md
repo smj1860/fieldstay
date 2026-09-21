@@ -286,8 +286,9 @@ Cart automation for inventory restocking. OAuth2 connection per organization. Ca
 
 ### Telnyx (SMS)
 A2P 10DLC messaging for guest SMS delivery. Webhook endpoint: `/api/webhooks/telnyx`.
-All sends are gated on `SMS_ENABLED=true` — do not enable until 10DLC campaign
-verification clears. Handles STOP/START/HELP keywords with TCPA-compliant consent
+All sends are gated on `SMS_ENABLED` — `true` in production since 2026-08-28 (10DLC
+verified), but the gate itself stays: it's what keeps a preview deploy or a local run
+from texting real guests. Handles STOP/START/HELP keywords with TCPA-compliant consent
 tracking. Ed25519 signature verification required on the webhook endpoint
 (`TELNYX_WEBHOOK_PUBLIC_KEY` env var).
 
@@ -296,14 +297,16 @@ Real-time and forecast weather data used to drive contextual guest SMS messages.
 Rain probability, temperature, and condition codes determine which sponsor slot
 type fires in the morning and evening cron functions.
 
-### Hostaway (PMS) — DISABLED
-API-key auth (not OAuth). Property and booking sync adapter built and in the
-codebase (`lib/inngest/functions/hostaway/`), but fully unregistered as of
-2026-07-25 — not reachable anywhere in the app. See CLAUDE_INTEGRATIONS.md's
-"Hostaway Integration" section for why and the re-enable checklist.
+### Hostaway (PMS)
+API-key auth (not OAuth). Re-enabled and fully live — property/booking sync,
+revenue posting, and a daily reservation reconcile. No webhook endpoint is
+registered with Hostaway yet, so updates sync once daily rather than in real
+time. See CLAUDE_INTEGRATIONS.md's "Hostaway Integration" section for details.
 
 ### Hospitable (PMS)
-OAuth2 application submitted. Integration in design phase — not yet built.
+OAuth2 connection, fully live. Reservations are webhook-primary with a daily
+reconcile backstop; also syncs properties, crew, and reviews. See
+CLAUDE_INTEGRATIONS.md's "Hospitable Integration" section for details.
 
 ---
 

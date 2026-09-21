@@ -100,6 +100,8 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 // Crew auto-assignment
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
+import { preFlightFriction, preFlightFrictionForOrg } from '@/lib/inngest/functions/cron/pre-flight-friction'
+import { frictionGrading, gradeFrictionForOrg } from '@/lib/inngest/functions/cron/friction-grading'
 
 // Vendor auto-suggestion
 import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
@@ -122,7 +124,7 @@ import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-mas
 // Platform inventory template broadcasting
 import { broadcastPlatformInventoryTemplate, syncInventoryTemplateForOrg } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
 import { bootstrapNewOrgInventory } from '@/lib/inngest/functions/bootstrap-new-org-inventory'
-import { recomputeParLevelsFn } from '@/lib/inngest/functions/recompute-par-levels'
+import { recomputeParLevelsFn, recomputeParLevelsOrgFn } from '@/lib/inngest/functions/recompute-par-levels'
 import { recordInventoryConsumption } from '@/lib/inngest/functions/record-inventory-consumption'
 
 // Integration error notifications
@@ -193,11 +195,14 @@ import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospit
 import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
+import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     inspectionCompleted,
+    prospectingCrawlDispatch,
+    prospectingCrawlProfile,
     inspectionOverdueEmailCron,
     inspectionOverdueEmailHandler,
     // iCal sync pipeline
@@ -314,6 +319,10 @@ export const { GET, POST, PUT } = serve({
     // Crew auto-assignment
     autoAssignTurnover,
     crewScoreRecompute,
+    preFlightFriction,
+    preFlightFrictionForOrg,
+    frictionGrading,
+    gradeFrictionForOrg,
 
     // Vendor auto-suggestion
     autoAssignVendor,
@@ -340,6 +349,7 @@ export const { GET, POST, PUT } = serve({
     syncInventoryTemplateForOrg,
     bootstrapNewOrgInventory,
     recomputeParLevelsFn,
+    recomputeParLevelsOrgFn,
     recordInventoryConsumption,
 
     // Integration error notifications

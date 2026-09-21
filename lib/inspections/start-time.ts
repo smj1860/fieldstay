@@ -25,9 +25,23 @@ export function resolveStartTime(
   deviceNow:       string,
   serverNowMs:     number = Date.now(),
 ): { startedAt: string; offsetSeconds: number } {
-  const offsetMs      = serverNowMs - Date.parse(deviceNow)
+  const deviceNowMs   = Date.parse(deviceNow)
+  const deviceStartMs = Date.parse(deviceStartedAt)
+
+  // A device that has been offline for days — exactly the condition this
+  // module exists to handle — is also the one most likely to hand back an
+  // unparseable timestamp (empty string, a partially-written IndexedDB
+  // record, "null" coerced from null). Date.parse on that returns NaN, which
+  // poisons every downstream value through to `new Date(NaN).toISOString()`
+  // throwing RangeError. Fall back to "started now" rather than crash — a
+  // wrong-but-plausible start time is a smaller failure than losing the walk.
+  if (!Number.isFinite(deviceNowMs) || !Number.isFinite(deviceStartMs)) {
+    return { startedAt: new Date(serverNowMs).toISOString(), offsetSeconds: 0 }
+  }
+
+  const offsetMs      = serverNowMs - deviceNowMs
   const offsetSeconds = Math.round(offsetMs / 1000)
-  const corrected     = Date.parse(deviceStartedAt) + offsetMs
+  const corrected     = deviceStartMs + offsetMs
 
   return {
     startedAt:     new Date(Math.min(corrected, serverNowMs)).toISOString(),

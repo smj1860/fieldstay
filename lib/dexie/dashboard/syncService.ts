@@ -263,9 +263,12 @@ export async function discardFailedDashboardMutation(
 /** Pending work that has not dead-lettered — what a "you have unsent work" prompt counts. */
 export async function countPendingDashboardWork(userId: string, orgId: string): Promise<number> {
   const db = getDashboardDb(userId, orgId)
+  // .where('failed').equals(0), not a bare .filter() — `failed` is indexed
+  // precisely so a query through it doesn't full-scan the outbox; a plain
+  // predicate scan defeats that even though it reads the same field.
   const [mutations, photos] = await Promise.all([
-    db.mutations.filter((m) => !m.failed).count(),
-    db.pending_photo_uploads.filter((p) => !p.failed && p.status === 'pending').count(),
+    db.mutations.where('failed').equals(0).count(),
+    db.pending_photo_uploads.where('failed').equals(0).filter((p) => p.status === 'pending').count(),
   ])
   return mutations + photos
 }

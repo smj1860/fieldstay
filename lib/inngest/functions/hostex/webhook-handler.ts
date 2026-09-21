@@ -21,6 +21,7 @@
 // arrive once that runs. Retrying would not conjure the property.
 // ============================================================================
 
+import { NonRetriableError }  from 'inngest'
 import { inngest }           from '@/lib/inngest/client'
 import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { reportError }       from '@/lib/observability/report-error'
@@ -28,9 +29,24 @@ import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { fetchProviderPropertyIdMap } from '../shared/reservation-pipeline'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
+import { isHostexAccountActionError } from '@/lib/integrations/providers/hostex-api'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { waitForHostexTokenRefresh } from './token-lock-wait'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-webhook-handler'
+
+/**
+ * A terminal, already-known-dead connection. No revocation webhook exists for
+ * Hostex — it keeps pushing events to a still-registered URL until tomorrow's
+ * reconcile catches this same condition and revokes the connection. Reporting
+ * every one of those deliveries is one Sentry event per webhook — potentially
+ * many per hour for an active listing — for a condition already being handled
+ * on its own daily cadence, not a new fault.
+ */
+export function isDeadHostexConnectionError(err: unknown): boolean {
+  return isHostexAccountActionError(err) || isProviderAuthFailure(err) || err instanceof NonRetriableError
+}
 
 export const hostexWebhookHandler = inngest.createFunction(
   {
@@ -39,10 +55,15 @@ export const hostexWebhookHandler = inngest.createFunction(
     retries: 3,
     // Serialized per connection, not per org: two deliveries for the same
     // connection racing would run two pipelines whose turnover regeneration
-    // touches the same properties. A modest platform cap keeps a busy account
-    // from monopolising function capacity.
+    // touches the same properties. The platform cap keeps a busy account
+    // from monopolising function capacity — raised from 10, which was sized
+    // for pilot-scale webhook volume and does not scale with connection
+    // count: at 100x growth, active listings firing reservation_updated
+    // sub-events (see the debounce below) would queue behind a 10-wide cap
+    // regardless of how many distinct connections are involved, since the
+    // per-connection key only serialises each one against ITSELF.
     concurrency: [
-      { limit: 10 },
+      { limit: 40 },
       { limit: 1, key: 'event.data.user_id' },
     ],
     // One reservation's state is worth reading at most once per few seconds.
@@ -62,6 +83,10 @@ export const hostexWebhookHandler = inngest.createFunction(
   { event: 'integration/hostex.webhook.received' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id, event: hostexEvent, reservation_code, property_id } = event.data
+
+    // Top-level, before any step below spends a token — see
+    // token-lock-wait.ts's header.
+    await waitForHostexTokenRefresh(step, user_id)
 
     try {
       // A GETTER, invoked inside each step that spends it — see the
@@ -145,7 +170,12 @@ export const hostexWebhookHandler = inngest.createFunction(
       // swallowing it would make the loss invisible.
       const msg = err instanceof Error ? err.message : String(err)
       logger.error(`[Hostex:${user_id}] webhook handling failed for ${reservation_code}: ${msg}`)
-      reportError(err, { site: 'inngest.hostex-webhook-handler', orgId: org_id })
+
+      if (isDeadHostexConnectionError(err)) {
+        logger.warn(`[Hostex:${user_id}] connection appears dead — suppressing duplicate report, awaiting reconcile revoke`)
+      } else {
+        reportError(err, { site: 'inngest.hostex-webhook-handler', orgId: org_id })
+      }
       throw err
     }
   }

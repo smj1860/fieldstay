@@ -6,7 +6,7 @@
 
 ## How Assignment Works
 
-When FieldStay creates a turnover from a booking (OwnerRez, Hospitable, or Hostex), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
+When FieldStay creates a turnover from a booking (OwnerRez, Hospitable, Hostex, or Hostaway), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
 
 ---
 

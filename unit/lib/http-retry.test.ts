@@ -116,6 +116,45 @@ describe('fetchWithRetry', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  // ── The idempotency guard this file's whole header argues for but never
+  // coded ────────────────────────────────────────────────────────────────
+  it('refuses to retry a POST — nothing in the type signature stopped a caller from trying', async () => {
+    await expect(fetchWithRetry('https://x.test', { method: 'POST' }, OPTS))
+      .rejects.toThrow(/refusing to retry a POST/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses PUT/PATCH/DELETE the same way, case-insensitively', async () => {
+    for (const method of ['put', 'PATCH', 'delete']) {
+      await expect(fetchWithRetry('https://x.test', { method }, OPTS))
+        .rejects.toThrow(/refusing to retry/)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('allows GET (the default, when init.method is omitted) and HEAD', async () => {
+    fetchMock.mockResolvedValue(OK())
+
+    await fetchWithRetry('https://x.test', {}, OPTS)
+    await fetchWithRetry('https://x.test', { method: 'GET' }, OPTS)
+    await fetchWithRetry('https://x.test', { method: 'head' }, OPTS)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects attempts: 0 as a caller misconfiguration, not a real retry exhaustion', async () => {
+    // Pre-fix this fell through the loop body entirely and threw a generic
+    // "retries exhausted" with `lastError` still undefined.
+    await expect(fetchWithRetry('https://x.test', {}, { ...OPTS, attempts: 0 }))
+      .rejects.toThrow(/attempts must be >= 1/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a negative attempts value the same way', async () => {
+    await expect(fetchWithRetry('https://x.test', {}, { ...OPTS, attempts: -1 }))
+      .rejects.toThrow(/attempts must be >= 1/)
+  })
 })
 
 describe('what must NOT be retried', () => {

@@ -79,6 +79,32 @@ function hashesMatch(a: string, b: string): boolean {
   return nodeTimingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
 }
 
+/**
+ * Parses and shape-checks the request body. request.json() succeeds for any
+ * syntactically valid JSON document, including the literal `null` — `as
+ * HostexWebhookPayload` is compile-time only and performs no runtime check.
+ * Accessing payload.event on a null body would throw before a typeof guard on
+ * it ever runs, since evaluating that guard requires evaluating payload.event
+ * first. Returns a short-circuit NextResponse for an invalid/malformed body,
+ * or the checked payload.
+ */
+async function parseHostexWebhookBody(
+  request: NextRequest,
+): Promise<{ response: NextResponse } | { payload: HostexWebhookPayload }> {
+  let rawPayload: unknown
+  try {
+    rawPayload = await request.json()
+  } catch {
+    return { response: NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) }
+  }
+
+  if (typeof rawPayload !== 'object' || rawPayload === null) {
+    return { response: NextResponse.json({ received: true, ignored: 'malformed_body' }, { status: 200 }) }
+  }
+
+  return { payload: rawPayload as HostexWebhookPayload }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
@@ -180,12 +206,9 @@ export async function POST(
   }
 
   // ── 3. Parse ──────────────────────────────────────────────────────────────
-  let payload: HostexWebhookPayload
-  try {
-    payload = await request.json() as HostexWebhookPayload
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
+  const parsed = await parseHostexWebhookBody(request)
+  if ('response' in parsed) return parsed.response
+  const { payload } = parsed
 
   const event = typeof payload.event === 'string' ? payload.event.slice(0, 100) : ''
 

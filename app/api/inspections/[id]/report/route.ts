@@ -35,10 +35,17 @@ export async function GET(
 
   // An auth gate proves WHO, not HOW OFTEN. This renders a multi-page PDF and,
   // with photographs, downloads up to 150 objects of up to 10MB each on the
-  // request path. Abuse limiter → fails OPEN: a Redis outage must not stop a PM
-  // producing a record an insurer is waiting for.
+  // request path — CLAUDE.md's own "Report and export caps" section sizes
+  // `maxDuration` against exactly that cost. Abuse limiter → fails CLOSED, the
+  // same call CLAUDE.md already makes for the SMS nudge budget: "a spend
+  // ceiling must not disappear during an outage." An unthrottled request here
+  // costs tens of seconds and up to ~1.5GB of memory, and a Redis outage is
+  // precisely the moment a runaway loop hitting this endpoint would otherwise
+  // go completely uncapped. A denied export can be retried once Redis is back;
+  // an outage that ALSO lifts the one limiter standing between a bug (or an
+  // abusive caller) and the platform's memory ceiling cannot be undone.
   const rl = await checkLimit(dataExportLimiter, `inspection-report:${user.id}`, {
-    onError: 'allow',
+    onError: 'deny',
     site:    'route.inspections.report.GET',
   })
   if (!rl.allowed) {

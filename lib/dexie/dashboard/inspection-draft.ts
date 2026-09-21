@@ -33,6 +33,7 @@
 import { getDashboardDb, type InspectionAnswerRow } from './schema'
 import type { AnswerState } from '@/lib/inspections/resolve-form'
 import type { Inspection } from '@/types/database'
+import { reportError } from '@/lib/observability/report-error'
 
 /** `${inspectionId}|${answerKey}` — one row per rendered instance. */
 export function draftRowId(inspectionId: string, answerKey: string): string {
@@ -91,27 +92,45 @@ export async function saveAnswer(
   identity: AnswerIdentity,
   patch:    AnswerPatch,
 ): Promise<void> {
-  const db = getDashboardDb(userId, orgId)
-  const id = draftRowId(identity.inspectionId, identity.answerKey)
-  const now = new Date().toISOString()
+  // Called on EVERY TAP during a 90-minute walk — "the alternative costs a
+  // second visit." IndexedDB can fail for reasons entirely outside this
+  // code's control (quota exceeded, which is exactly plausible mid-walk once
+  // photo-heavy answers have accumulated; a corrupted database from a
+  // previous crash), and this function's only fire-and-forget call site
+  // (fill-screen.tsx's onChange) is `void saveAnswer(...)` — nothing awaits
+  // it or catches a rejection. Without this, a quota failure mid-walk is an
+  // unhandled promise rejection with the UI's optimistic state already
+  // showing the tap as saved, while the actual write never landed: the exact
+  // "lost keystroke" failure this whole design exists to prevent. Reported
+  // rather than swallowed, and RE-thrown so an awaited call site's own
+  // handling is unchanged.
+  try {
+    const db = getDashboardDb(userId, orgId)
+    const id = draftRowId(identity.inspectionId, identity.answerKey)
+    const now = new Date().toISOString()
 
-  await db.transaction('rw', db.inspection_answers, async () => {
-    const existing = await db.inspection_answers.get(id)
-    const merged: InspectionAnswerRow = {
-      ...EMPTY,
-      ...identity,
-      ...existing,
-      ...patch,
-      id,
-      updatedAt: now,
-      // Recomputed from the merged row, not carried from `existing`: clearing
-      // the last value on an item has to un-answer it, or the progress count
-      // and the Review gate would both keep crediting an answer that is gone.
-      answeredAt: null,
-    }
-    merged.answeredAt = isAnswered(merged) ? (existing?.answeredAt ?? now) : null
-    await db.inspection_answers.put(merged)
-  })
+    await db.transaction('rw', db.inspection_answers, async () => {
+      const existing = await db.inspection_answers.get(id)
+      const merged: InspectionAnswerRow = {
+        ...EMPTY,
+        ...identity,
+        ...existing,
+        ...patch,
+        id,
+        updatedAt: now,
+        // Recomputed from the merged row, not carried from `existing`: clearing
+        // the last value on an item has to un-answer it, or the progress count
+        // and the Review gate would both keep crediting an answer that is gone.
+        answeredAt: null,
+      }
+      merged.answeredAt = isAnswered(merged) ? (existing?.answeredAt ?? now) : null
+      await db.inspection_answers.put(merged)
+    })
+  } catch (err) {
+    console.error('[saveAnswer]', err)
+    reportError(err, { site: 'dexie.dashboard.saveAnswer' })
+    throw err
+  }
 }
 
 /**
@@ -185,8 +204,13 @@ export async function pruneFinishedInspections(userId: string, orgId: string): P
   const ids = new Set(finished.map((i) => i.id))
   await db.transaction('rw', db.inspections, db.inspection_answers, async () => {
     await db.inspections.bulkDelete([...ids])
+    // .where('inspectionId') uses the index schema.ts declares specifically
+    // because every fill-screen read is "this inspection's answers" — a
+    // .filter() scan here ignores it and walks every answer row on every
+    // fill-screen mount, which is exactly the scaling scenario this file's
+    // own header warns about (fifty dead drafts of ~250 rows each).
     const orphaned = await db.inspection_answers
-      .filter((row) => ids.has(row.inspectionId))
+      .where('inspectionId').anyOf([...ids])
       .primaryKeys()
     await db.inspection_answers.bulkDelete(orphaned)
   })

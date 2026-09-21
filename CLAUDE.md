@@ -391,7 +391,33 @@ crew_availability           — crew marks available/unavailable by date. NOT in
                               cached but pulled on assigned-property-set change plus screen
                               open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
-                              checklist timestamps, pm_rating
+                              checklist timestamps, pm_rating, and the AUTOMATED
+                              quality signal completion_rate/photo_compliance_rate
+                              (20260913042943). Those two rate the TURNOVER, not the
+                              crew member: one figure per checklist instance written
+                              identically to every crew row for it — never filter the
+                              computation by completed_by_crew_id. NULL means NOT
+                              APPLICABLE (no checklist items / no completed
+                              photo-required items) and must contribute exactly 0 to
+                              the reliability delta; 0 would read as "totally failed"
+                              for something that never happened.
+                              **In apply_crew_score_recompute() the NULL check must be
+                              the FIRST CASE branch.** The obvious
+                              `COALESCE(CASE WHEN rate < 1.0 ... ELSE 0.01 END, 0)` is
+                              dead code that does the opposite: `NULL < 1.0` is NULL,
+                              not false, so the ELSE claims the row and "not
+                              applicable" collects the perfect-score bonus — measured
+                              live at 0.04, identical to a flawless turnover, and it
+                              moved a pm_rating-only row from 0.08 to 0.10, silently
+                              changing pm_rating's established behaviour. Enforced by
+                              unit/guardrails/null-is-not-a-score.test.ts
+crew_speed_baselines        — rolling 90-DAY avg minutes-per-bedroom per crew member
+                              (never a lifetime average — matches
+                              FAMILIARITY_WINDOW_DAYS). Written ONLY by the friction
+                              cron's first step; SELECT-only for org members, no
+                              PM write path. Crew under 3 completed turnovers in the
+                              window get NO row — the scorer falls back to the org
+                              median rather than skipping the turnover
 ```
 
 ### Work Orders
@@ -486,6 +512,107 @@ reservation_messages        — automated guest messaging (superseded guest_mess
                               guest_messages_sent, dropped by 20260611000006)
 reviews / review_responses  — guest reviews + PM responses
 ```
+
+### Friction Forecaster
+```
+pre_flight_friction         — one scored row per turnover per day, written by
+                              cron-pre-flight-friction (~2am CT, fanned out one
+                              event per org), read by the /ops exceptions panel.
+                              UNIQUE(turnover_id) is the upsert conflict target.
+                              severity: none|high|critical, status:
+                              flagged|resolved|dismissed. score_breakdown ALWAYS
+                              carries every FrictionComponents key, INCLUDING
+                              `localEvents: 0` — that key is the seam a future
+                              local-events scorer plugs into, and dropping it while
+                              it is zero makes "scored at zero" and "predates the
+                              scorer" indistinguishable in stored history. Enforced
+                              by unit/guardrails/friction-local-events-seam.test.ts.
+                              A rescore does NOT overturn a PM decision unless the
+                              severity got WORSE (nextStatus() in the cron).
+                              GRADED against reality by apply_friction_grading()
+                              (20260913111019, cron-friction-grading ~6am CT):
+                              actual_severity/actual_was_late/actual_completion_rate
+                              + one-shot graded_at. EVERY row is graded, never
+                              filtered by predicted severity — a turnover scored
+                              'none' that ran late is a FALSE NEGATIVE, false
+                              confidence given to a PM, and that matters more than a
+                              false positive that merely annoyed them. Read
+                              friction_forecast_calibration, which leads with RECALL
+                              for that reason and is service-role only (it aggregates
+                              every tenant; never grant it to authenticated).
+                              The grading gate requires assignment_outcomes.scored_at,
+                              NOT just completed_at: was_late is written only by
+                              apply_crew_score_recompute's claim step, so a completed
+                              turnover carries was_late = NULL until that cron runs,
+                              and NULL through the grading CASE lands in the ELSE as
+                              'none' — permanently, since graded_at is one-shot.
+                              This loop produces EVIDENCE, never a weight change:
+                              nothing in lib/scoring/friction.ts is auto-adjusted
+properties.seasonal_profile — OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY,
+                              the normal case, means "derive the market profiles from
+                              the ZIP" via lib/scoring/seasonal-market.ts; a non-empty
+                              value is a deliberate human correction and wins, and
+                              ['none'] is a deliberate "no seasonality" DISTINCT from
+                              empty — without that gap the derivation silently
+                              overrules a human every night (same reason
+                              properties.sponsor_assignment_mode exists).
+                              ARRAY because a property can genuinely carry more than
+                              one peak season: a Gatlinburg cabin has real summer park
+                              tourism AND a real fall-foliage run, and a scalar forced
+                              a false either/or.
+                              The DESTINATION-TYPE axis. Spring break is the GEOGRAPHY
+                              axis and keys off properties.state instead — do NOT add a
+                              'spring_break' value here, that conflation was tried and
+                              reverted
+```
+
+**`summer_vacation` is ONE value for lake, coastal and summer-peaked mountain
+markets.** It replaced `summer_lake` + `coastal_summer` on 2026-09-12, which were
+never actually different — identical windows (05-25..09-05), identical weight
+(0.15), identical spring-break eligibility, so the split never affected behaviour.
+**Do not add a third summer type** (`summer_mountain` or similar); that redundancy
+is exactly what the consolidation removed, and collapsing the two is what finally
+made summer-peaked mountain markets expressible at all.
+
+**The seasonal profile is DERIVED FROM THE ZIP, at scoring time.** It describes a
+MARKET, not a house — a cabin in Breckenridge follows the ski calendar whether or
+not it is slopeside — so no PM is ever asked to classify a property, which is the
+whole promise of the product. Two rules:
+
+- **Resolved at read time, never written into the property on save.** Three paths
+  already create a property (`createProperty`, `lib/properties/upsert-normalized.ts`,
+  the geocoding backfill cron) and wiring a derivation into each is the drift this
+  codebase keeps paying for. Deriving at read time also means adding a market to the
+  table reaches every existing property on the next 2am run — no backfill, nothing
+  to remember.
+- **A ZIP maps to an ARRAY of profiles, and several legitimately map to two.**
+  The Smokies ZIPs (Gatlinburg/Pigeon Forge/Sevierville) carry
+  `['summer_vacation', 'fall_foliage']`. Where two of a property's windows cover the
+  same date, `matchedWindow()` takes the HIGHEST-scoring one and never the sum —
+  two profiles covering today describe one busy day, not two independent reasons
+  for it. `springBreakScore` does the same across profiles.
+- **`ZIP_SEASONAL_PROFILE` is keyed on FIVE-DIGIT ZIPs, never three-digit prefixes,
+  and is partial by design.** 804xx is Breckenridge AND suburban Boulder; a prefix
+  would score a Boulder rental as ski every day for four and a half months. An
+  unmapped ZIP returns `'none'` and contributes 0 — the honest absence. Adding a
+  market needs a real basis, never a guess from a neighbouring ZIP: a wrong profile
+  does not fail loudly, it scores a property against the wrong calendar for months.
+
+Two rules the scoring library carries that are not obvious from the schema:
+
+- **Never add an LLM call or a traffic/events vendor to this module.** It is a
+  pure deterministic scorer on purpose — auditable, free, and no "why did the
+  AI say 94%" support burden. Local events are deliberately NOT built rather
+  than faked with a PM-entered table: a mechanism nobody maintains is worse
+  than an honest absence, and the whole feature exists to take upkeep OFF the
+  PM. If it is ever built the mechanism is a paid demand-intelligence API or a
+  public schedule pull.
+- **`properties.state` and `properties.zip` are both free text**, and the live
+  columns prove it: `AL` and `Alabama` for the same state; `36850-3722`,
+  `TX 78703` and NULL in the ZIP column. `springBreakScore` normalises through
+  `normalizeStateCode()` and the ZIP lookup through `normalizeZip()` for exactly
+  that reason — either table keyed on the raw string silently scores 0 for most
+  of the real portfolio.
 
 ### Supporting
 ```
@@ -1096,6 +1223,28 @@ orphans its ledger row. `scripts/check-migration-ledger.mjs` now fails CI on
 either; run `pnpm run check:migration-ledger:prod` after any out-of-band
 apply.
 
+**"The SAME version the ledger recorded" is not the version you asked for.**
+The MCP `apply_migration` tool's `name` argument becomes the ledger row's
+`name` column — it does NOT become the row's `version`. `version` is always
+whatever timestamp the tool happened to run at, regardless of the filename
+prefix you're trying to match. Applying `20260916140000_audit_events_dedupe_
+key.sql` via `apply_migration(name: "audit_events_dedupe_key", ...)` records
+a ledger row at version `20260916132257` (or whatever the wall clock read),
+not `20260916140000` — which is a fresh, self-inflicted mismatch on both
+sides at once: a "local file with no ledger row" (the real filename) and a
+"ledger row with no local file" (the auto-assigned one), even though the
+schema change genuinely landed. This shipped live on 2026-09-16, twice in
+one sitting (5 migrations, on two projects), caught only because
+`check-migration-ledger.mjs` failed CI afterward. After any `apply_migration`
+call, immediately reconcile the row yourself:
+```sql
+UPDATE supabase_migrations.schema_migrations
+SET version = '20260916140000', name = '20260916140000_audit_events_dedupe_key'
+WHERE version = '<whatever apply_migration actually recorded>';
+```
+Don't trust that the call "recorded the right version" just because it
+returned success — query `supabase_migrations.schema_migrations` and check.
+
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
@@ -1255,11 +1404,29 @@ and gated crew counts behind a PM approval that product never wanted.
 
 The inspection report (phase 7) renders synchronously on the request path:
 several passes over the answers, then pdf-lib draw calls per row, then one
-`save()` that serialises the whole document, with no yield point in the chain
-and no `maxDuration` entry in `vercel.json`. So it carries explicit ceilings.
-They are recorded here because **a cap nobody remembers is a cap somebody
-raises**, and this document's entire claim is completeness — a history that
-silently stops partway through 2024 reads as the PM having given up.
+`save()` that serialises the whole document, with no yield point in the chain.
+So it carries explicit ceilings on the WORK — the table below — plus a
+`maxDuration` in `vercel.json` on each of its three routes, sized to what that
+ceiling can still cost in TIME: 60s for the single-inspection PM route, 90s
+for the whole-property history export (the heavier of the two — up to
+`MAX_REPORT_PHOTOS` sequential downloads on top of up to `MAX_ANSWER_ROWS`),
+30s for the owner-portal copy (no photos, ever — see `includePhotos` in
+`lib/inspections/report/model.ts`). Neither substitutes for the other: a row
+cap bounds how much work there is to do; `maxDuration` bounds how long the
+platform lets that work run before killing the function outright, mid-`save()`,
+with nothing in the response to explain it. The caps are recorded here because
+**a cap nobody remembers is a cap somebody raises**, and this document's
+entire claim is completeness — a history that silently stops partway through
+2024 reads as the PM having given up.
+
+Each of those sequential photo downloads is itself time-boxed —
+`INSPECTION_PHOTO_TIMEOUT_MS` (`lib/http/timeout.ts`) via an `AbortSignal` —
+and the download is wrapped in a `try/catch`, not just an `if (error)` check:
+storage-js's `download()` only converts a `StorageError` to `{ data: null,
+error }`; an abort or any other throw propagates. Without the catch, one hung
+object would not cost its own photograph, it would take the whole document
+down — the same failure this file's photo-loop comment says a bad photo must
+never cause.
 
 | Cap | Value | Where | What it bounds |
 |---|---|---|---|
@@ -2032,6 +2199,32 @@ meta-rule, prose is for judgment calls only.
   data deletion) actually calls `logAuditEvent(s)()` can't be enumerated
   mechanically — there's no fixed pattern distinguishing "this action is
   audit-worthy" from "this one isn't."
+- **RLS "manage" policies keyed off an opaque SECURITY DEFINER function.**
+  The standard `is_org_member(org_id, ARRAY[...])` policy (Critical Security
+  Rules #2) is correct and intentional, but it is opaque to the query
+  planner: Postgres cannot push a condition evaluated inside a SECURITY
+  DEFINER PL/pgSQL function down into an index scan the way it can a plain
+  inlined `org_id = ...` predicate, so a large table's RLS-filtered scan can
+  fall back to evaluating the function once per candidate row rather than
+  seeking directly via an index on `org_id`. Whether this actually matters
+  for a given table depends on its size, its existing indexes, and how
+  selective the rest of the query's WHERE clause is — a genuinely
+  table-specific, plan-dependent judgment call, not a pattern a text or AST
+  scanner can safely flag. A blanket lint of "every RLS-table call site must
+  inline an org filter alongside is_org_member()" would fire constantly
+  against legitimate ID-scoped writes/reads that are already correctly
+  protected by RLS alone (the exact class of false positive the IDOR item
+  above warns about) — there is no way to distinguish "this query would
+  benefit from an inlined org_id filter for planner reasons" from "this
+  query is already fine because RLS forces correctness regardless of the
+  plan Postgres chooses" without reading each call site's actual query plan
+  (`EXPLAIN ANALYZE`) against realistic data volume. Check this manually,
+  table by table, on the tables genuinely at scale (property_assets,
+  work_orders, assignment_outcomes, checklist_instance_items, bookings): run
+  `EXPLAIN ANALYZE` on that table's hot read path and confirm the plan is
+  seeking on an index that includes `org_id`, not sequentially scanning and
+  calling `is_org_member()`/`get_user_org_ids()` per row. Do NOT attempt an
+  automated lint for this one.
 
 ### Code Quality
 

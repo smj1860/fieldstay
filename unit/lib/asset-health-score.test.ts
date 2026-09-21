@@ -28,6 +28,35 @@ describe('calculateHealthScore', () => {
     vi.useRealTimers()
   })
 
+  // ── Elapsed time, not calendar-year subtraction ──────────────────────────
+  // This function used to compute age with its own getFullYear() subtraction,
+  // independently of lib/assets/age-basis.ts's assetAgeYears() — the same bug
+  // in a second place. An asset installed December 20 and scored January 5
+  // sixteen days later read as a full year old, decaying the Weibull curve
+  // as though a year of wear had actually happened.
+  it('does not decay the age score for a year that has not actually elapsed', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-05T12:00:00.000Z'))
+
+    const score = calculateHealthScore(
+      {
+        installation_date:          '2025-12-20',
+        manufacture_date:           null,
+        expected_lifespan_years:    2,
+        estimated_replacement_cost: 1000,
+      },
+      standards,
+      noRepairs,
+    )
+
+    // Sixteen days old against a 2-year lifespan reads as brand new: 100.
+    // The pre-fix calendar-year subtraction reported ageYears = 1, which
+    // would have scored 90 (weibullSurvivalFraction(1, 2, 2.5) rounds the
+    // age component to 50 instead of 60) — a full 10 points lost to a
+    // year that had not actually elapsed.
+    expect(score).toBe(100)
+  })
+
   it('returns the neutral default of 50 when installation_date is missing', () => {
     const score = calculateHealthScore(
       { installation_date: null,

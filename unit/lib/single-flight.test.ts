@@ -12,6 +12,7 @@ vi.mock('@/lib/redis', () => {
 
 import * as redisModule from '@/lib/redis'
 import { singleFlight, acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { REDIS_TIMEOUT_MS } from '@/lib/http/timeout'
 
 const redis = (redisModule as unknown as {
   __client: Record<'get' | 'set' | 'del', ReturnType<typeof vi.fn>>
@@ -26,7 +27,12 @@ const getRedisIfConfigured = redisModule.getRedisIfConfigured as ReturnType<type
 // ============================================================================
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // resetAllMocks, not clearAllMocks: clearAllMocks leaves a queued
+  // mockResolvedValueOnce() from a PRIOR test still pending if that test
+  // didn't end up consuming it (e.g. a code path that calls redis.set fewer
+  // times than the test queued values for) — a real isolation bug this file
+  // hit once a test needed two distinct redis.set() outcomes in sequence.
+  vi.resetAllMocks()
   getRedisIfConfigured.mockReturnValue(redis)
 })
 
@@ -91,6 +97,75 @@ describe('singleFlight', () => {
     expect(result).toBe('fallback')
     expect(produce).toHaveBeenCalledTimes(1)
     expect(redis.del).not.toHaveBeenCalled()   // still never held it
+  })
+
+  it('re-attempts the lock after the wait budget expires, taking over from a crashed winner', async () => {
+    // The original holder crashed (or released after a failed produce()) —
+    // its lock has since expired/gone, and a caller falling out of the wait
+    // loop can genuinely become the winner rather than joining every other
+    // waiter in an unconditional, un-coordinated produce().
+    redis.set
+      .mockResolvedValueOnce(null)  // the initial acquireLock — someone else has it
+      .mockResolvedValueOnce('OK')  // the retry after the wait budget — now free
+    const produce = vi.fn(async () => 'took-over')
+
+    const result = await singleFlight({
+      key: 'k', read: async () => null, produce, waitMs: 1, maxWaits: 2,
+    })
+
+    expect(result).toBe('took-over')
+    expect(produce).toHaveBeenCalledTimes(1)
+    // Took the lock on retry, so it must release it — unlike the case above
+    // where the lock stayed with someone else the whole time.
+    expect(redis.del).toHaveBeenCalledWith('k:lock')
+  })
+
+  it('still falls through to an unconditional produce() when the retry lock is also lost', async () => {
+    redis.set.mockResolvedValue(null) // every acquire attempt loses
+    const produce = vi.fn(async () => 'fallback')
+
+    const result = await singleFlight({
+      key: 'k', read: async () => null, produce, waitMs: 1, maxWaits: 2,
+    })
+
+    expect(result).toBe('fallback')
+    expect(produce).toHaveBeenCalledTimes(1)
+    expect(redis.del).not.toHaveBeenCalled() // never held any lock
+  })
+
+  it('jitters the wait delay so losers do not fall through in lockstep', async () => {
+    // Every caller on a FIXED wait schedule falls through to produce() within
+    // the same narrow window once the winner's produce() runs longer than the
+    // budget — a fresh, simultaneous stampede. Jitter spreads that out.
+    redis.set.mockResolvedValue(null)
+    const delays: number[] = []
+    const originalSetTimeout = globalThis.setTimeout
+    vi.stubGlobal('setTimeout', ((fn: () => void, ms?: number) => {
+      delays.push(ms ?? 0)
+      return originalSetTimeout(fn, 0) // resolve immediately so the test stays fast
+    }) as typeof setTimeout)
+
+    await singleFlight({
+      key: 'k', read: async () => null, produce: async () => 'v', waitMs: 100, maxWaits: 5,
+    })
+
+    vi.unstubAllGlobals()
+
+    // acquireLock()'s own internal withTimeout() also calls setTimeout — once
+    // per acquire attempt (the initial one plus the retry-acquire between the
+    // two wait-and-poll cycles), at REDIS_TIMEOUT_MS — a different mechanism
+    // (a race against a slow Redis) than the jittered retry-wait this test is
+    // exercising. Excluded here rather than asserted on, since it isn't what
+    // "jitters the wait delay" is about.
+    const waitDelays = delays.filter((d) => d !== REDIS_TIMEOUT_MS)
+
+    // 5 waits at a fixed 100ms would all equal 100 — jitter means they don't.
+    expect(new Set(waitDelays).size).toBeGreaterThan(1)
+    // And every one stays within the documented 100-150ms jitter range.
+    for (const d of waitDelays) {
+      expect(d).toBeGreaterThanOrEqual(100)
+      expect(d).toBeLessThanOrEqual(150)
+    }
   })
 
   it('releases the lock even when produce throws', async () => {

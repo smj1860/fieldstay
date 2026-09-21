@@ -33,6 +33,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { runIdStartedAt, runDurationMs } from '@/lib/inngest/run-id'
+import { reportError }         from '@/lib/observability/report-error'
 
 /**
  * Loop breaker.
@@ -43,41 +44,118 @@ import { runIdStartedAt, runDurationMs } from '@/lib/inngest/run-id'
  */
 const SELF_ID = 'job-run-recorder'
 
+/**
+ * Batching config (2026-09-16 scalability pass).
+ *
+ * EVERY function run in the platform emits one `inngest/function.finished`,
+ * so at scale this was a per-EXECUTION single-row upsert funneled through one
+ * subscriber at `concurrency: { limit: 10 }` — a bottleneck sized for the
+ * traffic of a much smaller platform. Batching collects up to
+ * BATCH_MAX_SIZE finished events (or whatever arrives within BATCH_TIMEOUT,
+ * whichever comes first) into ONE invocation, written with ONE multi-row
+ * upsert instead of one row-at-a-time round trip per completion.
+ *
+ * 50, not Inngest's own maxSize ceiling of 100: half the ceiling leaves
+ * headroom against a burst that arrives faster than 100 finished-events can
+ * be batched (e.g. a platform-wide fan-out completing near-simultaneously)
+ * without every batch immediately maxing out and needing a second one right
+ * behind it. 5s timeout keeps the ledger's staleness bounded for the common
+ * case (a handful of completions trickling in) rather than waiting the full
+ * window every time.
+ *
+ * Safe to batch specifically BECAUSE this function's only side effect is the
+ * upsert below, which the guard just above and the `.filter()`/`.push()` loop
+ * make safe to apply to N events in one pass: onConflict/ignoreDuplicates
+ * already made a single row idempotent against redelivery, and a multi-row
+ * upsert with the same conflict target is idempotent per-row identically —
+ * Postgres's ON CONFLICT DO NOTHING applies row-by-row within the statement,
+ * not to the batch as a whole, so one already-recorded run inside a batch
+ * does not block the others in it.
+ */
+const BATCH_MAX_SIZE = 50
+const BATCH_TIMEOUT  = '5s' as const
+
+/**
+ * The shape of one `inngest/function.finished` event. Declared locally and
+ * cast to at the destructure below because the SDK's own `events` (plural)
+ * context field is typed via `GetContextEvents<TClient, TTriggers, true>` —
+ * the `true` excludes INTERNAL events, and `inngest/function.finished` is
+ * exactly that, so its element type resolves to `never` for a batched
+ * function triggered on it. The singular `event` field (used before this
+ * function batched) does not pass that flag and typed correctly; only the
+ * plural one has this gap. Purely a type-level limitation — the SDK still
+ * delivers the real batch at runtime regardless of what TypeScript can prove
+ * about it here.
+ */
+interface FinishedEvent {
+  ts?:  number
+  data: {
+    function_id: string
+    run_id:      string
+    error?:      { message?: string; name?: string; stack?: string }
+  }
+}
+
+interface SystemJobRunInsert {
+  function_id:   string
+  function_name: string
+  run_id:        string
+  status:        'succeeded' | 'failed'
+  attempt:       number
+  started_at:    string
+  finished_at:   string
+  duration_ms:   number | null
+  error_message: string | null
+  metadata:      Record<string, never>
+}
+
 export const jobRunRecorder = inngest.createFunction(
   {
     id:      SELF_ID,
     name:    'System: Record Job Run',
     // One retry. A lost heartbeat row is a monitoring gap, not a data loss,
     // and retrying hard against a struggling database to record that something
-    // else struggled is the wrong trade.
+    // else struggled is the wrong trade. Retrying re-sends the WHOLE batch,
+    // which the idempotent upsert makes a safe no-op for whatever already
+    // landed.
     retries: 1,
-    // Every function run in the platform passes through here, so this is the
-    // one place a burst genuinely needs a ceiling.
+    batchEvents: { maxSize: BATCH_MAX_SIZE, timeout: BATCH_TIMEOUT },
+    // Every function run in the platform passes through here — but now BATCHED
+    // (see above), so this ceiling covers up to concurrency x BATCH_MAX_SIZE
+    // completions in flight at once rather than concurrency alone. Unchanged
+    // from its pre-batching value: batching itself is what relieves the
+    // bottleneck the audit flagged, by cutting the NUMBER of invocations
+    // needing a concurrency slot in the first place, not by needing more slots.
     concurrency: { limit: 10 },
   },
   { event: 'inngest/function.finished' as const },
-  async ({ event, step, logger }) => {
-    const data = event.data ?? {}
-    const functionId = String(data.function_id ?? '')
+  async ({ events, step, logger }) => {
+    // See FinishedEvent's own comment for why this cast is necessary.
+    const batch = events as unknown as FinishedEvent[]
+    const rows: SystemJobRunInsert[] = []
+    let skippedSelf  = 0
+    let skippedNoId  = 0
 
-    // Inngest reports the fully-qualified id (`fieldstay-<id>`); the registry
-    // in watchdog.ts is written in terms of the bare ids the functions declare,
-    // so normalize once here rather than at every read site.
-    const bareId = functionId.replace(/^fieldstay-/, '')
+    for (const event of batch) {
+      const data = event.data ?? {}
+      const functionId = String(data.function_id ?? '')
 
-    if (bareId === SELF_ID || functionId === SELF_ID) {
-      // Recording our own completion would emit another finished event and
-      // recurse without bound.
-      return { skipped: true, reason: 'self' }
-    }
+      // Inngest reports the fully-qualified id (`fieldstay-<id>`); the registry
+      // in watchdog.ts is written in terms of the bare ids the functions
+      // declare, so normalize once here rather than at every read site.
+      const bareId = functionId.replace(/^fieldstay-/, '')
 
-    if (!functionId) {
-      logger.warn('[job-run-recorder] finished event with no function_id')
-      return { skipped: true, reason: 'no_function_id' }
-    }
+      if (bareId === SELF_ID || functionId === SELF_ID) {
+        // Recording our own completion would emit another finished event and
+        // recurse without bound.
+        skippedSelf++
+        continue
+      }
 
-    await step.run('record-run', async () => {
-      const supabase = createServiceClient({ system: 'inngest:job-run-recorder' })
+      if (!functionId) {
+        skippedNoId++
+        continue
+      }
 
       const error = data.error as { message?: string; stack?: string } | undefined
       const runId = String(data.run_id ?? '')
@@ -103,48 +181,80 @@ export const jobRunRecorder = inngest.createFunction(
       const startedAt  = runIdStartedAt(runId, finishedAt.getTime())
       const durationMs = runDurationMs(startedAt, finishedAt)
 
+      rows.push({
+        function_id:   bareId,
+        function_name: bareId,
+        run_id:        runId,
+        // 'succeeded', NOT 'completed'. system_job_runs_status_check
+        // allows exactly ('started','succeeded','failed'), and the wrong
+        // literal is rejected per-row with 23514 — which this function
+        // logs rather than throws, so it failed SILENTLY in production
+        // for 47 minutes and left the ledger empty while the recorder
+        // looked healthy. A mocked Supabase cannot enforce a CHECK
+        // constraint, so the unit test passed on 'completed' too.
+        status:        error ? 'failed' : 'succeeded',
+        attempt:       0,
+        // startedAt is null for a run id that is not a decodable ULID.
+        // Falling back to finishedAt keeps the NOT NULL column satisfied
+        // and makes the degenerate case look exactly like the old
+        // behaviour (zero-length run) rather than inventing a duration.
+        started_at:    (startedAt ?? finishedAt).toISOString(),
+        finished_at:   finishedAt.toISOString(),
+        duration_ms:   durationMs,
+        // Truncated: this column is read by a human triaging an outage,
+        // and a full stack per row would make the table the outage.
+        error_message: error?.message ? String(error.message).slice(0, 1000) : null,
+        metadata:      {},
+      })
+    }
+
+    if (skippedNoId > 0) {
+      logger.warn(`[job-run-recorder] ${skippedNoId} finished event(s) with no function_id`)
+    }
+
+    if (rows.length === 0) {
+      return { recorded: 0, skippedSelf, skippedNoId }
+    }
+
+    await step.run('record-runs', async () => {
+      const supabase = createServiceClient({ system: 'inngest:job-run-recorder' })
+
       const { error: insertError } = await supabase
         .from('system_job_runs')
         .upsert(
-          {
-            function_id:   bareId,
-            function_name: bareId,
-            run_id:        runId,
-            // 'succeeded', NOT 'completed'. system_job_runs_status_check
-            // allows exactly ('started','succeeded','failed'), and the wrong
-            // literal is rejected per-row with 23514 — which this function
-            // logs rather than throws, so it failed SILENTLY in production
-            // for 47 minutes and left the ledger empty while the recorder
-            // looked healthy. A mocked Supabase cannot enforce a CHECK
-            // constraint, so the unit test passed on 'completed' too.
-            status:        error ? 'failed' : 'succeeded',
-            attempt:       0,
-            // startedAt is null for a run id that is not a decodable ULID.
-            // Falling back to finishedAt keeps the NOT NULL column satisfied
-            // and makes the degenerate case look exactly like the old
-            // behaviour (zero-length run) rather than inventing a duration.
-            started_at:    (startedAt ?? finishedAt).toISOString(),
-            finished_at:   finishedAt.toISOString(),
-            duration_ms:   durationMs,
-            // Truncated: this column is read by a human triaging an outage,
-            // and a full stack per row would make the table the outage.
-            error_message: error?.message ? String(error.message).slice(0, 1000) : null,
-            metadata:      {},
-          },
+          rows,
           // Inngest may deliver the same finished event more than once. The
           // table's unique index is on (run_id, function_id) — NOT run_id
           // alone — so the conflict target must name both columns or Postgres
-          // rejects the whole statement with 42P10.
+          // rejects the whole statement with 42P10. ON CONFLICT DO NOTHING
+          // applies per-row within a multi-row upsert, so a duplicate among
+          // these `rows` never blocks the rest of the batch from landing.
           { onConflict: 'run_id,function_id', ignoreDuplicates: true },
         )
 
       if (insertError) {
-        // Logged, never thrown. This function exists to observe the platform;
-        // it must not become a source of failures in it.
-        logger.error(`[job-run-recorder] insert failed: ${insertError.message}`)
+        // Logged AND reported, never thrown. This function exists to observe
+        // the platform; it must not become a source of failures in it — but a
+        // logger.error() call alone was exactly the 47-minute production gap
+        // this file's own history records above (the 'completed'/'succeeded'
+        // literal mismatch): Axiom-only logging left the ledger silently
+        // empty while the recorder looked healthy, because nothing was
+        // watching Inngest's own function logs for a system cron nobody
+        // thought to check. reportError() is what makes a *second* failure of
+        // this insert — schema drift, an RLS change, the table itself going
+        // away — visible without a person happening to notice the gap, the
+        // same failure mode this whole module was built to close for every
+        // OTHER cron. 'warning', matching this module's own framing: a lost
+        // heartbeat row is a monitoring gap, not data loss.
+        logger.error(`[job-run-recorder] batch insert failed for ${rows.length} row(s): ${insertError.message}`)
+        reportError(insertError, {
+          site:  'inngest.job-run-recorder',
+          level: 'warning',
+          extra: { batchSize: rows.length },
+        })
       }
     })
 
-    return { recorded: bareId }
+    return { recorded: rows.length, skippedSelf, skippedNoId }
   }
 )

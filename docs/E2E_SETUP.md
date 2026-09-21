@@ -1,8 +1,9 @@
 # E2E Merge Gate — Setup Runbook
 
-Turns the Playwright suite (`e2e/specs/*`, 27 spec files) into a real merge
-gate, per the launch-readiness audit's B2 finding and the 2026-07-22 audit's
-recommendation #2.
+Turns the Playwright suite (`e2e/specs/*`, 30 spec files as of 2026-09-17 —
+this count grows; check `ls e2e/specs/ | wc -l` rather than trusting it as it
+ages) into a real merge gate, per the launch-readiness audit's B2 finding and
+the 2026-07-22 audit's recommendation #2.
 
 **Current state:** `.github/workflows/ci.yml`'s `e2e` job is a *self-arming
 gate*. With no secrets configured it skips the suite and stamps every CI run

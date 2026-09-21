@@ -319,8 +319,9 @@ Subscription lifecycle managed via webhooks. The app reads plan/status from the 
 A2P 10DLC messaging for guest SMS delivery. Webhook endpoint: `/api/webhooks/telnyx`.
 Signature verification uses ed25519 (`TELNYX_WEBHOOK_PUBLIC_KEY` env var). Handles
 STOP/START/HELP keywords with TCPA-compliant consent writes to
-`guidebook_guest_sms_optins`. All sends are gated on `SMS_ENABLED=true` — do not
-enable until 10DLC campaign verification clears.
+`guidebook_guest_sms_optins`. All sends are gated on `SMS_ENABLED` — `true` in
+production since 2026-08-28 (10DLC verified); the gate stays regardless, to keep
+previews and local runs from texting real guests.
 
 ### Tomorrow.io (Weather)
 
@@ -328,12 +329,13 @@ Real-time and forecast weather used by the guidebook morning/evening SMS crons.
 Rain probability and temperature determine which sponsor slot type fires and whether
 a rain-alert override takes precedence over a dinner recommendation.
 
-### Hostaway (PMS) — DISABLED
+### Hostaway (PMS)
 
-API-key auth (not OAuth). Property and booking sync adapter built at
-`lib/inngest/functions/hostaway/`, but fully unregistered as of 2026-07-25 —
-not reachable anywhere in the app. See CLAUDE_INTEGRATIONS.md's "Hostaway
-Integration" section for why and the re-enable checklist.
+API-key auth (not OAuth). Re-enabled and fully live at
+`lib/inngest/functions/hostaway/` — property/booking sync, revenue posting,
+and a daily reservation reconcile cron. No webhook endpoint is registered
+with Hostaway, so updates sync once daily rather than in real time. See
+CLAUDE_INTEGRATIONS.md's "Hostaway Integration" section for details.
 
 ### Dexie.js ↔ Supabase
 

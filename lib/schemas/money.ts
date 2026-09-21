@@ -56,3 +56,22 @@ export function parseMoneyAmount(
   if (parsed.success) return { ok: true, amount: parsed.data }
   return { ok: false, error: parsed.error.issues[0]?.message ?? 'Enter a valid amount.' }
 }
+
+/**
+ * Same validation, but owns the string→number coercion so a caller reading a
+ * raw form field never has to do it themselves.
+ *
+ * `Number.parseFloat` stops at the first non-numeric character rather than
+ * rejecting the whole string — `"100abc"` and `"100,000"` both silently
+ * become the number `100`, a value MoneyAmountSchema then happily accepts as
+ * valid even though the original input was garbage. Rejecting any string that
+ * isn't a plain decimal BEFORE that lossy coercion is what makes "Enter a
+ * valid amount" actually fire for this class of input.
+ */
+export function parseMoneyAmountFromString(
+  raw: string,
+  schema: z.ZodType<number> = MoneyAmountSchema,
+): { ok: true; amount: number } | { ok: false; error: string } {
+  if (!/^\d+(\.\d+)?$/.test(raw.trim())) return { ok: false, error: 'Enter a valid amount.' }
+  return parseMoneyAmount(Number.parseFloat(raw), schema)
+}

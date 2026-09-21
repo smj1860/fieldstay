@@ -171,15 +171,33 @@ function buildChildren(
   parent: InspectionFormItem,
   byParent: ReadonlyMap<string, InspectionFormItem[]>,
   inherit: ParentInstance = {},
+  // Cycle guard, not a depth cap: nothing in the seed pipeline can currently
+  // produce more than one level (a "child" can only reference a ROOT — see
+  // scripts/seed-inspection-forms.ts), but parent_item_id itself carries no
+  // constraint against a live edit or a corrupted form_snapshot creating a
+  // loop among children that never touches a root. A corrupt snapshot must
+  // degrade (drop the cyclic branch), never stack-overflow rendering a
+  // historical report.
+  ancestorIds: ReadonlySet<string> = new Set(),
 ): ResolvedItem[] {
+  const seen = new Set(ancestorIds).add(parent.id)
+
   return (byParent.get(parent.id) ?? [])
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order)
+    .filter((child) => !seen.has(child.id))
     .map((child) => ({
       formItem: child,
       ...(inherit.asset       !== undefined && { asset: inherit.asset }),
       ...(inherit.repeatIndex !== undefined && { repeatIndex: inherit.repeatIndex }),
-      children: [],
+      // Recurse rather than hardcoding []: a child can have its own children
+      // (a grandchild follow-up), and this used to silently drop any item
+      // nested more than one level deep — present in the flat item array,
+      // never rendered, never counted toward progress, and never reachable
+      // by the Review gate even when marked required. Same `inherit` at every
+      // depth: a grandchild belongs to the SAME asset/repeat instance as its
+      // parent and grandparent, matching the ParentInstance doc comment above.
+      children: buildChildren(child, byParent, inherit, seen),
     }))
 }
 
@@ -192,8 +210,20 @@ function buildChildren(
  * inspection — the one moment there is no way to recover. Matched by the
  * `inspection_items_value_number_range` CHECK (20260823001839) so a write that
  * did not come through here is bounded too.
+ *
+ * Also bounded by `submit-payload.ts`'s MAX_ITEMS at the OTHER end: at 999,
+ * the Safety form's 5-member extinguisher group alone produces
+ * 999 * 5 = 4,995 rows, which together with the rest of that form's own ~60
+ * items exceeded MAX_ITEMS — so a legitimately-filled walk (the inspector
+ * doing exactly what the UI invited, up to the code's own accepted maximum)
+ * was rejected outright by the submit boundary, dead-lettering a completed
+ * walk whose answers exist nowhere else. 400 leaves the largest form's
+ * worst case comfortably under MAX_ITEMS with margin to spare; the joint
+ * relationship is asserted by
+ * unit/guardrails/inspection-item-caps-consistent.test.ts so the two limits
+ * can never silently drift apart again.
  */
-export const MAX_REPEAT_INSTANCES = 999
+export const MAX_REPEAT_INSTANCES = 400
 
 function buildRepeatGroup(
   members:  InspectionFormItem[],
@@ -223,6 +253,17 @@ function buildRepeatGroup(
  * every keystroke without a cache, and what makes the whole thing testable
  * without a database or a browser.
  */
+/**
+ * ACTIVE assets only, and just their types. Shared by resolveFormPages (for
+ * the section/sweep gates) and findOutstanding (for the na_asset_type ledger
+ * check below), so both agree on what "active" means from one place — a
+ * replaced water heater must not resurrect the well section OR let an N/A
+ * about a water heater pass unchallenged.
+ */
+function activeAssetTypeSet(assets: readonly PropertyAsset[]): ReadonlySet<string> {
+  return new Set(assets.filter((a) => a.is_active).map((a) => a.asset_type))
+}
+
 export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   const counts = input.countsByItemId ?? {}
 
@@ -230,7 +271,7 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   // water heater must not resurrect the well section or generate a question
   // about itself.
   const activeAssets = input.assets.filter((a) => a.is_active)
-  const activeTypes  = new Set(activeAssets.map((a) => a.asset_type))
+  const activeTypes  = activeAssetTypeSet(input.assets)
 
   const index      = indexItems(input.items)
   const sweepable  = assetsForGenericSweep(activeAssets, coveredAssetTypes(input.items))
@@ -306,8 +347,14 @@ interface ItemIndex {
 function indexItems(items: InspectionFormItem[]): ItemIndex {
   const index: ItemIndex = { bySection: new Map(), byParent: new Map(), byRepeatSource: new Map() }
 
+  // Mutates the existing bucket array in place rather than spreading a new one
+  // per insertion. `[...(map.get(key) ?? []), item]` copies the whole bucket on
+  // EVERY item pushed to it — O(n²) for a section/parent with n items — where a
+  // large safety form's biggest section is exactly the shape that pays for it.
   const push = (map: Map<string, InspectionFormItem[]>, key: string, item: InspectionFormItem) => {
-    map.set(key, [...(map.get(key) ?? []), item])
+    const bucket = map.get(key)
+    if (bucket) bucket.push(item)
+    else map.set(key, [item])
   }
 
   for (const item of items) {
@@ -330,8 +377,18 @@ function indexItems(items: InspectionFormItem[]): ItemIndex {
  * the generic sweep ask about them a second time.
  */
 function coveredAssetTypes(items: InspectionFormItem[]): ReadonlySet<string> {
+  // Root items only — a conditionally-hidden child (parent_item_id set) or a
+  // repeat-group template member (repeat_source_item_id set) carrying the
+  // same asset_type as an always-visible root would otherwise count exactly
+  // the same as that root, even though it may never actually render at a
+  // given property. Every asset type a child/member carries today is also
+  // carried by a root covering the same type, so this isn't live, but nothing
+  // enforces that relationship for the next form author who adds one without
+  // the other.
   return new Set(
-    items.filter((i) => i.asset_type).map((i) => i.asset_type as string),
+    items
+      .filter((i) => i.asset_type && !i.parent_item_id && !i.repeat_source_item_id)
+      .map((i) => i.asset_type as string),
   )
 }
 
@@ -352,7 +409,16 @@ function resolveRoot(root: InspectionFormItem, ctx: ResolveCtx): ResolvedItem[] 
   const members = ctx.index.byRepeatSource.get(root.id)
   if (!members?.length) return [self]
 
-  const count = Math.min(MAX_REPEAT_INSTANCES, Math.max(0, Math.floor(ctx.counts[root.id] ?? 0)))
+  // Math.max/Math.min propagate NaN rather than ignoring it — a stray NaN
+  // count (a text field parsed from bad input, a corrupted local draft) would
+  // otherwise flow through untouched and zero the whole repeat group with no
+  // signal, the opposite of "ask again rather than silently drop" elsewhere
+  // in this module. This function is re-run on every change (see header), so
+  // the degrade stays silent rather than logging on every keystroke — a
+  // caller that wants to notice a persistently NaN count can inspect
+  // ctx.counts itself.
+  const rawCount = ctx.counts[root.id] ?? 0
+  const count = Number.isFinite(rawCount) ? Math.min(MAX_REPEAT_INSTANCES, Math.max(0, Math.floor(rawCount))) : 0
   return [self, ...buildRepeatGroup(members, count, ctx.index.byParent)]
 }
 
@@ -421,7 +487,7 @@ export interface OutstandingItem {
   sectionName: string
   itemKey:     string
   prompt:      string
-  reason:      'unanswered' | 'fail_needs_description' | 'needs_photo'
+  reason:      'unanswered' | 'fail_needs_description' | 'needs_photo' | 'na_contradicts_ledger'
   repeatIndex?: number
   assetId?:     string
 }
@@ -472,17 +538,26 @@ export function visibleNodes(
 ): VisibleNode[] {
   const out: VisibleNode[] = []
 
-  for (const item of page.items) {
-    out.push({ item, depth: 0 })
+  // Recursive, not a fixed two levels: a child can have its own children (a
+  // grandchild follow-up — see buildChildren in resolve-form.ts), and each
+  // one's visibility depends on ITS OWN direct parent's answer, not always
+  // the root's. A hardcoded single loop over `item.children` used to make a
+  // grandchild's condition unreachable even after buildChildren started
+  // resolving it, since nothing ever walked past depth 1 to check it.
+  const walk = (item: ResolvedItem, depth: number) => {
+    out.push({ item, depth })
 
-    // A child counts only when its condition is ACTUALLY MET, which needs the
-    // parent's answer — so visibility is decided here, where that answer is.
+    // A child counts only when its condition is ACTUALLY MET, which needs its
+    // direct parent's answer — so visibility is decided here, where that
+    // answer is.
     const parentResult = answers[answerKey(item)]?.result ?? null
     for (const child of item.children) {
       if (child.formItem.show_when && child.formItem.show_when !== parentResult) continue
-      out.push({ item: child, depth: 1 })
+      walk(child, depth + 1)
     }
   }
+
+  for (const item of page.items) walk(item, 0)
 
   return out
 }
@@ -490,12 +565,22 @@ export function visibleNodes(
 export function findOutstanding(
   pages: ResolvedPage[],
   answers: Readonly<Record<string, AnswerState>>,
+  /**
+   * The property's live asset ledger, for the na_asset_type check below.
+   * Optional and defaulting to none rather than required, so a caller that
+   * genuinely has no asset data (there isn't one today, but a defensive
+   * default costs nothing) degrades to skipping the check rather than
+   * throwing — the same "an absent signal must not crash" posture the rest
+   * of this module takes toward a corrupted snapshot.
+   */
+  assets: readonly PropertyAsset[] = [],
 ): OutstandingItem[] {
   const out: OutstandingItem[] = []
+  const activeTypes = activeAssetTypeSet(assets)
 
   pages.forEach((page, pageIndex) => {
     for (const { item: node } of visibleNodes(page, answers)) {
-      const reason = outstandingReason(node, answers[answerKey(node)])
+      const reason = outstandingReason(node, answers[answerKey(node)], activeTypes)
       if (!reason) continue
       out.push({
         pageIndex,
@@ -556,8 +641,9 @@ function photoSatisfied(answer: AnswerState | undefined): boolean {
 }
 
 function outstandingReason(
-  node:   ResolvedItem,
-  answer: AnswerState | undefined,
+  node:        ResolvedItem,
+  answer:      AnswerState | undefined,
+  activeTypes: ReadonlySet<string>,
 ): OutstandingItem['reason'] | null {
   const def = node.formItem
 
@@ -565,6 +651,16 @@ function outstandingReason(
   // function only judges an item it has already been told is on screen.
   if (def.is_required && !hasAnswer(def, answer)) {
     return def.response_type === 'photo' ? 'needs_photo' : 'unanswered'
+  }
+
+  // §12.3 / INSPECTIONS_SPEC.md "na_asset_type": "N/A — no pool at this
+  // property" is exactly the assertion the person who benefits from
+  // skipping the pool section is the one making. Where the item names an
+  // asset type FieldStay already tracks, an N/A the ledger contradicts is
+  // rejected here rather than taken on trust — this was the documented
+  // point of the column and had no enforcement anywhere before this.
+  if (answer?.result === 'na' && def.na_asset_type && activeTypes.has(def.na_asset_type)) {
+    return 'na_contradicts_ledger'
   }
 
   // §5: "A description is REQUIRED on fail" — it becomes the work order's

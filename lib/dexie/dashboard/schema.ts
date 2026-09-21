@@ -95,6 +95,16 @@ export interface DashboardPendingPhotoRow {
   orgId:      string
   /** Which queued write this photo belongs to, by `targetId`. */
   targetId:   string
+  /**
+   * The `inspection_answers` row this photo is attached to. Required to
+   * discard a dead-lettered photo CORRECTLY — deleting only this row (and not
+   * also clearing the answer's `photoPath`) leaves the answer pointing at a
+   * key that will never exist in Storage, and the blob itself unreachable by
+   * any code path (drainInspectionPhotos only iterates this table). Without
+   * this field a discard handler has no way to call discardInspectionPhoto()
+   * at all, correctly or otherwise.
+   */
+  answerRowId: string
   blobKey:    string
   mimeType:   string
   status:     'pending' | 'uploaded'
@@ -327,6 +337,22 @@ export class FieldStayDashboardDexie extends Dexie {
     this.version(5).stores({
       work_orders:       'id, org_id, property_id, status',
       open_wo_concerns:  'id, propertyId, [propertyId+concernKey]',
+    })
+
+    // v6 — index `status` on the photo queue.
+    //
+    // Uploaded rows are only ever STATUS-FLIPPED, never deleted (see the
+    // header comment in inspection-photos.ts — the UI needs to tell "no
+    // photo" from "photo taken, already sent"), so this table grows without
+    // bound over a device's lifetime. drainInspectionPhotos() used to read
+    // it with an unfiltered `.toArray()` on every photo capture and every
+    // reconnect — a full scan of every photo this device has ever queued,
+    // including ones long since uploaded and forgotten. `status` is what
+    // actually separates the actionable rows from the rest, so it is what
+    // needs the index; `pruneUploadedPhotoRows()` (inspection-photos.ts)
+    // keeps the table itself from growing forever in the first place.
+    this.version(6).stores({
+      pending_photo_uploads: 'id, targetId, failed, status',
     })
   }
 }

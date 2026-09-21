@@ -10,6 +10,8 @@ import { DashboardCacheGuard } from '@/lib/dexie/dashboard/cache-guard'
 import { InspectionWarmer } from '@/lib/dexie/dashboard/inspection-warmer'
 import { MaintenanceBoardWarmer } from '@/lib/dexie/dashboard/maintenance-board-warmer'
 import { DashboardSyncBanner } from './_components/dashboard-sync-banner'
+import { OfflineCacheCapNotice } from './_components/offline-cache-cap-notice'
+import { WidgetErrorBoundary } from '@/components/widget-error-boundary'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { SupportChatWidget } from '@/components/support/support-chat-widget'
@@ -203,7 +205,15 @@ export default async function DashboardLayout({
       <DashboardCacheGuard userId={user.id} orgId={membership.org_id} />
       <InspectionWarmer userId={user.id} orgId={membership.org_id} />
       <MaintenanceBoardWarmer userId={user.id} orgId={membership.org_id} />
-      <DashboardSyncBanner userId={user.id} orgId={membership.org_id} />
+      {/* A best-effort status widget on every dashboard screen — its own
+          render/query failure must cost one missing banner, not the whole
+          page. See components/widget-error-boundary.tsx. */}
+      <WidgetErrorBoundary site="dashboard.sync-banner">
+        <DashboardSyncBanner userId={user.id} orgId={membership.org_id} />
+      </WidgetErrorBoundary>
+      <WidgetErrorBoundary site="dashboard.offline-cache-cap-notice">
+        <OfflineCacheCapNotice userId={user.id} orgId={membership.org_id} />
+      </WidgetErrorBoundary>
       <DashboardShell
         role={membership.role}
         orgName={org.name || 'FieldStay'}

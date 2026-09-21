@@ -9,9 +9,12 @@ import Link                              from 'next/link'
 import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
+import { useCrewT, formatActiveAssignments } from '@/lib/crew/i18n'
 import { distanceMiles }                 from '@/lib/geocoding'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 import { Dialog }                        from '@/components/ui/Dialog'
+import { LanguageToggle }                from './_components/language-toggle'
+import type { CrewLocale } from '@/types/database'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -59,14 +62,11 @@ function crewStatusPillClass(status: string): string {
   return CREW_STATUS_PILL_CLASS[status] ?? 'bg-raised-themed text-secondary-themed'
 }
 
-const CREW_STATUS_LABEL: Record<string, string> = {
-  assigned:    'Assigned',
-  in_progress: 'In Progress',
-}
-
 /** Falls back to the raw status so an unmapped one is visible, not blank. */
-function crewStatusLabel(status: string): string {
-  return CREW_STATUS_LABEL[status] ?? status
+function crewStatusLabel(status: string, t: ReturnType<typeof useCrewT>): string {
+  if (status === 'assigned') return t('statusAssigned')
+  if (status === 'in_progress') return t('statusInProgress')
+  return status
 }
 
 function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string, PropertyRow>) {
@@ -87,6 +87,7 @@ function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string,
 }
 
 function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow }) {
+  const translate = useCrewT()
   const checkout = new Date(t.checkout_datetime)
   const isUrgent = t.priority === 'urgent' || t.priority === 'high'
 
@@ -104,7 +105,7 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
     >
       <div className="flex items-start justify-between gap-1 mb-1.5">
         <p className="font-bold text-primary-themed text-sm leading-tight">
-          {property?.name ?? 'Property'}
+          {property?.name ?? translate('propertyFallback')}
         </p>
         {isUrgent && <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />}
       </div>
@@ -121,7 +122,7 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
           'text-xs font-semibold px-2 py-0.5 rounded-full',
           crewStatusPillClass(t.status),
         )}>
-          {crewStatusLabel(t.status)}
+          {crewStatusLabel(t.status, translate)}
         </span>
         <span className="text-xs text-secondary-themed">
           {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
@@ -142,6 +143,7 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
 }
 
 function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: PropertyRow }) {
+  const translate = useCrewT()
   const fullAddress = [property?.address, property?.city, property?.state]
     .filter(Boolean).join(', ')
 
@@ -158,7 +160,7 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
           {wo.title}
         </p>
         <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">
-          WO
+          {translate('woBadge')}
         </span>
       </div>
       {property?.name && (
@@ -175,11 +177,11 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
           'text-xs font-semibold px-2 py-0.5 rounded-full',
           crewStatusPillClass(wo.status),
         )}>
-          {crewStatusLabel(wo.status)}
+          {crewStatusLabel(wo.status, translate)}
         </span>
         {wo.scheduled_date && (
           <span className="text-xs text-muted-themed">
-            Scheduled {new Date(wo.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {translate('scheduledPrefix')} {new Date(wo.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </span>
         )}
       </div>
@@ -187,10 +189,10 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
   )
 }
 
-function EmptyColumn({ label }: { label: string }) {
+function EmptyColumn({ message }: Readonly<{ message: string }>) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
-      <p className="text-xs text-muted-themed">No {label.toLowerCase()}</p>
+      <p className="text-xs text-muted-themed">{message}</p>
     </div>
   )
 }
@@ -243,17 +245,17 @@ const noopSubscribe = () => () => {}
 function buildBannerMessage(
   activeCount: number,
   health: { everSynced: boolean; lastError: string | null } | undefined,
+  locale: CrewLocale,
+  t: ReturnType<typeof useCrewT>,
 ): string {
   if (activeCount > 0) {
-    return `You have ${activeCount} active assignment${activeCount !== 1 ? 's' : ''}.`
+    return formatActiveAssignments(locale, activeCount)
   }
-  if (!health) return 'Loading your assignments…'
+  if (!health) return t('dashboardLoading')
   if (!health.everSynced) {
-    return health.lastError
-      ? "Couldn't load your assignments — check your connection and pull to refresh."
-      : 'Loading your assignments…'
+    return health.lastError ? t('dashboardLoadError') : t('dashboardLoading')
   }
-  return "You're all caught up — no active assignments."
+  return t('dashboardCaughtUp')
 }
 
 export default function CrewDashboardPage() {
@@ -262,8 +264,9 @@ export default function CrewDashboardPage() {
   const isMounted = useSyncExternalStore(noopSubscribe, () => true, () => false)
   const [showFeedback, setShowFeedback] = useState(false)
 
-  const { crewName } = useCrewContext()
+  const { crewName, crewLocale } = useCrewContext()
   const firstName    = crewName.split(' ')[0] ?? crewName
+  const t = useCrewT()
 
   const { today, weekOut } = todayAndWeekOutDates()
 
@@ -338,7 +341,7 @@ export default function CrewDashboardPage() {
   // an empty list is NOT "all caught up" — it is "we never managed to load your
   // work", and saying so is what turns a silent failure into a report.
   const activeCount   = allTurnovers.length + allWorkOrders.length
-  const bannerMessage = buildBannerMessage(activeCount, syncHealth)
+  const bannerMessage = buildBannerMessage(activeCount, syncHealth, crewLocale, t)
 
   if (!isMounted) return <CrewPageSkeleton />
 
@@ -347,15 +350,18 @@ export default function CrewDashboardPage() {
 
       {/* ── Welcome banner ─────────────────────────────────────────────── */}
       <div
-        className="px-4 py-3 mb-4"
+        className="px-4 py-3 mb-4 flex items-start justify-between gap-3"
         style={{ background: '#FCD116' }}
       >
-        <p className="font-bold text-brand-900 text-base">
-          Welcome, {firstName}
-        </p>
-        <p className="text-xs text-brand-800 mt-0.5">
-          {bannerMessage}
-        </p>
+        <div className="min-w-0">
+          <p className="font-bold text-brand-900 text-base">
+            {t('dashboardWelcomePrefix')} {firstName}
+          </p>
+          <p className="text-xs text-brand-800 mt-0.5">
+            {bannerMessage}
+          </p>
+        </div>
+        <LanguageToggle />
       </div>
 
       {/* ── Two-column split ───────────────────────────────────────────── */}
@@ -369,18 +375,18 @@ export default function CrewDashboardPage() {
               className="text-xs font-bold px-4 py-1.5 rounded-full text-white"
               style={{ background: '#0D1F3C' }}
             >
-              Today&apos;s Turnovers
+              {t('dashboardTodaysTurnovers')}
             </span>
           </div>
           {todayTurnovers.length > 0 && (
             <p className="text-xs text-center text-muted-themed mb-3">
               {travelSummary.available
-                ? `Total Travel Time: ${travelSummary.miles.toFixed(1)} mi, ${Math.floor(travelSummary.minutes / 60)}:${String(travelSummary.minutes % 60).padStart(2, '0')}`
-                : 'Total Travel Time: unavailable'}
+                ? `${t('dashboardTravelTimePrefix')} ${travelSummary.miles.toFixed(1)} mi, ${Math.floor(travelSummary.minutes / 60)}:${String(travelSummary.minutes % 60).padStart(2, '0')}`
+                : `${t('dashboardTravelTimePrefix')} ${t('dashboardTravelTimeUnavailable')}`}
             </p>
           )}
           {todayTurnovers.length === 0 && todayWorkOrders.length === 0
-            ? <EmptyColumn label="Today's Turnovers" />
+            ? <EmptyColumn message={t('dashboardNoTodaysTurnovers')} />
             : (
               <>
                 {todayTurnovers.map((t) => (
@@ -416,11 +422,11 @@ export default function CrewDashboardPage() {
               className="text-xs font-bold px-4 py-1.5 rounded-full text-white"
               style={{ background: '#0D1F3C' }}
             >
-              Upcoming
+              {t('dashboardUpcoming')}
             </span>
           </div>
           {upcomingTurnovers.length === 0 && upcomingWorkOrders.length === 0
-            ? <EmptyColumn label="Upcoming" />
+            ? <EmptyColumn message={t('dashboardNoUpcoming')} />
             : (
               <>
                 {upcomingTurnovers.map((t) => (
@@ -450,7 +456,7 @@ export default function CrewDashboardPage() {
           className="w-full py-2.5 rounded-xl text-xs font-semibold border border-themed text-secondary-themed hover:text-primary-themed hover:border-themed transition-colors flex items-center justify-center gap-1.5"
         >
           <MessageCircle className="w-3.5 h-3.5" />
-          Send feedback
+          {t('dashboardSendFeedback')}
         </button>
       </div>
 
@@ -460,6 +466,7 @@ export default function CrewDashboardPage() {
 }
 
 function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const t = useCrewT()
   const [text, setText]           = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -477,12 +484,12 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => null)
-        throw new Error(data?.error ?? 'Something went wrong')
+        throw new Error(data?.error ?? t('feedbackGenericError'))
       }
       setText('')
       setSubmitted(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setError(err instanceof Error ? err.message : t('feedbackGenericError'))
     } finally {
       setSubmitting(false)
     }
@@ -492,7 +499,7 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onClose={onClose}
-      title="Send feedback"
+      title={t('feedbackTitle')}
       mobileSheet
       footer={
         submitted ? (
@@ -501,7 +508,7 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
             className="w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ background: '#0D1F3C' }}
           >
-            Done
+            {t('feedbackDone')}
           </button>
         ) : (
           <button
@@ -510,7 +517,7 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
             className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
             style={{ background: '#0D1F3C' }}
           >
-            {submitting ? 'Sending…' : 'Submit'}
+            {submitting ? t('feedbackSending') : t('feedbackSubmit')}
           </button>
         )
       }
@@ -519,22 +526,22 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
         <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
           <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
           <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
-            Thank you!
+            {t('feedbackThankYou')}
           </p>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6 }}>
-            Your feedback goes straight to the team that builds this app.
+            {t('feedbackThankYouBody')}
           </p>
         </div>
       ) : (
         <>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>
-            What would make this app more helpful for your day-to-day work?
+            {t('feedbackPrompt')}
           </p>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={5}
-            placeholder="Share an idea, a frustration, or anything that would help…"
+            placeholder={t('feedbackPlaceholder')}
             style={{
               width: '100%', borderRadius: 12, border: '1px solid #e2e8f0',
               padding: '12px', fontSize: 14, color: '#1e293b', resize: 'none',

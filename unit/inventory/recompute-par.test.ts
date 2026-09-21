@@ -226,6 +226,28 @@ describe('recomputeParLevels', () => {
     expect(rpc).toHaveBeenCalledWith('apply_resolved_par_levels', expect.any(Object))
   })
 
+  it('paginates the consumption-stats read via .range(), not a bare .limit()', async () => {
+    // PostgREST's own max_rows = 1000 caps every response regardless of what
+    // a client's .limit() asks for — ITEM_CAP is 20,000, so a bare
+    // .limit(ITEM_CAP) was never actually a 20,000-row bound, it was 1,000,
+    // silently, with a 200 and no error. Past that many smart items with
+    // recorded consumption, the excess would resolve through the
+    // smart-group formula instead of their real historical rate, with
+    // nothing to say the stats were truncated. Only .range()-based
+    // pagination (fetchAllRows, matching the properties/items reads above)
+    // actually raises the ceiling.
+    const { client, calls } = makeSupabase({
+      properties:                  { data: PROPS, error: null },
+      inventory_items:             { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: { data: [], error: null },
+    })
+    await recomputeParLevels(client, { orgId: ORG })
+
+    const statsCalls = calls.filter((c) => c.table === 'inventory_consumption_stats')
+    expect(statsCalls.some((c) => c.method === 'range')).toBe(true)
+    expect(statsCalls.some((c) => c.method === 'limit')).toBe(false)
+  })
+
   it('does no work and no write when the org has no properties', async () => {
     const { client, rpc } = makeSupabase({ properties: { data: [], error: null } })
     await expect(recomputeParLevels(client, { orgId: ORG }))

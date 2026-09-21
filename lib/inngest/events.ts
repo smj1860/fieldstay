@@ -1243,14 +1243,29 @@ export type FieldStayEvents = {
   }
 
   // Recompute smart par levels. property_id scopes it to one property; omit it
-  // (or pass null) to cover every active property in the org. Emitted after a
-  // property is stocked, after the standard template lands on an org, and
-  // whenever a property's bedrooms/bathrooms/max_guests change — all three are
-  // inputs resolvePar() reads.
+  // (or pass null) to cover every active property in the org — which now
+  // dispatches inventory/par-recompute-org-requested (below) rather than
+  // resolving every property's items in one un-checkpointed step. Emitted
+  // after a property is stocked, after the standard template lands on an org,
+  // and whenever a property's bedrooms/bathrooms/max_guests change — all
+  // three are inputs resolvePar() reads.
   'inventory/par-recompute-requested': {
     data: {
       org_id:       string
       property_id?: string | null
+    }
+  }
+
+  // Org-wide fan-out dispatcher for the above: fetches every active property
+  // id for the org (bounded — a property list, not an item list) and sends
+  // one inventory/par-recompute-requested event per property, so each
+  // property gets its own retry boundary and its own bounded item read
+  // instead of one un-checkpointed scan across the whole org that throws once
+  // PROPERTY_CAP/ITEM_CAP is exceeded. See
+  // lib/inngest/functions/recompute-par-levels.ts.
+  'inventory/par-recompute-org-requested': {
+    data: {
+      org_id: string
     }
   }
 
@@ -1285,6 +1300,67 @@ export type FieldStayEvents = {
   'inspection/overdue.email.requested': {
     data: {
       org_id: string
+    }
+  },
+
+  /**
+   * One org's turnovers need a pre-flight friction score. Fanned out by
+   * cron-pre-flight-friction so each tenant's rollup + scoring + weather
+   * lookups are their own retry boundary and one slow org cannot spend the
+   * whole platform's runway before the 7am dashboard read.
+   *
+   * Carries the date the dispatcher resolved rather than letting each handler
+   * re-read the clock: the cron fires at 07:00 UTC, two hours from midnight
+   * CT, so a retry that crossed midnight UTC would otherwise score a
+   * different day than the one that was dispatched.
+   */
+  'friction/pre_flight.requested': {
+    data: {
+      org_id:        string
+      /** YYYY-MM-DD, the turnover date being scored. */
+      turnover_date: string
+    }
+  },
+
+  /**
+   * One org's ungraded pre_flight_friction rows are ready to grade against
+   * reality. Fanned out by cron-friction-grading so apply_friction_grading()
+   * scopes its UPDATE...FROM to a single tenant instead of one unbatched
+   * platform-wide join — see 20260916120000_friction_grading_per_org.sql.
+   */
+  'friction/grading.requested': {
+    data: {
+      org_id: string
+    }
+  },
+
+  // ----------------------------------------------------------
+  // Prospecting funnel — admin-triggered comparent.com re-crawl
+  // ----------------------------------------------------------
+
+  /**
+   * Dispatcher trigger for /admin/prospects' "Refresh from Comparent"
+   * button. Selects up to `limit` prospect_accounts rows (comparent_url set,
+   * oldest-crawled-first) and fans out one 'prospecting/crawl_profile
+   * .requested' event per row — see lib/inngest/functions/prospecting-crawl.ts.
+   */
+  'prospecting/crawl.requested': {
+    data: {
+      requested_by: string
+      limit:        number
+    }
+  },
+
+  /**
+   * One prospect_accounts row's comparent_url is ready to be (re-)fetched.
+   * Fanned out by the dispatcher above so one slow or failing profile page
+   * cannot spend the whole batch's retry budget — same per-item fan-out
+   * shape as billing/reconcile-property-count.requested.
+   */
+  'prospecting/crawl_profile.requested': {
+    data: {
+      prospect_id: string
+      url:         string
     }
   },
 }

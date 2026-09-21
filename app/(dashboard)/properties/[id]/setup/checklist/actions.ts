@@ -15,6 +15,12 @@ export type ChecklistState = { error?: string; success?: boolean }
 export interface ChecklistItemInput {
   id?: string
   task: string
+  /**
+   * Carried through from the source room template item (or a prior save) so
+   * a hand-edit through this builder never silently wipes out a translation
+   * entered in the Templates Hub. Not editable from this screen.
+   */
+  task_es?: string | null
   requires_photo: boolean
   notes: string
   sort_order: number
@@ -23,6 +29,8 @@ export interface ChecklistItemInput {
 export interface ChecklistSectionInput {
   id?: string
   name: string
+  /** See ChecklistItemInput.task_es — same preserve-don't-edit reasoning. */
+  name_es?: string | null
   sort_order: number
   room_template_id?: string | null
   items: ChecklistItemInput[]
@@ -117,6 +125,7 @@ function buildItemRows(tmplId: string, sectionId: string, section: ChecklistSect
     section_id:     sectionId,
     template_id:    tmplId,
     task:           item.task,
+    task_es:        item.task_es ?? null,
     requires_photo: item.requires_photo,
     notes:          item.notes || null,
     sort_order:     item.sort_order,
@@ -149,6 +158,7 @@ async function replaceSections(
       sections.map((section) => ({
         template_id:      tmplId,
         name:             section.name,
+        name_es:          section.name_es ?? null,
         sort_order:       section.sort_order,
         room_template_id: section.room_template_id ?? null,
         room_synced_at:   section.room_template_id ? new Date().toISOString() : null,

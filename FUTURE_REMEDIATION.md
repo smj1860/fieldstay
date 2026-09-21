@@ -1458,38 +1458,41 @@ confirmed absent from main before appending — it had never landed.
 
 ---
 
-## 31. The Stripe price-drift gate has never been able to run
+## 31. ~~The Stripe price-drift gate has never been able to run~~ — SUPERSEDED by the 2026-08-29 graduated-pricing rebuild
 
-`scripts/check-stripe-price-drift.mjs` compares `lib/stripe/client.ts`'s
+**Resolution:** the original finding described `scripts/check-stripe-price-drift.mjs`
+comparing `lib/stripe/client.ts`'s `PLANS` map (4 discrete tiers —
+`STRIPE_PRICE_STARTER_MONTHLY`/`GROWTH_MONTHLY`/`PORTFOLIO_MONTHLY`, plus a
+`Hosts` tier) against live Stripe prices. `PLANS` no longer exists — the
+graduated-pricing rebuild (see CLAUDE.md's "Billing — Graduated Pricing"
+section) replaced it with one graduated price per interval. The script itself
+was rewritten 2026-08-29 to match: it now checks the platform price's live
+Stripe tiers against the schedule in `lib/stripe/brackets.ts`, and
+`ci.yml`'s env block was updated to only the two platform price vars
+(`STRIPE_PRICE_PLATFORM_MONTHLY`/`_ANNUAL`) plus the unrelated
+`STRIPE_PRICE_SPONSOR_MONTHLY` — the six-secrets/"Hosts tier" gap described
+above no longer applies to the current code.
+
+**Not independently reverified here:** whether the `STRIPE_PRICE_DRIFT_ARMED`
+repo variable is actually set to `1` today (i.e. whether the gate is armed or
+still self-disarming) — that's GitHub repo configuration, not something
+visible from the source tree.
+
+Original item kept below for context.
+
+### ~~The Stripe price-drift gate has never been able to run~~
+
+`scripts/check-stripe-price-drift.mjs` compared `lib/stripe/client.ts`'s
 `PLANS` prices against the real Stripe price objects, so a plan quoted at one
-number on the landing pages and billed at another gets caught. It runs in the
-`db-invariants` CI job on every PR and has been printing a warning instead of
-checking anything (observed on run 31419756914, and it is not new):
+number on the landing pages and billed at another got caught. It ran in the
+`db-invariants` CI job on every PR and had been printing a warning instead of
+checking anything (observed on run 31419756914):
 
 ```text
 Stripe price drift check cannot run: STRIPE_SECRET_KEY is set but these price
 variables are not — STRIPE_PRICE_STARTER_MONTHLY, STRIPE_PRICE_GROWTH_MONTHLY,
 STRIPE_PRICE_PORTFOLIO_MONTHLY.
 ```
-
-`STRIPE_SECRET_KEY` and `STRIPE_PRICE_SPONSOR_MONTHLY` are set as repo
-secrets; the six plan price ids are not, so the check disarms itself rather
-than reporting every price as drifted. `STRIPE_PRICE_DRIFT_REQUIRE_ARMED` is
-`0`, which is what keeps that from failing the build — the sibling
-`DB_INVARIANTS_REQUIRE_ARMED` in the same job is `1`.
-
-**This is repo configuration, not a code change**, which is the only reason
-it is filed here rather than fixed: add the six ids as repo secrets (the same
-values the deployed app already uses), then set the repo variable
-`STRIPE_PRICE_DRIFT_ARMED=1` to make it a real gate, per the script's own
-instructions.
-
-Worth doing rather than deferring indefinitely, for a reason outside CI
-hygiene: `PLANS.hosts` has `STRIPE_PRICE_HOSTS_MONTHLY` / `_ANNUAL`, and
-`priceId()` resolves an unset variable to `null` rather than throwing, so a
-missing id surfaces as a failed checkout at the moment a trial user picks the
-plan. The Hosts tier is now advertised on `/`, `/hosts` and `/strops`'s
-JSON-LD. An armed drift check is what would say so before a customer does.
 
 ---
 

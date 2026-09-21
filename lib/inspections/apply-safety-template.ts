@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { reportError } from '@/lib/observability/report-error'
 import {
   firstSafetyDueDate,
   rebasedSafetyDueDate,
@@ -42,7 +43,7 @@ import {
 // no arbiters, so this shape passes its unit tests either way.
 
 /** Bound on one org's fan-out. Well above the 50-property plan ceiling. */
-const MAX_PROPERTIES = 500
+export const MAX_PROPERTIES = 500
 
 export interface ApplyResult {
   /** Schedules actually inserted. Zero is the steady state after the first run. */
@@ -86,6 +87,22 @@ export async function applySafetyTemplate(
 
   if (error) throw new Error(`property load failed for org ${orgId}: ${error.message}`)
   if (!properties?.length) return { created: 0, properties: 0, skipped: 'no_properties' }
+
+  if (properties.length === MAX_PROPERTIES) {
+    // The result set exactly filled the bound. Cannot tell from here whether
+    // that is a coincidence or a genuine Enterprise-tier org past this
+    // constant's headroom — but every property past the cap silently never
+    // gets a safety schedule, forever, on every future nightly pass too
+    // (there is no separate "catch what was missed" mechanism), so guessing
+    // "coincidence" is the wrong side to be wrong on.
+    reportError(
+      new Error(
+        `applySafetyTemplate hit its ${MAX_PROPERTIES}-property cap for org ${orgId} — ` +
+        'properties past this limit will silently never get a safety schedule',
+      ),
+      { site: 'lib.inspections.apply-safety-template', orgId, level: 'warning' },
+    )
+  }
 
   const dueDate = firstSafetyDueDate(template, opts.today ?? new Date())
 
@@ -209,30 +226,23 @@ export async function rebaseSafetySchedules(
   const formId = await loadSafetyFormId(supabase)
   if (!formId) return { retimed: 0 }
 
-  const { error: freqError } = await supabase
-    .from('maintenance_schedules')
-    .update({ frequency: template.frequency })
-    .eq('org_id', orgId)
-    .eq('creates', 'inspection')
-    .eq('inspection_form_id', formId)
-
-  if (freqError) {
-    throw new Error(`safety cadence update failed for org ${orgId}: ${freqError.message}`)
-  }
-
   const todayIso = today.toISOString().slice(0, 10)
-  const { data: retimed, error: dateError } = await supabase
-    .from('maintenance_schedules')
-    .update({ next_due_date: rebasedSafetyDueDate(template, today) })
-    .eq('org_id', orgId)
-    .eq('creates', 'inspection')
-    .eq('inspection_form_id', formId)
-    .gt('next_due_date', todayIso)
-    .select('id')
 
-  if (dateError) {
-    throw new Error(`safety due-date rebase failed for org ${orgId}: ${dateError.message}`)
+  // One RPC, not two separate UPDATEs — a failure between "cadence saved"
+  // and "due dates rebased" used to leave frequency and next_due_date
+  // permanently disagreeing for every affected property until something
+  // re-triggered this whole call. See the migration's header comment.
+  const { data: retimed, error } = await supabase.rpc('rebase_safety_schedules', {
+    p_org_id:    orgId,
+    p_form_id:   formId,
+    p_frequency: template.frequency,
+    p_due_date:  rebasedSafetyDueDate(template, today),
+    p_today:     todayIso,
+  })
+
+  if (error) {
+    throw new Error(`safety cadence rebase failed for org ${orgId}: ${error.message}`)
   }
 
-  return { retimed: retimed?.length ?? 0 }
+  return { retimed: retimed ?? 0 }
 }

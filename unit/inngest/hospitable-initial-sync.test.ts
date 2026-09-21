@@ -224,6 +224,15 @@ describe('hospInitialSync', () => {
         data: { booking_id: 'booking_1', property_id: 'prop_uuid_1', org_id: 'org_1', source: 'hospitable', actual_total_amount: 400 },
       },
     ])
+
+    // hospReservationWindows internally reads Date.now(), and Inngest
+    // re-executes this function body from the top on every step transition/
+    // retry — only step.run results are memoized. Computing windows as a
+    // plain expression would recompute a possibly-different array on a
+    // replay landing on the other side of a UTC midnight, orphaning
+    // already-fetched windows. Asserting it runs INSIDE a step is what
+    // would catch a regression back to the plain-expression form.
+    expect(step.run).toHaveBeenCalledWith('plan-reservation-windows', expect.any(Function))
   })
 
   it('marks the connection errored and stamps the metadata in ONE atomic write', async () => {

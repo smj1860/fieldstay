@@ -47,6 +47,12 @@ export function PurchaseOrderActions({
     totalEstimatedCost != null ? totalEstimatedCost.toFixed(2) : '',
   )
   const [error, setError] = useState<string | null>(null)
+  // Holds the parsed amount once it has been flagged as an outlier against
+  // the estimate and the PM has been shown the magnitude — a second click on
+  // "Mark ordered" with the SAME amount is the confirmation. Reset whenever
+  // the field changes, so an edited amount is never silently posted under an
+  // earlier confirmation.
+  const [overageConfirm, setOverageConfirm] = useState<number | null>(null)
   const [pending, startTransition] = useTransition()
 
   if (TERMINAL.has(status)) return null
@@ -64,6 +70,14 @@ export function PurchaseOrderActions({
     })
   }
 
+  /** Overage confirmation covers a fat-fingered digit (1500 typed as 15000)
+   *  against the one anchor this form has — the estimate a count already
+   *  produced. No anchor at all (a manual PO with no estimated cost) has
+   *  nothing to compare against, so it is never flagged. */
+  function isSuspiciousOverage(parsed: number): boolean {
+    return totalEstimatedCost != null && totalEstimatedCost > 0 && parsed > totalEstimatedCost * 5
+  }
+
   function submitOrdered() {
     const trimmed = amount.trim()
     // Empty is allowed: a PM who genuinely does not know the total yet should
@@ -74,11 +88,29 @@ export function PurchaseOrderActions({
       run('ordered')
       return
     }
-    const parsed = Number(trimmed)
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      setError('Enter a dollar amount, or leave it blank.')
+    // A strict decimal shape, not just Number.isFinite: Number("0x64")
+    // silently parses as hex (100) even though the field visually reads as
+    // decimal-only (inputMode="decimal"), and Number("  ") parses as 0.
+    if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+      setOverageConfirm(null)
+      setError('Enter a dollar amount (e.g. 45.00), or leave it blank.')
       return
     }
+    const parsed = Number(trimmed)
+
+    if (isSuspiciousOverage(parsed) && overageConfirm !== parsed) {
+      // First pass on this exact amount: flag it and stop rather than post
+      // straight to the owner ledger — a fat-fingered extra digit is
+      // otherwise indistinguishable from a genuinely large restock.
+      setOverageConfirm(parsed)
+      setError(
+        `That's ${(parsed / totalEstimatedCost!).toFixed(1)}x the estimate `
+        + `($${totalEstimatedCost!.toFixed(2)}). Click "Mark ordered" again to confirm.`,
+      )
+      return
+    }
+
+    setOverageConfirm(null)
     run('ordered', parsed)
   }
 
@@ -132,7 +164,7 @@ export function PurchaseOrderActions({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => { setAmount(e.target.value); setOverageConfirm(null) }}
               />
             </div>
             {error && <InlineAlert tone="error">{error}</InlineAlert>}

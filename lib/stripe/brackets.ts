@@ -225,12 +225,26 @@ export function bracketBreakdown(
   return items
 }
 
-/** Dollar-formatted per-unit rate for the bracket a given property count falls in — for display only ("you're paying $10/property right now"). */
+/**
+ * The rate the NEXT property would cost, in cents — display only ("adding one
+ * more property costs $10/mo"). Matches this file's own CLAUDE.md table
+ * entry, which is the contract anything wiring this in reads, and it is NOT
+ * the rate `quantity` itself is currently billed at — those differ at every
+ * bracket boundary (4, 15, 50), which is exactly the moment a PM deciding
+ * whether to add one more property needs the right number.
+ *
+ * `quantity = 0` is allowed (an org with no properties yet, asking what its
+ * first would cost) since the next property is always sellable there. `null`
+ * once `quantity` has already reached the self-serve ceiling — property
+ * `MAX_SELF_SERVE_PROPERTIES + 1` is Enterprise, not a marginal rate this
+ * schedule prices.
+ */
 export function marginalRateCentsFor(quantity: number): number | null {
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_SELF_SERVE_PROPERTIES) {
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity >= MAX_SELF_SERVE_PROPERTIES) {
     return null
   }
-  const bracket = BRACKETS.find((b) => quantity <= b.upTo)
+  const nextProperty = quantity + 1
+  const bracket = BRACKETS.find((b) => nextProperty <= b.upTo)
   if (!bracket) return null
   return bracket.flatAmountCents ?? bracket.unitAmountCents ?? null
 }

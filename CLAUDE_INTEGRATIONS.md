@@ -25,9 +25,8 @@ STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 STRIPE_PLATFORM_FEE_PCT=
-STRIPE_PRICE_STARTER_MONTHLY= / _ANNUAL=
-STRIPE_PRICE_GROWTH_MONTHLY= / _ANNUAL=
-STRIPE_PRICE_PORTFOLIO_MONTHLY= / _ANNUAL=
+STRIPE_PRICE_PLATFORM_MONTHLY= / _ANNUAL=   # the one graduated price per interval — see lib/stripe/brackets.ts
+STRIPE_PRICE_SPONSOR_MONTHLY=               # guidebook sponsors — unrelated to the platform price
 
 # Kroger (OAuth2 — see Integration Registry below)
 KROGER_CLIENT_ID=
@@ -60,7 +59,8 @@ TELNYX_API_KEY=
 TELNYX_MESSAGING_PROFILE_ID=
 TELNYX_FROM_NUMBER=
 TELNYX_WEBHOOK_PUBLIC_KEY=          # Ed25519 public key, verifies inbound webhooks
-SMS_ENABLED=                        # 'true' | 'false' — false until 10DLC verified
+SMS_ENABLED=                        # 'true' | 'false' — 'true' in production since 2026-08-28 (10DLC verified);
+                                     # gate stays regardless, to keep previews/local runs from texting real guests
 
 # Tomorrow.io (weather — contextual guest SMS signals)
 TOMORROW_IO_API_KEY=
@@ -107,10 +107,10 @@ lib/integrations/
   providers/
     ownerrez.ts / ownerrez-api.ts
     kroger.ts / kroger-token.ts
-    hostaway.ts             — authType: 'api_key', not OAuth. DISABLED — not
-                              registered in the providers map below. See
+    hostaway.ts             — authType: 'api_key', not OAuth. Live — see
                               "Hostaway Integration" section further down.
     hospitable.ts / hospitable-token.ts
+    hostex{,.types,.mappers,-api,-token}.ts
 
 app/api/integrations/[provider]/
   connect/route.ts        — OAuth Step 1: generic for ANY registered oauth2 provider.
@@ -358,41 +358,22 @@ oneclick callback and `/connect/finish` routes.
 
 ## Hostaway Integration
 
-**Status: DISABLED (product decision, 2026-07-25) — not reachable anywhere
-in the app.** Do not build on top of this integration or point marketing/
-onboarding surfaces at it until it's re-enabled.
+**Status: re-enabled and fully live.** Was disabled 2026-07-25 (see
+CHANGELOG.md for that history); the blocker — no automatic revenue posting —
+has since been fixed and the integration is registered and reachable like
+any other PMS.
 
-API-key auth (not OAuth) — `authType: 'api_key'`. The implementation is
-intact and functional at `lib/integrations/providers/hostaway.ts`, with
-initial sync at `lib/inngest/functions/hostaway/initial-sync.ts` — it's
-just fully unregistered:
-- Not in `lib/integrations/registry.ts`'s providers map (import + entry
-  commented out)
-- Its Inngest sync job is not in `app/api/inngest/route.ts`'s `serve()`
-  call
-- Excluded from every connect entry point: `HIDDEN_PROVIDER_IDS` in
-  `app/(dashboard)/settings/integrations/integrations-client.tsx` and
-  `PMS_PROVIDER_IDS` in `app/(dashboard)/setup/pms/page.tsx`
+API-key auth (not OAuth) — `authType: 'api_key'`. Registered in
+`lib/integrations/registry.ts`'s providers map and in `PMS_PROVIDER_IDS`,
+and its Inngest jobs (`hostawayInitialSync`, `hostawayIncrementalSyncCron`/
+`Handler`, `hostawayReservationReconcileCron`/`Handler`) are registered in
+`app/api/inngest/route.ts`'s `serve()` call. Sync posts booking revenue and
+a daily reconcile keeps it current.
 
-**Why:** `hostaway/initial-sync.ts` never fires `booking/confirmed` —
-unlike `hospitable/initial-sync.ts` and `hospitable/incremental-sync.ts`,
-which do — so a connected org would sync in properties/bookings with no
-automatic revenue posting to owner ledgers, unlike every other live PMS
-integration. That gap is what originally got it hidden from the UI; on
-2026-07-25 the call was made to fully unregister it (registry + Inngest)
-rather than leave a half-wired integration reachable by URL.
-
-**To re-enable:**
-1. Uncomment the registry entry in `lib/integrations/registry.ts` and the
-   Inngest route registration in `app/api/inngest/route.ts`.
-2. Re-add the connect UI/actions — see the commented-out blocks in
-   `app/(dashboard)/settings/integrations/integrations-client.tsx` and
-   `app/(dashboard)/setup/pms/page.tsx`.
-3. The actual blocker, not just paperwork: make
-   `hostaway/initial-sync.ts` fire `booking/confirmed` so revenue
-   automation works the same way it does for OwnerRez/Hospitable, then add
-   `'hostaway'` to `REVENUE_AUTOMATION_PROVIDER_IDS` in
-   `app/(dashboard)/ops/page.tsx`.
+**No webhook endpoint is registered with Hostaway yet** — its
+`validateWebhook()` still rejects every delivery, so updates sync once daily
+via the reconcile cron rather than in real time (the connect UI surfaces
+this to the PM: "Updates once daily — Hostaway webhooks are not wired yet").
 
 ## Hostex Integration
 

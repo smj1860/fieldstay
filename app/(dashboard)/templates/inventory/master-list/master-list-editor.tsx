@@ -11,6 +11,8 @@ import type { InventoryCategory } from '@/types/database'
 interface CatalogItemRow {
   id:           string
   name:         string
+  /** PM-entered Spanish translation, for the crew app's Spanish locale. */
+  name_es:      string | null
   category:     InventoryCategory
   default_unit: string
 }
@@ -38,6 +40,7 @@ export function MasterListEditor({
   const [saving, startSave] = useTransition()
 
   const [newName, setNewName] = useState('')
+  const [newNameEs, setNewNameEs] = useState('')
   const [newCategory, setNewCategory] = useState<InventoryCategory>('other')
   const [newUnit, setNewUnit] = useState('units')
 
@@ -68,13 +71,17 @@ export function MasterListEditor({
     const trimmed = newName.trim()
     if (!trimmed) return
     startSave(async () => {
-      const result = await createCatalogItem(trimmed, newCategory, newUnit.trim() || 'units')
+      const result = await createCatalogItem(trimmed, newCategory, newUnit.trim() || 'units', newNameEs)
       if (result.error || !result.id) {
         setError(result.error ?? 'Failed to add item.')
         return
       }
-      setItems((prev) => [...prev, { id: result.id!, name: trimmed, category: newCategory, default_unit: newUnit.trim() || 'units' }])
+      setItems((prev) => [...prev, {
+        id: result.id!, name: trimmed, name_es: newNameEs.trim() || null,
+        category: newCategory, default_unit: newUnit.trim() || 'units',
+      }])
       setNewName('')
+      setNewNameEs('')
       setError(null)
     })
   }
@@ -95,6 +102,17 @@ export function MasterListEditor({
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
               placeholder="e.g. Dish Soap"
+              className="input mt-1 w-full text-sm"
+            />
+          </div>
+          <div className="flex-1">
+            <label htmlFor="new-catalog-item-name-es" className="text-xs font-medium text-secondary-themed">Spanish name (optional)</label>
+            <input
+              id="new-catalog-item-name-es"
+              value={newNameEs}
+              onChange={(e) => setNewNameEs(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
+              placeholder="e.g. Jabón para platos"
               className="input mt-1 w-full text-sm"
             />
           </div>
@@ -150,6 +168,13 @@ export function MasterListEditor({
                       onBlur={(e) => handleFieldChange(item, { name: e.target.value.trim() || item.name })}
                       className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none border-b border-transparent focus:border-[var(--accent-gold)] transition-colors"
                     />
+                    <input
+                      value={item.name_es ?? ''}
+                      onChange={(e) => replaceItem(item.id, { name_es: e.target.value })}
+                      onBlur={(e) => handleFieldChange(item, { name_es: e.target.value.trim() || null })}
+                      placeholder="Spanish name"
+                      className="flex-1 text-sm text-secondary-themed bg-transparent focus:outline-none border-b border-transparent focus:border-[var(--accent-gold)] transition-colors"
+                    />
                     <select
                       value={item.category}
                       onChange={(e) => handleFieldChange(item, { category: e.target.value as InventoryCategory })}
@@ -174,7 +199,10 @@ export function MasterListEditor({
                   </>
                 ) : (
                   <>
-                    <span className="flex-1 text-sm text-primary-themed">{item.name}</span>
+                    <span className="flex-1 text-sm text-primary-themed">
+                      {item.name}
+                      {item.name_es && <span className="text-muted-themed"> · {item.name_es}</span>}
+                    </span>
                     <span className="text-xs text-muted-themed">{item.default_unit}</span>
                   </>
                 )}

@@ -8,6 +8,7 @@ import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { unwrap, unwrapList, reportQueryError, type PostgrestResult } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import {
   validatePortalToken,
   type PortalTokenRow,
@@ -129,7 +130,7 @@ function resolveSelectedProperty(
  * value and is therefore untrusted: it can only ever SELECT among the IDs the
  * token already authorizes, never widen them.
  */
-async function resolvePortfolioScope(
+export async function resolvePortfolioScope(
   supabase:      SupabaseLike,
   portalToken:   PortalTokenRow,
   orgId:         string,
@@ -154,7 +155,20 @@ async function resolvePortfolioScope(
       site: 'owner-portal.portfolioProperties',
       orgId,
     })
-    if (props.length > 0) portfolioProperties = props
+    // A legitimate zero — every id in a stale property_ids array was since
+    // deleted or reassigned out of the org — silently collapses this token
+    // back to the single `property` fallback with no signal anywhere. An
+    // owner who should see several properties on a combined statement link
+    // would see one, indistinguishable from "this owner really only has one
+    // property." See the identical note on resolvePortalScope() in
+    // lib/owner-portal/token.ts, which has the same shape.
+    if (props.length === 0) {
+      reportError(new Error('multi-property owner token resolved to zero live properties'), {
+        site: 'owner-portal.portfolioProperties', orgId, level: 'warning',
+      })
+    } else {
+      portfolioProperties = props
+    }
   }
 
   const propertyIds      = portfolioProperties.map((p) => p.id)

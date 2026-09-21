@@ -51,7 +51,20 @@ export function safeNextPath(
   try {
     const url = new URL(raw, SENTINEL_ORIGIN)
     if (url.origin !== SENTINEL_ORIGIN) return fallback
-    return `${url.pathname}${url.search}${url.hash}`
+
+    const result = `${url.pathname}${url.search}${url.hash}`
+
+    // The origin check above is not sufficient on its own: `/..//evil.example.com`
+    // resolves same-origin against the sentinel (the `..` collapses against the
+    // URL's own root, which the parser treats as independent from the leading
+    // `//` that follows it), but the resulting PATHNAME is `//evil.example.com`
+    // — and a string starting with `//` is protocol-relative the moment a
+    // browser (or router.push()) navigates to it, regardless of how the origin
+    // check above resolved. No legitimate in-app path ever has a double leading
+    // slash, so rejecting this is not a false-positive risk.
+    if (result.startsWith('//')) return fallback
+
+    return result
   } catch {
     return fallback
   }

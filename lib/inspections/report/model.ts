@@ -3,6 +3,8 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { chunkArray } from '@/lib/inngest/chunk'
+import { INSPECTION_PHOTO_TIMEOUT_MS } from '@/lib/http/timeout'
 import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import {
   parseFormSnapshot,
@@ -139,6 +141,12 @@ export interface InspectionReport {
   photosIncluded: boolean
   /** Set when a whole-property history was capped, so the PDF can say so. */
   omittedCount: number
+  /**
+   * Photo-bearing answers that existed but never got a chance at the shared
+   * MAX_REPORT_PHOTOS budget — see that constant's comment. Zero whenever
+   * `includePhotos` is false, since nothing was attempted at all.
+   */
+  omittedPhotoCount: number
 }
 
 const FORM_LABELS: Record<string, string> = {
@@ -179,7 +187,19 @@ const MAX_ANSWER_ROWS = 12_000
  *
  * The bucket caps an object at 10MB, so an unbounded photo log on a long
  * history could try to hold ~600MB in memory and serialise it into one
- * response. 150 covers a full Safety walk's photos many times over.
+ * response. 150 covers a full Safety walk's photos many times over — but a
+ * whole-PROPERTY-HISTORY export shares this ONE budget across every included
+ * walk (up to MAX_HISTORY_INSPECTIONS of them), and 60 walks at ~60 items
+ * each can carry thousands of eligible photos against it. Two things follow:
+ *
+ * - The budget is spent MOST-RECENT-WALK-FIRST (`loadPhotos` sorts by the
+ *   same recency the cover page and `omittedCount` already use), so a long
+ *   history does not let its earliest walks exhaust the budget before the
+ *   walk a PM actually opened the export to look at gets a single photo.
+ * - `omittedPhotoCount` reports it, the same way `omittedCount` reports the
+ *   walk-count cap — see the "cap that applies must SAY SO in the output"
+ *   rule. Without it, a walk whose photos lost the budget prints identically
+ *   to one whose photos genuinely failed to download.
  */
 export const MAX_REPORT_PHOTOS = 150
 
@@ -234,9 +254,9 @@ export async function loadInspectionReport(
     supabase, orgId, failedIds, rows.map((r) => r.id), 'inspections.report',
   )
 
-  const photos = includePhotos
-    ? await loadPhotos(supabase, answers)
-    : new Map<string, ReportPhoto>()
+  const { photos, omitted: omittedPhotoCount } = includePhotos
+    ? await loadPhotos(supabase, answers, rows.map((r) => r.id))
+    : { photos: new Map<string, ReportPhoto>(), omitted: 0 }
 
   return {
     orgId,
@@ -244,6 +264,7 @@ export async function loadInspectionReport(
     generatedAt:  input.now ?? new Date().toISOString(),
     photosIncluded: includePhotos,
     omittedCount: Math.max(0, totalCompleted - rows.length),
+    omittedPhotoCount,
     inspections: rows.map((row) => buildInspection({
       row,
       snapshot:   snapshots.get(row.id) ?? null,
@@ -316,8 +337,25 @@ async function loadInspectionRows(
   return { rows, totalCompleted: res.count ?? rows.length }
 }
 
-/** `.order('id')` is load-bearing: `.range()` pages are only stable under a
- *  stable sort, and an unstable one drops and repeats rows across boundaries. */
+/**
+ * `.order('id')` is load-bearing: `.range()` pages are only stable under a
+ * stable sort, and an unstable one drops and repeats rows across boundaries.
+ *
+ * `fetchAllRows` here issues up to `MAX_ANSWER_ROWS / max_rows` ≈ 12
+ * sequential round-trips (13 including the final short page) — designed for a
+ * background job's step budget, not a synchronous request. There is no cheap
+ * narrowing available: every column and every row is used (the printed body,
+ * the pass/fail tally, the record-only exclusion, and the photo lookup all
+ * read the full answer set for every inspection in scope — see this module's
+ * header comment on why the body is the same document for every audience),
+ * so trimming the SELECT or the row set would mean printing a document that
+ * is quietly missing part of the record. This is the same finding as
+ * MAX_REPORT_PHOTOS' and this file's top comment: the real fix is moving
+ * generation off the request path onto an Inngest job that writes to Storage
+ * and hands back a signed URL. Finding #5's bounded-parallel photo download
+ * is the change made THIS pass; this sequential drain is unchanged and
+ * remains the next thing to address if history exports keep growing.
+ */
 async function loadAnswers(
   supabase:      SupabaseClient,
   orgId:         string,
@@ -353,27 +391,77 @@ async function loadAnswers(
  * inspection body still shows the item.
  */
 async function loadPhotos(
-  supabase: SupabaseClient,
-  answers:  AnswerRow[],
-): Promise<Map<string, ReportPhoto>> {
-  const out   = new Map<string, ReportPhoto>()
-  const paths = answers
+  supabase:        SupabaseClient,
+  answers:         AnswerRow[],
+  inspectionOrder: string[],
+): Promise<{ photos: Map<string, ReportPhoto>; omitted: number }> {
+  const out = new Map<string, ReportPhoto>()
+
+  // MOST-RECENT-WALK-FIRST, not the order `answers` came back in (`.order('id')`
+  // on that read is a pagination requirement, unrelated to which walk a photo
+  // belongs to). `inspectionOrder` is `rows`' own order — completed_at
+  // descending — the same ranking the cover page already uses for "most
+  // recent". Without this, a 60-walk history's earliest-id answers could
+  // exhaust the shared budget before the walk the PM actually opened the
+  // export to review gets a single photo.
+  const rank = new Map(inspectionOrder.map((id, i) => [id, i]))
+  const eligible = answers
     .filter((a) => a.photo_path)
-    .slice(0, MAX_REPORT_PHOTOS)
+    .sort((a, b) => (rank.get(a.inspection_id) ?? 0) - (rank.get(b.inspection_id) ?? 0))
+  const paths   = eligible.slice(0, MAX_REPORT_PHOTOS)
+  const omitted = Math.max(0, eligible.length - MAX_REPORT_PHOTOS)
 
-  // Sequential rather than a Promise.all fan-out: this is 10MB-capped binary
-  // per object, and firing 150 concurrent downloads is how a report becomes a
-  // memory spike rather than a slow response.
-  for (const answer of paths) {
-    const path = answer.photo_path!
-    const { data, error } = await supabase.storage.from(PHOTO_BUCKET).download(path)
-    if (error || !data) continue
+  // BOUNDED PARALLEL BATCHES, not fully sequential and not a single unbounded
+  // Promise.all. Each object is 10MB-capped binary, so PHOTO_DOWNLOAD_BATCH_SIZE
+  // concurrent downloads bounds the in-flight memory to roughly that many
+  // objects at once — fully sequential (1 at a time, worst case
+  // MAX_REPORT_PHOTOS * INSPECTION_PHOTO_TIMEOUT_MS ≈ 900s against a 90s
+  // maxDuration) turns one slow storage backend into a request that cannot
+  // possibly finish; an unbounded fan-out (150 at once) turns it into a memory
+  // spike instead of a slow response. Chunked sequentially — the NEXT batch
+  // does not start until this one settles — so the ceiling holds regardless of
+  // how many chunks there are.
+  //
+  // TIMED, AND CAUGHT, per photo. Storage-js's download() only converts a
+  // StorageError to `{ data: null, error }` — anything else, an abort
+  // included, it RETHROWS (see BlobDownloadBuilder.execute()). Without the
+  // try/catch below, one hung object would not just cost its own photograph:
+  // an uncaught throw here propagates out of loadPhotos and
+  // loadInspectionReport, taking the whole document down over one picture —
+  // the exact failure mode this function's own header comment says a photo
+  // download must never cause. The signal is what makes "hung" a real,
+  // bounded outcome rather than "holds this loop, and the request, open until
+  // the platform kills the function."
+  for (const batch of chunkArray(paths, PHOTO_DOWNLOAD_BATCH_SIZE)) {
+    await Promise.all(batch.map(async (answer) => {
+      const path = answer.photo_path!
+      try {
+        const { data, error } = await supabase.storage.from(PHOTO_BUCKET)
+          .download(path, {}, { signal: AbortSignal.timeout(INSPECTION_PHOTO_TIMEOUT_MS) })
+        if (error || !data) return
 
-    const bytes = new Uint8Array(await data.arrayBuffer())
-    out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
+        const bytes = new Uint8Array(await data.arrayBuffer())
+        out.set(answer.id, { path, bytes, format: imageFormat(bytes) })
+      } catch {
+        // Skipped — see the header comment above.
+      }
+    }))
   }
-  return out
+  return { photos: out, omitted }
 }
+
+/**
+ * How many photo downloads run at once within one batch of `loadPhotos`.
+ *
+ * 8 is the "highest-value fix within scope" per CLAUDE.md's Report and export
+ * caps section: it cuts the worst-case wall time roughly 8x over fully
+ * sequential without approaching a memory spike (8 * 10MB ≈ 80MB in flight,
+ * against a platform function typically sized in the low GB). It is NOT a
+ * substitute for moving generation off the request path — see this file's
+ * header comment and MAX_REPORT_PHOTOS's — only a bound on how bad the
+ * synchronous path can get before that migration happens.
+ */
+const PHOTO_DOWNLOAD_BATCH_SIZE = 8
 
 const PHOTO_BUCKET = 'inspection-photos'
 

@@ -48,3 +48,7 @@ blob-report/
 # Load testing (k6 + Artillery)
 load-tests/.env.load
 load-tests/results/
+
+# Prospecting data (local prospect lists + crawl cache — never commit)
+/data/
+.claude/settings.local.json

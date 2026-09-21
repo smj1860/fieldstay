@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   hostawayListingToNormalized,
   hostawayReservationToNormalized,
@@ -286,6 +286,30 @@ describe('hostawayReservationToNormalized', () => {
     expect(n.guest_name).toBeNull()
     expect(n.guest_email).toBeNull()
   })
+
+  it('throws rather than mapping a missing id to the literal string "undefined"', () => {
+    // String(undefined) === "undefined" — that string becomes external_id,
+    // exactly the column the upsert conflicts on, and a second malformed row
+    // in the same sync would silently overwrite the first under one phantom
+    // "undefined" row.
+    expect(() => hostawayReservationToNormalized(reservation({ id: undefined as never }))).toThrow()
+    expect(() => hostawayReservationToNormalized(reservation({ id: null as never }))).toThrow()
+  })
+
+  it('flags a genuinely-$0 stay as revenue_known_zero so booking-events.ts never fabricates an estimate for it', () => {
+    const free = hostawayReservationToNormalized(reservation({ totalPrice: 0 }))
+    expect(free.actual_total_amount).toBeNull()
+    expect(free.revenue_known_zero).toBe(true)
+
+    // A totalPrice Hostaway simply never sent is a DIFFERENT case — genuinely
+    // unknown, not known-zero — and must still fall through to the estimate.
+    const unknown = hostawayReservationToNormalized(reservation())
+    expect(unknown.actual_total_amount).toBeNull()
+    expect(unknown.revenue_known_zero).toBe(false)
+
+    const priced = hostawayReservationToNormalized(reservation({ totalPrice: 500 }))
+    expect(priced.revenue_known_zero).toBe(false)
+  })
 })
 
 // ── Reviews ──────────────────────────────────────────────────────────────────
@@ -336,6 +360,11 @@ describe('hostawayReviewToNormalized: what is NOT storable', () => {
   it('drops a cancelled review', () => {
     expect(hostawayReviewToNormalized(review({ isCancelled: 1 }))).toBeNull()
   })
+
+  it('throws rather than mapping a missing id to the literal string "undefined"', () => {
+    expect(() => hostawayReviewToNormalized(review({ id: undefined as never }))).toThrow()
+    expect(() => hostawayReviewToNormalized(review({ id: null as never }))).toThrow()
+  })
 })
 
 describe('hostawayReviewToNormalized: mapping', () => {
@@ -373,5 +402,25 @@ describe('hostawayReviewToNormalized: mapping', () => {
 
   it('rounds a fractional rating, since reviews.rating is an integer column', () => {
     expect(hostawayReviewToNormalized(review({ rating: 4.6 }))!.rating).toBe(5)
+  })
+})
+
+describe('hostawayReviewToNormalized: a malformed-type rating is distinct from "not yet reviewed"', () => {
+  // Both drop the review (rating stays required), but only the malformed-shape
+  // case is a genuine API contract anomaly worth a log line — a real null
+  // rating is the documented, silent, common case.
+  it('warns when rating arrives as a non-numeric shape, e.g. a stringified number', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(hostawayReviewToNormalized(review({ rating: '4' as unknown as number }))).toBeNull()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('non-numeric rating')
+    warnSpy.mockRestore()
+  })
+
+  it('does not warn for a genuinely null rating (the documented "not yet reviewed" case)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(hostawayReviewToNormalized(review({ rating: null }))).toBeNull()
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })

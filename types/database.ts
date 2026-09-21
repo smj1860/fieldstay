@@ -72,6 +72,25 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
+export type CrewLocale          = 'en' | 'es'
+/**
+ * Destination type, NOT geography. The friction forecaster's seasonal
+ * component keys its fixed MM-DD windows off this; spring break is keyed off
+ * properties.state instead, because a lake house in Alabama and one in New
+ * Hampshire share a destination type and share no spring-break window at all.
+ * Do not add a 'spring_break' value here.
+ *
+ * Normally DERIVED from the property's ZIP rather than stored — see
+ * lib/scoring/seasonal-market.ts. properties.seasonal_profile holds only a
+ * human override, and holds an ARRAY of these: a property can carry more than
+ * one peak season.
+ *
+ * `summer_vacation` is one value for lake, coastal AND summer-peaked mountain
+ * markets. It replaced `summer_lake` + `coastal_summer`, which had identical
+ * windows, weight and spring-break eligibility — the split never affected
+ * behaviour. Do not add a third summer type.
+ */
+export type SeasonalProfile     = 'none' | 'summer_vacation' | 'fall_foliage' | 'ski' | 'year_round_urban'
 export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
 export type VendorAutoAssignMode = 'suggest' | 'disabled'
 export type SuggestionStatus     = 'pending' | 'accepted' | 'overridden' | 'dismissed'
@@ -265,6 +284,14 @@ export interface Property {
    * 20260823170441.
    */
   external_missing_since:  string | null
+  /**
+   * OVERRIDE ONLY, and an ARRAY (20260912184256). EMPTY — the normal case —
+   * means "derive the market profiles from the ZIP"
+   * (lib/scoring/seasonal-market.ts). A non-empty value is a deliberate human
+   * correction and wins; `['none']` is a deliberate "no seasonality" and is
+   * distinct from empty.
+   */
+  seasonal_profile:        SeasonalProfile[]
   created_at:              string
   updated_at:              string
 }
@@ -361,6 +388,13 @@ export interface CrewMember {
    * Governs only what the engine PROPOSES; manual assignment is unaffected.
    */
   auto_assign_eligible: boolean
+  /**
+   * Preferred UI language for the crew PWA. NOT NULL DEFAULT 'en'
+   * (20260910125639) — opt-in, so existing crew keep English until they
+   * explicitly switch. Written only via createServiceClient({ crew }); see
+   * that migration's comment for why no new RLS policy was added.
+   */
+  locale:             CrewLocale
   notes:              string | null
   home_zip:           string | null
   home_lat:           number | null
@@ -447,6 +481,15 @@ export interface AssignmentOutcome {
   completed_at:       string | null
   duration_minutes:   number | null
   pm_rating:          number | null
+  /**
+   * Automated quality signal (20260913042943), computed per TURNOVER and
+   * written identically to every crew member's row for it — not a per-person
+   * figure. NULL means not applicable (no checklist items / no completed
+   * photo-required items) and contributes exactly 0 to the reliability delta;
+   * 0 would read as "totally failed" for something that never happened.
+   */
+  completion_rate:       number | null
+  photo_compliance_rate: number | null
   property_bedrooms:  number | null
   was_late:           boolean | null
   was_missed:         boolean
@@ -523,6 +566,12 @@ export interface ChecklistTemplateSection {
   room_template_id:       string | null
   room_synced_at:         string | null
   created_at:             string
+  /**
+   * PM-entered Spanish translation of `name`, for the crew app's Spanish
+   * locale. Optional — falls back to `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                string | null
 }
 
 export interface ChecklistTemplateItem {
@@ -534,6 +583,12 @@ export interface ChecklistTemplateItem {
   notes:          string | null
   sort_order:     number
   created_at:     string
+  /**
+   * Copied from room_template_items.task_es via apply-master-template.ts.
+   * Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:        string | null
 }
 
 // Reusable, org-scoped room modules ("Standard Bedroom") a property's
@@ -547,6 +602,13 @@ export interface RoomTemplate {
   is_system:    boolean
   created_at:   string
   updated_at:   string
+  /**
+   * PM-entered Spanish translation of `name`, copied into
+   * checklist_template_sections.name_es when this room template is applied
+   * to a property. Optional — falls back to `name` when null. Added by
+   * 20260910235127_add_room_templates_name_es.sql.
+   */
+  name_es:      string | null
 }
 
 // Org-scoped editable copy of inventory_catalog, seeded on first touch
@@ -568,6 +630,12 @@ export interface OrgInventoryCatalogItem {
   is_consumable:             boolean
   created_at:                string
   updated_at:                string
+  /**
+   * Copied from inventory_catalog.name_es when the org's catalog is first
+   * seeded, then independently PM-editable. Optional — falls back to `name`
+   * when null. Added by 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                   string | null
 }
 
 // Org-scoped editable copy of maintenance_catalog_items, seeded on first
@@ -595,6 +663,12 @@ export interface RoomTemplateItem {
   notes:            string | null
   sort_order:       number
   created_at:       string
+  /**
+   * PM-entered Spanish translation of `task`, for the crew app's Spanish
+   * locale. Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:          string | null
 }
 
 export interface PlatformStaff {
@@ -728,6 +802,18 @@ export interface ChecklistInstanceItem {
   asset_discovery_type:  string | null
   created_at:            string
   updated_at:            string
+  /**
+   * Snapshot of checklist_template_items.task_es at turnover-creation time.
+   * Optional — falls back to `task` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  task_es:               string | null
+  /**
+   * Snapshot of checklist_template_sections.name_es at turnover-creation
+   * time. Optional — falls back to `section_name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  section_name_es:       string | null
 }
 
 export interface ChecklistItemSignal {
@@ -760,6 +846,12 @@ export interface InventoryCatalogItem {
   /** False for equipment/linens — see lib/inventory/stock-status.ts. */
   is_consumable:     boolean
   created_at:        string
+  /**
+   * Platform-maintained Spanish translation of `name`, seeded for the full
+   * catalog. Optional — falls back to `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:           string | null
 }
 
 /**
@@ -814,6 +906,13 @@ export interface InventoryItem {
   first_count_recorded_at: string | null
   created_at:              string
   updated_at:              string
+  /**
+   * Copied from the source template/catalog item via
+   * lib/inventory/apply-standard-to-property.ts. Optional — falls back to
+   * `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:                 string | null
 }
 
 export interface InventoryCount {
@@ -824,6 +923,8 @@ export interface InventoryCount {
   submitted_at:         string
   notes:                string | null
   created_at:           string
+  /** Idempotency claim for recordConsumptionFromCount() — see 20260915151000. */
+  consumption_recorded_at: string | null
 }
 
 export interface InventoryCountItem {
@@ -1077,6 +1178,11 @@ export interface WorkOrderUpdate {
   status_to:                 WoStatus | null
   notes:                     string | null
   created_at:                string
+  // One note per inspection_items row, ever: 'recurrence:' || inspection_items.id.
+  // NULL for every other work_order_updates row (status-change notes, etc.) —
+  // see work_order_updates_dedupe_key_idx (20260915211000), plain unique so
+  // supabase-js's onConflict can name it as an arbiter.
+  dedupe_key:                string | null
 }
 
 export interface WorkOrderPhoto {
@@ -1256,6 +1362,14 @@ export interface AuditEvent {
   metadata:    Record<string, unknown> | null
   ip_address:  string | null
   created_at:  string
+  /**
+   * Insert-time dedup for a write that might be delivered/invoked more than
+   * once for the same logical event (e.g. `thumbtack:${request_pk}`). Backed
+   * by a partial UNIQUE index (`WHERE dedupe_key IS NOT NULL`) — see
+   * 20260916120000_audit_events_dedupe_key.sql. NULL for every writer that
+   * doesn't opt into dedup, which is most of them.
+   */
+  dedupe_key:  string | null
 }
 
 export interface OrgInvite {
@@ -1469,6 +1583,13 @@ export interface InventoryTemplateItem {
   sort_order:      number
   notes:           string | null
   preferred_brand: string | null
+  /**
+   * Copied from org_inventory_catalog.name_es via
+   * app/(dashboard)/templates/inventory/actions.ts. Optional — falls back to
+   * `name` when null. Added by
+   * 20260910234151_add_spanish_columns_checklist_inventory.sql.
+   */
+  name_es:         string | null
 }
 
 // Two disjoint subscriber shapes share this table: crew (crew_member_id set,
@@ -2119,6 +2240,66 @@ export interface PromoHospitableLaunchCounter {
  * The hand-written interfaces are what can drift, so they are what is checked.
  * Add an entry in the same commit that adds a table + its interface.
  */
+/**
+ * One pre-flight friction assessment per turnover, written by the 2am
+ * `cron-pre-flight-friction` run and read by the /ops exceptions panel.
+ *
+ * `severity` and `status` are plain TEXT with CHECK constraints rather than
+ * Postgres enums, matching turnovers.suggestion_status — the drift gate only
+ * compares real `CREATE TYPE ... AS ENUM` types, so the unions below are
+ * documentation plus compile-time help, not something CI verifies.
+ */
+export interface PreFlightFriction {
+  id:                  string
+  org_id:              string
+  turnover_id:         string
+  property_id:         string
+  turnover_date:       string
+  /** 0.000-1.000. Clamped at 1 by computeFrictionScore — the weight maxes sum to more. */
+  failure_probability: number
+  /**
+   * Every FrictionComponents key, always — including `localEvents: 0`, which
+   * has no scorer yet. The key is the seam; omitting it would make "not
+   * scored" and "scored at zero" indistinguishable in stored history.
+   */
+  score_breakdown:     Record<string, number>
+  severity:            'none' | 'high' | 'critical'
+  status:              'flagged' | 'resolved' | 'dismissed'
+  smart_fix_crew_id:   string | null
+  smart_fix_reasoning: string | null
+  /**
+   * The grading feedback loop (20260913111019). Written once by
+   * apply_friction_grading() from assignment_outcomes, comparing what the
+   * forecaster PREDICTED against what actually happened.
+   *
+   * EVERY row is graded, never filtered by predicted severity: a turnover
+   * scored 'none' that ran late is a FALSE NEGATIVE, which matters more than
+   * a false positive that merely annoyed a PM. `graded_at` is one-shot — an
+   * outcome does not change after it happens — and NULL means the outcome
+   * data is not complete yet, so a later run picks it up.
+   */
+  actual_severity:        'none' | 'high' | 'critical' | null
+  actual_was_late:        boolean | null
+  actual_completion_rate: number | null
+  graded_at:              string | null
+  computed_at:         string
+  updated_at:          string
+}
+
+/**
+ * Rolling 90-day minutes-per-bedroom average per crew member. Written only by
+ * the friction cron's first step (service role); PM-readable, never
+ * PM-writable. A crew member below the minimum sample size has NO row — the
+ * scorer falls back to an org median rather than skipping the turnover.
+ */
+export interface CrewSpeedBaseline {
+  crew_member_id:          string
+  org_id:                  string
+  avg_minutes_per_bedroom: number
+  sample_size:             number
+  computed_at:             string
+}
+
 export interface HandWrittenRowMap {
   profiles:                            Profile
   organizations:                       Organization
@@ -2172,6 +2353,8 @@ export interface HandWrittenRowMap {
   org_sms_templates:                   OrgSmsTemplate
   assignment_outcomes:                 AssignmentOutcome
   vendor_assignment_outcomes:          VendorAssignmentOutcome
+  pre_flight_friction:                 PreFlightFriction
+  crew_speed_baselines:                CrewSpeedBaseline
   crew_feedback:                       CrewFeedback
   crew_sync_incidents:                 CrewSyncIncident
   checklist_item_signals:              ChecklistItemSignal
@@ -2219,6 +2402,8 @@ export interface HandWrittenRowMap {
   inspection_form_items:               InspectionFormItem
   inspections:                         Inspection
   inspection_items:                    InspectionItem
+  prospect_accounts:                   ProspectAccount
+  prospect_touches:                    ProspectTouch
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
@@ -2484,3 +2669,111 @@ export interface InspectionItem {
   created_at:  string
   updated_at:  string
 }
+
+/**
+ * Outbound prospecting funnel (20260919120000_prospect_accounts.sql).
+ *
+ * Platform-internal go-to-market data, not tenant data — there is no
+ * org_id and no per-org policy; every row is gated on
+ * is_platform_staff_admin(). Backs /admin/prospects.
+ */
+export interface ProspectAccount {
+  id:            string
+
+  company:       string
+  domain:        string | null
+  website:       string | null
+  comparent_url: string | null
+
+  city:          string | null
+  state:         string | null
+  market:        string | null
+  region:        string | null
+
+  portfolio_size:        number | null
+  portfolio_size_method: string | null
+
+  pms:      string | null
+  /** The fingerprint or source the PMS was identified from, not just the label. */
+  pms_note: string | null
+
+  /** Written by the offline scorer; read-only in the admin UI. */
+  score_a: number | null
+  score_b: number | null
+  track:   string | null
+  bucket:  string | null
+  gate:    string | null
+
+  contact_name:  string | null
+  contact_title: string | null
+  email:         string | null
+  /**
+   * GENERATED ALWAYS — true when email is a role inbox (info@, reservations@ …).
+   * Never name this column in an insert/update payload: Postgres rejects the
+   * whole statement with 428C9.
+   */
+  email_is_generic: boolean
+  phone:            string | null
+  linkedin_url:     string | null
+
+  status:         ProspectAccountStatus
+  status_note:    string | null
+  notes:          string | null
+  last_touch_at:  string | null
+  next_action_at: string | null
+
+  /**
+   * When comparent_url was last fetched by the admin-triggered re-crawl
+   * (20260919140000_prospect_accounts_crawl_tracking.sql). NULL = never
+   * crawled. Drives the crawl dispatcher's oldest-first batch selection.
+   */
+  last_crawled_at: string | null
+  crawl_status:    ProspectAccountCrawlStatus | null
+  crawl_error:     string | null
+
+  source:     string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProspectAccountStatus =
+  | 'new'
+  | 'researching'
+  | 'needs_contact_info'
+  | 'queued'
+  | 'emailed'
+  | 'called'
+  | 'texted'
+  | 'visited_no_contact'
+  | 'replied'
+  | 'meeting_set'
+  | 'in_trial'
+  | 'won'
+  | 'lost'
+  | 'disqualified'
+
+export type ProspectAccountCrawlStatus = 'ok' | 'no_website' | 'error'
+
+/**
+ * Append-only outreach log for prospect_accounts
+ * (20260919130000_prospect_touches.sql). One row per touch — distinct from
+ * prospect_accounts.status (current stage only) and .last_touch_at (most
+ * recent touch only). No UPDATE/DELETE grant: history is never edited.
+ */
+export interface ProspectTouch {
+  id:          string
+  prospect_id: string
+  touch_type:  ProspectTouchType
+  note:        string | null
+  actor_id:    string | null
+  occurred_at: string
+}
+
+export type ProspectTouchType =
+  | 'emailed'
+  | 'called'
+  | 'texted'
+  | 'visited_no_contact'
+  | 'replied'
+  | 'meeting_set'
+  | 'note'

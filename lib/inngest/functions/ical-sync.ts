@@ -137,7 +137,11 @@ export const syncAllIcalFeeds = inngest.createFunction(
     concurrency: { limit: 1 },  // only one full sync at a time
   },
   [
-    { cron: '0 * * * *' },                        // every hour
+    // :26 rather than :00 — see the stagger note in
+    // lib/inngest/functions/ownerrez/incremental-sync.ts. The hourly
+    // dispatchers are spread across the hour on purpose (:07 hostaway,
+    // :13 ownerrez, :26 here, :41 token-refresh); keep these minutes distinct.
+    { cron: '26 * * * *' },                       // every hour
     { event: 'ical/sync.all.requested' as const },
   ],
   async ({ event, step, logger }) => {

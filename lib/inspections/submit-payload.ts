@@ -15,6 +15,7 @@
 // inspector did not fill this in" must not be read as "the payload is corrupt".
 
 import type { InspectionAction, InspectionRepeatAnswer, InspectionResult } from '@/types/database'
+import { MAX_REPEAT_INSTANCES } from '@/lib/inspections/resolve-form'
 
 /**
  * One answer, as the device queued it.
@@ -53,10 +54,20 @@ const REPEAT_ANSWERS = new Set<string>(['same', 'new'])
 /**
  * The most answers one inspection may carry.
  *
- * The largest form is 55 root items, and repeat groups are capped at 999
- * instances each — so a legitimate inspection is in the hundreds and a request
- * in the tens of thousands is a bug or an attack, not a thorough walk. Bounded
- * here because the RPC will happily insert whatever it is handed.
+ * The largest form is 55 root items, and repeat groups are capped at
+ * MAX_REPEAT_INSTANCES (resolve-form.ts) instances each — so a legitimate
+ * inspection is in the hundreds and a request in the tens of thousands is a
+ * bug or an attack, not a thorough walk. Bounded here because the RPC will
+ * happily insert whatever it is handed.
+ *
+ * MUST stay above the worst case MAX_REPEAT_INSTANCES can produce on the
+ * largest real form, or a legitimately-filled walk — the inspector doing
+ * exactly what the UI invited, up to the code's own accepted maximum — gets
+ * silently dead-lettered here: this is TERMINAL for the outbox, since a
+ * rejected submit has no answers anywhere else. The two constants were once
+ * chosen independently and drifted apart (999 * 5-member extinguisher group
+ * alone exceeded this ceiling); their joint relationship is now asserted by
+ * unit/guardrails/inspection-item-caps-consistent.test.ts.
  */
 export const MAX_ITEMS = 5_000
 
@@ -96,7 +107,30 @@ export function parseSubmitPayload(body: unknown): ParseResult {
     items.push(item)
   }
 
-  return { inspectorName, items }
+  return { inspectorName, items: dedupeByAnswerKey(items) }
+}
+
+/**
+ * submit_inspection's INSERT ... ON CONFLICT ON CONSTRAINT
+ * inspection_items_unique_answer DO UPDATE cannot affect the same target row
+ * twice within one statement — Postgres raises "ON CONFLICT DO UPDATE
+ * command cannot affect row a second time" and the WHOLE submit fails. Two
+ * entries sharing (form_item_id, repeat_index, asset_id) are plausible from
+ * a repeat-group re-render bug, a stale cached answer plus a corrected one
+ * both surviving in the local draft, or a retry that appends rather than
+ * replaces. De-duplicated here, keeping the LAST occurrence — the same
+ * "later write wins" outcome the ON CONFLICT clause is trying to express one
+ * write at a time — so this failure mode is closed before it ever reaches
+ * the RPC, rather than surfacing as a permanently-failing outbox retry (this
+ * is TERMINAL for the outbox per this file's own header comment).
+ */
+function dedupeByAnswerKey(items: SubmittedItem[]): SubmittedItem[] {
+  const byKey = new Map<string, SubmittedItem>()
+  for (const item of items) {
+    const key = `${item.form_item_id}|${item.repeat_index ?? ''}|${item.asset_id ?? ''}`
+    byKey.set(key, item)
+  }
+  return [...byKey.values()]
 }
 
 function parseItem(entry: unknown): SubmittedItem | null {
@@ -112,13 +146,16 @@ function parseItem(entry: unknown): SubmittedItem | null {
   const actions = parseActions(r.actions)
   if (actions === false) return null
 
-  const valueNumber = optionalInt(r.value_number)
+  // Matches inspection_items_value_number_range. Rejected here so the
+  // inspector gets a message instead of a CHECK violation surfacing as
+  // "could not submit".
+  const valueNumber = parseBoundedInt(r.value_number, 0, 999)
   if (valueNumber === false) return null
-  // Matches inspection_items_value_number_range. Rejected here so the inspector
-  // gets a message instead of a CHECK violation surfacing as "could not submit".
-  if (valueNumber !== null && (valueNumber < 0 || valueNumber > 999)) return null
 
-  const repeatIndex = optionalInt(r.repeat_index)
+  // Same reasoning as value_number: reject an out-of-range index (a
+  // malformed payload, an adversarial replay) here rather than let it reach
+  // whatever downstream logic assumes it is a real 1-based instance number.
+  const repeatIndex = parseBoundedInt(r.repeat_index, 1, MAX_REPEAT_INSTANCES)
   if (repeatIndex === false) return null
 
   const repeat = parseRepeatAnswer(r)
@@ -126,6 +163,14 @@ function parseItem(entry: unknown): SubmittedItem | null {
 
   const text = parseTextFields(r)
   if (text === false) return null
+
+  // §5's rule — a description is REQUIRED on fail — is enforced client-side
+  // by resolve-form.ts's findOutstanding() before the Review page lets an
+  // inspector sign off, but THIS is the actual trust boundary: a stale
+  // client build, a hand-crafted replay, or a client bug that lets Review's
+  // gate be bypassed can submit `{ result: 'fail', note: null }` otherwise.
+  // The resulting work order's title comes from this note.
+  if (result === 'fail' && !text.note?.trim()) return null
 
   return {
     form_item_id:    r.form_item_id,
@@ -235,4 +280,14 @@ function optionalInt(value: unknown): number | null | false {
   if (value === null || value === undefined) return null
   if (typeof value !== 'number' || !Number.isInteger(value)) return false
   return value
+}
+
+/** optionalInt() plus a [min, max] range check — rejected, not clamped, so
+ *  an out-of-range value surfaces as a rejected shape rather than silently
+ *  becoming a different number. */
+function parseBoundedInt(value: unknown, min: number, max: number): number | null | false {
+  const n = optionalInt(value)
+  if (n === false) return false
+  if (n !== null && (n < min || n > max)) return false
+  return n
 }

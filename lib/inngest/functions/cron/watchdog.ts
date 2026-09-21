@@ -49,8 +49,8 @@ const HOUR_MS = 3_600_000
  * not assumed — and each budget is roughly 2x the period so one missed or
  * slow run does not page anyone:
  *
- *   ownerrez-incremental-sync          0 * * * *      hourly
- *   integration-token-refresh-cron     0 * * * *      hourly
+ *   ownerrez-incremental-sync          13 * * * *     hourly
+ *   integration-token-refresh-cron     41 * * * *     hourly
  *   cron-metrics-snapshot              slash-30       every 30 min
  *   hostex-reservation-reconcile-cron  0 8 * * *      daily
  *   hospitable-teammate-sync-cron      0 9 * * *      daily
@@ -83,6 +83,11 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   { id: 'cron-asset-health',                        maxSilentHours: 30 },
   { id: 'cron-maintenance-schedule-check',          maxSilentHours: 30 },
   { id: 'cron-daily-wrapup',                        maxSilentHours: 30 },
+  // The dispatcher only. Its per-org handler is event-driven fan-out and
+  // legitimately produces many same-tick runs — see the WATCHED_JOBS note at
+  // findDuplicatedCrons.
+  { id: 'cron-pre-flight-friction',                 maxSilentHours: 30 },
+  { id: 'cron-friction-grading',                    maxSilentHours: 30 },
 ]
 
 /**
@@ -490,11 +495,17 @@ export const systemWatchdog = inngest.createFunction(
       // Bounded by the widest budget in the registry, so this reads a day and a
       // bit of history rather than the whole table as it grows.
       const since = new Date(now - 31 * HOUR_MS).toISOString()
+      // Computed here, not after the fetch, so it can scope the QUERY itself —
+      // this watchdog only ever judges WATCHED_JOBS, so reading every other
+      // function's runs platform-wide (all 37 crons' worth, growing with the
+      // whole system's run volume) was pure waste paid on every hourly tick.
+      const watchedIds = WATCHED_JOBS.map((j) => j.id)
 
       const rows = await fetchAllRows<JobRunRow>(
         (from, to) => supabase
           .from('system_job_runs')
           .select('function_id, started_at, finished_at, duration_ms, run_id')
+          .in('function_id', watchedIds)
           .gte('started_at', since)
           .order('started_at', { ascending: false })
           .range(from, to),
@@ -546,52 +557,82 @@ export const systemWatchdog = inngest.createFunction(
 
       // Same rows, no second query: silence and slowness are two readings of
       // one scan.
-      const watchedIds = WATCHED_JOBS.map((j) => j.id)
       const slowJobs   = findSlowJobs(rows, watchedIds)
       // Third reading of the same scan. Duplication is invisible to the other
       // two by construction: a duplicated job is not silent, and each of its
       // runs is individually a normal duration.
       const duplicatedCrons = findDuplicatedCrons(rows, watchedIds)
 
-      return { silentJobs, slowJobs, duplicatedCrons }
+      // Fourth reading of the same scan — see the "An entirely empty ledger"
+      // comment below for why this is bounded to the 31h window rather than
+      // an all-time count of system_job_runs. `rows` is now scoped to
+      // WATCHED_JOBS (see the .in('function_id', watchedIds) filter above,
+      // 2026-09-16 — it used to read every function platform-wide), but that
+      // does not weaken this signal in practice: WATCHED_JOBS includes three
+      // HOURLY jobs, so if the recorder had truly written nothing for
+      // anything, none of those three would appear here either, and this
+      // still trips within a few hours rather than the up-to-a-day a
+      // daily-only job would need.
+      const noRunsRecorded = rows.length === 0
+
+      return { silentJobs, slowJobs, duplicatedCrons, noRunsRecorded }
     })
 
     const silent     = silentAndSlow.silentJobs
     const slow       = silentAndSlow.slowJobs
     const duplicated = silentAndSlow.duplicatedCrons
-
     // An entirely empty ledger is its own finding, not ten of them. It is
-    // expected exactly once — on the very first run, before this watchdog's own
-    // completion has been recorded — and after that it means the recorder is
-    // not working, which is worth knowing precisely because every other check
-    // here depends on it.
-    const noRunsRecorded = await step.run('check-recording-alive', async () => {
-      const supabase = createServiceClient({ system: 'inngest:system-watchdog' })
-      const { count } = await supabase
-        .from('system_job_runs')
-        .select('*', { count: 'exact', head: true })
-      return (count ?? 0) === 0
-    })
+    // expected exactly once — on the very first run, before this watchdog's
+    // own completion has been recorded — and after that it means the
+    // recorder is not working, which is worth knowing precisely because
+    // every other check here depends on it.
+    //
+    // This USED to be a plain, unbounded `count` over the whole table with
+    // no time filter — which meant that once system_job_runs held even one
+    // historical row, `count === 0` could never be true again, for the rest
+    // of the table's life. That only ever caught the recorder being broken
+    // from the very first deploy; a recorder that worked fine for months and
+    // then silently stopped (a regression, an RLS change, the table itself
+    // going away) left this permanently false while `silent` slowly
+    // discovered the same outage one watched job at a time, hours later and
+    // scattered across up to twelve separate alerts instead of the one clean
+    // "recording is dead" signal this check exists to give. Deriving it from
+    // the SAME 31h-bounded `rows` read as everything else above closes that:
+    // it is empty in the true cold-start case exactly like the old count
+    // was, and — unlike the old count — it can also become true again later.
+    const noRunsRecorded = silentAndSlow.noRunsRecorded
 
     // ── 2. Active integrations that have gone quiet ─────────────────────────
     const quiet = await step.run('check-quiet-integrations', async () => {
       const supabase = createServiceClient({ system: 'inngest:system-watchdog' })
 
-      // PLATFORM-WIDE — every live connection, not one tenant's. Paginated for
-      // the usual max_rows reason: truncation here would mean the connections
-      // past row 1000 are the ones never checked, silently.
+      const graceCutoff = now - NEW_CONNECTION_GRACE_HOURS * HOUR_MS
+      const quietCutoff = now - INTEGRATION_QUIET_HOURS * HOUR_MS
+      const quietCutoffIso = new Date(quietCutoff).toISOString()
+
+      // PLATFORM-WIDE — every live connection, not one tenant's — but no
+      // longer every ROW: "not touched since the cutoff" is pushed into the
+      // query via three ANDed .or() filters, one per timestamp column that
+      // could make a connection look active. A connection only reaches the
+      // application-side computation below if last_used_at, updated_at AND
+      // connected_at are ALL either null or already past quietCutoff — the
+      // exact same "none of the three signals is recent" test the JS below
+      // used to run over every active row, just evaluated in Postgres so the
+      // (normally large) genuinely-active majority is never fetched at all.
+      // Paginated still, for the usual max_rows reason: truncation here would
+      // mean the candidates past row 1000 are the ones never checked, silently.
       const rows = await fetchAllRows<ConnRow>(
         (from, to) => supabase
           .from('integration_connections')
           .select('id, provider_id, org_id, connected_at, last_used_at, updated_at')
           .eq('status', 'active')
+          .or(`last_used_at.lt.${quietCutoffIso},last_used_at.is.null`)
+          .or(`updated_at.lt.${quietCutoffIso},updated_at.is.null`)
+          .or(`connected_at.lt.${quietCutoffIso},connected_at.is.null`)
           .order('id')
           .range(from, to),
         { label: 'watchdog.connections' },
       )
-
-      const graceCutoff = now - NEW_CONNECTION_GRACE_HOURS * HOUR_MS
-      const quietCutoff = now - INTEGRATION_QUIET_HOURS * HOUR_MS
 
       return rows.flatMap((c) => {
         const connectedAt = c.connected_at ? Date.parse(c.connected_at) : 0

@@ -66,6 +66,7 @@ import { createPmNotification } from '../helpers'
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
+import { reportError } from '@/lib/observability/report-error'
 import type { InspectionFormItem, PriorityLevel, WoCategory } from '@/types/database'
 
 /** One answer, joined to the routing its form item carried at capture. */
@@ -144,6 +145,23 @@ export const inspectionCompleted = inngest.createFunction(
         .limit(MAX_REMEDIATIONS)
 
       if (itemsError) throw new Error(`inspection_items load failed: ${itemsError.message}`)
+
+      if ((items ?? []).length === MAX_REMEDIATIONS) {
+        // The result set exactly filled the bound. Cannot tell from here
+        // whether that is coincidence or the "device fault" this constant's
+        // own comment names — but every failure past the cap silently never
+        // gets a work order, a PO line or a notification, with no separate
+        // pass ever catching what was skipped, so guessing "coincidence" is
+        // the wrong side to be wrong on. Same pattern as
+        // applySafetyTemplate's property cap.
+        reportError(
+          new Error(
+            `inspectionCompleted hit its ${MAX_REMEDIATIONS}-item cap for inspection ${inspection_id} ` +
+            `(org ${org_id}) — failures past this limit were silently never remediated`,
+          ),
+          { site: 'inngest.inspection-completed', orgId: org_id, level: 'warning', extra: { inspectionId: inspection_id } },
+        )
+      }
 
       const failed: FailedItem[] = []
       for (const item of items ?? []) {
@@ -413,40 +431,34 @@ async function attachToOpenPredecessors(
   const attachable = items.filter((i) => stillOpen.has(i.repeat_of_work_order_id!))
   if (attachable.length === 0) return attached
 
-  // Idempotency without a dedupe column: the note text is deterministic, so a
-  // replay produces the identical string and is skipped. `work_order_updates`
-  // has no unique key to collide against and adding a marker id to the text
-  // would put a uuid in front of a PM for the sake of a retry.
-  const { data: existingNotes, error: notesError } = await supabase
-    .from('work_order_updates')
-    .select('work_order_id, notes')
-    .eq('org_id', orgId)
-    .in('work_order_id', [...stillOpen])
-    .limit(MAX_REMEDIATIONS)
-
-  if (notesError) throw new Error(`existing update lookup failed: ${notesError.message}`)
-  const seen = new Set((existingNotes ?? []).map((r) => `${r.work_order_id}|${r.notes ?? ''}`))
-
   // Every attachable item counts as ATTACHED, including one whose note is
   // already present from an earlier pass — the recurrence is recorded either
   // way, and re-creating a work order for it on the replay would be the
   // duplicate this whole path exists to avoid.
   for (const item of attachable) attached.add(item.id)
 
-  const rows = attachable
-    .map((item) => ({
-      work_order_id: item.repeat_of_work_order_id!,
-      org_id:        orgId,
-      // No status transition: the job's state is unchanged, only its history.
-      status_from:   null,
-      status_to:     null,
-      notes:         recurrenceNote(item),
-    }))
-    .filter((row) => !seen.has(`${row.work_order_id}|${row.notes}`))
+  // Idempotency via a real DB-level guarantee, not a read-then-write `seen`
+  // set: that only protects a SEQUENTIAL replay of this same step (a retry
+  // reads its own earlier write before deciding what to insert), not two
+  // genuinely CONCURRENT executions of the same inspection/completed event —
+  // Inngest's at-least-once delivery does not rule that out, and this
+  // function carries no concurrency key. One note per inspection_items row,
+  // ever: dedupe_key = 'recurrence:' || item.id, upserted against the plain
+  // unique index so a colliding concurrent write is silently ignored rather
+  // than racing the read.
+  const rows = attachable.map((item) => ({
+    work_order_id: item.repeat_of_work_order_id!,
+    org_id:        orgId,
+    // No status transition: the job's state is unchanged, only its history.
+    status_from:   null,
+    status_to:     null,
+    notes:         recurrenceNote(item),
+    dedupe_key:    `recurrence:${item.id}`,
+  }))
 
-  if (rows.length === 0) return attached
-
-  const { error: insertError } = await supabase.from('work_order_updates').insert(rows)
+  const { error: insertError } = await supabase
+    .from('work_order_updates')
+    .upsert(rows, { onConflict: 'dedupe_key', ignoreDuplicates: true })
   if (insertError) {
     throw new Error(`recurrence note insert failed for inspection ${inspectionId}: ${insertError.message}`)
   }

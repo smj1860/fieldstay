@@ -63,6 +63,17 @@ export async function nudgeDueDateIntoVacancy(
     .in('status', OCCUPYING_STATUSES)
     .lte('checkin_date', last)
     .gte('checkout_date', first)
+    // Deterministic ordering before the cap: without an ORDER BY, `.limit()`
+    // hands back an arbitrary subset under concurrent writes — a different
+    // 200 rows on a retry of the same request. `deriveVacancyGaps` re-sorts by
+    // checkin_date internally regardless, so this doesn't change which gaps
+    // get computed for a property realistically under the cap; it only
+    // matters (and matters a lot) once a property-month is pathological
+    // enough to hit MAX_BOOKINGS_PER_MONTH, where earliest-first means a
+    // truncation drops the LATEST bookings rather than a random assortment of
+    // them — the same "oldest/most-established first" bias every other capped
+    // read in this codebase uses.
+    .order('checkin_date', { ascending: true })
     .limit(MAX_BOOKINGS_PER_MONTH)
 
   if (error) {

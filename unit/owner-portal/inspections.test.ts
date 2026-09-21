@@ -69,10 +69,28 @@ const item = (over: Record<string, unknown> = {}) => ({
  * A snapshot that classifies form items, which is what the record-only filter
  * reads. The default SNAPSHOT above carries no sections, so every answer counts
  * as a check — that is what the pre-existing tests exercise, deliberately.
+ *
+ * Every field parseFormSnapshot's item validator checks is filled in here —
+ * see lib/inspections/snapshots.ts's isValidSnapshotItem for why a partial
+ * item (just id + remediation) is rejected rather than silently accepted.
  */
 const snapshotWith = (items: { id: string; remediation: string }[]) => ({
   form_key: 'safety', form_version: 1, captured_at: '2026-03-01T10:00:00Z',
-  sections: [{ id: 's1', key: 'sec', name: 'Section', sort_order: 0, items }],
+  sections: [{
+    id: 's1', key: 'sec', name: 'Section', sort_order: 0,
+    items: items.map((i) => ({
+      section_id: 's1', key: i.id, prompt: 'Prompt', sort_order: 1,
+      response_type: 'yes_no', is_required: true, photo_required: false,
+      parent_item_id: null, show_when: null,
+      repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
+      na_reason_template: null, na_asset_type: null, asset_type: null,
+      concern_key: null, asks_property_fact: null, shown_when_property_fact: null,
+      default_actions: [], wo_category: null, wo_priority: null,
+      po_catalog_item_id: null, po_default_qty: null,
+      created_at: '2026-01-01T00:00:00Z',
+      ...i,
+    })),
+  }],
 })
 
 describe('loadOwnerInspections — tenant scope', () => {

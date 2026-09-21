@@ -34,10 +34,12 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
+import { acquireLock, releaseLock, renewLock, SINGLE_FLIGHT_DEFAULTS } from '@/lib/cache/single-flight'
 import {
   fetchOrgRoomTemplateData,
   type OrgRoomTemplateData,
 } from '@/lib/checklists/apply-master-template'
+import { numberedRoomLabel, numberedRoomLabelEs } from '@/lib/checklists/room-label'
 
 /** Cap on sections read back for one property's default template. */
 const SECTION_LIMIT = 500
@@ -55,6 +57,7 @@ export interface RoomCountSyncResult {
 interface PlannedSection {
   template_id:      string
   name:             string
+  name_es:          string | null
   room_template_id: string
   sort_order:       number
 }
@@ -94,7 +97,8 @@ function planMissingSections(
     for (let i = currentCount + 1; i <= target; i++) {
       planned.push({
         template_id:      templateId,
-        name:             target > 1 ? `${room.name} ${i}` : room.name,
+        name:             numberedRoomLabel(room.name, target, i),
+        name_es:          numberedRoomLabelEs(room.name_es, target, i),
         room_template_id: roomTemplateId,
         sort_order:       sortOrder++,
       })
@@ -105,17 +109,88 @@ function planMissingSections(
 }
 
 /**
+ * Inserts the planned sections and their items. Two writes regardless of how
+ * many sections are missing — all sections in one insert, all their items in
+ * a second. A per-section loop would be the query-per-iteration shape
+ * unit/guardrails/n-plus-one-loops.test.ts exists to catch, and correcting a
+ * studio to an eight-bedroom would issue sixteen round trips inside a
+ * user-facing save. Errors propagate to the caller's try/catch — this
+ * function is only ever called from inside syncChecklistRoomCounts's
+ * lock-guarded block.
+ */
+async function insertPlannedSections(
+  supabase:   SupabaseClient,
+  templateId: string,
+  planned:    PlannedSection[],
+  roomData:   OrgRoomTemplateData,
+): Promise<RoomCountSyncResult> {
+  const { data: created, error: insertErr } = await supabase
+    .from('checklist_template_sections')
+    .insert(planned)
+    .select('id, room_template_id')
+
+  if (insertErr) throw insertErr
+
+  // Sections created but items not attached is worse than nothing — the crew
+  // sees a room they cannot act on — so a short read here is refused rather
+  // than half-populated.
+  if ((created ?? []).length !== planned.length) {
+    throw new Error(`inserted ${planned.length} sections but read back ${(created ?? []).length}`)
+  }
+
+  const items = (created ?? []).flatMap((section) =>
+    (roomData.itemsByTemplate[section.room_template_id as string] ?? []).map((item) => ({
+      section_id:     section.id as string,
+      template_id:    templateId,
+      task:           item.task,
+      task_es:        item.task_es,
+      requires_photo: item.requires_photo,
+      notes:          item.notes,
+      sort_order:     item.sort_order,
+    }))
+  )
+
+  if (items.length) {
+    const { error: itemsErr } = await supabase.from('checklist_template_items').insert(items)
+    if (itemsErr) throw itemsErr
+  }
+
+  return { added: planned.length }
+}
+
+/**
  * Top up a property's bedroom/bathroom sections to match its current counts.
- *
- * Two writes regardless of how many sections are missing — all sections in one
- * insert, all their items in a second. A per-section loop would be the
- * query-per-iteration shape unit/guardrails/n-plus-one-loops.test.ts exists to
- * catch, and correcting a studio to an eight-bedroom would issue sixteen round
- * trips inside a user-facing save.
  *
  * Never throws: a checklist one section short is a visible, fixable
  * inconvenience, whereas failing the enclosing save would reject a property
  * edit already committed to the database.
+ *
+ * LOCKED PER PROPERTY around the read-then-insert. No DB constraint backs the
+ * section count this function reads — there deliberately can't be one:
+ * `planMissingSections` numbers a new section from `currentCount + 1`, and
+ * two identically-numbered "Bedroom 3" sections are a legitimate outcome of
+ * the PM-facing "Insert Rooms from Library" picker, not a row a unique index
+ * could reject. Without this lock, two concurrent calls for the same
+ * property — a double-submitted edit, two tabs — would both read the SAME
+ * existing sections, both decide the SAME sections are missing, and both
+ * insert them: two "Bedroom 3" sections, each generating its own duplicate
+ * set of checklist items for a crew member to work through. Fails open like
+ * every other lock built on lib/cache/single-flight.ts — no Redis means
+ * proceed unlocked, no worse than before this existed.
+ *
+ * The lock is acquired only after confirming there is a default template to
+ * work against — a property with none (the common no-op case) never pays for
+ * it.
+ *
+ * The lock's TTL is fixed at acquisition and Redis does not know how long the
+ * guarded insert will actually take, so it is RENEWED once the sections read
+ * comes back and the potentially-slow part (inserting up to a many-bedroom
+ * property's worth of sections plus their items) is about to start. Without
+ * this, a correction of a studio to a large multi-bedroom property that took
+ * longer than the TTL would let a concurrent retry see the lock as expired,
+ * acquire it, and duplicate the insert — exactly the race this lock exists to
+ * prevent. Best-effort (renewLock never throws): a failed renewal just means
+ * the original TTL still applies, no worse than before this existed.
  */
 export async function syncChecklistRoomCounts(
   propertyId: string,
@@ -142,48 +217,34 @@ export async function syncChecklistRoomCounts(
     const templateId = template.id as string
     const roomData   = orgRoomData ?? await fetchOrgRoomTemplateData(orgId, supabase)
 
-    const { data: sections, error: sectionsErr } = await supabase
-      .from('checklist_template_sections')
-      .select('id, room_template_id, sort_order')
-      .eq('template_id', templateId)
-      .limit(SECTION_LIMIT)
-
-    if (sectionsErr) throw sectionsErr
-
-    const planned = planMissingSections(templateId, sections ?? [], roomData, counts)
-    if (!planned.length) return { added: 0 }
-
-    const { data: created, error: insertErr } = await supabase
-      .from('checklist_template_sections')
-      .insert(planned)
-      .select('id, room_template_id')
-
-    if (insertErr) throw insertErr
-
-    // Sections created but items not attached is worse than nothing — the crew
-    // sees a room they cannot act on — so a short read here is refused rather
-    // than half-populated.
-    if ((created ?? []).length !== planned.length) {
-      throw new Error(`inserted ${planned.length} sections but read back ${(created ?? []).length}`)
+    const lockKey = `sync-checklist-room-counts:${propertyId}`
+    if (!(await acquireLock(lockKey))) {
+      // Someone else is topping up this property's checklist right now.
+      // Their insert already covers whatever was missing — this caller
+      // doing nothing is the correct outcome, not a missed one.
+      return { added: 0 }
     }
 
-    const items = (created ?? []).flatMap((section) =>
-      (roomData.itemsByTemplate[section.room_template_id as string] ?? []).map((item) => ({
-        section_id:     section.id as string,
-        template_id:    templateId,
-        task:           item.task,
-        requires_photo: item.requires_photo,
-        notes:          item.notes,
-        sort_order:     item.sort_order,
-      }))
-    )
+    try {
+      const { data: sections, error: sectionsErr } = await supabase
+        .from('checklist_template_sections')
+        .select('id, room_template_id, sort_order')
+        .eq('template_id', templateId)
+        .limit(SECTION_LIMIT)
 
-    if (items.length) {
-      const { error: itemsErr } = await supabase.from('checklist_template_items').insert(items)
-      if (itemsErr) throw itemsErr
+      if (sectionsErr) throw sectionsErr
+
+      const planned = planMissingSections(templateId, sections ?? [], roomData, counts)
+      if (!planned.length) return { added: 0 }
+
+      // Re-arm the TTL before the two inserts below — see the header
+      // comment's note on why a fixed TTL can't be trusted to outlive this.
+      await renewLock(lockKey, SINGLE_FLIGHT_DEFAULTS.DEFAULT_LOCK_TTL_SECONDS)
+
+      return await insertPlannedSections(supabase, templateId, planned, roomData)
+    } finally {
+      await releaseLock(lockKey)
     }
-
-    return { added: planned.length }
   } catch (err) {
     console.error('[syncChecklistRoomCounts]', err)
     reportError(err, {

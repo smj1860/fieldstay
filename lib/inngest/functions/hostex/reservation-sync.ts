@@ -86,11 +86,16 @@ export async function syncHostexReservations(
       // One acquisition for the whole fan-out rather than one per code: this
       // is inside the step, so a retry re-reads it, and re-resolving per code
       // would issue N connection+Vault reads for a single logical fetch.
+      // Flattened, not filtered-for-one: Hostex returns one object per STAY
+      // and a reservation_code can name several (a multi-room-type or
+      // multi-property booking) — hostexReservationToNormalized keys on
+      // stay_code for exactly this reason. Assuming one row per code used to
+      // silently drop every sibling stay past the first.
       const token   = await getToken()
       const fetched = await Promise.all(
         fetchMode.reservationCodes.map((code) => hostexFetchReservationByCode(token, userId, code)),
       )
-      return fetched.filter((r): r is NonNullable<typeof r> => r !== null)
+      return fetched.flat()
     }
 
     const window = hostexReservationWindow(fetchMode.historyMonths, fetchMode.lookaheadMonths)

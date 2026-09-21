@@ -1,0 +1,69 @@
+-- ============================================================================
+-- [MEDIUM] work_orders still maintains a full B-tree index on the deprecated
+-- assigned_crew_id column.
+--
+-- Confirmed unused before dropping, per CLAUDE.md's documented deprecation
+-- ("assigned_crew_id" -> "assigned_crew_member_id", the old column
+-- deprecated) and a direct search of this codebase:
+--
+--   * app/, lib/, components/, types/database.ts: zero reads or writes of
+--     assigned_crew_id outside comments and the deprecation note in
+--     types/database.ts itself.
+--   * types/database.generated.ts (machine-generated from the live schema)
+--     still models the column and its FK — expected, since this migration
+--     does not touch the column or the FK, only the secondary index on it.
+--   * 20260605221147_fix_duplicate_crew_column_and_cleanup_policies.sql
+--     (the migration that introduced the deprecation) recorded that
+--     assigned_crew_id was "never used in production" and NULL in all 3
+--     rows that existed at the time, with assigned_crew_member_id already
+--     the canonical column from that point forward — nothing since has
+--     written to it.
+--   * No view or other migration references
+--     idx_work_orders_assigned_crew_id (the index being dropped here) for
+--     anything other than its own creation
+--     (20260617061333_add_missing_fk_indexes.sql).
+--   * The `assigned_crew_id` chokepoint ban in .semgrep/chokepoints.yml
+--     already keeps app code from writing new references to the column.
+--
+-- Every INSERT/UPDATE to work_orders (the highest-write-volume table
+-- touched by this scalability audit) has been maintaining a B-tree entry
+-- for a column that is always NULL and never read — pure write overhead
+-- with zero query benefit.
+--
+-- ── Known interaction worth flagging for whoever applies this centrally ────
+--
+-- work_orders.assigned_crew_id still carries a live FK
+-- (work_orders_assigned_crew_id_fkey -> crew_members(id) ON DELETE SET
+-- NULL), and scripts/check-db-invariants.mjs check 3 ("any FK column
+-- without a covering index") has no allowlist mechanism — unlike checks 2
+-- and 9, which have SERVICE_ROLE_ONLY_TABLES / ORG_ID_FK_EXCEPTIONS. Once
+-- this migration is applied and the db-invariants CI job runs against the
+-- E2E project, it WILL newly report
+-- `work_orders(assigned_crew_id) — work_orders_assigned_crew_id_fkey` as an
+-- unindexed FK column.
+--
+-- This is a deliberate, audit-endorsed trade, not an oversight: the index
+-- was paying a cost on every work_orders write (the hot path this whole
+-- audit is about) to protect a rare, non-hot-path operation (deleting a
+-- crew_member, which triggers Postgres to scan work_orders for rows to
+-- SET NULL) against a column that has been provably 100% NULL since before
+-- this column was even deprecated. Two ways to close the resulting
+-- db-invariants finding, neither done here since both are out of this
+-- migration's scope:
+--   (a) add a narrowly-justified allowlist entry to check 3 in
+--       scripts/check-db-invariants.mjs (mirroring ORG_ID_FK_EXCEPTIONS'
+--       pattern) documenting that this FK's covering index was deliberately
+--       dropped because the column is dead; or
+--   (b) drop assigned_crew_id (and its FK) entirely in a properly-scoped
+--       follow-up migration, which would remove the invariant's target
+--       rather than merely excuse it — the more thorough fix, but a bigger,
+--       separately-reviewable change (a column drop, not an index drop).
+-- Do not treat the resulting CI finding as an unrelated regression if it
+-- shows up — it is this migration's known, documented consequence.
+--
+-- CONCURRENTLY cannot run inside a transaction block, hence its own
+-- single-statement migration file, matching this migration set's other
+-- CONCURRENTLY files.
+-- ============================================================================
+
+DROP INDEX CONCURRENTLY IF EXISTS idx_work_orders_assigned_crew_id;

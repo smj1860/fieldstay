@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrap } from '@/lib/supabase/unwrap'
-import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { resolveSponsorsForPropertyCached } from '@/lib/guidebook/resolve-property-sponsors'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asOfferType } from '@/lib/guidebook/offer'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
@@ -163,7 +163,7 @@ export default async function GuestBookingGuidebookPage({
   // which is the nearest sponsor per named category — for a 1-4 property org
   // with at most six sponsors that is the same set it saw before, so nothing
   // changes for them.
-  const resolution = await resolveSponsorsForProperty(
+  const resolution = await resolveSponsorsForPropertyCached(
     supabase,
     booking.org_id,
     {

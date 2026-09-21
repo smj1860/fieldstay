@@ -34,22 +34,30 @@ export function CookieNotice() {
 
   if (!visible) return null
 
+  // pointer-events-none on the WRAPPER, auto on the card. The wrapper is
+  // `fixed bottom-0 left-0 right-0` with p-4, so without this it lays a
+  // transparent full-width 16px strip across the bottom of EVERY page that
+  // silently swallows clicks on whatever sits under it — for real users, not
+  // only tests. Three e2e specs named it exactly ("<div role='region'
+  // aria-label='Cookie notice'> intercepts pointer events") the moment a copy
+  // change made the banner one line taller; before that it cleared the buttons
+  // underneath by luck of layout rather than by design.
   return (
     <div
       role="region"
       aria-label="Cookie notice"
-      className="fixed bottom-0 left-0 right-0 z-50 p-4"
+      className="fixed bottom-0 left-0 right-0 z-50 p-4 pointer-events-none"
     >
       <div
-        className="max-w-2xl mx-auto rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg"
+        className="max-w-2xl mx-auto rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg pointer-events-auto"
         style={{
           background: 'var(--bg-card)',
           border:     '1px solid var(--border)',
         }}
       >
         <p className="flex-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-          We use essential cookies to keep you signed in and remember your preferences.
-          No tracking or advertising cookies.{' '}
+          Essential cookies keep you signed in; Google Analytics measures site usage.
+          No advertising cookies.{' '}
           <Link
             href="/privacy#cookies"
             className="underline underline-offset-2 hover:opacity-80"

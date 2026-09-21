@@ -6,7 +6,7 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 ## Does FieldStay work with the PMS I already use?
 
-FieldStay integrates with OwnerRez, Hospitable, and Hostex today — connect any one of them from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
+FieldStay integrates with OwnerRez, Hospitable, Hostex, and Hostaway today — connect any one of them from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
 
 ---
 
@@ -42,7 +42,7 @@ Yes. FieldStay is built with security as a core design principle:
 
 ## Does FieldStay store my PMS password?
 
-No. Every PMS connection — OwnerRez, Hospitable, and Hostex — uses OAuth 2.0, so FieldStay receives an access token, not your password. You authorize through your PMS's own login screen. FieldStay never sees or stores those credentials.
+No. OwnerRez, Hospitable, and Hostex connect via OAuth 2.0, so FieldStay receives an access token, not your password — you authorize through your PMS's own login screen. Hostaway connects differently: you generate an API key from your own Hostaway dashboard and enter that in FieldStay. Either way, FieldStay never sees or stores your PMS login credentials.
 
 ---
 
@@ -68,9 +68,9 @@ When a booking is cancelled in your PMS, the webhook fires and FieldStay automat
 
 ## Does RepuGuard work with Google or Airbnb reviews?
 
-RepuGuard automatically syncs reviews from your connected PMS — OwnerRez, Hospitable, or Hostex. All three aggregate reviews from multiple channels, so most Airbnb and Vrbo reviews appear automatically.
+RepuGuard automatically syncs reviews from your connected PMS — OwnerRez, Hospitable, Hostex, or Hostaway. All four aggregate reviews from multiple channels, so most Airbnb and Vrbo reviews appear automatically.
 
-For reviews on Google, Booking.com, or platforms that don't sync through your PMS, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text. Note that posting the response back isn't a one-click API submission — for OwnerRez reviews FieldStay links you to the review on OwnerRez's site to paste your response there; for Hospitable, Hostex, and manually-added reviews you post it wherever the review lives and then mark it posted in FieldStay.
+For reviews on Google, Booking.com, or platforms that don't sync through your PMS, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text. Note that posting the response back isn't a one-click API submission — for OwnerRez reviews FieldStay links you to the review on OwnerRez's site to paste your response there; for Hospitable, Hostex, Hostaway, and manually-added reviews you post it wherever the review lives and then mark it posted in FieldStay.
 
 ---
 
@@ -117,6 +117,12 @@ Crew members should install this as a PWA (Progressive Web App) on their phone h
 ## Does FieldStay have a native iOS or Android app?
 
 FieldStay uses a Progressive Web App (PWA) for the crew mobile experience. A PWA installs from the browser and appears on the home screen exactly like a native app — it works offline, receives push notifications, and does not require an App Store or Google Play download. There is no separate native app to install.
+
+---
+
+## Does the crew app support Spanish?
+
+Yes. Crew members can switch the crew app to Spanish themselves — the toggle lives in the crew app's own settings, so no property manager setup is required. Once switched, the app's navigation and menus, the in-app FAQ, and the checklist and inventory item text all display in Spanish. Switching back to English works the same way, at any time.
 
 ---
 

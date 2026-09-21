@@ -118,7 +118,7 @@ describe('properties/actions', () => {
       await expect(createProperty(null, fd({ zip: '36853', door_code: '1234' })))
         .rejects.toThrow('REDIRECT:/properties/prop_1/setup/details')
 
-      expect(geocodeZip).toHaveBeenCalledWith('36853')
+      expect(geocodeZip).toHaveBeenCalledWith('36853', { boundToSave: true })
       expect(supabase.rpc).toHaveBeenCalledWith('store_property_door_code', {
         p_property_id: 'prop_1', p_org_id: 'org_1', p_door_code: '1234',
       })
@@ -529,6 +529,11 @@ describe('properties/actions', () => {
       ['NaN',       'abc'],
       ['Infinity',  'Infinity'],
       ['over $1M',  '5000000'],
+      // Number.parseFloat stops at the first non-numeric character rather
+      // than rejecting the whole string, so a bare parseFloat(raw) would
+      // silently turn these into 100 before the schema ever ran.
+      ['trailing garbage',      '100abc'],
+      ['thousands separator',   '100,000'],
     ])('rejects a %s purchase price before any write', async (_label, value) => {
       const supabase = makeSupabase({})
       mockAuthed(supabase)

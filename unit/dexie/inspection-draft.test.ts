@@ -3,7 +3,9 @@
 // change to the same row does to the first, and what pruning removes.
 import 'fake-indexeddb/auto'
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import {
   cacheInspection,
@@ -100,6 +102,26 @@ describe('saveAnswer — a change is a MERGE, never a replace', () => {
       inspectionId: INSP, answerKey: 'a', actions: [], needsCleaning: false,
       note: null, photoPath: null, valueNumber: null, valueText: null, valueDate: null,
     })
+  })
+
+  it('reports and re-throws on an IndexedDB failure, rather than an unhandled rejection', async () => {
+    // Called on EVERY TAP during a 90-minute walk, and fill-screen.tsx's own
+    // onChange calls it as `void saveAnswer(...)` — nothing awaits or catches
+    // it there. A quota-exceeded or closed-connection failure used to reject
+    // straight past that fire-and-forget call site with nothing catching it:
+    // the UI's optimistic state already shows the tap as saved while the
+    // write never landed, silently reintroducing the "lost keystroke" failure
+    // this whole design exists to prevent. Closing the underlying connection
+    // (without dropping the cached handle saveAnswer will reuse) is a
+    // deterministic stand-in for exactly that class of failure.
+    const { reportError } = await import('@/lib/observability/report-error')
+    getDashboardDb(USER, ORG).close()
+
+    await expect(saveAnswer(USER, ORG, identity('a'), { result: 'pass' })).rejects.toThrow()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'dexie.dashboard.saveAnswer' }),
+    )
   })
 })
 

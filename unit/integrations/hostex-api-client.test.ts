@@ -32,15 +32,44 @@ vi.mock('@/lib/rate-limit', () => ({
     d.errored ? 60 : Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
 }))
 
+// This file is about hostexFetch's own request/response handling, not the
+// breaker — unit/lib/circuit-breaker.test.ts and a dedicated wiring test
+// cover that. Stubbed closed (same pattern as
+// unit/lib/kroger-client-rate-limit.test.ts) so it never touches Redis:
+// unit/setup.ts sets FAKE-but-present Upstash credentials, so an unmocked
+// evaluateBreaker/recordFailure/recordSuccess here would make a REAL fetch to
+// a bogus host and silently consume the very fetchMock responses these tests
+// stage for the Hostex API call itself.
+vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
+  ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
+  evaluateBreaker: vi.fn(async () => ({ decision: 'closed', priorFailures: 0 })),
+  recordFailure:   vi.fn(async () => undefined),
+  recordSuccess:   vi.fn(async () => undefined),
+}))
+
+import { RetryAfterError } from 'inngest'
 import {
   hostexDeleteWebhook,
   hostexFetch,
   hostexFetchProperties,
+  hostexFetchReservationByCode,
+  hostexFetchReviewByReservation,
   hostexReservationWindow,
   isHostexAccountActionError,
 } from '@/lib/integrations/providers/hostex-api'
 import { RateLimitError } from '@/lib/integrations/types'
 import { checkLimit } from '@/lib/rate-limit'
+
+/** Every hostexFetch throttle escapes as a RetryAfterError wrapping the
+ * original RateLimitError as `cause` — see lib/inngest/retry-after.ts. A bare
+ * RateLimitError used to reach Inngest uncaught, which retried on its own
+ * generic backoff rather than the interval Hostex actually asked for. */
+function causeRateLimit(err: unknown): RateLimitError {
+  expect(err).toBeInstanceOf(RetryAfterError)
+  const cause = (err as { cause?: unknown }).cause
+  expect(cause).toBeInstanceOf(RateLimitError)
+  return cause as RateLimitError
+}
 
 const USER = 'user_1'
 
@@ -82,9 +111,10 @@ describe('hostexFetch', () => {
     await expect(hostexFetch('/properties', 'tok', USER)).rejects.toThrow(/error_code 200/)
   })
 
-  it('throws RateLimitError on an IN-BAND 429 carried by a 200 response', async () => {
+  it('throws a RetryAfterError (wrapping RateLimitError) on an IN-BAND 429 carried by a 200 response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope(null, 429, { 'Retry-After': '17' })))
-    await expect(hostexFetch('/properties', 'tok', USER)).rejects.toBeInstanceOf(RateLimitError)
+    const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+    causeRateLimit(err)
   })
 
   it('jitters Retry-After by ±25% so throttled connections do not retry in lockstep', async () => {
@@ -96,9 +126,8 @@ describe('hostexFetch', () => {
 
     const seen = new Set<number>()
     for (let i = 0; i < 25; i++) {
-      const err = await hostexFetch('/properties', 'tok', USER).catch((e: RateLimitError) => e)
-      expect(err).toBeInstanceOf(RateLimitError)
-      const { retryAfter } = err as RateLimitError
+      const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+      const { retryAfter } = causeRateLimit(err)
       expect(retryAfter).toBeGreaterThanOrEqual(75)
       expect(retryAfter).toBeLessThanOrEqual(125)
       seen.add(retryAfter)
@@ -112,8 +141,8 @@ describe('hostexFetch', () => {
     // straight back into the window that just rejected us.
     vi.stubGlobal('fetch', vi.fn(async () => envelope(null, 429, { 'Retry-After': '1' })))
     for (let i = 0; i < 10; i++) {
-      const err = await hostexFetch('/properties', 'tok', USER).catch((e: RateLimitError) => e)
-      expect((err as RateLimitError).retryAfter).toBeGreaterThanOrEqual(1)
+      const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+      expect(causeRateLimit(err).retryAfter).toBeGreaterThanOrEqual(1)
     }
   })
 
@@ -184,7 +213,8 @@ describe('hostexFetch', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(hostexFetch('/properties', 'tok', USER)).rejects.toBeInstanceOf(RateLimitError)
+    const err = await hostexFetch('/properties', 'tok', USER).catch((e: unknown) => e)
+    causeRateLimit(err)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
@@ -203,6 +233,21 @@ describe('pagination', () => {
     expect(all).toHaveLength(101)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect((fetchMock.mock.calls[1]![0] as string)).toContain('offset=100')
+  })
+
+  it('throws rather than silently truncating when a page comes back unparseable', async () => {
+    // Page 1 is a genuine full page; page 2's envelope is missing the
+    // `properties` key entirely (a mangled/malformed response, not a real
+    // short page). extract() returns undefined for it — the loop must not
+    // read that as "zero rows, we're done" and hand back page 1 alone as if
+    // it were the complete result.
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ id: i, title: `p${i}` }))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope({ properties: page1, total: 150 }))
+      .mockResolvedValueOnce(envelope({ totally_wrong_key: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchProperties('tok', USER)).rejects.toThrow(/unparseable/)
   })
 
   it('does not trust `total` — a wrong count neither truncates nor loops', async () => {
@@ -226,6 +271,61 @@ describe('hostexReservationWindow', () => {
     const w = hostexReservationWindow(12, 6, new Date('2026-08-16T00:00:00Z'))
     expect(w.startCheckOutDate).toBe('2025-08-16')
     expect(w.endCheckOutDate).toBe('2027-02-16')
+  })
+})
+
+describe('hostexFetchReservationByCode', () => {
+  // Hostex returns one object per STAY, and a single reservation_code can
+  // legitimately span more than one (a multi-room-type or multi-property
+  // booking) — hostexReservationToNormalized keys external_id on stay_code
+  // for exactly this reason. A `limit: 1` re-read used to silently drop
+  // every sibling stay past the first.
+  it('returns EVERY stay under the reservation code, not just the first', async () => {
+    const stays = [
+      { id: 1, reservation_code: 'R1', stay_code: 'R1-A' },
+      { id: 2, reservation_code: 'R1', stay_code: 'R1-B' },
+    ]
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => envelope({ reservations: stays, total: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchReservationByCode('tok', USER, 'R1')).resolves.toEqual(stays)
+
+    const url = fetchMock.mock.calls[0]![0] as string
+    expect(url).toContain('reservation_code=R1')
+    expect(url).not.toContain('limit=1&')
+    expect(url).not.toMatch(/limit=1$/)
+  })
+
+  it('returns an empty array, not null, when the code matches nothing', async () => {
+    // A hard-deleted-between-delivery-and-read reservation is a legitimate
+    // outcome, not an error — callers flatten these results, and flattening
+    // null would throw.
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ reservations: [], total: 0 })))
+    await expect(hostexFetchReservationByCode('tok', USER, 'GONE')).resolves.toEqual([])
+  })
+})
+
+describe('hostexFetchReviewByReservation', () => {
+  it('returns EVERY review under the reservation code, not just the first', async () => {
+    // Whether Hostex can return more than one review per reservation is
+    // documented as unconfirmed either way — taking only [0] silently
+    // resolved that uncertainty in the direction that drops data.
+    const reviews = [
+      { id: 1, reservation_code: 'R1' },
+      { id: 2, reservation_code: 'R1' },
+    ]
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => envelope({ reviews, total: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hostexFetchReviewByReservation('tok', USER, 'R1')).resolves.toEqual(reviews)
+
+    const url = fetchMock.mock.calls[0]![0] as string
+    expect(url).toContain('reservation_code=R1')
+  })
+
+  it('returns an empty array, not null, when the reservation has no review', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ reviews: [], total: 0 })))
+    await expect(hostexFetchReviewByReservation('tok', USER, 'NONE')).resolves.toEqual([])
   })
 })
 

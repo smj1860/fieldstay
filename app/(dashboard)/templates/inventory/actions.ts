@@ -7,12 +7,16 @@ import { reportError } from '@/lib/observability/report-error'
 import { unwrapList, isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import type { InventoryCategory, TablesUpdate } from '@/types/database'
 
+/** The org's own catalog — the platform seed plus any custom items, small by construction. */
+const CATALOG_LIMIT = 500
+
 // ── Master List (org_inventory_catalog) ─────────────────────────────────────
 
 export async function createCatalogItem(
   name: string,
   category: InventoryCategory,
-  defaultUnit: string
+  defaultUnit: string,
+  nameEs?: string
 ): Promise<{ id?: string; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -21,10 +25,11 @@ export async function createCatalogItem(
     const trimmedUnit = defaultUnit.trim()
     if (!trimmedName) return { error: 'Item name is required.' }
     if (!trimmedUnit) return { error: 'Unit is required.' }
+    const trimmedNameEs = nameEs?.trim() || null
 
     const { data, error } = await supabase
       .from('org_inventory_catalog')
-      .insert({ org_id: membership.org_id, name: trimmedName, category, default_unit: trimmedUnit })
+      .insert({ org_id: membership.org_id, name: trimmedName, name_es: trimmedNameEs, category, default_unit: trimmedUnit })
       .select('id')
       .single()
 
@@ -54,7 +59,7 @@ export async function createCatalogItem(
 
 export async function updateCatalogItem(
   itemId: string,
-  updates: { name?: string; category?: InventoryCategory; default_unit?: string }
+  updates: { name?: string; name_es?: string | null; category?: InventoryCategory; default_unit?: string }
 ): Promise<{ error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -65,6 +70,7 @@ export async function updateCatalogItem(
       if (!trimmed) return { error: 'Item name is required.' }
       patch.name = trimmed
     }
+    if (updates.name_es !== undefined) patch.name_es = updates.name_es?.trim() || null
     if (updates.category !== undefined) patch.category = updates.category
     if (updates.default_unit !== undefined) {
       const trimmed = updates.default_unit.trim()
@@ -178,7 +184,7 @@ export async function createInventoryTemplate(
 
     const { data: catalogItems, error: catalogError } = await supabase
       .from('org_inventory_catalog')
-      .select('id, name, category, default_unit, default_par_level, platform_catalog_item_id')
+      .select('id, name, name_es, category, default_unit, default_par_level, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
       .in('id', selectedCatalogItemIds)
       // One row per selected id. Sized by the selection so a truncated read
@@ -210,6 +216,7 @@ export async function createInventoryTemplate(
         template_id:     template.id,
         catalog_item_id: item.platform_catalog_item_id ?? null,
         name:            item.name,
+        name_es:         item.name_es,
         category:        item.category,
         unit:            item.default_unit,
         par_level:       item.default_par_level,
@@ -280,8 +287,9 @@ export async function createInventoryTemplateFromCSV(
 
     const { data: catalogMatches, error: catalogError } = await supabase
       .from('org_inventory_catalog')
-      .select('name, platform_catalog_item_id')
+      .select('name, name_es, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
+      .limit(CATALOG_LIMIT)
 
     if (catalogError) {
       console.error('[createInventoryTemplateFromCSV] catalog fetch', catalogError)
@@ -289,9 +297,12 @@ export async function createInventoryTemplateFromCSV(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    const catalogIdByLowerName = new Map<string, string | null>()
+    // A CSV row carries no Spanish name of its own, so a matching catalog
+    // row's translation is carried forward automatically — the same "PM
+    // translates once at the org level" model as createInventoryTemplate.
+    const catalogMatchByLowerName = new Map<string, { catalogItemId: string | null; nameEs: string | null }>()
     for (const row of catalogMatches ?? []) {
-      catalogIdByLowerName.set(row.name.toLowerCase(), row.platform_catalog_item_id)
+      catalogMatchByLowerName.set(row.name.toLowerCase(), { catalogItemId: row.platform_catalog_item_id, nameEs: row.name_es })
     }
 
     const { data: template, error: templateError } = await supabase
@@ -307,20 +318,24 @@ export async function createInventoryTemplateFromCSV(
     }
 
     const { error: itemsError } = await supabase.from('inventory_template_items').insert(
-      rows.map((row) => ({
-        template_id:     template.id,
-        catalog_item_id: catalogIdByLowerName.get(row.name.toLowerCase()) ?? null,
-        name:            row.name,
-        category:        row.category,
-        unit:            row.unit,
-        // The addendum's spec said "default to 0, same as the column's own
-        // default" — that's actually inventory_items.par_level's default;
-        // inventory_template_items.par_level defaults to 1
-        // (20260618000002_baseline_schema_snapshot.sql). Using the real
-        // column default here, not the addendum's mixed-up one.
-        par_level:       row.par_level ?? 1,
-        preferred_brand: row.preferred_brand?.trim() || null,
-      }))
+      rows.map((row) => {
+        const catalogMatch = catalogMatchByLowerName.get(row.name.toLowerCase())
+        return {
+          template_id:     template.id,
+          catalog_item_id: catalogMatch?.catalogItemId ?? null,
+          name:            row.name,
+          name_es:         catalogMatch?.nameEs ?? null,
+          category:        row.category,
+          unit:            row.unit,
+          // The addendum's spec said "default to 0, same as the column's own
+          // default" — that's actually inventory_items.par_level's default;
+          // inventory_template_items.par_level defaults to 1
+          // (20260618000002_baseline_schema_snapshot.sql). Using the real
+          // column default here, not the addendum's mixed-up one.
+          par_level:       row.par_level ?? 1,
+          preferred_brand: row.preferred_brand?.trim() || null,
+        }
+      })
     )
 
     if (itemsError) {

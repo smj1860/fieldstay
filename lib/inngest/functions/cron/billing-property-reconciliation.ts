@@ -1,7 +1,8 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripe }              from '@/lib/stripe/client'
+import { stripe, isPlatformPriceId } from '@/lib/stripe/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
+import { sendEventsChunked }   from '@/lib/inngest/chunk'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { logAuditEvent }       from '@/lib/audit'
 import { reportError }         from '@/lib/observability/report-error'
@@ -68,7 +69,8 @@ export const billingPropertyReconciliation = inngest.createFunction(
     })
 
     if (orgIds.length) {
-      await step.sendEvent(
+      await sendEventsChunked(
+        step,
         'fan-out-property-reconciliation',
         orgIds.map((orgId) => ({
           name: 'billing/reconcile-property-count.requested' as const,
@@ -87,7 +89,27 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
     id:   'billing-reconcile-property-count-org',
     name: 'Billing: Reconcile Property Count — per org',
     retries: 3,
-    concurrency: { limit: 10 },
+    // Per-org key, not just a global cap. This function's own idempotency
+    // claim ("a retried step re-fetches the subscription fresh from Stripe")
+    // only holds for SEQUENTIAL retries — it says nothing about two live
+    // invocations for the same org running concurrently. The dispatcher's own
+    // step.sendEvent() is itself a step: if it durably queues events but the
+    // dispatcher doesn't get acknowledgment, Inngest retries the dispatcher,
+    // which re-sends a SECOND event per org. Without this key, both resulting
+    // invocations read the same stale Stripe quantity before either writes —
+    // a TOCTOU race on real billing state, unguarded by any compare-and-swap.
+    //
+    // The GLOBAL cap is 30, not the { limit: 10 } every other per-org fan-out
+    // cron in this codebase uses (asset-health, daily-wrapup,
+    // maintenance-schedules, work-order-ops, pre-flight-friction, …). Those
+    // are bounded by Supabase connection-pool pressure; this one's per-org
+    // work is a Stripe round trip instead, and Stripe's own published
+    // rate limits (100 requests/second in live mode) are two orders of
+    // magnitude above even this raised ceiling — a platform with 10,000
+    // billed orgs at 10-way concurrency serialises through roughly 1,000
+    // sequential batches a day; 30-way cuts that to a third without coming
+    // anywhere near Stripe's own throttling.
+    concurrency: [{ limit: 30 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'billing/reconcile-property-count.requested' },
   async ({ event, step }) => {
@@ -115,6 +137,26 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
       // head+count — ships no rows, so max_rows cannot truncate it. Matches
       // createCheckoutSession's own count exactly (is_active: true), so
       // checkout and reconciliation never disagree about what a property is.
+      //
+      // Deliberately NOT compared against a locally cached "last known
+      // billed quantity" to skip the Stripe read below when nothing has
+      // changed. Neither cheap candidate for that comparison holds up:
+      // `organizations.max_properties` is the 150-property STRUCTURAL
+      // ceiling, not what the org is billed for — see the Billing section's
+      // "max_properties changed meaning" note — so comparing against it
+      // would skip the Stripe call for nearly every org regardless of
+      // whether its billed quantity is actually in sync. And caching
+      // Stripe's own quantity locally to compare against instead reopens
+      // exactly the staleness this function's own idempotency design
+      // explicitly avoids ("naturally idempotent: a retried step re-fetches
+      // the subscription fresh from Stripe rather than trusting a local
+      // flag") — a quantity changed out-of-band (Stripe dashboard, support
+      // tooling) would silently stop reconciling until the org's property
+      // count happened to move again. The real fix is event-driven (cache
+      // from the `customer.subscription.updated` webhook this app already
+      // receives, invalidated by Stripe itself rather than guessed at here)
+      // and is separate, better-scoped work; the safe lever pulled in this
+      // pass is the concurrency ceiling above.
       const countRes = await supabase
         .from('properties')
         .select('id', { count: 'exact', head: true })
@@ -132,8 +174,7 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
       if (currentCount < 1) return
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-      const item = subscription.items.data[0]
-      if (!item) {
+      if (!subscription.items.data.length) {
         reportError(new Error('Platform subscription has no line item to reconcile'), {
           site: 'inngest.billing-property-reconciliation.no-item', orgId,
           extra: { subscription_id: subscriptionId },
@@ -141,17 +182,43 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
         return
       }
 
+      // The platform-price item, not blindly items.data[0] — same reasoning
+      // as the webhook handler's own lookup (core-billing.ts): `plan` on the
+      // organizations row is display-only and only ever synced FORWARD by a
+      // webhook, so it can read 'platform' for an org whose live Stripe
+      // subscription has since moved to a different price entirely
+      // (Enterprise, a promo, a grandfathered legacy price, something set up
+      // directly in the dashboard) without this cron ever hearing about it.
+      // That price's `quantity` means something else, or nothing at all —
+      // writing this org's live property count into it is not a
+      // reconciliation, it is a silent, unrelated billing change. Not an
+      // error: this is exactly the expected shape for an org that moved to
+      // Enterprise while still carrying `plan = 'platform'` from before that
+      // happened, so it is a quiet skip, not a report.
+      const item = subscription.items.data.find((i) => isPlatformPriceId(i.price.id))
+      if (!item) return
+
       const billedQuantity = item.quantity ?? 0
       if (currentCount === billedQuantity) return  // already in sync
 
       const interval = subscription.items.data[0]?.price?.recurring?.interval ?? 'month'
+
+      // Derived from the TARGET state, not a random value: a duplicate call
+      // that recomputes the identical target quantity collides on the same
+      // key and is a true no-op at Stripe's own layer, even if the per-org
+      // concurrency key above were ever bypassed (a second dispatcher retry
+      // queuing a second event, a manual re-trigger). proration_behavior is
+      // folded in because 'none' vs 'create_prorations' are genuinely
+      // different operations even at the same target quantity.
+      const idempotencyKeyFor = (proration: 'none' | 'create_prorations') =>
+        `billing-reconcile:${orgId}:${subscriptionId}:${currentCount}:${proration}`
 
       if (interval !== 'year') {
         // Monthly: any direction, deferred to the next natural invoice.
         await stripe.subscriptions.update(subscriptionId, {
           items:              [{ id: item.id, quantity: currentCount }],
           proration_behavior: 'none',
-        })
+        }, { idempotencyKey: idempotencyKeyFor('none') })
         return
       }
 
@@ -162,7 +229,7 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
         await stripe.subscriptions.update(subscriptionId, {
           items:              [{ id: item.id, quantity: currentCount }],
           proration_behavior: 'none',
-        })
+        }, { idempotencyKey: idempotencyKeyFor('none') })
         return
       }
 
@@ -178,7 +245,7 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
       await stripe.subscriptions.update(subscriptionId, {
         items:              [{ id: item.id, quantity: currentCount }],
         proration_behavior: 'create_prorations',
-      })
+      }, { idempotencyKey: idempotencyKeyFor('create_prorations') })
 
       await logAuditEvent({
         orgId,

@@ -169,7 +169,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(result).toEqual({ dispatched: 2 })
@@ -190,6 +190,29 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     vi.useRealTimers()
   })
 
+  it('spends exactly ONE step boundary — the whole point of the dispatcher fix', async () => {
+    // This dispatcher does almost nothing: one query, a Redis GET per
+    // connection, one send. Yet its p50 (15.0s) ran HIGHER than the handler
+    // doing all the real work (ownerrez-connection-sync, p50 6.6s), because
+    // every step boundary is a round trip back into /api/inngest. The circuit
+    // filter used to spend a whole extra one on a single Redis read.
+    //
+    // Asserted as a COUNT rather than by name: re-adding a step is the silent
+    // regression here — it would pass every other test in this file while
+    // putting the cost straight back.
+    baseMocks()
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    expect(step.run).toHaveBeenCalledTimes(1)
+    expect(step.run).toHaveBeenCalledWith('fetch-syncable-connections', expect.any(Function))
+  })
+
   it('requests the new-property diff on the daily backstop tick (10:00 UTC)', async () => {
     baseMocks()
     vi.useFakeTimers()
@@ -200,7 +223,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(step.sendEvent).toHaveBeenCalledWith('fan-out-connection-syncs', [
@@ -219,7 +242,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, {
       event: {
         data: {
@@ -268,7 +291,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     // The whole point: user_1's broken connection must not cost user_2 a sync.
@@ -290,7 +313,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(result).toEqual({ dispatched: 0, circuit_open: true })
@@ -306,7 +329,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(get).toHaveBeenCalledWith('ownerrez:circuit:conn_1')
@@ -328,7 +351,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const logger = makeLogger()
-    const step   = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step   = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger })
 
     // Never swallowed: the operator can see the breaker is running degraded.
@@ -566,7 +589,7 @@ describe('ownerRezIncrementalSync — Upstash not configured (preview)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(getRedis).not.toHaveBeenCalled()
@@ -581,7 +604,7 @@ describe('ownerRezIncrementalSync — Upstash not configured (preview)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(reportError).not.toHaveBeenCalled()
@@ -595,7 +618,7 @@ describe('ownerRezIncrementalSync — Upstash not configured (preview)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const step = makeAllowlistStep(['fetch-syncable-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     // The dispatcher only returns circuit_open when it short-circuits; a

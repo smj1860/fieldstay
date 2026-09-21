@@ -39,6 +39,10 @@ import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connectio
 import { syncHostawayReservations } from './reservation-sync'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { hostawaySyncLockKey, HOSTAWAY_SYNC_LOCK_TTL_SECONDS } from './sync-lock'
+import { HostawayPaginationOverflowError } from '@/lib/integrations/providers/hostaway'
+import { reportError } from '@/lib/observability/report-error'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-incremental-sync'
@@ -68,7 +72,16 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
     name:    'Hostaway: Incremental Sync (per connection)',
     retries: 3,
     concurrency: [
-      { limit: 4 },
+      // Platform-wide ceiling. 4 was sized for a handful of pilot
+      // connections and does not scale with connection count — at 100x
+      // growth an hourly cron dispatching hundreds of jittered events would
+      // queue almost entirely behind this cap rather than draining within
+      // the hour it exists to serve. Raised to a value clearly ahead of
+      // pilot scale; this alone does not bound an UNBOUNDED backlog as
+      // connection count keeps growing — an SLO alert on queue depth (time
+      // from dispatch to start) is the real follow-up, not a bigger number
+      // here.
+      { limit: 25 },
       // One run per org at a time. Without this an hourly sweep that overran
       // its hour would overlap its own successor on the same connection, and
       // both would be writing the same booking rows.
@@ -79,11 +92,26 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
+    // Cross-FUNCTION lock: this handler's own concurrency key above only
+    // serializes it against itself. The daily reconcile is a DIFFERENT
+    // Inngest function on the same org, un-jittered at 07:30 UTC while this
+    // sweep jitters up to 55 minutes into the next hour — the two genuinely
+    // overlap every day, and both call generateTurnoversForProperty with no
+    // guard, a TOCTOU on which run's booking read wins. Whichever loses this
+    // lock backs off; see sync-lock.ts.
+    const lockKey  = hostawaySyncLockKey(org_id)
+    const gotLock  = await acquireLock(lockKey, HOSTAWAY_SYNC_LOCK_TTL_SECONDS)
+    if (!gotLock) {
+      logger.info(`[Hostaway:${user_id}] Incremental sweep deferred — reconcile in flight for this org`)
+      return { skipped: true, reason: 'reconcile_in_progress' }
+    }
+
     // The whole sweep is wrapped, not just the first fetch: Hostaway's API key
     // cannot be refreshed, so once it stops being accepted every step below
     // fails the same way, and this runs HOURLY. Catching outside the steps lets
     // Inngest exhaust its retries first, so a transient 401 cannot revoke a
     // working connection.
+    try {
     try {
     const prepared = await step.run('read-cursor-and-properties', async () => {
       const token = await readIntegrationToken(user_id, PROVIDER)
@@ -182,6 +210,21 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       since:          prepared.cursor,
     }
     } catch (err) {
+      if (err instanceof HostawayPaginationOverflowError) {
+        // Nothing about this self-heals on retry — the query window is
+        // unchanged between attempts, so every retry (and every future
+        // hourly run) refetches the identical oversized window and fails
+        // identically. Tag it distinctly so it doesn't read as a generic,
+        // possibly-transient Sentry error indistinguishable from a network
+        // blip; a human needs to narrow the window or raise MAX_PAGES.
+        reportError(err, {
+          site:  'inngest.hostaway-incremental-sync-handler.pagination_overflow',
+          orgId: org_id,
+          extra: { entity: err.entity, rowsSoFar: err.rowsSoFar, maxPages: err.maxPages },
+        })
+        throw err
+      }
+
       if (!isProviderAuthFailure(err)) throw err
 
       // Decision in a step, send at the top level — see
@@ -193,6 +236,9 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       })
 
       return { reservations: 0, newTurnoverIds: 0, since: null, revoked: true }
+    }
+    } finally {
+      await releaseLock(lockKey)
     }
   }
 )

@@ -1,6 +1,17 @@
 # Inspections & Audits — Design Spec
 
-**Status:** draft for review. Nothing here is built yet.
+**Status:** STALE — this was drafted as a pre-build design spec, but the
+feature has since been substantially built. As of 2026-09-17 there are
+inspection migrations dated 2026-08-22 through 2026-09-16 (schema, RPCs,
+immutability, remediation, scheduling, retention exclusion), a live UI at
+`app/(dashboard)/maintenance/inspections/*`, `app/(dashboard)/setup/inspections/*`,
+API routes under `app/api/inspections/*` and `app/api/owner/[token]/inspections/*`
+(including a report/export route), and guardrail/unit tests. §10 "Phasing"
+below still shows most phases as un-annotated (only 0, 2, 2a are marked
+DONE there) even though file evidence suggests later phases shipped too —
+that table was not re-verified phase-by-phase against source in this pass,
+so treat the live code as authoritative over this document for any specific
+implementation claim, not just the phase table.
 **Owner:** @smj1860. Drafted 2026-08-19.
 
 Automates the PM's quality-control inspections, pre-peak-season property
@@ -1182,40 +1193,69 @@ address, inspection date, start time, inspector (the signed-in user),
 management company (the org). The inspector's own name is typed at SIGN-OFF,
 not here — see §5 on the letterhead/signature split.
 
-45 top-level items across 7 sections — 43 inspected items plus a two-item
-sign-off. Still the shortest of the three, which is right for a form that runs
-once or twice a year.
+54 top-level items across 7 sections — 52 inspected items plus a two-item
+sign-off. It was the shortest of the three until the ordinance-readiness pass
+of 2026-09-11 and is now the second longest, which is the right trade for the
+one form that runs at every property and the only artifact a PM has when a city
+asks them to show a property is fit to be licensed.
+
+**The 2026-09-11 pass, and what it was answering.** Read against the municipal
+STR ordinances that actually govern licensing — IRC/NFPA-derived, broadly
+consistent city to city on the points below — this form was passing properties
+that would fail a pre-licensing inspection. Not for asking the wrong questions:
+for asking the right ones at the wrong SCOPE. Alarms in bedrooms and hallways
+rather than on every level. Extinguishers described one by one with nothing
+asking whether the set covers the building. A diagram posted with nothing
+saying what is on it. "Guardrails sound" with neither the 30in drop that
+triggers the requirement nor the 36in height that satisfies it. Nine items were
+added (3b, 7f, 11a, 13a, 17b, 37a, 38a, 40a, 40b, plus 7e inside the
+extinguisher repeat group) and six prompts were rescoped; the form went to
+`version: 3`, so every completed walk still points at the rows it actually
+asked.
+
+Two rules held throughout. **Every addition is a requirement an inspector can
+cite**, not a best practice — the form is long enough that anything else is
+somebody's wasted afternoon. And **nothing conditional is gated**: bars on
+windows, a gas detector and an LP appliance are all answered N/A where they do
+not apply, never hidden, because a property fact is only written at completion
+and would therefore silence the FIRST walk at every property — which is exactly
+the walk most likely to be the one before a permit inspection.
 
 #### 1. Fire Safety & Life Safety Systems
 
 | # | Item | Type | Dflt | Asset | concern_key |
 |---|---|---|---|---|---|
-| 1 | Smoke detectors present in all bedrooms and hallways | yes_no | Repair | — | `smoke_detector_present` |
-| 1a | → Which room needs a smoke detector? | text | — | — | — |
+| 1 | Smoke alarms in every bedroom, in the hallway outside each sleeping area, and on every level including basement and habitable attic | yes_no | Repair | — | `smoke_detector_present` |
+| 1a | → Which room or level needs a smoke alarm? | text | — | — | — |
 | 2 | Smoke detectors tested and operational | yes_no | Repair | — | `smoke_detector_operational` |
 | 2a | → Which room's detector failed the test? | text | — | — | — |
 | 3 | Smoke detectors within their 10-year service life (date is on the back) | yes_no | Replace | — | `smoke_detector_age` |
 | 3a | → Which detectors are expired, and their manufacture dates | text | — | — | — |
-| 4 | CO detectors installed on every level with sleeping areas | yes_no | Repair | — | `co_detector_present` |
+| 3b | Smoke alarms are hardwired or 10-year sealed-battery units, and interconnected so one sounding sounds them all | yes_no | Repair | — | `smoke_detector_interconnect` |
+| 4 | CO alarms on every level and within 10 ft of each sleeping area — required wherever there is a fuel-burning appliance, fireplace or attached garage | yes_no | Repair | — | `co_detector_present` |
 | 4a | → Which level needs a CO detector? | text | — | — | — |
 | 5 | CO detectors operational | yes_no | Repair | — | `co_detector_operational` |
 | 5a | → Which level's detector failed the test? | text | — | — | — |
 | 6 | CO detectors within their service life (7–10 yr, per manufacturer) | yes_no | Replace | — | `co_detector_age` |
 | 7 | Number of fire extinguishers | count | — | — | — |
 | 7a | → Location (one row per extinguisher) | text | — | — | — |
+| 7e | → Rated 2-A:10-B:C or better (printed on the label) | yes_no | Replace | — | — |
 | 7b | → Fully charged | yes_no | Replace | — | — |
 | 7c | → Expiration date | date | Replace | — | — |
 | 7d | → Tag photo | photo | — | — | — |
+| 7f | At least one extinguisher on every floor, one within 30 ft of the kitchen, each mounted visible and unobstructed | yes_no | Repair | — | — |
 | 8 | Dryer lint trap and vent run clear to the exterior | yes_no | Service | `dryer` | `dryer_vent_clear` |
 | 9 | Chimney/flue swept within the last 12 months; firebox and damper sound | yes_no | Service | — | `chimney_swept` |
 | 10 | Exit doors and pathways clear and fully operational | yes_no | Repair | — | — |
 | 10a | → Photo of each exit | photo | — | — | — |
 | 11 | Bedroom egress windows open fully from inside without a tool | yes_no | Repair | — | `egress_window` |
+| 11a | Security bars, grilles or fixed screens on bedroom windows release from inside without a key, tool or special knowledge | yes_no | Repair | — | — |
 | 12 | Emergency lighting / flashlights present and functional | yes_no | Replace | — | — |
 | 12a | → Location | text | — | — | — |
-| 13 | Evacuation plan and emergency contacts posted where guests will see them | yes_no | Replace | — | — |
+| 13 | Evacuation diagram posted at the main exit — floor layout, exit routes, extinguisher and first-aid locations, the property address, and emergency contacts | yes_no | Replace | — | — |
+| 13a | First-aid kit stocked, in date, and where the posted diagram says it is | yes_no | Replace | — | — |
 
-Items 7a–7d repeat once per extinguisher counted in 7 — see
+Items 7a–7e repeat once per extinguisher counted in 7 — see
 `repeat_source_item_id` in §5. Item 7d is `photo_required` even on a pass:
 extinguisher tags are photographed every time, the one place a passing item
 still produces evidence.
@@ -1232,6 +1272,23 @@ Item 8 shares `dryer_vent_clear` with Indoor 42 and Outdoor 8 — the same vent
 from three vantage points, and now one work order. Dryer fires are a top-5
 residential cause; its absence from the FIRE safety form was the oversight.
 
+**Items 3b, 7f, 11a and 13a are the four a permit inspector checks and this
+section could not see.** 1, 2 and 3 can all be true of a property that still
+fails its pre-licensing inspection, because the ordinance also specifies what
+KIND of alarm and that they interconnect — a basement fire waking the upstairs
+bedrooms is why the codes moved, and 3b is the only item that asks it. 7a–7e
+describe each extinguisher and nothing reads those rows to decide whether the
+SET covers the building: 7a is free text, so three good extinguishers in one
+garage pass every per-unit question and fail the ordinance, which is what 7f
+asks and why it is a root rather than another repeat member. 11 asks whether
+the egress window opens; 11a asks whether anything BOLTED OVER IT releases, the
+failure mode being a guest asleep in a room full of smoke. And 13 named a
+posted plan without naming its contents, which a fire-escape sticker with no
+floor layout satisfied — it now names them, including the property ADDRESS,
+because a guest calling 911 from a house they arrived at after dark frequently
+cannot say where they are. 13a verifies what that diagram promises: an
+inspection that checks the map and never the kit is checking paperwork.
+
 #### 2. Electrical, Gas & Utility Safety
 
 | # | Item | Type | Dflt | Asset | concern_key |
@@ -1241,6 +1298,7 @@ residential cause; its absence from the FIRE safety form was the oversight.
 | 16 | No daisy-chained power strips, no extension cords in permanent use | yes_no | Replace | — | — |
 | 17 | Gas appliances — furnace, water heater, range — leak-checked, vented, no odour | yes_no | Service | — | `gas_appliance_safe` |
 | 17a | Gas supply line intact — no corrosion, damage, or exposed fittings; shut-off valve accessible and labelled | yes_no | Service | — | `gas_line_integrity` |
+| 17b | Combustible-gas detector fitted near each fuel-burning appliance — mounted low for propane, high for natural gas | yes_no | Replace | — | `gas_detector` |
 | 18 | Main water shut-off labelled, accessible, valve tool in place | yes_no | Repair | `plumbing_system` | `main_shutoff` |
 | 19 | HVAC air filters clean, supply vents unblocked, service log current | yes_no | Replace | `hvac` | `hvac_filter` |
 
@@ -1251,14 +1309,31 @@ convention as Indoor's 14a/19a) is the line feeding those appliances rather
 than the appliances themselves: a corroded or damaged run is caught before
 it ever reaches a leaking appliance, not after.
 
+Item 17b (2026-09-11) is the third question in that family and the one about
+TIME: 17 and 17a both ask whether something is wrong right now, and neither
+asks whether anything would notice a leak in the fifty-one weeks between walks
+— the same gap the water section closed with its sensor/shut-off pair at 26 and
+27. The mounting height is in the prompt deliberately. Propane is heavier than
+air and pools at the floor while natural gas rises, so a detector at the wrong
+height is installed, powered, tested and useless; it is the most common way
+this gets done wrong. An all-electric property answers N/A.
+
 #### 3. Structural, Floor & Slip/Trip Hazard Mitigation
 
 | # | Item | Type | Dflt | Asset | concern_key |
 |---|---|---|---|---|---|
-| 20 | Handrails secure; treads slip-resistant and clear | yes_no | Repair | — | `handrail_secure` |
+| 20 | Handrail on every flight of four or more risers — graspable, secure, full length; treads slip-resistant and clear | yes_no | Repair | — | `handrail_secure` |
 | 21 | Walkways and driveways level, clear of trip hazards, algae, ice | yes_no | Repair | — | `walkway_trip_hazard` |
 | 22 | Flooring sound — no torn carpet, loose tile or warped boards | yes_no | Repair | — | `flooring_sound` |
-| 23 | Deck and balcony guardrails sound; posts secure; spindle spacing compliant | yes_no | Repair | `deck_structure` | `deck_guardrail` |
+| 23 | Guardrails wherever a walking surface sits more than 30in above grade — at least 36in high, spindles under 4in apart, posts and ledger secure | yes_no | Repair | `deck_structure` | `deck_guardrail` |
+
+Items 20 and 23 were rescoped on 2026-09-11 to name the code triggers rather
+than ask for a judgment. "Guardrails sound" cannot fail a deck that has no
+guardrail at all, and whether one is required is a measurement — 30in above
+grade — that an inspector standing on the deck can take and a prompt saying
+"sound" never prompts them to. Same for the 36in height and the four-riser
+stair rule, both of which decide the answer and neither of which the previous
+wording mentioned.
 
 #### 4. Water Leak & Freeze Damage Prevention
 
@@ -1290,6 +1365,7 @@ for it.
 | 35 | Hot tub thermostat limited to 104°F or below | yes_no | Service | `hot_tub` | — |
 | 36 | Trampoline, playground or diving board present at this property | yes_no | — | — | — |
 | 37 | Exterior deadbolts and smart locks secure; keyless codes tested | yes_no | Service | `smart_lock` | `exterior_lock` |
+| 37a | House numbers legible from the street day and night — at least 4in high, contrasting with their background | yes_no | Replace | — | `address_visible` |
 
 Item 33 carries `na_asset_type = 'hot_tub'`: a property with no pool or hot tub
 recorded skips it with a reason the asset ledger backs, per §5. Item 34 does the
@@ -1299,6 +1375,15 @@ same against `pool_pump`.
 Baker Act has mandated compliant anti-entrapment drain covers since 2008, the
 failure mode is a fatality, and it is a named exclusion in many policies. The
 form checked the fence and the gate and never looked at the drain.
+
+**Item 37a is here because Safety is the only form every property runs.**
+Outdoor already asked about house numbers, and Outdoor is a per-property opt-in
+scheduled as ordinary recurring maintenance (see
+`lib/inspections/safety-template.ts`) — so an item that emergency services and
+most municipal codes depend on was being asked at the properties somebody
+remembered to schedule an Outdoor walk for. Anything a permit turns on belongs
+on this form. It shares `address_visible` with its Outdoor twin, so two askings
+are still one sign and one job.
 
 **Item 36 is the one item on any form whose FAILING answer is `yes`, and it is
 deliberately not phrased around a failure at all.** It exists because a
@@ -1312,8 +1397,11 @@ sound. `remediation: 'none'`; this one informs rather than dispatches.
 | # | Item | Type | Dflt | Remediation |
 |---|---|---|---|---|
 | 38 | Short-term rental permit or licence current for this jurisdiction | yes_no | — | notify |
+| 38a | Permit or licence number displayed as the ordinance requires — posted inside and shown in every listing | yes_no | — | notify |
 | 39 | Liability insurance certificate current and covering short-term rental use | yes_no | — | notify |
-| 40 | Occupancy limit posted, and consistent with the listing | yes_no | — | notify |
+| 40 | Occupancy limit posted with the permit information, and consistent with both the listing and the permit | yes_no | — | notify |
+| 40a | Quiet hours, trash and recycling schedule, and parking limits posted as the permit conditions require | yes_no | — | notify |
+| 40b | Local responsible party and 24-hour contact number current with the jurisdiction, and posted for guests and neighbours | yes_no | — | notify |
 
 Same reasoning as Outdoor's HOA section, and the same mechanism: a lapsed permit
 is not a work order and not a purchase order, so these use
@@ -1325,6 +1413,22 @@ whether the property was legally permitted to operate.
 Item 39's second clause matters more than the first: a standard homeowner's
 policy that excludes short-term rental use is worse than no policy, because the
 owner believes they are covered.
+
+**38a, 40a and 40b (2026-09-11) are the three that lose a permit without
+anything being physically wrong with the building.** Holding a licence and
+DISPLAYING it are separately enforceable, and the listing half of 38a is the
+one most often cited, because a jurisdiction that requires the permit number in
+the advertisement checks it from a desk without visiting at all. 40a is not
+life safety and is on this form anyway: posted quiet hours, trash schedule and
+parking limits are PERMIT CONDITIONS in most cities that license short-term
+rentals, and a renewal denied over an unposted trash day costs the owner the
+season as surely as a failed alarm test. 40b is the most common non-structural
+revocation trigger there is — the ordinance names a local party who must answer
+within a stated number of minutes, the contact moves or changes number, and
+nobody tells the county until a neighbour complains and the line rings out.
+Item 40 gained "and the permit" for the same reason: a posted limit matching a
+listing that exceeds what the permit allows is two consistent documents and one
+violation.
 
 **All three forms are now real** — no first-pass guesses remain. Safety above,
 Indoor in 12.2, Outdoor in 12.3, with the cross-form `concern_key` table at the
@@ -1570,7 +1674,7 @@ order.
 | 12 | Lawn and landscaping mowed and trimmed; no burrows, roots or holes | yes_no | Service | — | — |
 | 13 | Outdoor stair treads secure and slip-resistant | yes_no | Repair | — | — |
 | 14 | Perimeter fencing and gates sound, latching, no missing sections | yes_no | Repair | — | — |
-| 15 | House numbers visible from the road, day and night | yes_no | Replace | — | — |
+| 15 | House numbers visible from the road, day and night | yes_no | Replace | — | `address_visible` |
 | 16 | No wasp, hornet or bee nests at entries, eaves or amenity areas | yes_no | Service | — | `exterior_pest` |
 | 17 | Irrigation runs without leaks, broken heads or overspray onto walkways | yes_no | Service | — | — |
 | 18 | Mailbox and delivery area intact and accessible | yes_no | Repair | — | — |
@@ -1767,6 +1871,7 @@ next to the forms is how the overlaps are understood.
 | `gfci_wet_areas` | 14 | 25 | 26 |
 | `main_shutoff` | 18 | 44 | 25 |
 | `exterior_lock` | 37 | — | 28 |
+| `address_visible` | 37a | — | 15 |
 | `pool_barrier` | 33 | — | 33 |
 | `firepit_clearance` | 31 | — | 35 |
 | `grill_safe` | — | — | 36 |
@@ -1779,12 +1884,14 @@ next to the forms is how the overlaps are understood.
 | `flooring_sound` | 22 | 3 | — |
 | `smoke_detector_present` | 1 | — | — |
 | `smoke_detector_age` | 3 | — | — |
+| `smoke_detector_interconnect` | 3b | — | — |
 | `co_detector_present` | 4 | — | — |
 | `co_detector_age` | 6 | — | — |
 | `chimney_swept` | 9 | — | — |
 | `egress_window` | 11 | 5 | — |
 | `gas_appliance_safe` | 17 | — | — |
 | `gas_line_integrity` | 17a | — | — |
+| `gas_detector` | 17b | — | — |
 | `sump_pump` | 28 | — | — |
 | `pool_drain_vgb` | 34 | — | — |
 | `entry_lock_operational` | — | 1 | — |

@@ -36,10 +36,46 @@ export interface DueSchedule extends DueScheduleInput {
 
 const DAY_MS = 86_400_000
 
-/** Today as `YYYY-MM-DD` in the VIEWER's timezone — a due date is a local day. */
-export function todayISO(now: Date = new Date()): string {
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 10)
+/**
+ * Today as `YYYY-MM-DD` in the given IANA timezone — a due date is a local
+ * day, but "the viewer's" is a lie the OLD signature told: `getTimezoneOffset()`
+ * reflects the offset of the process EXECUTING the JS, not the browser that
+ * will read the result. Called with no `timeZone` from a Next.js Server
+ * Component (upcoming-for-dashboard.ts's default parameter) or an Inngest
+ * cron (inspection-overdue-email.ts), that offset is Vercel's Lambda/Edge
+ * runtime (UTC by default), not the PM's. A PM in Los Angeles viewing the
+ * dashboard in the evening is, from the server's perspective, already into
+ * "tomorrow" in UTC — a schedule due "today" per their own wall clock could
+ * drop off the horizon list a day early or under-count daysLate by one.
+ *
+ * Defaults to UTC — an honest "the server's own day," not a stand-in for
+ * "the viewer's". A caller that genuinely needs a specific viewer's local
+ * day (inspections-view.tsx, client-side) must pass one explicitly; there is
+ * no way to infer it server-side.
+ */
+export function todayISO(now: Date = new Date(), timeZone: string = 'UTC'): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(now) // en-CA formats as YYYY-MM-DD
+}
+
+/**
+ * Schedule ids that already back an OPEN walk (started, not yet completed).
+ *
+ * Shared with lib/inspections/overdue-email.ts's selectOverdueForDigest for
+ * the same reason selectDueSchedules delegates to selectUpcomingSchedules
+ * rather than reimplementing the suppression rule: both surfaces answer "is
+ * this schedule still waiting", and a second implementation would drift — the
+ * monthly digest telling a PM a walk is overdue while someone is mid-walk on
+ * it right now is exactly the kind of drift this prevents.
+ */
+export function scheduleIdsWithOpenWalk(
+  inspections: readonly StartedInspectionInput[],
+): ReadonlySet<string> {
+  return new Set(
+    inspections
+      .filter((i) => !i.completed_at && i.source_schedule_id)
+      .map((i) => i.source_schedule_id as string),
+  )
 }
 
 /**
@@ -94,11 +130,7 @@ export function selectUpcomingSchedules(
   today:       string,
   horizonDays: number,
 ): DueSchedule[] {
-  const walkInProgress = new Set(
-    inspections
-      .filter((i) => !i.completed_at && i.source_schedule_id)
-      .map((i) => i.source_schedule_id as string),
-  )
+  const walkInProgress = scheduleIdsWithOpenWalk(inspections)
 
   const horizon = addDaysISO(today, horizonDays)
 
@@ -114,8 +146,15 @@ export function selectUpcomingSchedules(
     .sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))
 }
 
-/** `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer. */
-function addDaysISO(date: string, days: number): string {
+/**
+ * `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer.
+ * Exported for upcoming-for-dashboard.ts, which shares this exact date-math
+ * contract — see selectUpcomingSchedules' header comment on why the
+ * selection half is shared: a second implementation drifting from this one
+ * would reintroduce the same class of "the dashboard nags about a walk the
+ * Maintenance page already stopped listing" bug that design exists to prevent.
+ */
+export function addDaysISO(date: string, days: number): string {
   return new Date(dayMs(date) + days * DAY_MS).toISOString().slice(0, 10)
 }
 

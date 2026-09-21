@@ -60,7 +60,12 @@ export const integrationTokenRefreshCron = inngest.createFunction(
     // Prevent overlapping runs if manually triggered while a scheduled run is active
     concurrency: { limit: 1, key: '"integration-token-refresh-cron"' },
   },
-  { cron: '0 * * * *' },   // every hour at :00 (was every 2 hours — see windowEdge below)
+  // :41 rather than :00 — see the stagger note in
+  // lib/inngest/functions/ownerrez/incremental-sync.ts. Which MINUTE this runs
+  // is immaterial: the 90-minute windowEdge below is deliberately wider than
+  // the 60-minute cadence, so only the cadence has to hold. (Was every 2 hours
+  // before that widening.)
+  { cron: '41 * * * *' },   // every hour
   async ({ step, logger }) => {
 
     const connections = await step.run('fetch-expiring-connections', async () => {

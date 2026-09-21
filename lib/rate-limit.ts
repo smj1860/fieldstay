@@ -380,6 +380,23 @@ export const workOrderRatelimit = new Ratelimit({
   prefix:    'rl:wo',
 })
 
+// Unmatched-path throttle (proxy.ts's enforceUnmatchedPathRateLimit) — every
+// session-less request to a path that is not PUBLIC/TOKEN/BYPASS, which is
+// exactly the bucket app/not-found.tsx's force-dynamic render (plus the
+// anonymous redirect-to-login branch for a real protected URL) actually
+// serves. That page cannot be prerendered — it needs a per-request CSP nonce,
+// see its own header comment — so it is the one page whose cost scales
+// directly with junk traffic: broken links, scanner probes
+// (/wp-login.php-, /.env-shaped paths), a viral surge's stray 404s. 60/minute
+// per IP is generous enough for a real visitor who fat-fingers a URL a few
+// times, tight enough to blunt a scanning/probing burst from one source.
+export const unmatchedPathRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(60, '1 m'),
+  analytics: false,
+  prefix:    'rl:unmatched-path',
+})
+
 // Public vendor Stripe Connect onboarding routes (/vendor-connect/[token]/*,
 // /api/vendor-connect/[token]/*) — same rationale and limit as workOrderRatelimit:
 // guards against stripe_connect_token enumeration on this unauthenticated route.
@@ -596,4 +613,28 @@ export const supportChatDailyLimiter = new Ratelimit({
   limiter:   Ratelimit.slidingWindow(100, '1 d'),
   analytics: true,
   prefix:    'ratelimit:support-chat-daily',
+})
+
+// Per-org throttle on the Slack notification side-channel for crew→PM
+// messages (app/api/crew/messages/route.ts's notifyPmSlack). Slack's own
+// Incoming Webhooks are documented at roughly one message per second per
+// webhook URL; a busy org's crew can send messages faster than that in a
+// burst (a checklist review thread, several crew reporting issues at once),
+// and Slack answering with 429s is the FIRST symptom, not a graceful
+// degrade. 30/minute is a real ceiling under Slack's own limit while still
+// covering a normal burst.
+//
+// A denied check skips the SLACK PING ONLY — the crew message itself is
+// already committed to `messages` and delivered in-app before this limiter
+// is even consulted (see the route's after() ordering), so a PM never loses
+// a message to this, only the redundant Slack copy of one they'll see in the
+// app regardless. That is exactly why this fails OPEN like the other
+// abuse/side-channel limiters here: a Redis outage must not be the reason a
+// crew member's message stops reaching the PM's inbox notification, and the
+// in-app delivery is the correctness-critical path this doesn't touch.
+export const crewMessageSlackRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(30, '1 m'),
+  analytics: false,
+  prefix:    'rl:crew-message-slack',
 })

@@ -43,6 +43,7 @@ export interface RecordConsumptionResult {
   /** Why nothing was recorded, when nothing was. Surfaced for the log — these
    *  are all ordinary states, not failures. */
   reason?: 'no_previous_count' | 'no_occupied_nights' | 'no_positive_deltas' | 'no_property'
+    | 'already_recorded'
 }
 
 /** Nights of overlap between a booking and the window between two counts.
@@ -64,17 +65,57 @@ export async function recordConsumptionFromCount(
   const { countId, propertyId, orgId } = scope
   const ctx = { site: 'lib.inventory.recordConsumptionFromCount', orgId }
 
-  const currRes = await supabase
+  // Idempotency claim, FIRST — before anything is read or derived. Inngest
+  // guarantees only at-least-once delivery, and this function's whole
+  // derivation is pure over two already-persisted rows: a second call
+  // recomputes the IDENTICAL sample and record_consumption_samples() has no
+  // way to tell it apart from a genuinely new observation, since its conflict
+  // target is the item's one rolling-stats row, not a per-observation key. A
+  // second delivery must be a guaranteed no-op, so claim before reading
+  // anything a caller could use to derive a sample.
+  const claimRes = await supabase
     .from('inventory_counts')
-    .select('id, submitted_at, property_id')
+    .update({ consumption_recorded_at: new Date().toISOString() })
     .eq('id', countId)
     .eq('org_id', orgId)
+    .is('consumption_recorded_at', null)
+    .select('id')
     .maybeSingle()
+  const claim = tryUnwrap<{ id: string }>(claimRes, ctx)
+  if (!claim.ok || !claim.data) return { recorded: 0, reason: 'already_recorded' }
+
+  // curr and prop are independent reads — neither's inputs depend on the
+  // other's result (curr only needs countId/orgId, prop only needs
+  // propertyId/orgId, both already in scope) — so they run concurrently.
+  // prev is NOT joined here: it filters on `curr.data.submitted_at`, a real
+  // data dependency, and must wait for curr to resolve first.
+  const [currRes, propRes] = await Promise.all([
+    supabase
+      .from('inventory_counts')
+      .select('id, submitted_at, property_id')
+      .eq('id', countId)
+      .eq('org_id', orgId)
+      .maybeSingle(),
+    supabase
+      .from('properties')
+      .select('max_guests')
+      .eq('id', propertyId)
+      .eq('org_id', orgId)
+      .maybeSingle(),
+  ])
   const curr = tryUnwrap<CountRow>(currRes, ctx)
   if (!curr.ok || !curr.data) return { recorded: 0, reason: 'no_previous_count' }
 
+  const prop = tryUnwrap<{ max_guests: number | null }>(propRes, ctx)
+  if (!prop.ok || !prop.data) return { recorded: 0, reason: 'no_property' }
+  // Same fallback the resolver uses for an unset capacity, so the two stay
+  // consistent when a property's metadata is incomplete.
+  const capacity = prop.data.max_guests && prop.data.max_guests > 0 ? prop.data.max_guests : 2
+
   // The immediately preceding count for this property. Scoped by org as well
   // as property so a forged count_id cannot walk another tenant's history.
+  // Genuinely sequential — filters on curr.data.submitted_at, so it cannot
+  // start until curr has resolved above.
   const prevRes = await supabase
     .from('inventory_counts')
     .select('id, submitted_at, property_id')
@@ -87,17 +128,15 @@ export async function recordConsumptionFromCount(
   const prev = tryUnwrap<CountRow>(prevRes, ctx)
   if (!prev.ok || !prev.data) return { recorded: 0, reason: 'no_previous_count' }
 
-  const propRes = await supabase
-    .from('properties')
-    .select('max_guests')
-    .eq('id', propertyId)
-    .eq('org_id', orgId)
-    .maybeSingle()
-  const prop = tryUnwrap<{ max_guests: number | null }>(propRes, ctx)
-  if (!prop.ok || !prop.data) return { recorded: 0, reason: 'no_property' }
-  // Same fallback the resolver uses for an unset capacity, so the two stay
-  // consistent when a property's metadata is incomplete.
-  const capacity = prop.data.max_guests && prop.data.max_guests > 0 ? prop.data.max_guests : 2
+  // checkin_date/checkout_date are DATE columns; submitted_at is a timestamptz
+  // ISO string. Comparing them directly forwards a literal that Postgres
+  // resolves via an implicit date<->timestamptz cast, which is time-of-day-
+  // and session-timezone-dependent right at the boundary day — a count
+  // submitted at 11pm vs. 1am on the same calendar day can include or exclude
+  // a booking that checks in/out that exact day. Slicing to the calendar date
+  // on both sides compares what a human reading two dates would expect.
+  const currDateOnly = curr.data.submitted_at.slice(0, 10)
+  const prevDateOnly = prev.data.submitted_at.slice(0, 10)
 
   const bookingsRes = await supabase
     .from('bookings')
@@ -106,8 +145,8 @@ export async function recordConsumptionFromCount(
     .eq('org_id', orgId)
     .eq('status', 'confirmed')
     .eq('is_block', false)
-    .lt('checkin_date', curr.data.submitted_at)
-    .gt('checkout_date', prev.data.submitted_at)
+    .lt('checkin_date', currDateOnly)
+    .gt('checkout_date', prevDateOnly)
     .limit(BOOKING_CAP)
   const bookings = unwrapList<BookingRow>(bookingsRes, ctx)
 
@@ -147,6 +186,11 @@ export async function recordConsumptionFromCount(
 
   if (!samples.length) return { recorded: 0, reason: 'no_positive_deltas' }
 
+  // A same-batch duplicate inventory_item_id (a client race writing the same
+  // item twice, a bug in the count-submission upsert) is safe to send as-is:
+  // record_consumption_samples() (20260915154000) deduplicates by
+  // (inventory_item_id, org_id) and averages before its ON CONFLICT DO UPDATE,
+  // rather than raising 21000 and losing every other sample in the batch.
   const { data, error } = await supabase.rpc('record_consumption_samples', { p_rows: samples })
   if (error) throw error
 

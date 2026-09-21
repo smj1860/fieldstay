@@ -52,6 +52,10 @@ import { syncHostawayReservations } from './reservation-sync'
 import { syncHostawayReviews } from './reviews-sync'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
+import { hostawaySyncLockKey, HOSTAWAY_SYNC_LOCK_TTL_SECONDS } from './sync-lock'
+import { HostawayPaginationOverflowError } from '@/lib/integrations/providers/hostaway'
+import { reportError } from '@/lib/observability/report-error'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
@@ -82,13 +86,29 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
     name:    'Hostaway: Reservation Reconcile (per connection)',
     retries: 3,
     concurrency: [
-      { limit: 4 },
+      // Platform-wide ceiling — see incremental-sync-handler.ts's identical
+      // comment. This handler additionally runs BOTH the reservations and
+      // reviews walks per connection, so it holds its slot even longer than
+      // the hourly sweep; the same "raise the ceiling now, an SLO alert on
+      // queue depth is the real follow-up" reasoning applies.
+      { limit: 25 },
       { limit: 1, key: 'event.data.org_id' },
     ],
   },
   { event: 'integration/hostaway.reservation_reconcile.requested' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
+
+    // Cross-function lock, symmetric with the incremental handler — see
+    // sync-lock.ts and that file's own comment for why this daily reconcile
+    // and the hourly sweep genuinely overlap for every org during the 07:00
+    // UTC hour, both racing generateTurnoversForProperty otherwise.
+    const lockKey = hostawaySyncLockKey(org_id)
+    const gotLock = await acquireLock(lockKey, HOSTAWAY_SYNC_LOCK_TTL_SECONDS)
+    if (!gotLock) {
+      logger.info(`[Hostaway:${user_id}] Reconcile deferred — incremental sweep in flight for this org`)
+      return { skipped: true, reason: 'incremental_sync_in_progress' }
+    }
 
     try {
       return await runProviderReconcile({
@@ -138,6 +158,20 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
       },
       })
     } catch (err) {
+      if (err instanceof HostawayPaginationOverflowError) {
+        // Same reasoning as incremental-sync-handler.ts's mirrored catch —
+        // this window (arrivalFrom cutoff / review lookback) is unchanged
+        // between retries and between daily runs, so it fails identically
+        // forever without distinct alerting. Tag it so it doesn't blend into
+        // generic Sentry noise.
+        reportError(err, {
+          site:  'inngest.hostaway-reservation-reconcile-handler.pagination_overflow',
+          orgId: org_id,
+          extra: { entity: err.entity, rowsSoFar: err.rowsSoFar, maxPages: err.maxPages },
+        })
+        throw err
+      }
+
       if (!isProviderAuthFailure(err)) throw err
 
       // Decision in a step, send at the top level — see
@@ -151,6 +185,8 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
       })
 
       return { revoked: true }
+    } finally {
+      await releaseLock(lockKey)
     }
   }
 )

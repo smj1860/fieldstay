@@ -74,6 +74,17 @@ async function fetchAssignedTurnoverIds(
   // syncs, so the device would delete a different set each time and thrash
   // instead of settling on one wrong answer. Range pagination REQUIRES a stable
   // sort to page correctly, so the ordering is load-bearing twice over.
+  // The PostgREST error is captured rather than discarded. `fetchAllPages`
+  // collapses any page failure to `null`, and reporting that as a bare
+  // `new Error('turnover_assignments fetch failed')` is what left this issue
+  // undiagnosable in production on 2026-09-11: no code, no message, so a 42501
+  // (a signed-out device — the same cause as the four dashboard issues in that
+  // minute) could not be told apart from a 500, a timeout, or a real RLS fault.
+  // reportError's describe() already renders a PostgrestError's message and
+  // code, and Sentry groups on that title, so passing the real error through
+  // also stops unrelated failures of this read collapsing into one issue.
+  let pageError: unknown = null
+
   const rows = await fetchAllPages<{ turnover_id: string }>(async (from, to) => {
     const res = await supabase
       .from('turnover_assignments')
@@ -82,11 +93,11 @@ async function fetchAssignedTurnoverIds(
       .order('turnover_id')
       .range(from, to)
     return { data: res.data as { turnover_id: string }[] | null, error: res.error }
-  })
+  }, (err) => { pageError = err })
 
   if (rows === null) {
-    console.error('[turnoverSync] turnover_assignments fetch failed')
-    reportError(new Error('turnover_assignments fetch failed'), {
+    console.error('[turnoverSync] turnover_assignments fetch failed:', pageError)
+    reportError(pageError ?? new Error('turnover_assignments fetch failed'), {
       site: 'dexie.sync.turnovers.assignments',
     })
     return null
@@ -217,7 +228,7 @@ async function syncScopeReferenceData(
     (chunk, from, to) =>
       supabase
         .from('inventory_items')
-        .select('id, property_id, org_id, name, category, unit, par_level')
+        .select('id, property_id, org_id, name, name_es, category, unit, par_level')
         .in('property_id', chunk)
         .eq('is_active', true)
         .order('id')
@@ -232,7 +243,10 @@ async function syncScopeReferenceData(
   // type any more, so nothing can be pending to replay over these rows. A
   // count is staged locally and submitted as an inventory_counts row instead.
   if (inventory.length) {
-    await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
+    const normalizedInventory = (inventory as Array<Record<string, unknown>>).map((row) => ({
+      ...row, name_es: (row.name_es as string | null) ?? '',
+    }))
+    await db.inventory_items.bulkPut(normalizedInventory as InventoryItemRow[])
   }
   await rememberScope(userId, 'scope:inventory_items', propertyIds)
   return true
@@ -336,7 +350,7 @@ export async function pullChecklistsForTurnovers(
   const itemCursor = opts.force ? null : await getCursor(userId, 'cursor:checklist_items')
   const items = await fetchWithCursorSplit(
     supabase, 'checklist_instance_items',
-    'id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, asset_discovery_type, updated_at',
+    'id, instance_id, turnover_id, section_name, section_name_es, task, task_es, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, asset_discovery_type, updated_at',
     'turnover_id', knownIds, freshIds, itemCursor,
   )
   if (items === null) return
@@ -368,6 +382,8 @@ export async function pullChecklistsForTurnovers(
         crew_notes:            resolveCrewNotes(row, localById.get(row.id as string), thisCrewMemberId),
         photo_reason:          row.photo_reason ?? '',
         asset_discovery_type:  row.asset_discovery_type ?? '',
+        section_name_es:       row.section_name_es ?? '',
+        task_es:               row.task_es ?? '',
       }
     })
     await bulkPutShadowed(db.checklist_instance_items, userId, 'checklist_instance_items', normalized as ChecklistInstanceItemRow[])

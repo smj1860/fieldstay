@@ -70,11 +70,11 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: 'Cancels blocks absent from the Hospitable calendar. hospFetchCalendar THROWS on any non-ok, so [] can only mean the window genuinely holds no blocks — which is the normal state for most properties. An empty-set guard here would be a bug: the LAST lifted block could never be cleared.',
   },
-  'lib/dexie/dashboard/warm-maintenance-board.ts:153': {
+  'lib/dexie/dashboard/warm-maintenance-board.ts:298': {
     protection: 'fetch-fails-loud',
     why: "Deletes cached open work orders absent from the fetch. The Supabase read's error branch stamps the watermark and returns BEFORE this block, so the delete only ever runs on a list the server genuinely produced — an org with zero open work orders is a legitimate, even common, steady state. The stale set additionally excludes every id with a pending work_order.create mutation, so a row this device is still trying to send survives regardless of what the fetch returned; see the file's own header comment for why that exclusion is the point of this warm existing at all.",
   },
-  'lib/dexie/sync/turnovers.ts:109': {
+  'lib/dexie/sync/turnovers.ts:120': {
     protection: 'fetch-fails-loud',
     why: 'Drops cached turnovers no longer assigned to this crew member. fetchAssignedTurnoverIds returns NULL on failure and syncAssignedTurnovers returns early on null, so [] means the crew member genuinely has no assignments — a normal state, and unassignment-to-zero must still clear the device.',
   },
@@ -86,15 +86,15 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: "Reconciles ONE property's cached assets after pulling an inspection. The Supabase read returns { data, error } and the function returns early on error, so the bulkDelete is only ever reached with a genuinely complete list — and empty is a legitimate steady state here, because most properties have not catalogued their assets at all (8 of 29 in production). An empty-set guard would be WRONG: it would make the last asset impossible to retire, and a stale asset keeps opening §12.3's well section on a property with no well.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:387': {
-    protection: 'fetch-fails-loud',
-    why: "The same reconciliation, batched across the properties with open inspections. Identical protection: the asset query's error branch returns before this block, having still cached the inspections themselves. The delete is scoped to the property_ids the fetch actually covered, so even a wrong empty result could not reach another property's cached assets.",
-  },
-  'lib/dexie/dashboard/warm-inspections.ts:295': {
+  'lib/dexie/dashboard/warm-inspections.ts:437': {
     protection: 'fetch-fails-loud',
     why: "Drops cached PROPERTIES the org no longer has, so a removed property stops being offered as somewhere to start an inspection. cacheFormLibrary returns early on any of its four query errors, so this block only runs with a genuinely complete list. Empty is a legitimate steady state — a new org has no properties — and an empty-set guard would make the LAST property impossible to remove from a device. Note the sibling FORM tables in the same function are guarded the opposite way, and deliberately: an empty form library is never a real state, only a failed seed.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:488': {
+  'lib/dexie/dashboard/warm-inspections.ts:531': {
+    protection: 'fetch-fails-loud',
+    why: "The same reconciliation, batched across the properties with open inspections. Identical protection: the asset query's error branch returns before this block, having still cached the inspections themselves. The delete is scoped to the property_ids the fetch actually covered, so even a wrong empty result could not reach another property's cached assets.",
+  },
+  'lib/dexie/dashboard/warm-inspections.ts:633': {
     protection: 'fetch-fails-loud',
     why: "Drops cached OPEN CONCERNS — the open work orders §6's repeat prompt asks about — once they are no longer open. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the delete only runs on a genuinely complete list, and the scope is the property_ids the fetch covered. Empty is emphatically a legitimate steady state: most properties have no open inspection-sourced work order at all. An empty-set guard would be the bug here — a COMPLETED work order could never stop being offered as a predecessor, and the prompt would keep asking an inspector whether a finding matches a job that was finished months ago.",
   },
@@ -114,23 +114,23 @@ const RECONCILERS: Record<string, Reconciler> = {
  * registered with the same two protections.
  */
 const CLEAR_AND_REPLACE: Record<string, Reconciler> = {
-  'lib/dexie/dashboard/warm-maintenance-board.ts:193': {
+  'lib/dexie/dashboard/warm-maintenance-board.ts:344': {
     protection: 'fetch-fails-loud',
     why: "Replaces the cached VENDORS table wholesale. The Supabase read's error branch returns 0 before this block, leaving the cache alone, so the clear only ever runs on a list the server genuinely produced. Empty is a real possibility for a brand-new org with no vendors yet, and clearing correctly is right there too: a vendor deactivated since the last warm must stop being the name shown on a cached work-order card. The whole set is small (one org's active vendors) and refetched on every warm, so a clear costs nothing a diff would have saved.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:212': {
+  'lib/dexie/dashboard/warm-inspections.ts:333': {
     protection: 'fetch-fails-loud',
     why: "Replaces the cached §7 INSPECTION SCHEDULES wholesale. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the clear only ever runs on a list the server genuinely produced. Empty is a legitimate steady state and an empty-set guard would be the BUG here: an org that deletes its last inspection schedule would keep being told a walk is due, forever, on every device that had cached it. The whole set is refetched on every warm, so a clear costs nothing a diff would have saved.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:283': {
+  'lib/dexie/dashboard/warm-inspections.ts:425': {
     protection: 'empty-set-guard',
     why: "The platform FORM LIBRARY, and guarded the opposite way to everything else in this file on purpose. An empty form library is never a real state — it means the seed has not run — so cacheFormLibrary refuses to act on one (`formRows.length === 0 || itemRows.length === 0` returns early, keeping the cached copy). Replacing a good library with nothing would take a device that could start a walk offline and make it unable to, which is the single capability the whole warm exists for.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:284': {
+  'lib/dexie/dashboard/warm-inspections.ts:426': {
     protection: 'empty-set-guard',
     why: "Sections, behind the same guard as the forms above and inseparable from them. A half-applied library is worse than a stale one: sections without their items resolve to a SHORTER form, so every question the inspector is shown gets answered, the Review gate passes, and a whole section is silently absent from the record.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:285': {
+  'lib/dexie/dashboard/warm-inspections.ts:427': {
     protection: 'empty-set-guard',
     why: "Items, behind the same guard. This is the table the guard is really about — `itemRows.length === 0` is checked explicitly alongside the forms precisely because an empty item list is the one that produces a form that looks complete and asks nothing.",
   },
@@ -146,7 +146,7 @@ const FAIL_SOFT_EMPTY_RETURNS: Record<string, string> = {
   // hospFetchReservationMessages' 404-returns-[] entry was here until
   // 2026-08-20. The function is gone: the message webhook carries the whole
   // message, so nothing fetches a thread any more.
-  'lib/integrations/providers/hospitable.ts:822':
+  'lib/integrations/providers/hospitable.ts:869':
     'hospFetchTeammates: 403 is the one expected non-ok — a connection predating the teammate:read scope. Nothing about it is retriable. Every OTHER status now throws, and the sole absence-based consumer carries an empty-set guard.',
 }
 
@@ -385,7 +385,7 @@ describe('guardrail: reconciling by absence must survive an empty fetch', () => 
     // added because a shape nobody had scanned for turned out to be live in
     // four places, and a typo'd regex would put it straight back to zero.
     const cleared = findClearAndReplaceSites()
-    expect(cleared).toContain('lib/dexie/dashboard/warm-inspections.ts:212')
+    expect(cleared).toContain('lib/dexie/dashboard/warm-inspections.ts:333')
     expect(cleared.length).toBeGreaterThanOrEqual(4)
     // And it must NOT fire on an unrelated .clear() — the table names have to
     // match on both halves or this becomes noise nobody reads.

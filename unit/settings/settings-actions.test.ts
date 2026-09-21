@@ -253,7 +253,7 @@ describe('settings/actions', () => {
 
       await addCrewMember(null, formData({ name: 'Jamie', email: 'jamie@example.com', home_zip: '36853' }))
 
-      expect(geocodeZip).toHaveBeenCalledWith('36853')
+      expect(geocodeZip).toHaveBeenCalledWith('36853', { boundToSave: true })
       const updateCall = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'update')
       expect(updateCall).toBeDefined()
     })

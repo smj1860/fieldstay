@@ -22,9 +22,24 @@ interface CategoryPickerFindProSectionProps {
 }
 
 export function CategoryPickerFindProSection({ heading, categoryOptions, categoryFieldLabel }: Readonly<CategoryPickerFindProSectionProps>) {
-  const [category, setCategory] = useState<ThumbtackCategoryKey>(categoryOptions[0]!.value)
+  // categoryOptions[0]!.value was a lie the moment a caller passes []: a
+  // future caller building this list dynamically (e.g. filtered to categories
+  // relevant to a specific property type) could land on zero entries, and the
+  // non-null assertion would throw during the very first render — before any
+  // user interaction, taking down whatever page mounted this. The initializer
+  // itself must stay safe (Rules of Hooks — this can't be guarded by an early
+  // return before the hook runs), so it takes the optional value and the
+  // empty case is handled by the guard below instead.
+  const [category, setCategory] = useState<ThumbtackCategoryKey | undefined>(categoryOptions[0]?.value)
   const [zip, setZip]           = useState('')
   const [confirmedZip, setConfirmedZip] = useState<string | null>(null)
+
+  if (categoryOptions.length === 0 || category === undefined) return null
+
+  // inputMode="numeric" is a soft-keyboard hint only — it does not stop a
+  // desktop user, a password manager, or a paste from putting anything in
+  // this field. A length check alone lets "aaaaa" or "-----" through.
+  const isValidZip = /^\d{5}$/.test(zip.trim())
 
   if (confirmedZip) {
     const label = categoryOptions.find((c) => c.value === category)?.label.toLowerCase() ?? 'pro'
@@ -68,7 +83,7 @@ export function CategoryPickerFindProSection({ heading, categoryOptions, categor
         <Button
           variant="secondary"
           className="text-sm"
-          disabled={zip.trim().length < 5}
+          disabled={!isValidZip}
           onClick={() => setConfirmedZip(zip.trim())}
         >
           Search

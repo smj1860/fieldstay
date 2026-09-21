@@ -5,7 +5,7 @@ import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useDexieDb } from '@/lib/dexie/context'
 import { createClient } from '@/lib/supabase/client'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
-import { enqueueMutation } from '@/lib/dexie/syncService'
+import { enqueueMutationTx, getSyncEngine } from '@/lib/dexie/syncService'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -13,6 +13,8 @@ import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useCrewContext } from '@/lib/crew/crew-context'
+import { useCrewT } from '@/lib/crew/i18n'
 import type { AssetType } from '@/types/database'
 
 // ── Discovery Capture Modal ──────────────────────────────────────────────────
@@ -24,6 +26,23 @@ import type { AssetType } from '@/types/database'
 // the engine handed the same prompt out again on the next turnover forever.
 // One modal, so the two entry points cannot drift into capturing different
 // things.
+
+/**
+ * The storage-key extension for a captured photo's filename.
+ *
+ * `name.split('.').pop() || 'jpg'` looks right but is not: `'photo'.split('.')`
+ * is `['photo']`, and `.pop()` on that returns the truthy string `'photo'` —
+ * so the `|| 'jpg'` fallback never fires for a filename with no dot at all: it
+ * only fires on an EMPTY filename. Some capture pipelines (certain Android
+ * WebViews, some `capture="environment"` implementations, a File built from a
+ * blob with no conventional name) hand back exactly that — a name with no
+ * extension — which without this check becomes a storage key like
+ * `smart_lock-<uuid>.photo` instead of `.jpg`.
+ */
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : 'jpg'
+}
 
 export function DiscoveryCaptureModal({
   propertyId,
@@ -47,6 +66,8 @@ export function DiscoveryCaptureModal({
   onCaptured?: () => void
 }) {
   const db = useDexieDb()
+  const t = useCrewT()
+  const { crewLocale } = useCrewContext()
   const [make,       setMake]       = useState('')
   const [model,      setModel]      = useState('')
   const [photoFile,  setPhotoFile]  = useState<File | null>(null)
@@ -74,28 +95,47 @@ export function DiscoveryCaptureModal({
       scanStatus: 'pending' | null
     },
   ): Promise<void> {
-    await db.property_assets.put({
-      id:          assetId,
-      org_id:      orgId,
-      property_id: propertyId,
-      asset_type:  assetType,
-      make:        fields.make ?? '',
-      model:       fields.model ?? '',
-      is_na:       fields.isNa ? 1 : 0,
-      photo_url:   fields.photoPath ?? '',
+    // ONE Dexie transaction, per CLAUDE.md: "The optimistic local write and
+    // its outbox row commit in ONE Dexie transaction... As two transactions,
+    // a PWA reclaimed between them left the cache updated with nothing
+    // queued to send it." enqueueMutation() (the public helper) opens its
+    // OWN transaction and cannot be folded into this one — enqueueMutationTx
+    // is the version meant to be called from inside an existing transaction,
+    // same as every other crew write path (lib/dexie/helpers.ts's
+    // writeAndQueue). Without this, a PWA backgrounded/reclaimed between the
+    // two awaits left a local property_assets row with nothing queued: no
+    // mutation row to show as failed, no delta pull to ever correct it, and
+    // onCaptured?.() (ticking the turnover's checklist item) had already
+    // fired — the captured asset silently never reached FieldStay while the
+    // checklist showed it done forever.
+    await db.transaction('rw', db.property_assets, db.mutations, async () => {
+      await db.property_assets.put({
+        id:          assetId,
+        org_id:      orgId,
+        property_id: propertyId,
+        asset_type:  assetType,
+        make:        fields.make ?? '',
+        model:       fields.model ?? '',
+        is_na:       fields.isNa ? 1 : 0,
+        photo_url:   fields.photoPath ?? '',
+      })
+
+      await enqueueMutationTx(db, 'property_assets', assetId, 'PUT', {
+        org_id:      orgId,
+        property_id: propertyId,
+        name:        assetTypeDisplayName(assetType),
+        asset_type:  assetType,
+        make:        fields.make,
+        model:       fields.model,
+        photo_url:   fields.photoPath,
+        is_na:       fields.isNa,
+        scan_status: fields.scanStatus,
+      })
     })
 
-    await enqueueMutation(userId, 'property_assets', assetId, 'PUT', {
-      org_id:      orgId,
-      property_id: propertyId,
-      name:        assetTypeDisplayName(assetType),
-      asset_type:  assetType,
-      make:        fields.make,
-      model:       fields.model,
-      photo_url:   fields.photoPath,
-      is_na:       fields.isNa,
-      scan_status: fields.scanStatus,
-    })
+    // Kicked OUTSIDE the transaction: network I/O inside it would throw
+    // TransactionInactiveError the moment the transaction auto-commits.
+    void getSyncEngine(userId).processOutbox()
   }
 
   async function handleMarkNa() {
@@ -106,7 +146,7 @@ export function DiscoveryCaptureModal({
       onCaptured?.()
       setSuccess(true)
     } catch (err: unknown) {
-      setError((err as Error).message || 'Could not save. Check your connection and try again.')
+      setError((err as Error).message || t('discoveryErrorGeneric'))
     } finally {
       setSubmitting(false)
     }
@@ -115,7 +155,7 @@ export function DiscoveryCaptureModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!make.trim() && !model.trim() && !photoFile) {
-      setError('Add a make/model, a photo, or mark this as not applicable.')
+      setError(t('discoveryErrorRequired'))
       return
     }
     setSubmitting(true)
@@ -126,7 +166,7 @@ export function DiscoveryCaptureModal({
       let photoPath: string | null = null
 
       if (photoFile) {
-        const ext     = photoFile.name.split('.').pop() || 'jpg'
+        const ext     = fileExtension(photoFile.name)
         const path    = orgScopedStoragePath(orgId, 'asset-discovery', propertyId, `${assetType}-${crypto.randomUUID()}.${ext}`)
         const blobKey = `photo-asset-${assetId}`
 
@@ -175,7 +215,7 @@ export function DiscoveryCaptureModal({
       onCaptured?.()
       setSuccess(true)
     } catch (err: unknown) {
-      setError((err as Error).message || 'Could not save. Check your connection and try again.')
+      setError((err as Error).message || t('discoveryErrorGeneric'))
     } finally {
       setSubmitting(false)
     }
@@ -185,12 +225,12 @@ export function DiscoveryCaptureModal({
     <Dialog
       open
       onClose={onClose}
-      title={success ? 'Saved' : `Capture: ${assetTypeDisplayName(assetType)}`}
+      title={success ? t('discoveryTitleSaved') : `${t('discoveryCapturePrefix')} ${assetTypeDisplayName(assetType, crewLocale)}`}
       maxWidthClassName="max-w-sm"
       mobileSheet
       footer={
         success ? (
-          <Button onClick={onClose} className="w-full">Done</Button>
+          <Button onClick={onClose} className="w-full">{t('done')}</Button>
         ) : (
           <div className="w-full space-y-3">
             <button
@@ -200,7 +240,7 @@ export function DiscoveryCaptureModal({
               className="w-full py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ background: 'var(--accent-amber)', color: 'var(--bg-page)' }}
             >
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save'}
+              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('actionSaving')}</> : t('actionSave')}
             </button>
             <button
               type="button"
@@ -208,7 +248,7 @@ export function DiscoveryCaptureModal({
               onClick={handleMarkNa}
               className="w-full py-2.5 rounded-xl border border-themed text-sm font-medium text-secondary-themed disabled:opacity-50"
             >
-              This property doesn&apos;t have one
+              {t('discoveryNotApplicable')}
             </button>
           </div>
         )
@@ -218,9 +258,7 @@ export function DiscoveryCaptureModal({
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
           <p className="text-sm text-muted-themed">
-            {scanQueued
-              ? "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment."
-              : 'Asset details saved.'}
+            {scanQueued ? t('discoverySuccessScanQueued') : t('discoverySuccessSimple')}
           </p>
         </div>
       ) : (
@@ -239,15 +277,15 @@ export function DiscoveryCaptureModal({
           )}
           <form id="discovery-capture-form" onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label htmlFor="discovery-make" className="label text-primary-themed">Make</label>
+              <label htmlFor="discovery-make" className="label text-primary-themed">{t('discoveryMake')}</label>
               <Input id="discovery-make" type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
             </div>
             <div>
-              <label htmlFor="discovery-model" className="label text-primary-themed">Model</label>
+              <label htmlFor="discovery-model" className="label text-primary-themed">{t('discoveryModel')}</label>
               <Input id="discovery-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
             </div>
             <div>
-              <label htmlFor="discovery-photo" className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
+              <label htmlFor="discovery-photo" className="label text-primary-themed">{t('discoveryPhotoLabel')}</label>
               <input
                 id="discovery-photo"
                 type="file"

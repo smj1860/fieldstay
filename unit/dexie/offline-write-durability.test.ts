@@ -56,8 +56,8 @@ const ITEM = 'item-1'
 
 async function seedItem(): Promise<void> {
   await getDexieDb(USER).checklist_instance_items.put({
-    id: ITEM, instance_id: 'inst-1', turnover_id: 't-1', section_name: 'Kitchen',
-    task: 'Wipe counters', is_completed: 0, completed_at: null, completed_by_crew_id: '',
+    id: ITEM, instance_id: 'inst-1', turnover_id: 't-1', section_name: 'Kitchen', section_name_es: '',
+    task: 'Wipe counters', task_es: '', is_completed: 0, completed_at: null, completed_by_crew_id: '',
     requires_photo: 0, photo_reason: '', photo_storage_path: null, crew_notes: '',
     sort_order: 1, is_section_final_item: 0, asset_discovery_type: '',
   })

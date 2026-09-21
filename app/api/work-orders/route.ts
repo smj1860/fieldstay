@@ -68,6 +68,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: valid.error }, { status: 400 })
     }
 
+    // A SOFT signal, not a block. mergeOfflineWorkOrders only dedupes by the
+    // client-minted id, and the id-based upsert below only protects against
+    // THIS device replaying THIS mutation — neither has any concept of two
+    // different devices, both offline at the same property, independently
+    // creating a work order for the same real-world issue. Blocking the
+    // create would risk silently dropping a genuine second problem; the
+    // create still happens, and the response just tells the caller a
+    // possible match exists so the PM can be told rather than left with two
+    // live work orders neither side knows about.
+    const possibleDuplicateOf = await findPossibleDuplicateWorkOrder(
+      supabase, membership.org_id, parsed.input.property_id, parsed.input.title,
+    )
+
     const { payload, usePortal } = buildWorkOrderInsert(parsed.input, membership.org_id)
 
     // The DEVICE's id, and ignoreDuplicates, are what make a replay safe: the
@@ -120,7 +133,10 @@ export async function POST(req: Request) {
       assignedCrewMemberId: parsed.input.assigned_crew_member_id,
     })
 
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({
+      ok: true,
+      ...(possibleDuplicateOf ? { possibleDuplicateOf } : {}),
+    })
   } catch (err) {
     console.error('[work-orders.create]', err)
     reportError(err, { site: 'route.work-orders.create' })
@@ -195,6 +211,39 @@ function optionalText(value: unknown): string | null | false {
 /** An absent, empty or non-string id is simply "not provided". */
 function optionalId(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+/**
+ * A soft, best-effort match — not a fuzzy-match library. Looks for another
+ * OPEN work order on the same property, raised in roughly the same window,
+ * whose title reads as the same issue once case/punctuation/whitespace
+ * differences are ignored. Scoped to the last 24h so an old, unrelated
+ * "smoke detector" from months ago cannot flag a new one.
+ */
+async function findPossibleDuplicateWorkOrder(
+  supabase:   Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:      string,
+  propertyId: string,
+  title:      string,
+): Promise<{ id: string; title: string } | null> {
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('id, title')
+    .eq('org_id', orgId)
+    .eq('property_id', propertyId)
+    .in('status', ['pending', 'quote_requested', 'assigned', 'in_progress'])
+    .gte('created_at', new Date(Date.now() - 24 * 3_600_000).toISOString())
+    .limit(20)
+
+  if (error || !data) return null
+
+  const target = normalizeTitle(title)
+  const match = data.find((wo) => normalizeTitle(wo.title) === target)
+  return match ? { id: match.id, title: match.title } : null
+}
+
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
 /**

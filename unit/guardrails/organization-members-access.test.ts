@@ -101,6 +101,13 @@ const ALLOWED: Record<string, string> = {
   'app/api/health/route.ts':
     'Liveness probe — a minimal SELECT 1-shaped round-trip that returns no member data.',
 
+  'lib/inngest/functions/account-deletion.ts':
+    're-verifies at EXECUTION time (not just request time) that the org is ' +
+    'still sole-member-owned by the requester before purging it — a TOCTOU ' +
+    'guard on a destructive action, not recipient selection. getPmMembers is ' +
+    'the wrong shape: it filters by role and returns a notification target, ' +
+    'where this needs "does any OTHER accepted member exist at all".',
+
   // The two KNOWN DRIFT entries that shipped with this guardrail
   // (app/api/webhooks/stripe/handlers/core-billing.ts and
   // app/(dashboard)/messages/actions.ts) were fixed on 2026-07-31 — both now

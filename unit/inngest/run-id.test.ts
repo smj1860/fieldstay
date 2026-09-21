@@ -12,10 +12,13 @@ import { runIdStartedAt, runDurationMs } from '@/lib/inngest/run-id'
 // that has gone slow if nothing records slowness.
 //
 // The fixtures below are REAL production run ids, taken from
-// integration-token-refresh-cron on 2026-08-18. That cron is `0 * * * *`, so a
-// correct decoder must land on exactly :00:00.000 — which is a much sharper
-// assertion than "some plausible date" and is what confirms the bit-level
-// decode rather than merely the shape.
+// integration-token-refresh-cron on 2026-08-18, when that cron was `0 * * * *`
+// (it now runs at :41 — see the stagger note in
+// lib/inngest/functions/ownerrez/incremental-sync.ts). These are fixed
+// historical ids, so they still decode to exactly :00:00.000 — a much sharper
+// assertion than "some plausible date", and what confirms the bit-level decode
+// rather than merely the shape. A future fixture captured from this cron will
+// land on :41 instead; that is the schedule changing, not the decoder breaking.
 // ============================================================================
 
 describe('runIdStartedAt', () => {

@@ -36,6 +36,26 @@ const inter = localFont({
   weight:   '100 900',
 })
 
+// ── Google Analytics 4 ──────────────────────────────────────────────────────
+//
+// ONE property for BOTH hostnames. fieldstay.app (apex, marketing) and
+// app.fieldstay.app (the dashboard) are aliases of the same deployment — see
+// the comment in app/sitemap.ts — so this root layout is what serves both, and
+// installing the tag once here covers both. GA4 scopes its _ga cookie to the
+// registrable domain, so a visitor who reads the marketing site and then signs
+// in stays a single session across the two hosts with no linker config.
+//
+// PRODUCTION ONLY. Preview deploys and local dev render nothing, so neither
+// pollutes the property with traffic nobody wants to measure. VERCEL_ENV is
+// platform-supplied (hence absent from lib/env.ts's ENV_SPEC, by that file's
+// PLATFORM_VARS list) and is read here at build time, which is correct: this
+// layout is prerendered, and a production build is exactly when it is 'production'.
+//
+// Reading process.env is not a dynamic API, so this does NOT make the layout
+// dynamic — see the block below about why that matters.
+const GA_MEASUREMENT_ID = 'G-S35S0LSCGD'
+const analyticsEnabled  = process.env.VERCEL_ENV === 'production'
+
 export const metadata: Metadata = {
   title: {
     default:  'FieldStay',
@@ -114,6 +134,20 @@ export default function RootLayout({
         {children}
         <CookieNotice />
         <Analytics />
+        {analyticsEnabled && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
+              strategy="afterInteractive"
+            />
+            {/*
+              The bootstrap is an external same-origin file, not an inline
+              snippet — inline would need 'unsafe-inline' in script-src on
+              every nonce'd route. Same reasoning as /theme-init.js above.
+            */}
+            <Script src="/gtag-init.js" strategy="afterInteractive" />
+          </>
+        )}
       </body>
     </html>
   )

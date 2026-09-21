@@ -217,6 +217,16 @@ export function extractHostawayActualTotal(res: HostawayReservation): number | n
  * checkin_time/checkout_time are what the turnover generator should use.
  */
 export function hostawayReservationToNormalized(res: HostawayReservation): NormalizedBooking {
+  // res.id is typed as a required number, but that's a compile-time fiction
+  // against a REST response this mapper cannot verify at runtime. A missing/
+  // null id would otherwise become the literal string "undefined" via
+  // String(undefined) — exactly the column the upsert conflicts on
+  // (onConflict: 'org_id,external_id,external_source') — silently colliding
+  // with the next malformed row instead of failing loudly.
+  if (res.id === undefined || res.id === null) {
+    throw new Error('[Hostaway] reservation payload missing id — refusing to map')
+  }
+
   return {
     external_id:          String(res.id),
     property_external_id: res.listingId !== undefined && res.listingId !== null
@@ -236,6 +246,12 @@ export function hostawayReservationToNormalized(res: HostawayReservation): Norma
     stay_type:   'guest_stay',
 
     actual_total_amount: extractHostawayActualTotal(res),
+    // optionalAmount() treats totalPrice <= 0 as absent, so a genuinely free
+    // (comped/promo) stay collapses to the same actual_total_amount: null as
+    // one Hostaway simply didn't report a price for — the pipeline must not
+    // treat the two alike, or a $0 stay gets a fabricated nights *
+    // avg_nightly_rate estimate posted as if it were real revenue.
+    revenue_known_zero: typeof res.totalPrice === 'number' && Number.isFinite(res.totalPrice) && res.totalPrice === 0,
   }
 }
 
@@ -297,9 +313,22 @@ export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHo
   if (review.isCancelled) return null
   if (review.type !== 'guest-to-host') return null
 
-  const rating = typeof review.rating === 'number' && Number.isFinite(review.rating)
-    ? review.rating
-    : null
+  // Same missing-id guard as hostawayReservationToNormalized above — see its
+  // comment. Thrown, not dropped: a corrupted external_id ("undefined") would
+  // silently collide with the next malformed row under the same upsert key.
+  if (review.id === undefined || review.id === null) {
+    throw new Error('[Hostaway] review payload missing id — refusing to map')
+  }
+
+  const ratingRaw = review.rating
+  const rating = typeof ratingRaw === 'number' && Number.isFinite(ratingRaw) ? ratingRaw : null
+  if (rating === null && ratingRaw !== null && ratingRaw !== undefined) {
+    // Distinct from the documented "not yet reviewed" case (rating genuinely
+    // null) — this is Hostaway returning a rating in a shape we don't expect
+    // (e.g. a numeric string), which would otherwise fall into the exact same
+    // dropped path with nothing to distinguish it from normal sync traffic.
+    console.warn(`[Hostaway] review ${review.id} has non-numeric rating "${String(ratingRaw)}" — dropped`)
+  }
   const text = review.publicReview?.trim()
 
   if (rating === null || !text) return null
@@ -309,7 +338,13 @@ export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHo
     external_source:      'hostaway',
     property_external_id: String(review.listingMapId),
     guest_name:           optionalText(review.guestName ?? undefined),
-    rating:               Math.round(rating),
+    // reviews.rating has a DB CHECK (rating BETWEEN 1 AND 5). A single row
+    // outside that range aborts the ENTIRE bulk upsert (23514), silently
+    // blocking every other review in this sync run, forever, since the same
+    // bad row is re-fetched on every retry. Hostaway aggregates channels with
+    // different native scales (Booking.com is 1-10) and this scale was never
+    // verified against a live payload — clamp defensively rather than trust it.
+    rating:               Math.min(5, Math.max(1, Math.round(rating))),
     review_text:          text,
     review_date:          hostawayDateToIso(review.departureDate),
     response_status:      review.revieweeResponse?.trim() ? 'posted' : 'pending',

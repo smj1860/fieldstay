@@ -1611,7 +1611,12 @@ describe('maintenance/actions', () => {
         maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
         maintenance_schedule_template_items: [{ data: [{ id: 'item_1', name: 'Filter change', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null }] }],
         properties:                          [{ data: [{ id: 'prop_1' }] }],
-        maintenance_schedules:                [{ data: [] }, { error: null }],
+        maintenance_schedules:                [{ data: [] }],
+      }, 'user_1', {
+        // The insert is now via broadcast_maintenance_schedules (the
+        // advisory-lock RPC), never a plain .insert() — see the TOCTOU
+        // regression test below for why.
+        broadcast_maintenance_schedules: { data: { inserted: 1 }, error: null },
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, user: { id: 'user_1' }, membership,
@@ -1620,6 +1625,67 @@ describe('maintenance/actions', () => {
       const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
 
       expect(result).toEqual({ success: true, created: 1, skipped: 0 })
+    })
+
+    // ── Regression: a send failure AFTER the write must not report failure ──
+    // The schedules are already committed by the RPC — that IS the broadcast.
+    // A failing inngest.send() (network blip, Inngest outage) must not turn
+    // that success into "Operation failed. Please try again.", which would
+    // give the PM every reason to retry a broadcast that already ran.
+    it('still reports success when the post-write event send fails', async () => {
+      const supabase = makeSupabase({
+        maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
+        maintenance_schedule_template_items: [{ data: [{ id: 'item_1', name: 'Filter change', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null }] }],
+        properties:                          [{ data: [{ id: 'prop_1' }] }],
+        maintenance_schedules:                [{ data: [] }],
+      }, 'user_1', {
+        broadcast_maintenance_schedules: { data: { inserted: 1 }, error: null },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+      vi.mocked(inngest.send).mockRejectedValueOnce(new Error('Inngest unreachable'))
+
+      const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ success: true, created: 1, skipped: 0 })
+      expect(reportError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ site: 'serverAction.maintenance.broadcastMaintenanceTemplate.event' }),
+      )
+    })
+
+    it('trusts the RPC over its own pre-lock estimate — a row the RPC skipped counts as skipped, not created', async () => {
+      // The pre-lock existingNames read is only a fast estimate for BUILDING
+      // rowsToInsert; it is not itself a safe dedup guard, since there is
+      // deliberately no unique constraint behind it. A row this action
+      // estimated as new can still lose the race to a concurrent broadcast
+      // between that estimate and the RPC's own lock-held re-check — the
+      // RPC's actual `inserted` count is the source of truth for what the PM
+      // is told, not the length of what was proposed.
+      const supabase = makeSupabase({
+        maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
+        maintenance_schedule_template_items: [{
+          data: [
+            { id: 'item_1', name: 'Filter change', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null },
+            { id: 'item_2', name: 'Gutter clean', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: null, estimated_cost: null, sort_order: 1, asset_category: null, active_from_month: null, active_to_month: null },
+          ],
+        }],
+        properties:             [{ data: [{ id: 'prop_1' }] }],
+        maintenance_schedules:  [{ data: [] }],
+      }, 'user_1', {
+        // Both rows looked new at the pre-lock estimate, but the RPC's
+        // lock-held re-check found one already existed (a concurrent
+        // broadcast won the race on it) and inserted only the other.
+        broadcast_maintenance_schedules: { data: { inserted: 1 }, error: null },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ success: true, created: 1, skipped: 1 })
     })
 
     // ── Regression: max_rows = 1000 silently truncated the dedupe set ────
@@ -1647,6 +1713,54 @@ describe('maintenance/actions', () => {
       const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
 
       expect(result).toEqual({ success: true, created: 0, skipped: 1 })
+    })
+
+    // ── Regression: dedup keyed on the TEMPLATE ITEM, not the name ──────────
+    // A name-only dedup key silently cannibalized unrelated templates that
+    // happen to share an item name ("HVAC Filter Replacement" is exactly the
+    // kind of name the standard catalog ships) and orphaned a renamed item
+    // into a duplicate schedule on re-broadcast. source_template_item_id
+    // survives both.
+    it('does NOT skip a same-named item that belongs to a DIFFERENT template item — no cross-template collision', async () => {
+      const supabase = makeSupabase({
+        maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
+        maintenance_schedule_template_items: [{ data: [{ id: 'item_1', name: 'HVAC Filter Replacement', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null }] }],
+        properties:                          [{ data: [{ id: 'prop_1' }] }],
+        // Same name, but from a DIFFERENT template's item — must not be
+        // treated as the same schedule.
+        maintenance_schedules: [{ data: [{ property_id: 'prop_1', name: 'HVAC Filter Replacement', source_template_item_id: 'other-template-item' }] }],
+      }, 'user_1', {
+        broadcast_maintenance_schedules: { data: { inserted: 1 }, error: null },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ success: true, created: 1, skipped: 0 })
+    })
+
+    it('DOES skip a renamed template item that already has a schedule from the SAME item id', async () => {
+      const supabase = makeSupabase({
+        maintenance_schedule_templates:      [{ data: { id: 'tmpl_1', org_id: null, is_system: true } }],
+        // The template item was renamed from "HVAC Filter" to "HVAC Filter
+        // Replacement" — its row id (item_1) did not change.
+        maintenance_schedule_template_items: [{ data: [{ id: 'item_1', name: 'HVAC Filter Replacement', description: null, schedule_frequency: 'quarterly', vendor_specialty_hint: 'hvac', estimated_cost: null, sort_order: 0, asset_category: null, active_from_month: null, active_to_month: null }] }],
+        properties:                          [{ data: [{ id: 'prop_1' }] }],
+        // The existing schedule still carries the OLD name but the SAME
+        // source_template_item_id — must be recognized as the same item.
+        maintenance_schedules: [{ data: [{ property_id: 'prop_1', name: 'HVAC Filter', source_template_item_id: 'item_1' }] }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await broadcastMaintenanceTemplate('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ success: true, created: 0, skipped: 1 })
+      // No candidate rows at all, so the RPC is never even called.
+      expect(supabase.calls.some((c) => c.table === 'rpc:broadcast_maintenance_schedules')).toBe(false)
     })
 
     it('requires at least one property', async () => {

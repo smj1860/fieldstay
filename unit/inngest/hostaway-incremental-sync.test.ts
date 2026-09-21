@@ -79,6 +79,14 @@ vi.mock('@/lib/integrations/connection-metadata', () => ({
   mergeIntegrationConnectionMetadata: vi.fn(),
   SYNCABLE_CONNECTION_STATUSES: ['active', 'error'],
 }))
+// The handler now takes a cross-function Redis lock against the daily
+// reconcile (see hostaway-sync-lock.test.ts) before doing anything else.
+// Unmocked, unit/setup.ts's fake Upstash credentials make this a REAL fetch
+// to a bogus host, which hangs every test here until the timeout.
+vi.mock('@/lib/cache/single-flight', () => ({
+  acquireLock: vi.fn(async () => true),
+  releaseLock: vi.fn(async () => undefined),
+}))
 
 import { hostawayIncrementalSyncHandler } from '@/lib/inngest/functions/hostaway/incremental-sync-handler'
 import { readIntegrationToken } from '@/lib/integrations/vault'

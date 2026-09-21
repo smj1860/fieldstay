@@ -15,6 +15,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapList }          from '@/lib/supabase/unwrap'
+import { reportError }         from '@/lib/observability/report-error'
 import { createPmNotifications, type CreatePmNotificationInput } from '@/lib/inngest/helpers'
 
 const EXPIRING_SOON_WINDOW_DAYS = 30
@@ -24,6 +25,22 @@ const EXPIRING_SOON_WINDOW_DAYS = 30
  * un-warned assets stay un-warned (warranty_warned_at IS NULL keeps
  * selecting them) and are picked up by tomorrow's run, ordered soonest-
  * expiring-first so a backlog never delays the most urgent warnings.
+ *
+ * NOT raised as part of the 100x-traffic scalability pass, deliberately: the
+ * claim step below does `.update(...).in('id', assets.map(...)).select('id')`
+ * as ONE round trip, and PostgREST's `max_rows = 1000` truncates a RETURNING
+ * clause exactly like any other response — silently, with a 200 and no
+ * truncation signal (see CLAUDE.md's `max_rows` rule). The UPDATE itself would
+ * still claim every matched row correctly, but `claimedIds` would only cover
+ * the first 1000, so every asset past that cutoff would be marked
+ * warranty_warned_at (never revisited by tomorrow's run — the gate is a
+ * one-shot) while never actually being notified. That is a worse failure mode
+ * than the backlog this cap already produces, so raising this needs the same
+ * chunked-claim treatment vendor-compliance-grace-check.ts uses for its own
+ * 2,000/run cap (HARD_BLOCK_CHUNK, claimed in batches of 500) — a genuine
+ * capacity change, not a constant edit. Until that lands, 200 stays, and a run
+ * that hits it now says so out loud (see the reportError below) instead of
+ * only in a log line.
  */
 const MAX_PER_RUN = 200
 
@@ -74,9 +91,15 @@ export const assetWarrantyExpiryCheck = inngest.createFunction(
       const claimedAssets = assets.filter((a) => claimedIds.has(a.id))
 
       const notifications: CreatePmNotificationInput[] = claimedAssets.map((asset) => {
-        const daysUntil = Math.round(
+        // The query's warranty_expiry_date >= todayStr guarantee is relative to
+        // whenever it ran, not to the moment this line executes — an
+        // off-schedule invocation (a manual replay, a delayed retry, a
+        // rescheduled cron) run later in the day than the fixed 0 12 * * *
+        // slot can otherwise compute a negative days-until for an asset
+        // expiring "today", rendering "expires in -1 days" to the PM.
+        const daysUntil = Math.max(0, Math.round(
           (new Date(asset.warranty_expiry_date).getTime() - Date.now()) / 86_400_000
-        )
+        ))
         return {
           orgId:     asset.org_id,
           type:      'asset_warranty_expiry',
@@ -93,10 +116,21 @@ export const assetWarrantyExpiryCheck = inngest.createFunction(
     })
 
     if (warned.length === MAX_PER_RUN) {
-      logger.warn(
+      const message =
         `[asset-warranty-expiry] hit the ${MAX_PER_RUN}/run cap — remaining assets stay ` +
         `un-warned (warranty_warned_at IS NULL) and will be picked up by tomorrow's run.`
-      )
+      logger.warn(message)
+      // A protective cap doing exactly what it's for, not a fault — but a
+      // growing backlog is a capacity signal worth seeing in Sentry before it
+      // becomes a multi-day warning delay, not just in a log line nobody
+      // watches. 'warning', not 'error', for the same reason the watchdog's
+      // slow-job report uses it: nothing here is broken, and this should
+      // never turn into a triage-queue item on its own.
+      reportError(new Error(message), {
+        site:  'inngest.asset-warranty-expiry-check.cap-hit',
+        level: 'warning',
+        extra: { warned_count: warned.length, max_per_run: MAX_PER_RUN },
+      })
     }
 
     logger.info(`Warranty watchdog: warned on ${warned.length} asset(s)`)

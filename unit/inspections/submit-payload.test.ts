@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { parseSubmitPayload, MAX_ITEMS, MAX_TEXT } from '@/lib/inspections/submit-payload'
+import { MAX_REPEAT_INSTANCES } from '@/lib/inspections/resolve-form'
 
 // ============================================================================
 // THE BIAS HERE IS ASYMMETRIC, AND ON PURPOSE.
@@ -125,6 +126,33 @@ describe('parseSubmitPayload — the value columns', () => {
     expect(ok(body({ items: [item()] })).items[0]!.note).toBeNull()
   })
 
+  it('a repeat index must be a whole number in [1, MAX_REPEAT_INSTANCES]', () => {
+    // Unlike value_number, this one had NO range check at all — an
+    // out-of-range index (a malformed payload, an adversarial replay) sailed
+    // through to the RPC as if it were a real 1-based instance number.
+    expect(ok(body({ items: [item({ repeat_index: 1 })] })).items[0]!.repeat_index).toBe(1)
+    expect(ok(body({ items: [item({ repeat_index: MAX_REPEAT_INSTANCES })] }))).toBeTruthy()
+    expect(err(body({ items: [item({ repeat_index: 0 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: -1 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: MAX_REPEAT_INSTANCES + 1 })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ repeat_index: 2147483647 })] }))).toMatch(/Malformed/)
+    // Absent is still fine — most items aren't inside a repeat group.
+    expect(ok(body({ items: [item()] })).items[0]!.repeat_index).toBeNull()
+  })
+
+  it('rejects a fail result with no description — the actual trust boundary', () => {
+    // §5's rule is enforced client-side by resolve-form.ts's
+    // findOutstanding() before Review lets an inspector sign off — but THAT
+    // is bypassable (a stale build, a hand-crafted replay); THIS boundary is
+    // not. The resulting work order's title comes from this note.
+    expect(err(body({ items: [item({ result: 'fail', note: null })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ result: 'fail' })] }))).toMatch(/Malformed/)
+    expect(err(body({ items: [item({ result: 'fail', note: '   ' })] }))).toMatch(/Malformed/)
+    expect(ok(body({ items: [item({ result: 'fail', note: 'cracked hose' })] }))).toBeTruthy()
+    // A non-fail result needs no description.
+    expect(ok(body({ items: [item({ result: 'pass', note: null })] }))).toBeTruthy()
+  })
+
   it('carries every value column through unchanged', () => {
     const parsed = ok(body({ items: [item({
       result: 'fail', note: 'latch broken', actions: ['repair'], needs_cleaning: true,
@@ -217,5 +245,69 @@ describe('parseSubmitPayload — the repeat answer', () => {
     // an answer — so this is tolerated rather than rejected.
     expect(ok(body({ items: [item({ repeat_of_work_order_id: WO })] })).items[0])
       .toMatchObject({ repeat_answer: null })
+  })
+})
+
+// ============================================================================
+// submit_inspection's INSERT ... ON CONFLICT ON CONSTRAINT
+// inspection_items_unique_answer DO UPDATE cannot affect the same target row
+// twice within one statement — Postgres raises a cardinality_violation and
+// the WHOLE submit fails. Two entries sharing (form_item_id, repeat_index,
+// asset_id) are plausible from a repeat-group re-render bug, a stale cached
+// answer plus a corrected one both surviving in the local draft, or a retry
+// that appends rather than replaces. This is TERMINAL for the outbox — a
+// rejected/failed submit dead-letters a completed walk whose answers exist
+// nowhere else — so the dedup has to happen here, before the RPC ever sees
+// a duplicate key.
+// ============================================================================
+describe('parseSubmitPayload — deduplicating a repeated answer key', () => {
+  const DEF = '22222222-2222-2222-2222-222222222222'
+  const ASSET = '33333333-3333-3333-3333-333333333333'
+
+  it('keeps only the LAST of two entries sharing (form_item_id, repeat_index, asset_id)', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, note: 'first pass — stale' }),
+        item({ form_item_id: DEF, note: 'corrected answer', result: 'fail' }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]).toMatchObject({ note: 'corrected answer', result: 'fail' })
+  })
+
+  it('treats a different repeat_index as a distinct key, not a duplicate', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, repeat_index: 1 }),
+        item({ form_item_id: DEF, repeat_index: 2 }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(2)
+  })
+
+  it('treats a different asset_id as a distinct key, not a duplicate', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, asset_id: ASSET }),
+        item({ form_item_id: DEF, asset_id: null }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(2)
+  })
+
+  it('collapses three duplicates of the same key down to one, still keeping the last', () => {
+    const r = ok(body({
+      items: [
+        item({ form_item_id: DEF, note: 'v1' }),
+        item({ form_item_id: DEF, note: 'v2' }),
+        item({ form_item_id: DEF, note: 'v3' }),
+      ],
+    }))
+
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.note).toBe('v3')
   })
 })

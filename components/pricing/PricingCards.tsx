@@ -32,7 +32,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { monthlyCostCents, annualCostCents, bracketBreakdown, MAX_SELF_SERVE_PROPERTIES } from "@/lib/stripe/brackets";
 import { TIER_UPPER_BOUNDS, type PricingTier } from "./plan-tiers";
@@ -50,18 +50,64 @@ interface PricingCardsProps {
 
 const DEFAULT_QTY = 20; // Falls inside Growth — the tier already marked "Most Popular".
 
+// A fast drag on the range input fires dozens of onChange events a second.
+// Committing every one straight to the state that drives
+// bracketBreakdown()/monthlyCostCents() meant each of those events also
+// re-rendered all five tier cards below. 75ms sits inside the documented
+// 50-100ms window: fast enough that a released slider reads as live, slow
+// enough that a drag in progress collapses to one recompute per pause
+// instead of one per pixel.
+const SLIDER_DEBOUNCE_MS = 75;
+
 /** Which of the four priced tiers (Hosts/Starter/Growth/Portfolio) covers `qty`. Enterprise (index 4) if none do. */
 function tierIndexForQty(qty: number): number {
   const idx = TIER_UPPER_BOUNDS.findIndex((bound) => qty <= bound);
   return idx === -1 ? TIER_UPPER_BOUNDS.length : idx;
 }
 
+/**
+ * Every `qty` this calculator holds must be a valid integer in
+ * [1, MAX_SELF_SERVE_PROPERTIES] — monthlyCostCents()/annualCostCents() return
+ * `null` for anything else, and PricingCalculator reads them with a non-null
+ * assertion. `null! / 100` does not throw; `null` coerces to `0` in a numeric
+ * division, so a non-integer quantity silently rendered "$0/mo" to a visitor
+ * instead of a real price. The range input's default step already keeps it to
+ * whole numbers, but the number input has no such guarantee — nothing stops a
+ * visitor from typing "12.5", and `Number("12.5")` is a valid, non-integer
+ * number that the old `Number(e.target.value) || 1` clamp let straight
+ * through. Both inputs route through this so neither can reintroduce the gap.
+ */
+function clampQty(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(MAX_SELF_SERVE_PROPERTIES, Math.max(1, Math.round(value)));
+}
+
 function PricingCalculator({
-  qty, onQtyChange, annual, matchedTierName,
-}: Readonly<{ qty: number; onQtyChange: (n: number) => void; annual: boolean; matchedTierName: string }>) {
-  const monthly = monthlyCostCents(qty)! / 100;
-  const shown   = (annual ? annualCostCents(qty)! : monthlyCostCents(qty)!) / 100;
-  const items   = bracketBreakdown(qty, annual ? "annual" : "monthly");
+  qty, sliderQty, onSliderChange, onNumberChange, annual, matchedTierName,
+}: Readonly<{
+  qty:            number;
+  /**
+   * The range input's own handle position — updated on every drag frame for
+   * responsive UI feedback, independent of `qty`. See onSliderChange's
+   * caller (PricingCards) for why the two are decoupled.
+   */
+  sliderQty:      number;
+  onSliderChange: (n: number) => void;
+  onNumberChange: (n: number) => void;
+  annual:         boolean;
+  matchedTierName: string;
+}>) {
+  // Keyed on [qty, annual]: the expensive bracketBreakdown()/
+  // monthlyCostCents()/annualCostCents() calls from lib/stripe/brackets.ts
+  // only re-run when the COMMITTED quantity or the interval actually
+  // changes, not on every render this component's parent triggers.
+  const { monthly, shown, items } = useMemo(() => {
+    return {
+      monthly: monthlyCostCents(qty)! / 100,
+      shown:   (annual ? annualCostCents(qty)! : monthlyCostCents(qty)!) / 100,
+      items:   bracketBreakdown(qty, annual ? "annual" : "monthly"),
+    };
+  }, [qty, annual]);
 
   return (
     <div className="rounded-2xl border border-[var(--mkt-border)] bg-white p-6 mb-6">
@@ -75,8 +121,8 @@ function PricingCalculator({
               type="range"
               min={1}
               max={MAX_SELF_SERVE_PROPERTIES}
-              value={qty}
-              onChange={(e) => onQtyChange(Number(e.target.value))}
+              value={sliderQty}
+              onChange={(e) => onSliderChange(clampQty(Number(e.target.value)))}
               className="flex-1 accent-[var(--mkt-gold)]"
               aria-label="Number of properties"
             />
@@ -86,7 +132,7 @@ function PricingCalculator({
               min={1}
               max={MAX_SELF_SERVE_PROPERTIES}
               value={qty}
-              onChange={(e) => onQtyChange(Math.min(MAX_SELF_SERVE_PROPERTIES, Math.max(1, Number(e.target.value) || 1)))}
+              onChange={(e) => onNumberChange(clampQty(Number(e.target.value)))}
               className="w-16 text-center font-mono font-semibold rounded-lg border border-[var(--mkt-border)] py-1.5 text-[var(--mkt-ink)]"
             />
           </div>
@@ -128,14 +174,44 @@ function PricingCalculator({
 }
 
 export default function PricingCards({ tiers, annual, signupHref }: Readonly<PricingCardsProps>) {
-  const [qty, setQty] = useState(DEFAULT_QTY);
-  const activeIndex = tierIndexForQty(qty);
+  // `qty` is the COMMITTED value: it drives the calculator's price/breakdown
+  // and which tier card below is highlighted. `sliderQty` is purely the range
+  // handle's own position, so dragging feels immediate even while `qty` (and
+  // the expensive recompute + five-card re-render it triggers) is debounced.
+  const [qty, setQty]             = useState(DEFAULT_QTY);
+  const [sliderQty, setSliderQty] = useState(DEFAULT_QTY);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
+  function handleSliderChange(next: number) {
+    setSliderQty(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setQty(next), SLIDER_DEBOUNCE_MS);
+  }
+
+  function handleNumberChange(next: number) {
+    // A typed value is a single discrete event, not the drag storm this
+    // debounce exists for — commit immediately so the number box and "Your
+    // price" never lag behind what was typed. Also cancel any pending
+    // slider-driven commit so a stale drag value can't land afterward and
+    // clobber the more recent typed one.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setSliderQty(next);
+    setQty(next);
+  }
+
+  const activeIndex = useMemo(() => tierIndexForQty(qty), [qty]);
 
   return (
     <div>
       <PricingCalculator
         qty={qty}
-        onQtyChange={setQty}
+        sliderQty={sliderQty}
+        onSliderChange={handleSliderChange}
+        onNumberChange={handleNumberChange}
         annual={annual}
         matchedTierName={tiers[activeIndex]?.name ?? tiers[0]!.name}
       />
@@ -178,7 +254,7 @@ export default function PricingCards({ tiers, annual, signupHref }: Readonly<Pri
                       from{' '}
                     </span>
                     <span className={`text-3xl font-bold ${primaryText}`}>
-                      ${annual ? plan.annual!.toLocaleString() : plan.monthly}
+                      ${annual ? plan.annual!.toLocaleString() : plan.monthly!.toLocaleString()}
                     </span>
                     <span className={`mb-1 text-sm ${mutedText}`}>
                       {annual ? '/yr' : '/mo'}

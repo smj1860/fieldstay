@@ -24,14 +24,22 @@ export function asJsonObject(value: Json | null | undefined): JsonObject | null 
 /**
  * A jsonb object read as a flag map (e.g. properties.amenities), keeping only
  * the entries whose value really is a boolean.
+ *
+ * A non-boolean entry (a legacy import's `"true"` string, `1`/`0`, `null`) is
+ * silently dropped rather than coerced — it would otherwise render identically
+ * to "never set", with no way to distinguish a real false from stored garbage.
+ * `ctx` is optional so existing call sites reading a jsonb column that is
+ * genuinely always well-formed today don't have to pass one; a new caller
+ * reading data from a less-trusted source (a PMS import) should.
  */
-export function asBooleanMap(value: Json | null | undefined): Record<string, boolean> {
+export function asBooleanMap(value: Json | null | undefined, ctx?: { site: string }): Record<string, boolean> {
   const obj = asJsonObject(value)
   if (obj === null) return {}
 
   const out: Record<string, boolean> = {}
   for (const [key, v] of Object.entries(obj)) {
-    if (typeof v === 'boolean') out[key] = v
+    if (typeof v === 'boolean') { out[key] = v; continue }
+    if (v !== undefined && ctx) console.warn(`[asBooleanMap] non-boolean value for "${key}" at ${ctx.site}`, typeof v)
   }
   return out
 }

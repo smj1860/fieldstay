@@ -2,6 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
+
+/** What every call site in this file actually passes — createServiceClient()'s own return type. */
+type ServiceClient = ReturnType<typeof createServiceClient>
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
@@ -9,6 +12,7 @@ import { reportError } from '@/lib/observability/report-error'
 import {
   MAX_SPONSORS_PER_PROPERTY,
   ASSIGNMENT_MIN_PROPERTIES,
+  invalidateSponsorsCache,
 } from '@/lib/guidebook/resolve-property-sponsors'
 
 /**
@@ -26,16 +30,24 @@ export type AssignmentResult = { success: true } | { success: false; error: stri
 /** Postgres unique-violation — the category-collision index firing. */
 const UNIQUE_VIOLATION = '23505'
 
+/** Postgres check-violation — the per-property 4-sponsor cap trigger firing. */
+const CHECK_VIOLATION = '23514'
+
 /**
- * The collision index reports a constraint name, not a sentence. Translate it
- * once, here, rather than letting a raw 23505 reach a manager who has no way
- * to know what "guidebook_sponsor_assignments_named_slot_unique" means.
+ * The collision index and the cap trigger both report a raw Postgres code,
+ * not a sentence. Translate them once, here, rather than letting either reach
+ * a manager who has no way to know what
+ * "guidebook_sponsor_assignments_named_slot_unique" means.
  */
 function assignmentErrorMessage(err: { code?: string; message?: string }): string {
   if (err.code === UNIQUE_VIOLATION) {
     return 'That property already has a sponsor in this category. ' +
            'Each property can carry only one Morning Brew, Dinner & Pints, Rainy Day and ' +
            'Outdoor Adventure sponsor — swap the existing one out first.'
+  }
+  if (err.code === CHECK_VIOLATION) {
+    return `A property can carry at most ${MAX_SPONSORS_PER_PROPERTY} sponsors. ` +
+           'Remove one from that property before adding another.'
   }
   return 'Could not save those assignments. Please try again.'
 }
@@ -50,8 +62,7 @@ function assignmentErrorMessage(err: { code?: string; message?: string }): strin
  * this one decides what is allowed, and only the second one is a rule.
  */
 async function orgIsAboveAssignmentTier(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: ServiceClient,
   orgId:    string,
 ): Promise<boolean> {
   const { count, error } = await supabase
@@ -111,50 +122,24 @@ export async function setSponsorProperties(
     const owned = unwrapList(ownedRes, { site: 'actions.setSponsorProperties', orgId }) as { id: string }[]
     const targetIds = owned.map((p) => p.id)
 
-    // Which properties currently carry this sponsor — needed so the ones being
-    // REMOVED are marked manual too.
-    const currentRes = await supabase
-      .from('guidebook_sponsor_assignments')
-      .select('property_id')
-      .eq('org_id', orgId)
-      .eq('sponsor_id', sponsorId)
-      .limit(1000)
-
-    const current = unwrapList(currentRes, { site: 'actions.setSponsorProperties', orgId }) as
-      { property_id: string }[]
-    const currentIds = current.map((r) => r.property_id)
-
-    const toAdd    = targetIds.filter((id) => !currentIds.includes(id))
-    const toRemove = currentIds.filter((id) => !targetIds.includes(id))
-
-    if (toRemove.length > 0) {
-      const del = await supabase
-        .from('guidebook_sponsor_assignments')
-        .delete()
-        .eq('org_id', orgId)
-        .eq('sponsor_id', sponsorId)
-        .in('property_id', toRemove)
-      if (del.error) throw del.error
-    }
-
-    if (toAdd.length > 0) {
-      // org_id and slot_type are overwritten by the derive trigger; they are
-      // supplied only because both columns are NOT NULL.
-      const ins = await supabase
-        .from('guidebook_sponsor_assignments')
-        .insert(toAdd.map((propertyId) => ({
-          org_id:      orgId,
-          sponsor_id:  sponsorId,
-          property_id: propertyId,
-          slot_type:   'general',
-        })))
-      if (ins.error) {
-        if (ins.error.code === UNIQUE_VIOLATION) {
-          return { success: false, error: assignmentErrorMessage(ins.error) }
-        }
-        throw ins.error
+    // Diff-and-replace happens INSIDE the RPC, against a fresh read taken at
+    // call time — not against a diff computed here from an earlier read that
+    // could be stale by the time this reaches the database. The delete and
+    // insert it performs are one function call, so a cap or category-collision
+    // violation on the insert rolls back the removals too: the property set
+    // ends up either fully updated or fully untouched, never partial.
+    const rpcRes = await supabase.rpc('set_sponsor_properties', {
+      p_org_id:       orgId,
+      p_sponsor_id:   sponsorId,
+      p_property_ids: targetIds,
+    })
+    if (rpcRes.error) {
+      if (rpcRes.error.code === UNIQUE_VIOLATION || rpcRes.error.code === CHECK_VIOLATION) {
+        return { success: false, error: assignmentErrorMessage(rpcRes.error) }
       }
+      throw rpcRes.error
     }
+    const { added: toAdd, removed: toRemove } = rpcRes.data as { added: string[]; removed: string[] }
 
     await markManual(supabase, orgId, [...toAdd, ...toRemove])
 
@@ -170,6 +155,7 @@ export async function setSponsorProperties(
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.setSponsorProperties' })
@@ -222,29 +208,21 @@ export async function setPropertySponsors(
     const owned = unwrapList(ownedRes, { site: 'actions.setPropertySponsors', orgId }) as { id: string }[]
     const targetIds = owned.map((s) => s.id)
 
-    // Replace wholesale: this action states the property's complete set.
-    const del = await supabase
-      .from('guidebook_sponsor_assignments')
-      .delete()
-      .eq('org_id', orgId)
-      .eq('property_id', propertyId)
-    if (del.error) throw del.error
-
-    if (targetIds.length > 0) {
-      const ins = await supabase
-        .from('guidebook_sponsor_assignments')
-        .insert(targetIds.map((sponsorId) => ({
-          org_id:      orgId,
-          sponsor_id:  sponsorId,
-          property_id: propertyId,
-          slot_type:   'general',
-        })))
-      if (ins.error) {
-        if (ins.error.code === UNIQUE_VIOLATION) {
-          return { success: false, error: assignmentErrorMessage(ins.error) }
-        }
-        throw ins.error
+    // Replace wholesale, atomically: this action states the property's
+    // complete set. One RPC call is one implicit transaction, so a cap or
+    // category-collision violation on the insert rolls back the delete too —
+    // the property ends up either fully replaced or fully untouched, never
+    // wiped-and-stuck-empty on a failed insert.
+    const rpcRes = await supabase.rpc('replace_property_sponsors', {
+      p_org_id:      orgId,
+      p_property_id: propertyId,
+      p_sponsor_ids: targetIds,
+    })
+    if (rpcRes.error) {
+      if (rpcRes.error.code === UNIQUE_VIOLATION || rpcRes.error.code === CHECK_VIOLATION) {
+        return { success: false, error: assignmentErrorMessage(rpcRes.error) }
       }
+      throw rpcRes.error
     }
 
     await markManual(supabase, orgId, [propertyId])
@@ -257,6 +235,7 @@ export async function setPropertySponsors(
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.setPropertySponsors' })
@@ -309,6 +288,7 @@ export async function resetPropertyToAutomatic(propertyId: string): Promise<Assi
     })
 
     revalidatePath('/guidebook')
+    invalidateSponsorsCache(orgId)
     return { success: true }
   } catch (err) {
     reportError(err, { site: 'actions.resetPropertyToAutomatic' })
@@ -323,8 +303,7 @@ export async function resetPropertyToAutomatic(propertyId: string): Promise<Assi
  * and a bulk assign touches every property in the org at once.
  */
 async function markManual(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase:    any,
+  supabase:    ServiceClient,
   orgId:       string,
   propertyIds: string[],
 ): Promise<void> {

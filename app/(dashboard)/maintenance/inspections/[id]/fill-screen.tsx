@@ -58,6 +58,7 @@ import {
   captureInspectionPhoto,
   discardInspectionPhoto,
   drainInspectionPhotos,
+  pruneUploadedPhotoRows,
 } from '@/lib/dexie/dashboard/inspection-photos'
 import type { InspectionAnswerRow, OpenConcernRow } from '@/lib/dexie/dashboard/schema'
 import { enqueueDashboardMutation } from '@/lib/dexie/dashboard/syncService'
@@ -91,6 +92,10 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       if (!cancelled) setPullFailed(!outcome.ok)
     })
     void pruneFinishedInspections(userId, orgId)
+    // Same lifecycle point, same reason: uploaded photo rows are only ever
+    // status-flipped, never deleted on their own, so this table grows
+    // without bound over a device's lifetime otherwise.
+    void pruneUploadedPhotoRows(userId, orgId)
     // Any photo left queued from a previous visit — the drain is idempotent and
     // gates itself on being online.
     void drainInspectionPhotos(userId, orgId)
@@ -189,7 +194,18 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
     })
   }, [snapshot, assets, answerRows, propertyFacts])
 
-  const outstanding = useMemo(() => findOutstanding(pages, answers), [pages, answers])
+  // Whether the Review page is the one on screen. Computed here (ahead of the
+  // early-return guards below, alongside the other plain derivations) so it
+  // can gate `outstanding` — `findOutstanding` walks EVERY page's EVERY node,
+  // and there is no reason to pay that on every keystroke while the inspector
+  // is still filling in section 2 of 9. It is used again, unchanged, past the
+  // guards to decide what actually renders.
+  const onReview = stop >= pages.length
+
+  const outstanding = useMemo(
+    () => (onReview ? findOutstanding(pages, answers, assets ?? []) : []),
+    [onReview, pages, answers, assets],
+  )
 
   const onChange = useCallback((key: string, formItemId: string, prompt: string,
                                 assetId: string | null, repeatIndex: number | null,
@@ -337,8 +353,7 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
   }
 
 
-  const onReview = stop >= pages.length
-  const page     = onReview ? null : pages[stop]
+  const page = onReview ? null : pages[stop]
 
   return (
     <Shell>
@@ -375,17 +390,22 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
             {visibleNodes(page!, answers).map(({ item, depth }) => {
               const key = answerKey(item)
               return (
+                // onChange/onCapture/onDiscard are the STABLE top-level
+                // callbacks (each its own useCallback above), passed through
+                // unwrapped rather than a fresh per-item closure built here on
+                // every render — ItemRow derives the (key, formItemId, …)
+                // identity itself from `node`. A wrapper allocated in this
+                // `.map()` would be a new function every render regardless of
+                // whether this row's own data changed, which would defeat
+                // ItemRow's React.memo below for every row on every render.
                 <ItemRow
                   key={key}
                   node={item}
                   depth={depth}
                   answer={answersById.get(key)}
-                  onChange={(patch) => onChange(
-                    key, item.formItem.id, item.formItem.prompt,
-                    item.asset?.id ?? null, item.repeatIndex ?? null, patch,
-                  )}
-                  onCapture={(file) => { void onCapture(key, file) }}
-                  onDiscard={() => { void onDiscard(key) }}
+                  onChange={onChange}
+                  onCapture={onCapture}
+                  onDiscard={onDiscard}
                   // §5: several forms deliberately ask about one concern, so
                   // the lookup key is the concern where the item names one and
                   // the item id otherwise — the same fallback the warm applies

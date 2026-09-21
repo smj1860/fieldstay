@@ -8,11 +8,21 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
-import { throwIfAnyQueryFailed, isRealQueryError, reportQueryError, unwrapCount } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, isRealQueryError, reportQueryError, unwrapCount, unwrapList } from '@/lib/supabase/unwrap'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
 const MAX_PLAUSIBLE_DURATION_MINUTES = 8 * 60
+
+/**
+ * Row cap on the quality-ratio read.
+ *
+ * A checklist runs 30-60 items and nothing in the schema caps it, so this is
+ * explicit rather than left to PostgREST's max_rows — a truncated read there
+ * returns 200 with no signal and would skew both ratios toward whatever the
+ * first page happened to contain.
+ */
+const MAX_CHECKLIST_ITEMS = 500
 
 /**
  * Triggered when a new turnover is created (from iCal sync or manual).
@@ -124,19 +134,26 @@ export const handleTurnoverCreated = inngest.createFunction(
 type TurnoverServiceClient = ReturnType<typeof createServiceClient>
 
 /**
- * The earliest and latest checklist item completion, or [] if none.
+ * The earliest and latest checklist item completion, plus the instance id.
  *
  * Only the extremes matter — the duration is MAX - MIN — so the database is
  * asked for exactly those two rows rather than every item. That also removes
  * an unbounded read: a checklist runs 30-60 items today, but nothing in the
  * schema caps it, and PostgREST would silently truncate at max_rows and skew
  * the result.
+ *
+ * The instance id is returned rather than kept local because the quality
+ * ratios need the same instance. Re-resolving it at the call site would be a
+ * second round trip to answer a question this function has already answered,
+ * and two lookups can disagree — a checklist replaced between them would have
+ * the duration measured against one instance and the completion rate against
+ * another. `null` means the turnover has no checklist instance at all.
  */
 async function checklistCompletionRange(
   supabase:   TurnoverServiceClient,
   turnoverId: string,
   orgId:      string,
-): Promise<string[]> {
+): Promise<{ instanceId: string | null; timestamps: string[] }> {
   const { data: instance, error: instanceError } = await supabase
     .from('checklist_instances')
     .select('id')
@@ -144,7 +161,7 @@ async function checklistCompletionRange(
     .eq('org_id', orgId)
     .maybeSingle()
   if (instanceError) throw instanceError
-  if (!instance) return []
+  if (!instance) return { instanceId: null, timestamps: [] }
 
   const end = (ascending: boolean) => supabase
     .from('checklist_instance_items')
@@ -160,7 +177,10 @@ async function checklistCompletionRange(
   const endsError = ends.find((r) => r.error)?.error
   if (endsError) throw endsError
 
-  return ends.map((r) => r.data?.completed_at).filter((t): t is string => Boolean(t))
+  return {
+    instanceId: instance.id,
+    timestamps: ends.map((r) => r.data?.completed_at).filter((t): t is string => Boolean(t)),
+  }
 }
 
 /**
@@ -216,18 +236,74 @@ async function inventoryCompletionSignal(
   return lastEdited?.updated_at ?? null
 }
 
-/** Every completion-type timestamp for a turnover: checklist plus inventory. */
+/**
+ * Every completion-type timestamp for a turnover: checklist plus inventory,
+ * alongside the checklist instance the first half came from.
+ */
 async function collectCompletionTimestamps(
   supabase:   TurnoverServiceClient,
   turnoverId: string,
   orgId:      string,
-): Promise<string[]> {
-  const timestamps = await checklistCompletionRange(supabase, turnoverId, orgId)
+): Promise<{ instanceId: string | null; timestamps: string[] }> {
+  const { instanceId, timestamps } = await checklistCompletionRange(supabase, turnoverId, orgId)
 
   const inventorySignal = await inventoryCompletionSignal(supabase, turnoverId, orgId)
   if (inventorySignal) timestamps.push(inventorySignal)
 
-  return timestamps
+  return { instanceId, timestamps }
+}
+
+/**
+ * Completion rate and photo compliance for one checklist instance — the
+ * automated quality signal.
+ *
+ * THE TURNOVER IS WHAT IS RATED, NOT THE CREW MEMBER. This deliberately does
+ * NOT filter by completed_by_crew_id: one figure is computed per instance and
+ * applied identically to every crew member assigned to that turnover. A
+ * per-person split was tried in design and discarded — two cleaners sharing a
+ * job share its outcome, and splitting the checklist between them measures
+ * who happened to tick which box rather than how the turnover went.
+ *
+ * NULL means NOT APPLICABLE, and the distinction is the point: a turnover
+ * with no checklist items has no completion rate, and 0 would read as
+ * "totally failed" while 1 would read as "perfect" for something that never
+ * happened. Callers must not coalesce to 0 before storage — that happens once,
+ * explicitly, in apply_crew_score_recompute()'s COALESCE.
+ *
+ * Bounded read: a checklist runs 30-60 items and nothing in the schema caps
+ * it, so the row count is capped rather than left to PostgREST's max_rows,
+ * which would truncate silently and skew both ratios.
+ */
+async function checklistQualityRatios(
+  supabase:   TurnoverServiceClient,
+  instanceId: string,
+): Promise<{ completionRate: number | null; photoComplianceRate: number | null }> {
+  const itemsRes = await supabase
+    .from('checklist_instance_items')
+    .select('is_completed, requires_photo, photo_storage_path')
+    .eq('instance_id', instanceId)
+    .limit(MAX_CHECKLIST_ITEMS)
+
+  const items = unwrapList<{
+    is_completed: boolean | null
+    requires_photo: boolean | null
+    photo_storage_path: string | null
+  }>(itemsRes, { site: 'inngest.turnover-events.checklistQualityRatios' })
+
+  if (items.length === 0) return { completionRate: null, photoComplianceRate: null }
+
+  const completionRate = items.filter((i) => i.is_completed).length / items.length
+
+  // Denominator is photo-required items that were COMPLETED, not all
+  // photo-required items: an item nobody reached yet is already counted as
+  // incomplete by completionRate above, and counting it again here would
+  // charge one miss twice.
+  const photoRequiredCompleted = items.filter((i) => i.requires_photo && i.is_completed)
+  const photoComplianceRate = photoRequiredCompleted.length === 0
+    ? null
+    : photoRequiredCompleted.filter((i) => i.photo_storage_path).length / photoRequiredCompleted.length
+
+  return { completionRate, photoComplianceRate }
 }
 
 interface DurationWrite {
@@ -428,7 +504,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('record-crew-duration', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const timestamps = await collectCompletionTimestamps(supabase, turnover_id, org_id)
+      const { instanceId, timestamps } = await collectCompletionTimestamps(supabase, turnover_id, org_id)
 
       if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
 
@@ -471,10 +547,23 @@ export const handleTurnoverCompleted = inngest.createFunction(
       // and the learning loop that feeds crew scoring recorded nothing at all.
       // turnovers.crew_duration_minutes is an ordinary integer column and IS
       // written here.
+      // Null when the turnover has no checklist instance — stored as NULL, not
+      // 0, and contributing nothing to the score. See checklistQualityRatios.
+      const { completionRate, photoComplianceRate } = instanceId
+        ? await checklistQualityRatios(supabase, instanceId)
+        : { completionRate: null, photoComplianceRate: null }
+
       const [assignmentResult, turnoverResult] = await Promise.all([
         supabase
           .from('assignment_outcomes')
-          .update({ started_at: startedAt, completed_at: completedAt })
+          .update({
+            started_at:            startedAt,
+            completed_at:          completedAt,
+            // No crew_member_id filter below, deliberately: one turnover's
+            // quality figures apply to every crew member who worked it.
+            completion_rate:       completionRate,
+            photo_compliance_rate: photoComplianceRate,
+          })
           .eq('turnover_id', turnover_id)
           .eq('org_id', org_id)
           .select('id'),

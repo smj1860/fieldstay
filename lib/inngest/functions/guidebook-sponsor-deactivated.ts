@@ -5,6 +5,7 @@ import { getPmEmails } from '@/lib/inngest/helpers'
 import { sendGuidebookGracePeriodEmail } from '@/lib/resend/client'
 import { logAuditEvent } from '@/lib/audit'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrap } from '@/lib/supabase/unwrap'
+import { invalidateSponsorsCache } from '@/lib/guidebook/resolve-property-sponsors'
 
 export const guidebookSponsorDeactivated = inngest.createFunction(
   { id: 'guidebook-sponsor-deactivated', name: 'Guidebook: Sponsor Deactivated' },
@@ -29,6 +30,12 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
         .eq('org_id', orgId)
 
       if (error) throw new Error(`Failed to deactivate sponsor: ${error.message}`)
+    })
+
+    // A cancelled/failed sponsor must stop appearing on guest pages promptly
+    // rather than surviving up to a minute in the resolver cache.
+    await step.run('invalidate-sponsors-cache', async () => {
+      invalidateSponsorsCache(orgId)
     })
 
     const activeSponsorCount = await step.run('count-active-sponsors', async () => {

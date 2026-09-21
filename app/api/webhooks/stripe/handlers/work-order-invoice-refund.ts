@@ -58,6 +58,15 @@ export async function handleWorkOrderInvoiceRefunded(
   const isFullRefund = charge.amount_refunded >= charge.amount_captured
   const newStatus     = isFullRefund ? 'refunded' : 'partially_refunded'
 
+  // Optimistic lock on the value just read. The out-of-order guard above only
+  // protects against a STALE incoming value; it does nothing about two
+  // GENUINELY CONCURRENT deliveries (Stripe does not serialize webhook
+  // delivery to one endpoint) both reading the same starting
+  // amount_refunded, both passing the guard, and racing this UPDATE — the
+  // loser's write would otherwise land second and silently overwrite the
+  // winner's higher total with its own now-stale, smaller one. The
+  // `.eq('amount_refunded', inv.amount_refunded)` CAS makes exactly one of
+  // two racing deliveries win; the other affects zero rows.
   const updateRes = await supabase
     .from('work_order_invoices')
     .update({
@@ -67,11 +76,24 @@ export async function handleWorkOrderInvoiceRefunded(
     })
     .eq('id', inv.id)
     .eq('org_id', inv.org_id)
-  unwrap(updateRes, {
+    .eq('amount_refunded', inv.amount_refunded)
+    .select('id')
+    .maybeSingle()
+  const updated = unwrap(updateRes, {
     site:  'webhook.stripe.work-order-invoice-refund.mark-refunded',
     orgId: inv.org_id,
     extra: { work_order_id: inv.work_order_id },
   })
+
+  // Zero rows back (with no error) means a concurrent delivery already moved
+  // amount_refunded past what this invocation read at the top of the
+  // function — so the compensating credit and actual_cost adjustment below,
+  // both computed from that same stale read, must not proceed. Throwing here
+  // releases the dedup claim (see route.ts) and lets Stripe's retry re-read
+  // the row fresh rather than silently posting a wrong-amount credit.
+  if (!updated) {
+    throw new Error(`refund update lost a concurrency race for invoice ${inv.id} — retry`)
+  }
 
   // Compensating credit against the SAME category the original expense
   // posted to ('maintenance'), as a NEGATIVE expense rather than a positive

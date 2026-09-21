@@ -18,6 +18,22 @@ interface ApplyDialogBodyProps {
 }
 
 function ApplyResultSummary({ applyResult }: Readonly<{ applyResult: BroadcastResult }>) {
+  // BroadcastResult is one type covering both the success and error shapes
+  // broadcastMaintenanceTemplate() returns. The current caller always routes
+  // an `{error}` response through the separate applyError prop instead of
+  // storing it here — but nothing in this component's own type or logic
+  // enforces that, so a future or different caller that stores the raw
+  // response would otherwise render "Template applied — Created undefined
+  // schedules" for an outcome that was actually a failure. Checked here too,
+  // not just relied on at the call site.
+  if (applyResult.error || applyResult.success !== true) {
+    return (
+      <InlineAlert tone="error">
+        {applyResult.error ?? 'Could not apply the template. Please try again.'}
+      </InlineAlert>
+    )
+  }
+
   const skipped = applyResult.skipped ?? 0
   return (
     <InlineAlert tone="success" className="flex items-start gap-2">

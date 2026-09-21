@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
@@ -156,5 +156,49 @@ describe('notifyCrewFeedback', () => {
     await expect(
       invokeHandler(notifyCrewFeedback, { event: feedbackEvent(), step: makeStep() }),
     ).rejects.toThrow(/Resend error/)
+  })
+
+  describe('CREW_FEEDBACK_NOTIFY_EMAIL override', () => {
+    // Every crew feedback submission platform-wide used to go to a single
+    // hardcoded personal inbox with no configuration surface and no way to
+    // change the recipient without a code change.
+    const ORIGINAL_ENV = process.env.CREW_FEEDBACK_NOTIFY_EMAIL
+
+    afterEach(() => {
+      if (ORIGINAL_ENV === undefined) delete process.env.CREW_FEEDBACK_NOTIFY_EMAIL
+      else process.env.CREW_FEEDBACK_NOTIFY_EMAIL = ORIGINAL_ENV
+    })
+
+    it('sends to the configured address when CREW_FEEDBACK_NOTIFY_EMAIL is set', async () => {
+      process.env.CREW_FEEDBACK_NOTIFY_EMAIL = 'ops-team@fieldstay.app'
+      vi.resetModules()
+
+      const { notifyCrewFeedback: freshHandler } = await import('@/lib/inngest/functions/notify-crew-feedback')
+      const supabase = makeSupabase()
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      await invokeHandler(freshHandler, { event: feedbackEvent(), step: makeStep() })
+
+      expect(resend.emails.send).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'ops-team@fieldstay.app' }),
+        expect.anything(),
+      )
+    })
+
+    it('falls back to stephen@fieldstay.app when unset', async () => {
+      delete process.env.CREW_FEEDBACK_NOTIFY_EMAIL
+      vi.resetModules()
+
+      const { notifyCrewFeedback: freshHandler } = await import('@/lib/inngest/functions/notify-crew-feedback')
+      const supabase = makeSupabase()
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      await invokeHandler(freshHandler, { event: feedbackEvent(), step: makeStep() })
+
+      expect(resend.emails.send).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'stephen@fieldstay.app' }),
+        expect.anything(),
+      )
+    })
   })
 })

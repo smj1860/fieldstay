@@ -59,7 +59,28 @@ interface Props {
   stalledHint:  string
   /** Second line of the red panel. Same reasoning. */
   failedHint:   string
+  /**
+   * The panel's own chrome — count headlines, buttons, the discard dialog.
+   * All optional with English defaults so the dashboard's existing call site
+   * (no locale concept) is unaffected; the crew banner passes translated
+   * copies. Kept as small formatting functions rather than flat strings
+   * because English/Spanish pluralization both depend on the count.
+   */
+  stalledHeadline?:    (count: number) => string
+  failedHeadline?:     (count: number) => string
+  discardAriaLabel?:   (label: string) => string
+  retryAllLabel?:      string
+  retryingLabel?:      string
+  discardTitle?:       string
+  discardBody?:        (label: string) => string
+  keepLabel?:          string
+  discardLabel?:       string
 }
+
+const defaultStalledHeadline = (count: number) => `${count} change${count !== 1 ? 's' : ''} still trying to sync`
+const defaultFailedHeadline  = (count: number) => `${count} item${count !== 1 ? 's' : ''} didn’t sync`
+const defaultDiscardAriaLabel = (label: string) => `Discard ${label}`
+const defaultDiscardBody = (label: string) => `“${label}” never reached FieldStay. Discarding removes it from this device for good.`
 
 export function SyncFailurePanel({
   entries,
@@ -67,6 +88,15 @@ export function SyncFailurePanel({
   onRetryAll,
   stalledHint,
   failedHint,
+  stalledHeadline  = defaultStalledHeadline,
+  failedHeadline   = defaultFailedHeadline,
+  discardAriaLabel = defaultDiscardAriaLabel,
+  retryAllLabel    = 'Retry all',
+  retryingLabel    = 'Retrying…',
+  discardTitle     = 'Discard this item?',
+  discardBody      = defaultDiscardBody,
+  keepLabel        = 'Keep it',
+  discardLabel     = 'Discard',
 }: Readonly<Props>) {
   const [retrying, setRetrying] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState<SyncFailureEntry | null>(null)
@@ -82,7 +112,7 @@ export function SyncFailurePanel({
         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
         <span className="flex-1 min-w-0">
           <span className="block text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
-            {stalledCount} change{stalledCount !== 1 ? 's' : ''} still trying to sync
+            {stalledHeadline(stalledCount)}
           </span>
           <span className="block text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {stalledHint}
@@ -118,7 +148,7 @@ export function SyncFailurePanel({
                 buttons below sit outside it deliberately. */}
             <output className="block">
               <span className="block text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
-                {entries.length} item{entries.length !== 1 ? 's' : ''} didn&rsquo;t sync
+                {failedHeadline(entries.length)}
               </span>
               <span className="block text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {failedHint}
@@ -137,7 +167,7 @@ export function SyncFailurePanel({
                   <button
                     type="button"
                     onClick={() => setConfirmDiscard(entry)}
-                    aria-label={`Discard ${entry.label}`}
+                    aria-label={discardAriaLabel(entry.label)}
                     className="ml-auto p-1.5 -m-1 rounded-lg shrink-0 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                     style={{ color: 'var(--text-muted)' }}
                   >
@@ -154,7 +184,7 @@ export function SyncFailurePanel({
               className="mt-3 w-full flex items-center justify-center gap-2 py-2.5"
             >
               <RefreshCw className="w-4 h-4" />
-              {retrying ? 'Retrying…' : 'Retry all'}
+              {retrying ? retryingLabel : retryAllLabel}
             </Button>
           </div>
         </div>
@@ -164,13 +194,13 @@ export function SyncFailurePanel({
         <Dialog
           open
           onClose={() => setConfirmDiscard(null)}
-          title="Discard this item?"
+          title={discardTitle}
           mobileSheet
           maxWidthClassName="max-w-sm"
           footer={
             <div className="flex flex-col gap-2 w-full">
               <Button variant="secondary" onClick={() => setConfirmDiscard(null)} className="w-full py-3">
-                Keep it
+                {keepLabel}
               </Button>
               <Button
                 variant="danger"
@@ -181,14 +211,13 @@ export function SyncFailurePanel({
                 }}
                 className="w-full py-3"
               >
-                Discard
+                {discardLabel}
               </Button>
             </div>
           }
         >
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            &ldquo;{confirmDiscard.label}&rdquo; never reached FieldStay. Discarding
-            removes it from this device for good.
+            {discardBody(confirmDiscard.label)}
           </p>
         </Dialog>
       )}

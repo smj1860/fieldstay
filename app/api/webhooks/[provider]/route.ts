@@ -21,7 +21,7 @@ import { unwrapList } from '@/lib/supabase/unwrap'
 import { NextResponse, type NextRequest }            from 'next/server'
 import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
-import { canonicalJson, PayloadTooDeepError }        from '@/lib/integrations/canonical-json'
+import { canonicalJson, PayloadTooDeepError, PayloadTooLargeError } from '@/lib/integrations/canonical-json'
 import { extractClientIp }                            from '@/lib/integrations/webhook-verification'
 import { revokeIntegrationToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
@@ -36,6 +36,32 @@ import type { WebhookVerificationResult }            from '@/lib/integrations/we
 // falling through to the next candidate (or to '').
 function asIdString(value: unknown): string | undefined {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
+}
+
+/**
+ * Wraps canonicalJson's two validation errors (over-deep, over-wide) into a
+ * 400 response, extracted out of POST so the extra `if` for
+ * PayloadTooLargeError doesn't push POST itself over the cognitive-complexity
+ * ceiling — see the dedup-key comment inline at the call site for why this
+ * hashes the CANONICAL form rather than the raw body.
+ */
+function canonicalDedupSourceOrResponse(
+  payload: Record<string, unknown>,
+  providerId: string,
+): { dedupSource: string } | { response: NextResponse } {
+  try {
+    return { dedupSource: canonicalJson(payload) }
+  } catch (err) {
+    if (err instanceof PayloadTooDeepError) {
+      console.warn(`[Webhook:${providerId}] Rejected over-nested payload: ${err.message}`)
+      return { response: NextResponse.json({ error: 'Payload too deeply nested' }, { status: 400 }) }
+    }
+    if (err instanceof PayloadTooLargeError) {
+      console.warn(`[Webhook:${providerId}] Rejected oversized payload: ${err.message}`)
+      return { response: NextResponse.json({ error: 'Payload too large' }, { status: 400 }) }
+    }
+    throw err
+  }
 }
 
 
@@ -327,16 +353,16 @@ export async function POST(
   //    stringify call this replaces threw an uncaught RangeError on a deeply
   //    nested body and the route answered 500. canonicalJson rejects past 64
   //    levels instead, which turns that into input validation at the boundary.
-  let dedupSource: string
-  try {
-    dedupSource = canonicalJson(payload)
-  } catch (err) {
-    if (err instanceof PayloadTooDeepError) {
-      console.warn(`[Webhook:${providerId}] Rejected over-nested payload: ${err.message}`)
-      return NextResponse.json({ error: 'Payload too deeply nested' }, { status: 400 })
-    }
-    throw err
-  }
+  //
+  //    The NODE-COUNT guard is the width equivalent: a payload with tens of
+  //    thousands of shallow siblings (a huge flat array, or an object with a
+  //    huge number of keys) never trips the depth cap but still walks every
+  //    element synchronously on this request thread. canonicalJson rejects
+  //    past MAX_NODES for the same reason — the reject happens mid-walk,
+  //    before the full recursive walk over an oversized payload completes.
+  const dedupResult = canonicalDedupSourceOrResponse(payload, providerId)
+  if ('response' in dedupResult) return dedupResult.response
+  const { dedupSource } = dedupResult
   const webhookId    = createHash('sha256').update(dedupSource).digest('hex')
 
   {

@@ -32,6 +32,20 @@ import type { GuidebookSponsor, GuidebookSlotType } from '@/types/database'
 /** Radius offered by the one-click bulk action. */
 const NEARBY_RADIUS_MILES = 10
 
+/**
+ * How many rows `SponsorPropertiesDialog` renders before a "Show more" click.
+ *
+ * `properties` here is the WHOLE org's list — up to `MAX_SELF_SERVE_PROPERTIES`
+ * (150, see `lib/stripe/brackets.ts`) — rendered fully unpaginated with a
+ * per-row distance computation. Simple client-side pagination rather than a
+ * virtualization library (none is in the repo, and CLAUDE.md's "never
+ * introduce unnecessary tooling" rules one out for a list that tops out at
+ * 150 rows). `PropertySponsorsDialog`'s own list (sponsors, not properties)
+ * needs neither: `guidebook_sponsors.slot_number` CHECKs 1..6, so it never
+ * exceeds six rows regardless of org size.
+ */
+const PROPERTIES_PAGE_SIZE = 50
+
 export interface AssignmentProperty {
   id:   string
   name: string
@@ -102,6 +116,7 @@ export function SponsorPropertiesDialog({
   const [selected, setSelected] = useState<Set<string>>(initiallyOn)
   const [error, setError]       = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
+  const [visibleCount, setVisibleCount] = useState(PROPERTIES_PAGE_SIZE)
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -112,21 +127,45 @@ export function SponsorPropertiesDialog({
     })
   }
 
-  /** Distance from this sponsor to a property, or null when either lacks coordinates. */
-  const milesTo = (p: AssignmentProperty): number | null => {
-    if (sponsor.lat === null || sponsor.lng === null) return null
-    if (p.lat === null || p.lng === null) return null
-    return distanceMiles(sponsor.lat, sponsor.lng, p.lat, p.lng)
-  }
+  /**
+   * Distance from this sponsor to every property, computed ONCE per
+   * (sponsor, properties) pair rather than per render. Every keystroke/toggle
+   * in this dialog re-renders the whole list — up to 150 rows at the
+   * self-serve ceiling — and without memoizing this, each of those renders
+   * recomputed a haversine distance for every property all over again for no
+   * reason: neither the sponsor's coordinates nor the property list change
+   * while the dialog is just being clicked around in.
+   */
+  const milesById = useMemo(() => {
+    const map = new Map<string, number | null>()
+    for (const p of properties) {
+      const mi =
+        sponsor.lat === null || sponsor.lng === null || p.lat === null || p.lng === null
+          ? null
+          : distanceMiles(sponsor.lat, sponsor.lng, p.lat, p.lng)
+      map.set(p.id, mi)
+    }
+    return map
+  }, [properties, sponsor.lat, sponsor.lng])
 
-  const nearby = properties.filter((p) => {
-    const mi = milesTo(p)
-    return mi !== null && mi <= NEARBY_RADIUS_MILES
-  })
+  const nearby = useMemo(
+    () => properties.filter((p) => {
+      const mi = milesById.get(p.id) ?? null
+      return mi !== null && mi <= NEARBY_RADIUS_MILES
+    }),
+    [properties, milesById],
+  )
 
   const selectNearby = () => {
     setSelected((prev) => new Set([...prev, ...nearby.map((p) => p.id)]))
   }
+
+  // Pagination is purely a RENDER concern — selection, "select nearby", and
+  // the initially-checked set above all operate over the full `properties`
+  // array regardless of how much of it is currently visible, so ticking a
+  // box then scrolling never loses a selection that happens to be off-page.
+  const visibleProperties = properties.slice(0, visibleCount)
+  const remaining = properties.length - visibleProperties.length
 
   const save = () => {
     setError(null)
@@ -172,9 +211,9 @@ export function SponsorPropertiesDialog({
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        {properties.map((p) => {
+        {visibleProperties.map((p) => {
           const inputId = `sponsor-prop-${p.id}`
-          const miles   = formatMiles(milesTo(p))
+          const miles   = formatMiles(milesById.get(p.id) ?? null)
           return (
             <label
               key={p.id}
@@ -208,6 +247,18 @@ export function SponsorPropertiesDialog({
           )
         })}
       </div>
+
+      {remaining > 0 && (
+        <div style={{ marginTop: '12px', textAlign: 'center' }}>
+          <Button
+            variant="secondary"
+            onClick={() => setVisibleCount((n) => n + PROPERTIES_PAGE_SIZE)}
+            disabled={pending}
+          >
+            Show {Math.min(remaining, PROPERTIES_PAGE_SIZE)} more ({remaining} remaining)
+          </Button>
+        </div>
+      )}
     </Dialog>
   )
 }

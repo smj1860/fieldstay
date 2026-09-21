@@ -41,14 +41,38 @@
 // a new state every RLS policy in the schema has to learn is a large blast
 // radius for no gain — and a mistake in it locks out live tenants.
 //
-// It also proposed chunking each table into `id IN (SELECT … LIMIT 5000)`
-// batches. That is not expressible through PostgREST (no subqueries), and more
-// to the point it would not touch the statement that actually matters: the
-// cascade is triggered by deleting the organizations row, so bounding the
-// explicit deletes leaves the one all-or-nothing statement exactly as large.
-// Step-per-table checkpointing gets the resumability without pretending to
-// solve that. If an org ever genuinely outruns 300s, the fix is a
-// SECURITY DEFINER batched purge RPC, not smaller PostgREST calls.
+// ── Batched, resumable purges (2026-09-16 scalability pass) ─────────────────
+//
+// Each explicit per-table purge below used to be ONE indivisible
+// `DELETE FROM t WHERE org_id = $1` PostgREST call. Past the Inngest step
+// budget (~300s), Postgres rolls back the WHOLE statement, and a retry
+// re-issues the identical statement against the UNREDUCED row count — a table
+// that has ever grown past what one statement can clear in the budget could
+// never finish purging, no matter how many retries Inngest gave it.
+//
+// purgeTableInBatches() (below) fixes this via the `purge_org_table_batch()`
+// SECURITY DEFINER RPC (supabase/migrations/*_add_purge_org_table_batch.sql),
+// which deletes at most PURGE_BATCH_SIZE rows per call and reports how many it
+// removed. The loop calls it — one step.run per batch, each independently
+// retryable — until a call reports fewer than a full batch. A run that dies on
+// table 4's 30th batch resumes at batch 30, not at table 4's first row.
+//
+// This does NOT reach into the big one: `DELETE FROM organizations WHERE
+// id = $1` still cascades to every table with a real FK to organizations
+// (properties, bookings, turnovers, and dozens more — verified against the
+// live FK graph 2026-09-16) in ONE statement, same as before. Explicitly
+// batch-purging that entire cascade tree ahead of time was investigated and
+// rejected for this pass: most of those tables are plan-capped or
+// per-property-bounded (CLAUDE.md's semgrep `-org-scoped` tier already audits
+// exactly this — which of them grow with an org's SIZE, which grow with TIME),
+// so the tables actually at risk of outrunning the statement budget are
+// small in number and are exactly the ones already purged explicitly below —
+// which is also where the FK graph forced them to be pre-cleared anyway (see
+// the NO ACTION note on ORG_TABLES_BLOCKING_CASCADE). If a genuinely
+// time-growing table is ever added directly under `organizations` without its
+// own explicit purge here, extend ORG_PURGE_TABLES and the RPC's allow-list
+// together, in FK order — do not assume the cascade will always be small
+// enough.
 // ============================================================
 
 import { inngest }             from '@/lib/inngest/client'
@@ -58,16 +82,33 @@ import { reportError }         from '@/lib/observability/report-error'
 /**
  * Tables that must be cleared BEFORE the organizations row, because they hold
  * a non-cascading FK to another table that IS in the cascade tree. Postgres
- * does not order cascade actions, so leaving these to the cascade can abort
- * the whole DELETE with a foreign-key violation. Verified 2026-07-30:
- *   work_order_invoices.property_id -> properties   ON DELETE RESTRICT
- *   work_order_invoices.vendor_id   -> vendors      ON DELETE RESTRICT
- *   work_orders.reported_by_crew_member_id -> crew_members  ON DELETE NO ACTION
- * Deleting invoices then work orders clears all three edges; every other FK
- * inside the organizations cascade tree is CASCADE or SET NULL.
+ * does not order cascade actions among independent direct children of the
+ * SAME parent, so leaving these to the cascade can abort the whole DELETE
+ * with a foreign-key violation. Re-verified against the live FK graph
+ * 2026-09-16 (`pg_constraint.confdeltype`), which is what turned up two
+ * entries the 2026-07-30 note missed:
+ *   work_order_invoices.property_id -> properties   ON DELETE NO ACTION
+ *   work_order_invoices.vendor_id   -> vendors      ON DELETE NO ACTION
+ *   work_order_invoices.work_order_id -> work_orders ON DELETE NO ACTION
+ *   owner_transactions.property_id -> properties    ON DELETE NO ACTION
+ *   purchase_orders.property_id    -> properties    ON DELETE NO ACTION
+ * owner_transactions and purchase_orders are BOTH, like work_order_invoices,
+ * direct children of organizations (their own org_id FK is CASCADE) that also
+ * hold a NO ACTION edge into properties — the identical hazard shape, just
+ * never added here. It had not caused a visible failure only because
+ * Postgres's cascade ordering among organizations' many direct children
+ * happened not to hit it for any org purged so far, not because the edge
+ * doesn't exist.
+ *
+ * ORDER WITHIN THIS ARRAY MATTERS: work_order_invoices must precede
+ * work_orders (the NO ACTION edge above). owner_transactions and
+ * purchase_orders reference neither each other nor work_orders with anything
+ * stronger than SET NULL, so they may sit anywhere before it.
  */
 export const ORG_TABLES_BLOCKING_CASCADE = [
   'work_order_invoices',
+  'owner_transactions',
+  'purchase_orders',
   'work_orders',
 ] as const
 
@@ -107,6 +148,89 @@ export const ORG_PURGE_TABLES = [
   ...ORG_TABLES_BLOCKING_CASCADE,
   ...ORG_TABLES_WITHOUT_CASCADE,
 ] as const
+
+/**
+ * Rows removed per `purge_org_table_batch()` RPC call. Matches the RPC's own
+ * default — kept explicit here rather than omitted so the two stay visibly in
+ * sync if either changes. Exported for the guardrail/unit tests that pin the
+ * batching contract (0 rows, exactly one batch, more than one batch).
+ */
+export const PURGE_BATCH_SIZE = 5000
+
+/**
+ * Circuit breaker, not a real ceiling: at PURGE_BATCH_SIZE=5000 this is 5
+ * million rows for ONE table for ONE org — an order of magnitude past
+ * anything a real tenant should ever reach. Its only job is to turn a bug
+ * (an RPC that never reports a short batch, a table whose org_id filter
+ * somehow never converges) into a thrown, dead-lettered error instead of a
+ * loop that runs one step per batch forever.
+ */
+export const MAX_BATCHES_PER_TABLE = 1000
+
+/**
+ * Purges `table`'s rows for `orgId` in bounded batches via the
+ * `purge_org_table_batch()` RPC (supabase/migrations/*_add_purge_org_table_batch.sql),
+ * one `step.run` per batch — so a run that dies mid-table resumes at the
+ * batch it was on, not at the table's first row.
+ *
+ * `stepLabel` distinguishes the main purge pass from the final sweep of
+ * ORG_TABLES_WITHOUT_CASCADE below — the same table is purged under two
+ * different labels in one run, and step ids must not collide or Inngest's
+ * memoization would treat the second pass as already done.
+ *
+ * A batch that comes back at exactly PURGE_BATCH_SIZE means "maybe more" —
+ * the loop takes one more batch to confirm. A batch under PURGE_BATCH_SIZE
+ * (including 0) means the table is drained for this org.
+ */
+async function purgeTableInBatches(
+  step:      { run: (name: string, cb: () => Promise<number>) => Promise<number> },
+  stepLabel: string,
+  table:     string,
+  orgId:     string,
+): Promise<void> {
+  for (let batch = 0; batch < MAX_BATCHES_PER_TABLE; batch++) {
+    const deleted: number = await step.run(`${stepLabel}-${table}-${orgId}-batch-${batch}`, async (): Promise<number> => {
+      const admin = createServiceClient({ system: 'inngest:account-deletion' })
+
+      const { data, error } = await admin.rpc('purge_org_table_batch', {
+        p_table_name: table,
+        p_org_id:     orgId,
+        p_batch_size: PURGE_BATCH_SIZE,
+      })
+
+      // Throw. The route used to return a 500 here and leave the caller to
+      // notice; now a failure retries on its own and, once retries are
+      // exhausted, reaches the dead-letter handler and the founder inbox.
+      // Swallowing it would leave a half-purged org with a live auth user
+      // and no signal anywhere.
+      if (error) {
+        reportError(error, {
+          site:  `inngest.account-deletion.${stepLabel}`,
+          orgId,
+          extra: { table, batch },
+        })
+        throw new Error(
+          `account-deletion: ${stepLabel} failed for ${table}/${orgId} (batch ${batch}): ${error.message}`
+        )
+      }
+
+      return data as number
+    })
+
+    if (!deleted || deleted < PURGE_BATCH_SIZE) return
+  }
+
+  // MAX_BATCHES_PER_TABLE exhausted without draining to zero — see that
+  // constant's own comment. This should never fire for real data; if it
+  // does, dead-lettering to the founder inbox is the right outcome, not an
+  // infinite loop or a silent partial purge.
+  const err = new Error(
+    `account-deletion: ${table}/${orgId} did not drain after ${MAX_BATCHES_PER_TABLE} batches ` +
+    `of ${PURGE_BATCH_SIZE} rows — refusing to loop further`
+  )
+  reportError(err, { site: `inngest.account-deletion.${stepLabel}`, orgId, extra: { table } })
+  throw err
+}
 
 export const accountDeletion = inngest.createFunction(
   {
@@ -152,28 +276,67 @@ export const accountDeletion = inngest.createFunction(
     // this loop is a fan of step boundaries rather than a single step with a
     // loop inside it.
     for (const orgId of orgIds) {
+      // Re-verify the invariant the route promised, at EXECUTION time, not
+      // just at request time. assertSoleMember checked this once,
+      // synchronously, when the deletion was requested — but this function
+      // runs asynchronously and can be delayed by retries, so the check can
+      // go stale: the requester invites a second member (or one who was
+      // already invited finally accepts) between the request and this run.
+      // Without re-checking, the job wakes up trusting the stale event
+      // payload and deletes every row in an org that is no longer sole-
+      // member-owned — including data belonging to a different, still-active
+      // person who never asked for anything to be deleted.
+      await step.run(`verify-sole-member-${orgId}`, async () => {
+        const admin = createServiceClient({ system: 'inngest:account-deletion' })
+
+        // Bounded to one row: this only needs to know whether ANY other
+        // accepted member exists, never the full membership list, so
+        // .neq(user_id) + .limit(1) both answers the question and avoids an
+        // unbounded .select() (PostgREST's max_rows=1000 cap has no
+        // truncation signal — see CLAUDE.md).
+        const { data: others, error } = await admin
+          .from('organization_members')
+          .select('user_id')
+          .eq('org_id', orgId)
+          .not('invite_accepted_at', 'is', null)
+          .neq('user_id', user_id)
+          .limit(1)
+
+        if (error) {
+          reportError(error, { site: 'inngest.account-deletion.sole-member-recheck', orgId })
+          throw new Error(`account-deletion: sole-member re-check failed for org ${orgId}: ${error.message}`)
+        }
+
+        if ((others ?? []).length > 0) {
+          // The invariant the route promised no longer holds. Do NOT purge —
+          // report it and let a human decide, rather than deleting a live
+          // org out from under someone who never asked for it.
+          reportError(new Error(
+            `account-deletion: org ${orgId} gained ${others.length} member(s) since the ` +
+            `deletion was requested — refusing to purge`,
+          ), { site: 'inngest.account-deletion.sole-member-race', orgId })
+          throw new Error(`account-deletion: org ${orgId} is no longer sole-member-owned by ${user_id}`)
+        }
+
+        return { orgId, verified: true }
+      })
+
       for (const table of ORG_PURGE_TABLES) {
-        await step.run(`purge-${table}-${orgId}`, async () => {
-          const admin = createServiceClient({ system: 'inngest:account-deletion' })
+        await purgeTableInBatches(step, 'purge_org', table, orgId)
+      }
 
-          const { error } = await admin.from(table).delete().eq('org_id', orgId)
-
-          // Throw. The route used to return a 500 here and leave the caller to
-          // notice; now a failure retries on its own and, once retries are
-          // exhausted, reaches the dead-letter handler and the founder inbox.
-          // Swallowing it would leave a half-purged org with a live auth user
-          // and no signal anywhere.
-          if (error) {
-            reportError(error, {
-              site:  'inngest.account-deletion.purge_org',
-              orgId,
-              extra: { table },
-            })
-            throw new Error(`account-deletion: failed to purge ${table} for org ${orgId}: ${error.message}`)
-          }
-
-          return { table, orgId }
-        })
+      // The non-cascading tables were cleared above, one step per table, but
+      // nothing locks the org against new writes in the window between that
+      // sweep and this delete — a crew member's own session is untouched by
+      // this flow (the sole-member check is about organization_members, not
+      // crew_members), so a write into e.g. crew_availability that lands
+      // after that table's purge but before the org row goes is caught by
+      // neither: the purge already ran, and these tables have no FK to
+      // organizations (that is the entire reason they're in this list), so
+      // the final cascade below doesn't touch them either. Re-sweep
+      // immediately before the org row goes to close that window.
+      for (const table of ORG_TABLES_WITHOUT_CASCADE) {
+        await purgeTableInBatches(step, 'purge_org_final_sweep', table, orgId)
       }
 
       await step.run(`delete-organization-${orgId}`, async () => {
@@ -210,8 +373,16 @@ export const accountDeletion = inngest.createFunction(
       const { error } = await admin.auth.admin.deleteUser(user_id)
 
       // A user already gone is the retry case, not a failure: the previous
-      // attempt got this far and died on the response. Anything else throws.
-      if (error && !/not[_ ]found/i.test(error.message)) {
+      // attempt got this far and died on the response. The real signal is the
+      // HTTP status Supabase's admin client attaches (404) — not a regex
+      // against `error.message`'s wording, which is third-party prose this
+      // codebase does not control. If GoTrue ever rewords "User not found" to
+      // something the old regex missed, a legitimately-idempotent retry would
+      // throw, exhaust all 5 retries, and dead-letter a false alarm to the
+      // founder inbox for an account that was, in fact, already deleted. The
+      // regex stays as a fallback for the rare case status is undefined.
+      const alreadyGone = error && (error.status === 404 || /not[_ ]found/i.test(error.message))
+      if (error && !alreadyGone) {
         reportError(error, { site: 'inngest.account-deletion.delete_user' })
         throw new Error(`account-deletion: deleteUser failed: ${error.message}`)
       }

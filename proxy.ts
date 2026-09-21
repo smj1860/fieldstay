@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  tokenResourceRatelimit,
+  tokenResourceRatelimit, unmatchedPathRatelimit,
   oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit, webhookRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
@@ -45,9 +45,15 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // Next.js's own inline hydration scripts; wasm-unsafe-eval required by
     // the Supabase JS client. Dev mode additionally needs 'unsafe-eval' for
     // Turbopack's eval()-based module wrapping/HMR.
+    //
+    // googletagmanager.com is the GA4 tag (app/layout.tsx). It is loaded as an
+    // EXTERNAL script and its bootstrap lives in /gtag-init.js rather than
+    // inline, for the same reason /theme-init.js does: an inline snippet would
+    // need 'unsafe-inline' in script-src on every nonce'd route, which is the
+    // relaxation this whole directive exists to avoid.
     isDev
-      ? `script-src 'self' ${inlineScripts} 'unsafe-eval' 'wasm-unsafe-eval'`
-      : `script-src 'self' ${inlineScripts} 'wasm-unsafe-eval'`,
+      ? `script-src 'self' ${inlineScripts} 'unsafe-eval' 'wasm-unsafe-eval' https://*.googletagmanager.com`
+      : `script-src 'self' ${inlineScripts} 'wasm-unsafe-eval' https://*.googletagmanager.com`,
 
     // Styles: 'unsafe-inline' required for the codebase's established
     // style={{ ... }} convention with CSS variables. Inline styles are CSS,
@@ -75,7 +81,12 @@ function buildCsp(nonce: string | null, isDev: boolean) {
     // API + WebSocket connections. Sentry ingest host added for client-side
     // error/trace reporting (instrumentation-client.ts) — without this the
     // browser SDK's own requests get silently blocked by this same CSP.
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511738488094720.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
+    // The three Google hosts are GA4's collect endpoints. www.google-analytics.com
+    // is the classic one; *.analytics.google.com and region1.google-analytics.com
+    // are where GA4 actually sends most /g/collect beacons, and a policy naming
+    // only the first blocks the majority of hits with nothing in the UI to show
+    // for it — the tag loads, the page looks fine, and no data arrives.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511738488094720.ingest.us.sentry.io https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com http://localhost:* ws://localhost:* wss://localhost:*",
 
     // Object/media: locked down entirely
     "object-src 'none'",
@@ -465,6 +476,55 @@ async function enforceTokenRouteRateLimit(
   ), nonce)
 }
 
+// ── Unmatched-path throttle ─────────────────────────────────────────────────
+// app/not-found.tsx is force-dynamic — see its header comment — because a
+// prerendered 404 cannot carry the per-request CSP nonce Next's inline
+// hydration scripts need. That makes it the one page pushed off the CDN, so
+// its cost scales directly with junk traffic: broken links, scanner probes,
+// a viral surge's stray 404s.
+//
+// proxy.ts cannot know in advance whether a path will 404 — that decision is
+// the Next.js router's, and it runs AFTER middleware — so this keys on the
+// next best signal instead: a session-less request to a path that is neither
+// PUBLIC, TOKEN, nor BYPASS. That bucket is exactly the traffic that either
+// ends up on the 404 render (a mistyped link, a scanner-shaped path) or gets
+// redirected to /login (an anonymous hit on a real protected URL, e.g. a
+// dashboard link shared while logged out) — behaviour that already exists
+// either way; this only adds a ceiling on top of it. A request carrying a
+// session cookie never reaches this check (`hasSessionCookie`, the same
+// cheap pre-check the "ANONYMOUS TRAFFIC PAYS NOTHING" block below uses), so
+// no authenticated user's own navigation is affected.
+//
+// Fails OPEN like every other abuse limiter in this file — a Redis outage
+// must never turn into every anonymous visitor being blocked.
+async function enforceUnmatchedPathRateLimit(
+  request: NextRequest,
+  nonce:   string,
+): Promise<NextResponse | null> {
+  const ip = extractClientIp(request) ?? '127.0.0.1'
+
+  const decision = await checkLimit(unmatchedPathRatelimit, ip, {
+    onError: 'allow',
+    site:    'proxy:unmatched-path',
+  })
+
+  if (decision.allowed) return null
+
+  return withCsp(new NextResponse(
+    JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+    {
+      status:  429,
+      headers: {
+        'Content-Type':          'application/json',
+        'X-RateLimit-Limit':     String(decision.limit),
+        'X-RateLimit-Remaining': String(decision.remaining),
+        'X-RateLimit-Reset':     String(decision.reset),
+        'Retry-After':           String(retryAfterSeconds(decision)),
+      },
+    }
+  ), nonce)
+}
+
 function bypassResponse(request: NextRequest, pathname: string, nonce: string): NextResponse {
   const response = withCsp(NextResponse.next({ request }), nonce, pathname)
 
@@ -530,6 +590,14 @@ export async function proxy(request: NextRequest) {
   if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce, pathname)
 
   const isPublic = classification === 'public'
+
+  // Session-less request to neither a public, token, nor bypass path — see
+  // enforceUnmatchedPathRateLimit's header comment for what this bucket is
+  // and why it can't be narrowed to "will actually 404" in advance.
+  if (classification === 'protected' && !hasSessionCookie(request)) {
+    const throttled = await enforceUnmatchedPathRateLimit(request, nonce)
+    if (throttled) return throttled
+  }
 
   // ANONYMOUS TRAFFIC PAYS NOTHING.
   //

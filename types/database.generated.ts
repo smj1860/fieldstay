@@ -305,12 +305,14 @@ export type Database = {
       assignment_outcomes: {
         Row: {
           completed_at: string | null
+          completion_rate: number | null
           created_at: string
           crew_member_id: string
           duration_minutes: number | null
           id: string
           org_id: string
           override_reason: string | null
+          photo_compliance_rate: number | null
           pm_rating: number | null
           property_bedrooms: number | null
           property_id: string | null
@@ -326,12 +328,14 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          completion_rate?: number | null
           created_at?: string
           crew_member_id: string
           duration_minutes?: number | null
           id?: string
           org_id: string
           override_reason?: string | null
+          photo_compliance_rate?: number | null
           pm_rating?: number | null
           property_bedrooms?: number | null
           property_id?: string | null
@@ -347,12 +351,14 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          completion_rate?: number | null
           created_at?: string
           crew_member_id?: string
           duration_minutes?: number | null
           id?: string
           org_id?: string
           override_reason?: string | null
+          photo_compliance_rate?: number | null
           pm_rating?: number | null
           property_bedrooms?: number | null
           property_id?: string | null
@@ -402,6 +408,7 @@ export type Database = {
           action: string
           actor_id: string | null
           created_at: string
+          dedupe_key: string | null
           id: string
           ip_address: string | null
           metadata: Json | null
@@ -413,6 +420,7 @@ export type Database = {
           action: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null
@@ -424,6 +432,7 @@ export type Database = {
           action?: string
           actor_id?: string | null
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           ip_address?: string | null
           metadata?: Json | null
@@ -577,8 +586,10 @@ export type Database = {
           photo_storage_path: string | null
           requires_photo: boolean
           section_name: string
+          section_name_es: string | null
           sort_order: number
           task: string
+          task_es: string | null
           turnover_id: string | null
           updated_at: string
         }
@@ -599,8 +610,10 @@ export type Database = {
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name: string
+          section_name_es?: string | null
           sort_order?: number
           task: string
+          task_es?: string | null
           turnover_id?: string | null
           updated_at?: string
         }
@@ -621,8 +634,10 @@ export type Database = {
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name?: string
+          section_name_es?: string | null
           sort_order?: number
           task?: string
+          task_es?: string | null
           turnover_id?: string | null
           updated_at?: string
         }
@@ -796,6 +811,7 @@ export type Database = {
           section_id: string
           sort_order: number
           task: string
+          task_es: string | null
           template_id: string
         }
         Insert: {
@@ -806,6 +822,7 @@ export type Database = {
           section_id: string
           sort_order?: number
           task: string
+          task_es?: string | null
           template_id: string
         }
         Update: {
@@ -816,6 +833,7 @@ export type Database = {
           section_id?: string
           sort_order?: number
           task?: string
+          task_es?: string | null
           template_id?: string
         }
         Relationships: [
@@ -840,6 +858,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          name_es: string | null
           requires_section_photo: boolean
           room_synced_at: string | null
           room_template_id: string | null
@@ -850,6 +869,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          name_es?: string | null
           requires_section_photo?: boolean
           room_synced_at?: string | null
           room_template_id?: string | null
@@ -860,6 +880,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          name_es?: string | null
           requires_section_photo?: boolean
           room_synced_at?: string | null
           room_template_id?: string | null
@@ -1141,6 +1162,7 @@ export type Database = {
           invite_sent_at: string | null
           invite_token: string | null
           is_active: boolean
+          locale: string
           name: string
           notes: string | null
           org_id: string
@@ -1168,6 +1190,7 @@ export type Database = {
           invite_sent_at?: string | null
           invite_token?: string | null
           is_active?: boolean
+          locale?: string
           name: string
           notes?: string | null
           org_id: string
@@ -1195,6 +1218,7 @@ export type Database = {
           invite_sent_at?: string | null
           invite_token?: string | null
           is_active?: boolean
+          locale?: string
           name?: string
           notes?: string | null
           org_id?: string
@@ -1210,6 +1234,45 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "crew_members_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crew_speed_baselines: {
+        Row: {
+          avg_minutes_per_bedroom: number
+          computed_at: string
+          crew_member_id: string
+          org_id: string
+          sample_size: number
+        }
+        Insert: {
+          avg_minutes_per_bedroom: number
+          computed_at?: string
+          crew_member_id: string
+          org_id: string
+          sample_size: number
+        }
+        Update: {
+          avg_minutes_per_bedroom?: number
+          computed_at?: string
+          crew_member_id?: string
+          org_id?: string
+          sample_size?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_speed_baselines_crew_member_id_fkey"
+            columns: ["crew_member_id"]
+            isOneToOne: true
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_speed_baselines_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -2398,6 +2461,7 @@ export type Database = {
           is_active: boolean
           is_consumable: boolean
           name: string
+          name_es: string | null
           par_mode: Database["public"]["Enums"]["par_mode"]
           smart_group: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2412,6 +2476,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name: string
+          name_es?: string | null
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2426,6 +2491,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name?: string
+          name_es?: string | null
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
@@ -2514,6 +2580,7 @@ export type Database = {
       }
       inventory_counts: {
         Row: {
+          consumption_recorded_at: string | null
           created_at: string
           id: string
           notes: string | null
@@ -2523,6 +2590,7 @@ export type Database = {
           submitted_by_crew_id: string | null
         }
         Insert: {
+          consumption_recorded_at?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -2532,6 +2600,7 @@ export type Database = {
           submitted_by_crew_id?: string | null
         }
         Update: {
+          consumption_recorded_at?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -2578,6 +2647,7 @@ export type Database = {
           is_consumable: boolean
           low_stock_threshold_pct: number
           name: string
+          name_es: string | null
           notes: string | null
           org_id: string
           par_level: number
@@ -2603,6 +2673,7 @@ export type Database = {
           is_consumable?: boolean
           low_stock_threshold_pct?: number
           name: string
+          name_es?: string | null
           notes?: string | null
           org_id: string
           par_level?: number
@@ -2628,6 +2699,7 @@ export type Database = {
           is_consumable?: boolean
           low_stock_threshold_pct?: number
           name?: string
+          name_es?: string | null
           notes?: string | null
           org_id?: string
           par_level?: number
@@ -2678,6 +2750,7 @@ export type Database = {
           category: string | null
           id: string
           name: string
+          name_es: string | null
           notes: string | null
           par_level: number
           par_mode: Database["public"]["Enums"]["par_mode"]
@@ -2694,6 +2767,7 @@ export type Database = {
           category?: string | null
           id?: string
           name: string
+          name_es?: string | null
           notes?: string | null
           par_level?: number
           par_mode?: Database["public"]["Enums"]["par_mode"]
@@ -2710,6 +2784,7 @@ export type Database = {
           category?: string | null
           id?: string
           name?: string
+          name_es?: string | null
           notes?: string | null
           par_level?: number
           par_mode?: Database["public"]["Enums"]["par_mode"]
@@ -3303,6 +3378,7 @@ export type Database = {
           is_active: boolean
           is_consumable: boolean
           name: string
+          name_es: string | null
           org_id: string
           par_mode: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id: string | null
@@ -3320,6 +3396,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name: string
+          name_es?: string | null
           org_id: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
@@ -3337,6 +3414,7 @@ export type Database = {
           is_active?: boolean
           is_consumable?: boolean
           name?: string
+          name_es?: string | null
           org_id?: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
@@ -4105,6 +4183,95 @@ export type Database = {
         }
         Relationships: []
       }
+      pre_flight_friction: {
+        Row: {
+          actual_completion_rate: number | null
+          actual_severity: string | null
+          actual_was_late: boolean | null
+          computed_at: string
+          failure_probability: number
+          graded_at: string | null
+          id: string
+          org_id: string
+          property_id: string
+          score_breakdown: Json
+          severity: string
+          smart_fix_crew_id: string | null
+          smart_fix_reasoning: string | null
+          status: string
+          turnover_date: string
+          turnover_id: string
+          updated_at: string
+        }
+        Insert: {
+          actual_completion_rate?: number | null
+          actual_severity?: string | null
+          actual_was_late?: boolean | null
+          computed_at?: string
+          failure_probability: number
+          graded_at?: string | null
+          id?: string
+          org_id: string
+          property_id: string
+          score_breakdown: Json
+          severity?: string
+          smart_fix_crew_id?: string | null
+          smart_fix_reasoning?: string | null
+          status?: string
+          turnover_date: string
+          turnover_id: string
+          updated_at?: string
+        }
+        Update: {
+          actual_completion_rate?: number | null
+          actual_severity?: string | null
+          actual_was_late?: boolean | null
+          computed_at?: string
+          failure_probability?: number
+          graded_at?: string | null
+          id?: string
+          org_id?: string
+          property_id?: string
+          score_breakdown?: Json
+          severity?: string
+          smart_fix_crew_id?: string | null
+          smart_fix_reasoning?: string | null
+          status?: string
+          turnover_date?: string
+          turnover_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pre_flight_friction_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_smart_fix_crew_id_fkey"
+            columns: ["smart_fix_crew_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pre_flight_friction_turnover_id_fkey"
+            columns: ["turnover_id"]
+            isOneToOne: true
+            referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       processed_webhooks: {
         Row: {
           processed_at: string
@@ -4220,6 +4387,7 @@ export type Database = {
           pets_allowed: boolean | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct: number | null
+          seasonal_profile: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed: Json
           smoking_allowed: boolean | null
           sponsor_assignment_mode: string
@@ -4267,6 +4435,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -4314,6 +4483,7 @@ export type Database = {
           pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
+          seasonal_profile?: Database["public"]["Enums"]["seasonal_profile"][]
           setup_steps_completed?: Json
           smoking_allowed?: boolean | null
           sponsor_assignment_mode?: string
@@ -4521,6 +4691,155 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospect_accounts: {
+        Row: {
+          bucket: string | null
+          city: string | null
+          company: string
+          comparent_url: string | null
+          contact_name: string | null
+          contact_title: string | null
+          crawl_error: string | null
+          crawl_status: string | null
+          created_at: string
+          domain: string | null
+          email: string | null
+          email_is_generic: boolean | null
+          gate: string | null
+          id: string
+          last_crawled_at: string | null
+          last_touch_at: string | null
+          linkedin_url: string | null
+          market: string | null
+          next_action_at: string | null
+          notes: string | null
+          phone: string | null
+          pms: string | null
+          pms_note: string | null
+          portfolio_size: number | null
+          portfolio_size_method: string | null
+          region: string | null
+          score_a: number | null
+          score_b: number | null
+          source: string | null
+          state: string | null
+          status: string
+          status_note: string | null
+          track: string | null
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          bucket?: string | null
+          city?: string | null
+          company: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          email_is_generic?: boolean | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          bucket?: string | null
+          city?: string | null
+          company?: string
+          comparent_url?: string | null
+          contact_name?: string | null
+          contact_title?: string | null
+          crawl_error?: string | null
+          crawl_status?: string | null
+          created_at?: string
+          domain?: string | null
+          email?: string | null
+          email_is_generic?: boolean | null
+          gate?: string | null
+          id?: string
+          last_crawled_at?: string | null
+          last_touch_at?: string | null
+          linkedin_url?: string | null
+          market?: string | null
+          next_action_at?: string | null
+          notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          pms_note?: string | null
+          portfolio_size?: number | null
+          portfolio_size_method?: string | null
+          region?: string | null
+          score_a?: number | null
+          score_b?: number | null
+          source?: string | null
+          state?: string | null
+          status?: string
+          status_note?: string | null
+          track?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: []
+      }
+      prospect_touches: {
+        Row: {
+          actor_id: string | null
+          id: string
+          note: string | null
+          occurred_at: string
+          prospect_id: string
+          touch_type: string
+        }
+        Insert: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id: string
+          touch_type: string
+        }
+        Update: {
+          actor_id?: string | null
+          id?: string
+          note?: string | null
+          occurred_at?: string
+          prospect_id?: string
+          touch_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_touches_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -5051,6 +5370,7 @@ export type Database = {
           room_template_id: string
           sort_order: number
           task: string
+          task_es: string | null
         }
         Insert: {
           created_at?: string
@@ -5060,6 +5380,7 @@ export type Database = {
           room_template_id: string
           sort_order?: number
           task: string
+          task_es?: string | null
         }
         Update: {
           created_at?: string
@@ -5069,6 +5390,7 @@ export type Database = {
           room_template_id?: string
           sort_order?: number
           task?: string
+          task_es?: string | null
         }
         Relationships: [
           {
@@ -5087,6 +5409,7 @@ export type Database = {
           id: string
           is_system: boolean
           name: string
+          name_es: string | null
           org_id: string
           updated_at: string
         }
@@ -5096,6 +5419,7 @@ export type Database = {
           id?: string
           is_system?: boolean
           name: string
+          name_es?: string | null
           org_id: string
           updated_at?: string
         }
@@ -5105,6 +5429,7 @@ export type Database = {
           id?: string
           is_system?: boolean
           name?: string
+          name_es?: string | null
           org_id?: string
           updated_at?: string
         }
@@ -5184,6 +5509,84 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      str_prospects: {
+        Row: {
+          address: string | null
+          city: string | null
+          confidence: number | null
+          dedupe_key: string
+          domain: string | null
+          email: string | null
+          evidence_url: string | null
+          first_seen: string | null
+          kind: string | null
+          last_seen: string | null
+          name: string
+          name_canonical: string | null
+          owner_notes: string | null
+          phone: string | null
+          pms: string | null
+          properties_sample: string | null
+          property_count: number | null
+          source: string | null
+          source_detail: string | null
+          state: string | null
+          status: string | null
+          updated_at: string | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          city?: string | null
+          confidence?: number | null
+          dedupe_key: string
+          domain?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          first_seen?: string | null
+          kind?: string | null
+          last_seen?: string | null
+          name: string
+          name_canonical?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          properties_sample?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string
+          domain?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          first_seen?: string | null
+          kind?: string | null
+          last_seen?: string | null
+          name?: string
+          name_canonical?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          properties_sample?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Relationships: []
       }
       stripe_processed_events: {
         Row: {
@@ -6089,6 +6492,7 @@ export type Database = {
       work_order_updates: {
         Row: {
           created_at: string
+          dedupe_key: string | null
           id: string
           notes: string | null
           org_id: string
@@ -6100,6 +6504,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           notes?: string | null
           org_id: string
@@ -6111,6 +6516,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          dedupe_key?: string | null
           id?: string
           notes?: string | null
           org_id?: string
@@ -6392,6 +6798,80 @@ export type Database = {
       }
     }
     Views: {
+      friction_forecast_calibration: {
+        Row: {
+          actual_friction_count: number | null
+          false_negatives: number | null
+          false_positives: number | null
+          precision: number | null
+          recall: number | null
+          total_graded: number | null
+        }
+        Relationships: []
+      }
+      str_prospects_icp: {
+        Row: {
+          city: string | null
+          confidence: number | null
+          dedupe_key: string | null
+          email: string | null
+          evidence_url: string | null
+          icp_band: string | null
+          kind: string | null
+          last_seen: string | null
+          name: string | null
+          owner_notes: string | null
+          phone: string | null
+          pms: string | null
+          property_count: number | null
+          source: string | null
+          source_detail: string | null
+          state: string | null
+          status: string | null
+          website: string | null
+        }
+        Insert: {
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          icp_band?: never
+          kind?: string | null
+          last_seen?: string | null
+          name?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          website?: string | null
+        }
+        Update: {
+          city?: string | null
+          confidence?: number | null
+          dedupe_key?: string | null
+          email?: string | null
+          evidence_url?: string | null
+          icp_band?: never
+          kind?: string | null
+          last_seen?: string | null
+          name?: string | null
+          owner_notes?: string | null
+          phone?: string | null
+          pms?: string | null
+          property_count?: number | null
+          source?: string | null
+          source_detail?: string | null
+          state?: string | null
+          status?: string | null
+          website?: string | null
+        }
+        Relationships: []
+      }
       vendor_compliance_status: {
         Row: {
           active_doc_count: number | null
@@ -6435,6 +6915,7 @@ export type Database = {
         Returns: number
       }
       apply_crew_score_recompute: { Args: never; Returns: Json }
+      apply_friction_grading: { Args: { p_org_id: string }; Returns: Json }
       apply_inventory_counts: {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number
@@ -6448,6 +6929,14 @@ export type Database = {
           p_token_expires_at: string
         }
         Returns: Json
+      }
+      broadcast_maintenance_schedules: {
+        Args: { p_org_id: string; p_rows: Json; p_template_id: string }
+        Returns: Json
+      }
+      bulk_advance_maintenance_schedules: {
+        Args: { p_org_id: string; p_updates: Json }
+        Returns: number
       }
       claim_hospitable_promo_slot: {
         Args: { p_org_id: string; p_price_cents: number; p_tier: string }
@@ -6668,7 +7157,12 @@ export type Database = {
         Args: { p_entity: string; p_user_ids: string[] }
         Returns: undefined
       }
+      property_defaults_report: { Args: never; Returns: Json }
       purge_expired_audit_events: { Args: never; Returns: Json }
+      purge_org_table_batch: {
+        Args: { p_batch_size?: number; p_org_id: string; p_table_name: string }
+        Returns: number
+      }
       read_integration_refresh_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: string
@@ -6680,6 +7174,16 @@ export type Database = {
       read_property_door_code: {
         Args: { p_org_id: string; p_property_id: string }
         Returns: string
+      }
+      rebase_safety_schedules: {
+        Args: {
+          p_due_date: string
+          p_form_id: string
+          p_frequency: Database["public"]["Enums"]["schedule_frequency"]
+          p_org_id: string
+          p_today: string
+        }
+        Returns: number
       }
       recompute_vendor_scores: { Args: never; Returns: number }
       record_consumption_samples: { Args: { p_rows: Json }; Returns: number }
@@ -6702,6 +7206,14 @@ export type Database = {
       replace_property_asset: {
         Args: { p_new_asset: Json; p_old_asset_id: string; p_org_id: string }
         Returns: Json
+      }
+      replace_property_sponsors: {
+        Args: {
+          p_org_id: string
+          p_property_id: string
+          p_sponsor_ids: string[]
+        }
+        Returns: undefined
       }
       replace_room_template_items: {
         Args: { p_items: Json; p_room_template_id: string }
@@ -6734,6 +7246,14 @@ export type Database = {
       set_default_platform_inventory_template: {
         Args: { p_template_id: string }
         Returns: undefined
+      }
+      set_sponsor_properties: {
+        Args: {
+          p_org_id: string
+          p_property_ids: string[]
+          p_sponsor_id: string
+        }
+        Returns: Json
       }
       storage_org_prefix: { Args: { object_name: string }; Returns: string }
       store_integration_refresh_token: {
@@ -6966,6 +7486,12 @@ export type Database = {
         | "semi_annual"
         | "annual"
       schedule_type: "routine" | "seasonal"
+      seasonal_profile:
+        | "none"
+        | "summer_vacation"
+        | "fall_foliage"
+        | "ski"
+        | "year_round_urban"
       support_category: "faq" | "technical" | "account_specific"
       support_message_role: "user" | "assistant" | "human"
       sync_status: "pending" | "success" | "error"
@@ -7304,6 +7830,13 @@ export const Constants = {
         "annual",
       ],
       schedule_type: ["routine", "seasonal"],
+      seasonal_profile: [
+        "none",
+        "summer_vacation",
+        "fall_foliage",
+        "ski",
+        "year_round_urban",
+      ],
       support_category: ["faq", "technical", "account_specific"],
       support_message_role: ["user", "assistant", "human"],
       sync_status: ["pending", "success", "error"],

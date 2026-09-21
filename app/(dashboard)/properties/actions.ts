@@ -13,7 +13,7 @@ import { applyStandardInventoryToProperty } from '@/lib/inventory/apply-standard
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
-import { parseMoneyAmount } from '@/lib/schemas/money'
+import { parseMoneyAmountFromString } from '@/lib/schemas/money'
 import type { AssetType, AssetTypeStandard, Enums, MemberRole, TablesInsert } from '@/types/database'
 
 // properties/property_assets both gate writes on
@@ -127,7 +127,10 @@ function optionalMoneyField(
   raw: FormDataEntryValue | null,
 ): { ok: true; value: number | null } | { ok: false; error: string } {
   if (raw === null || raw === '') return { ok: true, value: null }
-  const parsed = parseMoneyAmount(Number.parseFloat(raw as string))
+  // parseMoneyAmountFromString rejects "100abc"/"100,000" outright rather
+  // than letting Number.parseFloat silently coerce them to 100 before
+  // validation ever runs.
+  const parsed = parseMoneyAmountFromString(raw as string)
   return parsed.ok ? { ok: true, value: parsed.amount } : { ok: false, error: parsed.error }
 }
 
@@ -287,7 +290,7 @@ export async function createProperty(
     }
 
     if (zip) {
-      const coords = await geocodeZip(zip)
+      const coords = await geocodeZip(zip, { boundToSave: true })
       if (coords) {
         await writeCoords(supabase, property.id, coords, 'createProperty')
       } else {

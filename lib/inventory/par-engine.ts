@@ -181,6 +181,15 @@ export interface ParRebase {
  * A target below 1 goes STATIC rather than re-basing. Partly arithmetic — the
  * inverse of 0 is negative — but mostly meaning: "0" is a PM saying they do
  * not stock this item here, which is a fixed number, not a scaling one.
+ *
+ * THE INVERSE ONLY HOLDS FOR AN INTEGER TARGET. smartFormulaPar always wraps
+ * its result in Math.ceil() (line 120), which by definition can only ever
+ * return a whole number — the next recompute cannot reproduce a fractional
+ * par_level no matter what base_qty is stored. par_level is a plain numeric
+ * column and a PM can type 2.5, so this rounds UP before inverting rather
+ * than silently storing a base_qty whose very next recompute contradicts the
+ * number the PM just set — the identical bug this function exists to close,
+ * one step later.
  */
 export function rebaseParFromTarget(
   target: number,
@@ -194,12 +203,16 @@ export function rebaseParFromTarget(
     return { par_mode: 'static', smart_group: null, base_qty: 1, par_level: level, auto_adjust: false }
   }
 
+  // Rounded up, not to the nearest — a PM typing 2.5 means "at least 2.5", so
+  // the whole number that survives the next ceil() must not be smaller than
+  // what they asked for.
+  const wholeLevel = Math.ceil(level)
   const k = smartScaleFactor(config.smart_group, property)
   return {
     par_mode:    'smart',
     smart_group: config.smart_group,
-    base_qty:    (level - 0.5) / k,
-    par_level:   level,
+    base_qty:    (wholeLevel - 0.5) / k,
+    par_level:   wholeLevel,
     auto_adjust: false,
   }
 }

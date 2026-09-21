@@ -194,6 +194,22 @@ export function historyCapNote(report: InspectionReport): string | null {
     + 'for this property. Earlier inspections remain on record and can be exported separately.'
 }
 
+/**
+ * The photo budget, stated the same way the walk-count cap is.
+ *
+ * MAX_REPORT_PHOTOS is one budget shared across every walk in a history
+ * export, spent most-recent-walk-first. Without this note, a walk whose
+ * photos lost that budget prints identically — via `attachmentLine`'s "none
+ * could be retrieved" — to one whose photos genuinely failed to download,
+ * which is a different claim about a different problem.
+ */
+export function photoCapNote(report: InspectionReport): string | null {
+  if (report.omittedPhotoCount <= 0) return null
+  return `Photo log limited to the most recent ${report.omittedPhotoCount === 1 ? 'photograph' : 'photographs'} `
+    + `this export's budget could hold; ${report.omittedPhotoCount} earlier `
+    + `${report.omittedPhotoCount === 1 ? 'photograph is' : 'photographs are'} on file but not included here.`
+}
+
 export function titleCase(value: string): string {
   const spaced = value.replace(/_/g, ' ')
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)

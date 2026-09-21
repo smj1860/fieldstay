@@ -18,6 +18,8 @@ import {
 interface ItemState {
   tempId: string
   task: string
+  /** PM-entered Spanish translation, for the crew app's Spanish locale. */
+  taskEs: string
   requires_photo: boolean
   notes: string
 }
@@ -25,6 +27,8 @@ interface ItemState {
 interface RoomState {
   id: string
   name: string
+  /** PM-entered Spanish translation, for the crew app's Spanish locale. */
+  nameEs: string
   autoInclude: boolean
   isSystem: boolean
   items: ItemState[]
@@ -45,8 +49,8 @@ function makeId() {
 // literal) would differ — or collide — between those two passes and either
 // produce duplicate React keys or a hydration mismatch. The server id is
 // identical both times since it comes from the initialRooms prop.
-function toItemState(item: { id: string; task: string; requires_photo: boolean; notes: string }): ItemState {
-  return { tempId: item.id, task: item.task, requires_photo: item.requires_photo, notes: item.notes }
+function toItemState(item: { id: string; task: string; task_es?: string | null; requires_photo: boolean; notes: string }): ItemState {
+  return { tempId: item.id, task: item.task, taskEs: item.task_es ?? '', requires_photo: item.requires_photo, notes: item.notes }
 }
 
 // Pure list-transform helpers, kept at module scope rather than nested
@@ -58,6 +62,10 @@ function renameRoomInList(rooms: RoomState[], roomId: string, name: string): Roo
   return rooms.map((r) => (r.id === roomId ? { ...r, name } : r))
 }
 
+function renameRoomEsInList(rooms: RoomState[], roomId: string, nameEs: string): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, nameEs } : r))
+}
+
 function setRoomAutoIncludeInList(rooms: RoomState[], roomId: string, autoInclude: boolean): RoomState[] {
   return rooms.map((r) => (r.id === roomId ? { ...r, autoInclude } : r))
 }
@@ -65,7 +73,7 @@ function setRoomAutoIncludeInList(rooms: RoomState[], roomId: string, autoInclud
 function addItemToRoom(rooms: RoomState[], roomId: string): RoomState[] {
   return rooms.map((r) =>
     r.id === roomId
-      ? { ...r, items: [...r.items, { tempId: makeId(), task: '', requires_photo: false, notes: '' }] }
+      ? { ...r, items: [...r.items, { tempId: makeId(), task: '', taskEs: '', requires_photo: false, notes: '' }] }
       : r
   )
 }
@@ -114,6 +122,7 @@ function removeRoomFromList(rooms: RoomState[], roomId: string): RoomState[] {
 function buildItemsPayload(items: ItemState[]): RoomTemplateItemInput[] {
   return items.map((item, i) => ({
     task:           item.task,
+    task_es:        item.taskEs,
     requires_photo: item.requires_photo,
     notes:          item.notes,
     sort_order:     i,
@@ -138,13 +147,13 @@ export function RoomLibraryBuilder({
   continueAction,
   continuePropertyCount,
 }: Readonly<{
-  initialRooms: Array<{ id: string; name: string; autoInclude: boolean; isSystem: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
+  initialRooms: Array<{ id: string; name: string; nameEs?: string | null; autoInclude: boolean; isSystem: boolean; items: Array<{ id: string; task: string; task_es?: string | null; requires_photo: boolean; notes: string }> }>
   canManage: boolean
   continueAction?: () => Promise<void>
   continuePropertyCount?: number
 }>) {
   const [rooms, setRooms] = useState<RoomState[]>(() =>
-    initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, isSystem: r.isSystem, items: r.items.map(toItemState) }))
+    initialRooms.map((r) => ({ id: r.id, name: r.name, nameEs: r.nameEs ?? '', autoInclude: r.autoInclude, isSystem: r.isSystem, items: r.items.map(toItemState) }))
   )
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [newRoomName, setNewRoomName] = useState('')
@@ -171,7 +180,7 @@ export function RoomLibraryBuilder({
         setError(result.error ?? 'Failed to create room template.')
         return
       }
-      setRooms((prev) => [...prev, { id: result.id!, name, autoInclude: false, isSystem: false, items: [] }])
+      setRooms((prev) => [...prev, { id: result.id!, name, nameEs: '', autoInclude: false, isSystem: false, items: [] }])
       setExpanded((prev) => new Set(prev).add(result.id!))
       setNewRoomName('')
       setError(null)
@@ -180,6 +189,10 @@ export function RoomLibraryBuilder({
 
   const updateRoomName = (roomId: string, name: string) => {
     setRooms((prev) => renameRoomInList(prev, roomId, name))
+  }
+
+  const updateRoomNameEs = (roomId: string, nameEs: string) => {
+    setRooms((prev) => renameRoomEsInList(prev, roomId, nameEs))
   }
 
   const toggleAutoInclude = (roomId: string) => {
@@ -212,13 +225,11 @@ export function RoomLibraryBuilder({
     setRooms((prev) => moveItemInRoom(prev, roomId, itemTempId, dir))
   }
 
-  const handleSaveRoom = (room: RoomState, nameChanged: boolean) => {
+  const handleSaveRoom = (room: RoomState) => {
     startCreate(async () => {
       setError(null)
-      if (nameChanged) {
-        const renameResult = await renameRoomTemplate(room.id, room.name)
-        if (renameResult.error) { setError(renameResult.error); return }
-      }
+      const renameResult = await renameRoomTemplate(room.id, room.name, room.nameEs)
+      if (renameResult.error) { setError(renameResult.error); return }
       const itemsResult = await saveRoomTemplateItems(room.id, buildItemsPayload(room.items))
       if (itemsResult.error) { setError(itemsResult.error); return }
       setSavedRoomId(room.id)
@@ -265,12 +276,13 @@ export function RoomLibraryBuilder({
             saved={savedRoomId === room.id}
             onToggle={() => toggleExpanded(room.id)}
             onNameChange={(name) => updateRoomName(room.id, name)}
+            onNameEsChange={(nameEs) => updateRoomNameEs(room.id, nameEs)}
             onToggleAutoInclude={() => toggleAutoInclude(room.id)}
             onAddItem={() => addItem(room.id)}
             onRemoveItem={(itemTempId) => removeItem(room.id, itemTempId)}
             onUpdateItem={(itemTempId, field, value) => updateItem(room.id, itemTempId, field, value)}
             onMoveItem={(itemTempId, dir) => moveItem(room.id, itemTempId, dir)}
-            onSave={(nameChanged) => handleSaveRoom(room, nameChanged)}
+            onSave={() => handleSaveRoom(room)}
             onDelete={() => handleDeleteRoom(room.id)}
             saving={creating}
           />
@@ -316,6 +328,7 @@ function RoomCard({
   saving,
   onToggle,
   onNameChange,
+  onNameEsChange,
   onToggleAutoInclude,
   onAddItem,
   onRemoveItem,
@@ -331,15 +344,15 @@ function RoomCard({
   saving: boolean
   onToggle: () => void
   onNameChange: (name: string) => void
+  onNameEsChange: (nameEs: string) => void
   onToggleAutoInclude: () => void
   onAddItem: () => void
   onRemoveItem: (itemTempId: string) => void
   onUpdateItem: (itemTempId: string, field: keyof ItemState, value: unknown) => void
   onMoveItem: (itemTempId: string, dir: -1 | 1) => void
-  onSave: (nameChanged: boolean) => void
+  onSave: () => void
   onDelete: () => void
 }>) {
-  const [initialName] = useState(room.name)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
@@ -368,12 +381,20 @@ function RoomCard({
       {isOpen && (
         <div className="border-t border-themed px-4 py-4 space-y-3">
           {canManage && (
-            <input
-              value={room.name}
-              onChange={(e) => onNameChange(e.target.value)}
-              className="input w-full text-sm font-medium"
-              placeholder="Room name"
-            />
+            <div className="flex gap-2">
+              <input
+                value={room.name}
+                onChange={(e) => onNameChange(e.target.value)}
+                className="input flex-1 text-sm font-medium"
+                placeholder="Room name"
+              />
+              <input
+                value={room.nameEs}
+                onChange={(e) => onNameEsChange(e.target.value)}
+                className="input flex-1 text-sm font-medium"
+                placeholder="Spanish name (optional)"
+              />
+            </div>
           )}
 
           <label htmlFor={`auto-include-${room.id}`} className="flex items-start gap-2 cursor-pointer">
@@ -408,6 +429,12 @@ function RoomCard({
                   placeholder="Task description…"
                   className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)] border-b border-[color:var(--border)] focus:border-[var(--accent-gold)] transition-colors"
                 />
+                <input
+                  value={item.taskEs}
+                  onChange={(e) => onUpdateItem(item.tempId, 'taskEs', e.target.value)}
+                  placeholder="Spanish translation (optional)"
+                  className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)] border-b border-[color:var(--border)] focus:border-[var(--accent-gold)] transition-colors"
+                />
                 <button
                   type="button"
                   onClick={() => onUpdateItem(item.tempId, 'requires_photo', !item.requires_photo)}
@@ -436,7 +463,7 @@ function RoomCard({
             <div className="flex items-center gap-3 pt-2 flex-wrap">
               <Button
                 variant="secondary"
-                onClick={() => onSave(room.name !== initialName)}
+                onClick={() => onSave()}
                 disabled={saving}
                 className="text-sm inline-flex items-center gap-1.5"
               >

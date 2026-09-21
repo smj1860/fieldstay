@@ -38,6 +38,7 @@ import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/prop
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
 import { syncHostexStaff } from './staff-sync'
+import { waitForHostexTokenRefresh } from './token-lock-wait'
 
 const PROVIDER = 'hostex'
 const SYSTEM   = 'inngest:hostex-initial-sync'
@@ -63,15 +64,26 @@ export const hostexInitialSync = inngest.createFunction(
     // Per-org serialization plus a platform cap. The platform cap is less
     // critical than Hospitable's (Hostex quotas are per-token, so orgs do not
     // starve each other) but still bounds how much of the function budget one
-    // wave of connects can occupy.
+    // wave of connects can occupy. Raised from 4 for the same reason as the
+    // reconcile handler and webhook handler in this same directory — a flat
+    // 4 does not scale with how many orgs connect Hostex at once (a launch
+    // push, an onboarding campaign), and initial sync is the most expensive
+    // per-connection run of the three (properties + 12 months of reservations
+    // and reviews + staff + webhook registration).
     concurrency: [
-      { limit: 4 },
+      { limit: 25 },
       { limit: 1, key: 'event.data.org_id' },
     ],
   },
   { event: 'integration/hostex.connected' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id, external_user_id } = event.data
+
+    // Top-level, before any step below spends a token — see
+    // token-lock-wait.ts's header for why the wait for a concurrent refresh
+    // happens here (via step.sleep) rather than inside the getToken() calls
+    // deep in each step.run below.
+    await waitForHostexTokenRefresh(step, user_id)
 
     try {
       // ── 1. Token ──────────────────────────────────────────────────────────
