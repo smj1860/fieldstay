@@ -99,35 +99,6 @@ export interface LodgifyRoomType {
   bathrooms?:   number | null
 }
 
-/**
- * The booking statuses Lodgify DOCUMENTS, capitalised as it writes them.
- *
- * Exported for the mapper's switch to be read against, not to constrain the
- * field below — see LodgifyBookingStatus.
- */
-export type LodgifyKnownBookingStatus = 'Booked' | 'Tentative' | 'Open' | 'Declined'
-
-/**
- * What a booking's `status` actually is: any string.
- *
- * Deliberately NOT the union above. This was written as
- * `'Booked' | … | string`, which TypeScript collapses to plain `string`
- * anyway — four decorative members that bought no checking (SonarQube S6571).
- * Widening it honestly is the better encoding here, because the value is
- * UNVERIFIED provider data: nothing has ever seen a live Lodgify response, so
- * a type claiming to know the four values would be asserting more than we
- * know.
- *
- * The safety is in the mapper instead, and it is real: mapLodgifyStatus
- * matches case-insensitively (a provider that changes an enum's casing is far
- * likelier than one that changes its meaning, and a case mismatch would route
- * EVERY booking through unmappedBookingStatus to 'tentative' — the exact
- * failure that left 28 OwnerRez bookings out of every revenue path for weeks),
- * and anything it does not recognise reports to Sentry rather than defaulting
- * silently.
- */
-export type LodgifyBookingStatus = string
-
 /** GET /v2/reservations/bookings and /v2/reservations/bookings/{id} */
 export interface LodgifyBooking {
   /** Required. Becomes bookings.external_id. */
@@ -139,7 +110,25 @@ export interface LodgifyBooking {
   arrival?:      string | null
   departure?:    string | null
 
-  status?:       LodgifyBookingStatus | null
+  /**
+   * Lodgify DOCUMENTS four values — Booked, Tentative, Open, Declined,
+   * capitalised as written here — and this is typed `string` anyway, on
+   * purpose.
+   *
+   * A union of those four plus `string` (what this was) is collapsed by
+   * TypeScript to plain `string` regardless, so it bought no checking at all
+   * while claiming to. And the honest type IS `string`: nothing has ever seen
+   * a live Lodgify response, so a union asserting the vocabulary is closed
+   * would be claiming more than we know.
+   *
+   * The safety lives in mapLodgifyStatus instead, where it does real work: it
+   * matches case-INSENSITIVELY (a provider changing an enum's casing is far
+   * likelier than one changing its meaning, and a case mismatch would route
+   * EVERY booking to 'tentative' — the failure that left 28 OwnerRez bookings
+   * out of every revenue path for weeks), and reports anything it does not
+   * recognise rather than defaulting silently.
+   */
+  status?:       string | null
 
   /**
    * The booking channel, as Lodgify reports it. `source` is a machine-ish
