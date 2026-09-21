@@ -31,6 +31,22 @@ vi.mock('@/lib/rate-limit', () => ({
 
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
+// This file is about lodgifyFetch's own request/response handling, not the
+// breaker — unit/lib/circuit-breaker.test.ts covers that. Stubbed closed (the
+// same pattern hostex-api-client.test.ts uses, and for the same reason):
+// unit/setup.ts sets FAKE-but-present Upstash credentials, so an unmocked
+// evaluateBreaker/recordFailure/recordSuccess would make a REAL fetch to a
+// bogus host and silently consume the very fetchMock responses these tests
+// stage for the Lodgify call itself.
+vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
+  ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
+  evaluateBreaker: vi.fn(async () => ({ decision: 'closed', priorFailures: 0 })),
+  recordFailure:   vi.fn(async () => undefined),
+  recordSuccess:   vi.fn(async () => undefined),
+}))
+
+import { RetryAfterError } from 'inngest'
+import { evaluateBreaker, recordFailure } from '@/lib/integrations/circuit-breaker'
 import {
   isLodgifyAuthFailure,
   lodgifyBookingWindow,
@@ -45,6 +61,19 @@ import { reportError } from '@/lib/observability/report-error'
 
 const USER = 'user_1'
 const KEY  = 'test-api-key'
+
+/**
+ * Every lodgifyFetch throttle escapes as a RetryAfterError wrapping the
+ * original RateLimitError as `cause` — see lib/inngest/retry-after.ts. A bare
+ * RateLimitError reaching Inngest is retried on its own generic backoff curve
+ * rather than the interval the provider actually asked for.
+ */
+function causeRateLimit(err: unknown): RateLimitError {
+  expect(err).toBeInstanceOf(RetryAfterError)
+  const cause = (err as { cause?: unknown }).cause
+  expect(cause).toBeInstanceOf(RateLimitError)
+  return cause as RateLimitError
+}
 
 function ok(body: unknown, status = 200): Response {
   return {
@@ -112,10 +141,10 @@ describe('lodgifyFetch: throttling and classification', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(err(429, { 'Retry-After': '30' })))
 
     const thrown = await lodgifyFetch('/properties', KEY, USER).catch((e: unknown) => e)
-    expect(thrown).toBeInstanceOf(RateLimitError)
+    const inner  = causeRateLimit(thrown)
     // Jittered ±25% around 30.
-    expect((thrown as RateLimitError).retryAfter).toBeGreaterThanOrEqual(22)
-    expect((thrown as RateLimitError).retryAfter).toBeLessThanOrEqual(38)
+    expect(inner.retryAfter).toBeGreaterThanOrEqual(22)
+    expect(inner.retryAfter).toBeLessThanOrEqual(38)
   })
 
   it('refuses to call at all when the outbound budget is spent — fails CLOSED', async () => {
@@ -125,7 +154,8 @@ describe('lodgifyFetch: throttling and classification', () => {
     vi.stubGlobal('fetch', fetchMock)
     vi.mocked(checkLimit).mockResolvedValue({ allowed: false, errored: true, reset: Date.now() } as never)
 
-    await expect(lodgifyFetch('/properties', KEY, USER)).rejects.toBeInstanceOf(RateLimitError)
+    const thrown = await lodgifyFetch('/properties', KEY, USER).catch((e: unknown) => e)
+    causeRateLimit(thrown)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -156,6 +186,46 @@ describe('lodgifyFetch: throttling and classification', () => {
     const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>
     expect(headers['X-ApiKey']).toBe(KEY)
     expect(headers.Authorization).toBeUndefined()
+  })
+})
+
+describe('lodgifyFetch: circuit breaker', () => {
+  it('refuses to call when the circuit is open', async () => {
+    // Without this, every independent Lodgify sync across every connected org
+    // keeps calling through a provider-wide outage, each waiting out the full
+    // timeout and then being retried by Inngest's backoff.
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.mocked(evaluateBreaker).mockResolvedValueOnce({ decision: 'open', priorFailures: 5 } as never)
+
+    const thrown = await lodgifyFetch('/properties', KEY, USER).catch((e: unknown) => e)
+    expect((thrown as Error).name).toBe('NonRetriableError')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('counts a 5xx as a breaker failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(err(503)))
+
+    await lodgifyFetch('/properties', KEY, USER).catch(() => undefined)
+    expect(vi.mocked(recordFailure)).toHaveBeenCalledWith('lodgify')
+  })
+
+  it('does NOT count a 429 as a breaker failure', async () => {
+    // A provider working correctly and telling us to slow down is not the
+    // provider failing — same exemption hostexFetch and krogerFetch make.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(err(429, { 'Retry-After': '5' })))
+
+    await lodgifyFetch('/properties', KEY, USER).catch(() => undefined)
+    expect(vi.mocked(recordFailure)).not.toHaveBeenCalled()
+  })
+
+  it('does NOT count a terminal 4xx as a breaker failure', async () => {
+    // A 401/404/422 is US being wrong or an account-level condition, not
+    // Lodgify's service degrading.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(err(422)))
+
+    await lodgifyFetch('/properties', KEY, USER).catch(() => undefined)
+    expect(vi.mocked(recordFailure)).not.toHaveBeenCalled()
   })
 })
 

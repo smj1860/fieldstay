@@ -26,15 +26,35 @@
 // bookings arrive once that runs. Retrying would not conjure the property.
 // ============================================================================
 
+import { NonRetriableError }    from 'inngest'
 import { inngest }              from '@/lib/inngest/client'
 import { reconnectRequired }    from '@/lib/inngest/reconnect-required'
 import { reportError }          from '@/lib/observability/report-error'
 import { readIntegrationToken } from '@/lib/integrations/vault'
+import { isLodgifyAuthFailure } from '@/lib/integrations/providers/lodgify-api'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { fetchProviderPropertyIdMap } from '../shared/reservation-pipeline'
 import { syncLodgifyReservations, type LodgifyFetchMode } from './reservation-sync'
 
 const PROVIDER = 'lodgify' as const
 const SYSTEM   = 'inngest:lodgify-webhook-handler'
+
+/**
+ * A terminal, already-known-dead connection.
+ *
+ * Lodgify has no revocation webhook — no way at all for it to tell us the PM
+ * rotated their key — so it keeps pushing events to a still-registered URL
+ * until the daily reconcile catches this same condition and revokes the
+ * connection. Reporting every one of those deliveries is one Sentry event per
+ * webhook, potentially many per hour for an active listing, for a condition
+ * already being handled on its own daily cadence rather than a new fault.
+ *
+ * Mirrors isDeadHostexConnectionError, which exists for the same reason one
+ * provider over.
+ */
+export function isDeadLodgifyConnectionError(err: unknown): boolean {
+  return isLodgifyAuthFailure(err) || isProviderAuthFailure(err) || err instanceof NonRetriableError
+}
 
 /**
  * The fallback sweep's window, in months, when a delivery named no booking we
@@ -55,10 +75,13 @@ export const lodgifyWebhookHandler = inngest.createFunction(
     retries: 3,
     // Serialized per connection, not per org: two deliveries for the same
     // connection racing would run two pipelines whose turnover regeneration
-    // touches the same properties. A modest platform cap keeps a busy account
-    // from monopolising function capacity.
+    // touches the same properties. The platform cap keeps a busy account from
+    // monopolising function capacity — 40, matching the Hostex equivalent
+    // after the 2026-09-16 high-scale audit: the per-connection key only
+    // serialises each connection against ITSELF, so a low platform cap queues
+    // unrelated orgs behind each other for no reason.
     concurrency: [
-      { limit: 10 },
+      { limit: 40 },
       { limit: 1, key: 'event.data.user_id' },
     ],
     // One booking's state is worth reading at most once per few seconds. A
@@ -147,6 +170,14 @@ export const lodgifyWebhookHandler = inngest.createFunction(
       // failure would make the loss invisible until the next daily sweep.
       const msg = err instanceof Error ? err.message : String(err)
       logger.error(`[Lodgify:${user_id}] webhook handling failed (booking ${booking_id ?? 'unknown'}): ${msg}`)
+
+      if (isDeadLodgifyConnectionError(err)) {
+        // Logged, not reported — see isDeadLodgifyConnectionError. The daily
+        // reconcile owns revoking this connection and telling the PM.
+        logger.warn(`[Lodgify:${user_id}] connection appears dead — suppressing duplicate report, awaiting reconcile revoke`)
+        throw err
+      }
+
       reportError(err, { site: 'inngest.lodgify-webhook-handler', orgId: org_id })
       throw err
     }

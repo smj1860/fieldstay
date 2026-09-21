@@ -248,6 +248,14 @@ function isCancelled(booking: LodgifyBooking): boolean {
  * When the breakdown is confirmed, net it here — booking-events.ts already
  * prefers this figure over its nights * avg_nightly_rate estimate, so
  * improving it improves every owner ledger without touching another file.
+ *
+ * `revenue_known_zero` is deliberately NOT set. That flag means "the provider
+ * told us this stay was genuinely free", and it suppresses the estimate a
+ * null total would otherwise get — so claiming it requires being able to tell
+ * a real comped stay from a total Lodgify simply did not report. With these
+ * shapes unverified, a `total_amount` of 0 could be either, and asserting the
+ * stronger reading would silently zero out real revenue on an owner
+ * statement. Set it once a live response shows which is which.
  */
 export function lodgifyBookingToNormalized(booking: LodgifyBooking): NormalizedBooking {
   const cancelled = isCancelled(booking)

@@ -37,7 +37,10 @@ import {
   RateLimitError,
 } from '@/lib/integrations/types'
 import { checkLimit, lodgifyApiLimiter, outboundBackoffSeconds } from '@/lib/rate-limit'
+import { evaluateBreaker, recordFailure, recordSuccess, CircuitOpenError } from '@/lib/integrations/circuit-breaker'
+import { rateLimitRetry } from '@/lib/inngest/retry-after'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { fetchWithRetry } from '@/lib/http/retry'
 import { reportError } from '@/lib/observability/report-error'
 import { lodgifyProvider } from '@/lib/integrations/providers/lodgify'
 import type {
@@ -118,7 +121,11 @@ async function errorDetail(res: Response): Promise<string> {
 async function throwForStatus(res: Response, path: string, entityId?: string): Promise<never> {
   const detail = await errorDetail(res)
 
-  if (res.status === 429) throw new RateLimitError(retryAfterSecondsFrom(res))
+  // Wrapped in rateLimitRetry so Inngest waits the interval LODGIFY asked for
+  // rather than its own backoff curve. Deliberately NOT a breaker failure:
+  // a provider working correctly and telling us to slow down is not the
+  // provider failing — the same exemption hostexFetch and krogerFetch make.
+  if (res.status === 429) throw rateLimitRetry(new RateLimitError(retryAfterSecondsFrom(res)))
 
   if (res.status === 401 || res.status === 403) {
     const failure = new ProviderAuthError(LODGIFY_PROVIDER_LABEL, res.status, path, detail)
@@ -134,6 +141,11 @@ async function throwForStatus(res: Response, path: string, entityId?: string): P
     const failure = new ProviderRequestError(LODGIFY_PROVIDER_LABEL, res.status, path, detail)
     throw new NonRetriableError(failure.message, { cause: failure })
   }
+
+  // Everything left is 5xx-shaped: Lodgify FAILING, rather than us being
+  // wrong (the terminal statuses above) or being throttled (the 429 above).
+  // That is exactly what the breaker should count.
+  await recordFailure('lodgify')
 
   const suffix = detail ? ` — ${detail}` : ''
   throw new Error(`Lodgify ${path} failed: HTTP ${res.status}${suffix}`)
@@ -160,9 +172,84 @@ interface LodgifyRequestInit {
 }
 
 /**
+ * Spend one token of this connection's outbound budget, or throw.
+ *
+ * Fails CLOSED: this budget exists to throw before Lodgify throttles us, and
+ * Lodgify's real ceiling is unverified (see lodgifyApiLimiter's comment). If
+ * the budget cannot be consulted we must not guess our way through it —
+ * Inngest's step retry handles the backoff.
+ *
+ * Extracted from lodgifyFetch for the same cognitive-complexity reason as
+ * hostex-api.ts's enforceHostexRateLimit.
+ */
+async function enforceLodgifyRateLimit(userId: string): Promise<void> {
+  const budget = await checkLimit(lodgifyApiLimiter, `lodgify-api:${userId}`, {
+    onError: 'deny',
+    site:    'lib.integrations.lodgify-api.lodgifyFetch',
+  })
+
+  if (budget.allowed) return
+
+  // outboundBackoffSeconds rather than a bare `reset` subtraction: when the
+  // limiter itself ERRORS, checkLimit sets reset to Date.now(), so that
+  // subtraction floors to 1s and we would retry a provider immediately during
+  // the very outage that made the budget unreadable.
+  //
+  // jitter:false because withRetryJitter is this module's own spread and
+  // applying both would compound them.
+  throw rateLimitRetry(new RateLimitError(withRetryJitter(outboundBackoffSeconds(budget, { jitter: false }))))
+}
+
+/**
+ * The raw HTTP call, with the circuit breaker's failure bookkeeping around it.
+ *
+ * GET-only retry: fetchWithRetry refuses non-idempotent methods, and every
+ * paginating caller below only ever GETs. This absorbs a transient
+ * timeout/5xx on a single page without the caller's whole `step.run` — often
+ * many pages deep — being replayed from page 1 by Inngest's own retry.
+ *
+ * The webhook subscribe/unsubscribe calls are POSTs and deliberately get a
+ * single unretried attempt: a retried subscribe is a duplicate subscription,
+ * i.e. duplicate deliveries on the PM's own account.
+ */
+async function lodgifyRawFetch(
+  path:   string,
+  apiKey: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  body:   unknown,
+): Promise<Response> {
+  try {
+    if (method === 'GET') {
+      return await fetchWithRetry(
+        `${LODGIFY_API_BASE}${path}`,
+        { method: 'GET', headers: lodgifyProvider.getApiHeaders(apiKey) },
+        { timeoutMs: PMS_API_TIMEOUT_MS, label: `Lodgify ${path}`, attempts: 3 },
+      )
+    }
+
+    return await fetch(`${LODGIFY_API_BASE}${path}`, {
+      method,
+      headers: lodgifyProvider.getApiHeaders(apiKey),
+      body:    body === undefined ? undefined : JSON.stringify(body),
+      signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
+    })
+  } catch (err) {
+    // A timeout or transport failure that survived fetchWithRetry's own
+    // attempts (or a POST's single unretried attempt) is exactly what the
+    // breaker counts.
+    await recordFailure('lodgify')
+    throw err
+  }
+}
+
+/**
  * One authenticated Lodgify request, returning the parsed JSON body.
  *
- * @throws RateLimitError when Lodgify throttles.
+ * @throws RetryAfterError (via rateLimitRetry) when Lodgify throttles, so
+ *         Inngest waits the interval Lodgify actually asked for instead of
+ *         its own generic backoff curve. A bare RateLimitError escaping here
+ *         is how hospitable-incremental-sync dead-lettered as "exhausted all
+ *         retries: Rate limited — retry after 2s".
  * @throws NonRetriableError (with a typed `cause`) for a terminal status.
  */
 export async function lodgifyFetch<T>(
@@ -172,43 +259,43 @@ export async function lodgifyFetch<T>(
   userId: string,
   init?:  LodgifyRequestInit,
 ): Promise<T> {
-  // Fails CLOSED: this budget exists to throw before Lodgify throttles us, and
-  // Lodgify's real ceiling is unverified (see lodgifyApiLimiter's comment). If
-  // the budget cannot be consulted we must not guess our way through it —
-  // Inngest's step retry handles the backoff.
-  const budget = await checkLimit(lodgifyApiLimiter, `lodgify-api:${userId}`, {
-    onError: 'deny',
-    site:    'lib.integrations.lodgify-api.lodgifyFetch',
-  })
+  await enforceLodgifyRateLimit(userId)
 
-  if (!budget.allowed) {
-    // outboundBackoffSeconds rather than a bare `reset` subtraction: when the
-    // limiter itself ERRORS, checkLimit sets reset to Date.now(), so that
-    // subtraction floors to 1s and we would retry a provider immediately
-    // during the very outage that made the budget unreadable.
-    //
-    // jitter:false because withRetryJitter is this module's own spread and
-    // applying both would compound them.
-    throw new RateLimitError(withRetryJitter(outboundBackoffSeconds(budget, { jitter: false })))
+  // Circuit breaker, checked BEFORE the fetch — same chokepoint pattern as
+  // hostexFetch and krogerFetch. Without it, every independent Lodgify sync
+  // (initial, reconcile, webhook — across every connected org) keeps calling
+  // through a provider-wide outage, each waiting out the full
+  // PMS_API_TIMEOUT_MS and getting retried by Inngest's backoff, at the exact
+  // moment the provider can least take the load.
+  const { decision, priorFailures } = await evaluateBreaker('lodgify')
+  if (decision === 'open') {
+    throw new NonRetriableError(new CircuitOpenError('lodgify').message)
   }
 
-  const res = await fetch(`${LODGIFY_API_BASE}${path}`, {
-    method:  init?.method ?? 'GET',
-    headers: lodgifyProvider.getApiHeaders(apiKey),
-    body:    init?.body === undefined ? undefined : JSON.stringify(init.body),
-    signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-  })
+  const res = await lodgifyRawFetch(path, apiKey, init?.method ?? 'GET', init?.body)
 
   if (!res.ok) await throwForStatus(res, path, init?.entityId)
 
   // A 204 (documented for unsubscribe) has no body to parse.
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) {
+    if (priorFailures > 0) await recordSuccess('lodgify')
+    return undefined as T
+  }
 
+  let parsed: T
   try {
-    return await res.json() as T
+    parsed = await res.json() as T
   } catch {
+    // A 2xx whose body is not JSON is an edge/proxy page standing in for
+    // Lodgify, not Lodgify answering — the breaker should count it.
+    await recordFailure('lodgify')
     throw new Error(`Lodgify ${path} returned a non-JSON body: HTTP ${res.status}`)
   }
+
+  // Only clear when there is something to clear — same as hostexFetch.
+  if (priorFailures > 0) await recordSuccess('lodgify')
+
+  return parsed
 }
 
 /**

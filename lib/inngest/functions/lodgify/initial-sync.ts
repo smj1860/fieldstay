@@ -67,8 +67,14 @@ export const lodgifyInitialSync = inngest.createFunction(
     // Per-org serialization plus a platform cap. Lodgify quotas are per
     // account key, so orgs do not starve each other; the cap still bounds how
     // much of the function budget one wave of connects can occupy.
+    //
+    // 25, matching what the 2026-09-16 high-scale audit settled the Hostex
+    // and Hostaway equivalents on: a flat 4 does not scale with how many orgs
+    // connect at once (a launch push, an onboarding campaign), and initial
+    // sync is the most expensive per-connection run here — properties plus 12
+    // months of bookings.
     concurrency: [
-      { limit: 4 },
+      { limit: 25 },
       { limit: 1, key: 'event.data.org_id' },
     ],
   },
