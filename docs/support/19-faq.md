@@ -8,6 +8,10 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 FieldStay integrates with OwnerRez, Hospitable, Hostex, and Hostaway today — connect any one of them from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
 
+**Lodgify** is a special case worth naming: the integration is built but not switched on yet, because we haven't run it against a real Lodgify account. In the meantime Lodgify works through a calendar (iCal) link, which gets you bookings and turnovers but not revenue or guest details. If you're on Lodgify and would be willing to connect a real account, please tell us — that's the one thing standing between it and being live. See **Using FieldStay with Lodgify** for setup.
+
+**Any PMS that publishes an iCal link** works the same way, connected or not: paste the calendar link on each property and your bookings and turnovers flow in.
+
 ---
 
 ## Can I use FieldStay without connecting a PMS?

@@ -115,6 +115,31 @@ file that changes.
       WHERE id = 'lodgify';` (exactly as `20260816122829_activate_hostex_provider.sql`
       did for Hostex).
 
+### 7. Customer-facing copy — in the SAME commit as the flag
+
+Everything below currently tells a customer Lodgify is NOT connectable. The
+moment the flag flips, each one becomes false, and a support bot answering from
+stale copy is worse than one answering "I don't know" — it tells a paying
+customer the product cannot do something it just started doing. (`SMS_ENABLED`'s
+note in CLAUDE.md records what that already cost once.)
+
+- [ ] `docs/support/37-connecting-lodgify.md` — rewrite from "built but not
+      switched on" to a real connect guide, modelled on
+      `34-connecting-hostex.md`. Keep the two permanent caveats: no reviews
+      (Lodgify has no such resource) and no way for us to revoke the API key.
+- [ ] `docs/support/19-faq.md` — "Does FieldStay work with the PMS I already
+      use?" names Lodgify as not-yet-available. Move it into the supported list.
+- [ ] `docs/support/19-faq.md` — "How often does my PMS sync?" says bookings
+      arrive in seconds via webhooks, with Hostex as the one exception. If
+      Lodgify goes live with `LODGIFY_WEBHOOKS_ENABLED` still off, it is a
+      SECOND exception and syncs daily — say so there.
+- [ ] `lib/faq-content.ts` — several entries enumerate the supported PMS list
+      (`SHARED_LANDING_FAQ_TAIL`, the marketing and pricing answers). Grep for
+      `Hostex` and add Lodgify wherever the list is meant to be exhaustive.
+- [ ] Re-run `npx tsx scripts/seed-support-kb.ts` — Finn answers from
+      `support_kb_chunks`, which is a SNAPSHOT of `docs/support/`. Editing the
+      markdown changes nothing a customer sees until the KB is re-seeded.
+
 ---
 
 ## Disconnect — the honest version

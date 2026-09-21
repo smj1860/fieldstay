@@ -87,15 +87,43 @@ async function ensureWebhookToken(userId: string): Promise<string> {
 
   const webhookToken = randomBytes(32).toString('hex')
 
-  const { error } = await admin
+  // ATOMIC CLAIM — `.is('webhook_token', null)` is load-bearing, not tidiness.
+  //
+  // Two callers can reach this concurrently for the same connection: initial
+  // sync's register-webhook step and the daily reconcile's ensure-webhook step
+  // (a manual resync during the reconcile's window is the everyday case).
+  // Without the guard, both mint a DIFFERENT random token, both UPDATE
+  // unconditionally, and each then registers ITS OWN token with Lodgify
+  // regardless of which write won — so Lodgify pushes to two URLs while the DB
+  // remembers one, and every delivery landing on the orphaned URL is rejected
+  // by our route and lost. Whether Lodgify retries a rejected delivery is
+  // unconfirmed, so those have to be assumed gone.
+  //
+  // Mirrors ensureHostexWebhookRegistration, which was fixed for exactly this.
+  const claimRes = await admin
     .from('integration_connections')
     .update({ webhook_token: webhookToken, updated_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('provider_id', PROVIDER)
+    .is('webhook_token', null)
+    .select('webhook_token')
+    .maybeSingle()
 
-  if (error) throw new Error(`[Lodgify] Failed to store webhook token: ${error.message}`)
+  if (claimRes.error) throw new Error(`[Lodgify] Failed to store webhook token: ${claimRes.error.message}`)
 
-  return webhookToken
+  if (claimRes.data?.webhook_token) return claimRes.data.webhook_token
+
+  // Lost the race — re-read and use the WINNER's token, never our own.
+  const recheckRes = await admin
+    .from('integration_connections')
+    .select('webhook_token')
+    .eq('user_id', userId)
+    .eq('provider_id', PROVIDER)
+    .maybeSingle()
+
+  const recheck = unwrap(recheckRes, { site: 'lib.integrations.lodgify-webhook.recheck-token' })
+
+  return recheck?.webhook_token ?? webhookToken
 }
 
 /**
