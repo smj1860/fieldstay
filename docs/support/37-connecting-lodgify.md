@@ -1,84 +1,102 @@
-# Using FieldStay with Lodgify
+# Connecting Lodgify to FieldStay
 
-**Short version: you can use FieldStay with Lodgify today through a calendar (iCal) link. A direct Lodgify connection is built but not switched on yet — if you're on Lodgify, tell us, because you're who we're waiting to test it with.**
-
----
-
-## What works today
-
-Lodgify publishes an iCal calendar link for each property. FieldStay reads those links, so your bookings flow in automatically and your turnovers get built from them without anyone typing anything.
-
-To set it up, for each property:
-
-1. In **Lodgify**, open the property's calendar and copy its **iCal export link** (the `.ics` URL)
-2. In **FieldStay**, go to **Properties → [the property] → Setup → iCal**
-3. Choose **Direct / Other** as the source, paste the link, and save
-
-Repeat for each property. FieldStay checks the feeds regularly and creates turnovers between consecutive stays.
-
-### What you get from an iCal feed
-
-- Check-in and check-out dates for every booking
-- Turnovers generated automatically between stays, including same-day flips
-- Everything FieldStay does downstream of a turnover: crew assignment, checklists, inventory consumption, inspections, work orders
-
-### What an iCal feed cannot give you
-
-This is a limit of the iCal format itself — it is a calendar, not a booking record — so it applies to any platform you connect this way, not just Lodgify:
-
-- **No revenue.** Booking amounts are not in a calendar feed, so owner statements won't show booking revenue from iCal bookings. You can add revenue manually on the booking.
-- **No guest details.** Names and email addresses mostly don't travel in an iCal feed.
-- **No property details.** Bedrooms, bathrooms, guest capacity, WiFi and check-in instructions all need to be filled in on the property in FieldStay. They're worth doing early: bedroom and bathroom counts drive how many checklist sections a turnover gets and how inventory par levels scale.
-- **No reviews.**
-
-If you want those, the direct connection below is what provides them.
+Connecting your Lodgify account takes about two minutes. Once connected, your properties and bookings sync automatically, booking revenue posts to owner statements, and turnovers are built from your Lodgify calendar.
 
 ---
 
-## The direct Lodgify connection
+## Before You Connect
 
-Lodgify has a public API, and FieldStay's integration with it is written and waiting. It is **not available to turn on yet.** You won't see Lodgify in **Settings → Integrations** while that's the case.
+You need a Lodgify account on a plan that includes **Public API access** — that is Lodgify's Professional plan and above. Lodgify's Starter plan cannot generate an API key at all, so the connection is not possible on it. If you try, FieldStay tells you the plan is the problem rather than claiming your key is invalid.
 
-The honest reason: we haven't been able to run it against a real Lodgify account. Everything in it was built from Lodgify's published documentation rather than from a live connection, and we would rather hold it than hand you an integration whose first run is also its first test.
-
-**If you use Lodgify and would be willing to connect a real account, please say so** — that is the one thing standing between this and switching it on.
-
-### What it will do once it's live
-
-- Properties and bookings sync automatically, including 12 months of booking history on first connect
-- Booking revenue posts to owner statements, so your P&L is right from day one
-- Turnovers build themselves from your Lodgify calendar
-- Cancellations come across as cancellations and never generate a turnover
-
-### What it won't do, even then
-
-- **No reviews.** Lodgify's API has no reviews resource at all, so there's nothing for RepuGuard to draft against. Reviews you get through Lodgify will need to be added manually.
-- **No staff or crew import.** Lodgify has no staff concept to import from — you'll add crew in FieldStay directly.
-- **No owner blocks.** Manually-blocked owner time lives on Lodgify's availability calendar rather than in its bookings, so it won't come across at first.
-
-### What you'll need
-
-Your Lodgify plan has to include **Public API access** (that's Lodgify's Professional plan and above — their Starter plan cannot generate an API key at all). You'll generate a key yourself in Lodgify under **Settings → Public API** and paste it into FieldStay; there's no authorization redirect and nothing to approve.
+You'll also need to be logged into FieldStay as an Owner or Admin — Managers cannot connect integrations.
 
 ---
 
-## Disconnecting, and a caveat worth knowing
+## How to Connect
 
-When the direct connection is live and you disconnect it, FieldStay deletes its copy of your API key and removes any webhooks it registered on your Lodgify account.
+Unlike OwnerRez, Hospitable and Hostex, there is no authorization redirect. You generate a key in Lodgify and paste it into FieldStay.
 
-**Lodgify provides no way for us to invalidate the key itself.** Unlike OwnerRez or Hostex — where disconnecting actually revokes our access on their side — a Lodgify API key stays valid until you rotate it in Lodgify. If you want FieldStay's access definitively dead rather than merely deleted, rotate the key in **Lodgify → Settings → Public API** after disconnecting. That's a property of Lodgify's API, not a choice FieldStay made.
+1. In **Lodgify**, go to **Settings → Public API** and copy your API key
+2. In **FieldStay**, go to **Settings → Integrations**
+3. Find Lodgify and click **Connect**
+4. Paste the key and save
+
+FieldStay checks the key against your Lodgify account before storing it, so an invalid key or a plan without API access fails immediately rather than appearing to connect and then syncing nothing. Within a minute or two your properties and bookings begin appearing.
 
 ---
 
-## Switching from iCal to the direct connection later
+## What Syncs When You Connect
 
-Worth planning for, because it isn't automatic.
+### Properties
 
-FieldStay matches synced properties to the ones it created from that same PMS. A property you set up by hand for an iCal feed wasn't created by Lodgify, so when you connect Lodgify directly it arrives as a **new** property record rather than merging into the one you already have. You'd end up with two entries for the same house — the hand-made one holding your iCal bookings and your edits, and the synced one holding everything Lodgify knows.
+Every active property in your Lodgify account syncs, with name, address, and map coordinates. Room counts and guest capacity come across where Lodgify publishes them.
 
-Two ways to avoid the mess:
+Where Lodgify does not publish a value, FieldStay does **not** guess one. Bedroom count, bathroom count and guest capacity arrive with FieldStay's own starting values (1 bedroom, 1 bathroom, 2 guests, 3:00 PM check-in, 11:00 AM checkout) for you to correct.
 
-- **If you're setting up now and expect to connect Lodgify directly soon**, consider waiting and letting the direct connection create your properties. It fills in more than you'd type by hand.
-- **If you're already running on iCal**, tell support before you connect. Moving your history — crew assignments, checklists, work orders, inspections — onto the synced property is something we'd rather walk through with you than have you discover afterwards.
+Correcting them early is worth the minute it takes, because those numbers drive real work: turnover checklists get one section per bedroom and bathroom, and smart inventory par levels scale with bedrooms, bathrooms and guest capacity.
 
-This is not specific to Lodgify. It's how every PMS connection behaves when properties already exist by hand.
+**Your corrections are permanent.** A later re-sync will not overwrite a bedroom count you set — where Lodgify has no value of its own, FieldStay leaves yours alone rather than re-asserting a default over it.
+
+WiFi details, check-in instructions and house rules are yours to fill in on the property; Lodgify's API does not expose them, so nothing FieldStay syncs will ever overwrite what you type there.
+
+### Bookings
+
+Your first sync pulls **12 months of booking history and 6 months forward**, so owner statements and P&L have a real first year rather than starting from today.
+
+Each booking arrives with guest name, check-in and check-out dates, booking channel (Airbnb, Vrbo, Booking.com, direct) and total. Turnovers are generated automatically between consecutive stays, including same-day flips.
+
+Cancelled and declined bookings come across as cancelled, and never generate a turnover.
+
+### Revenue
+
+Booking totals post to the owner ledger automatically, so P&L and owner statements reflect real revenue from day one rather than an estimate.
+
+The figure is the booking total as Lodgify reports it, before any channel commission. If you net commissions out on your statements today, that difference is worth knowing about.
+
+---
+
+## What Does Not Sync, and Why
+
+These are limits of what Lodgify's API publishes, not features FieldStay chose to skip:
+
+- **Reviews.** Lodgify's API has no reviews resource at all, so there is nothing for RepuGuard to draft against. Reviews that come through Lodgify need to be added to FieldStay manually if you want a drafted response.
+- **Staff or crew.** Lodgify has no staff concept to import from. Add your crew in FieldStay directly — **Team → Crew Members**.
+- **Owner blocks.** Time you block on your own calendar lives on Lodgify's availability calendar rather than in its bookings, so it does not come across yet. A blocked period will not show as a booking in FieldStay.
+
+---
+
+## How Often It Syncs
+
+**Lodgify syncs once daily.** Most FieldStay integrations receive changes within seconds through webhooks; Lodgify's webhook delivery is held off until we have verified how it behaves against a live account, so a change made in Lodgify can take up to 24 hours to appear on its own.
+
+You are not stuck waiting for it. **Trigger Resync** on **Settings → Integrations** pulls everything immediately — properties as well as bookings — and is the right thing to click after you add a property or change a booking you need reflected now.
+
+When webhook delivery is switched on, existing connections pick it up automatically on their next daily sync. Nothing to reconnect.
+
+---
+
+## Disconnecting, and a Caveat Worth Knowing
+
+Disconnecting removes FieldStay's copy of your API key and removes any webhooks FieldStay registered on your Lodgify account.
+
+**Lodgify provides no way for us to invalidate the key itself.** With OwnerRez or Hostex, disconnecting actually revokes our access on their side. A Lodgify API key stays valid until you rotate it in Lodgify. If you want FieldStay's access definitively dead rather than merely deleted, rotate the key in **Lodgify → Settings → Public API** after disconnecting.
+
+That is a property of Lodgify's API rather than a choice FieldStay made, and it is the reason this page says so plainly instead of leaving you to assume otherwise.
+
+---
+
+## If You Are Already Running on an iCal Link
+
+Worth planning for, because it is not automatic.
+
+FieldStay matches synced properties to ones it created from that same PMS. A property you set up by hand for an iCal feed was not created by Lodgify, so connecting Lodgify brings that property in as a **new** record rather than merging into the one you already have. You would end up with two entries for the same house — the hand-made one holding your iCal bookings and edits, and the synced one holding what Lodgify knows.
+
+**Tell support before you connect.** Moving your history — crew assignments, checklists, work orders, inspections — onto the synced property is something we would rather walk through with you than have you discover afterwards.
+
+This is not specific to Lodgify. It is how every PMS connection behaves when properties already exist by hand.
+
+---
+
+## If Something Looks Wrong
+
+Lodgify is FieldStay's newest integration. If a sync reports an error, or your property or booking counts do not match what you see in Lodgify, tell support and say what you expected — that is genuinely useful to us and we will look at it directly. FieldStay is built to fail visibly rather than quietly here: a sync that cannot read something reports an error on the connection in **Settings → Integrations** rather than importing partial data and looking finished.

@@ -1,20 +1,30 @@
 # Lodgify — enablement checklist
 
-**Status: built, held inactive.** Every part of the integration exists —
-adapter, API client, mappers, initial sync, daily reconcile, webhook route and
-handler — and none of it is reachable by a PM. `integration_providers.lodgify`
-has `is_active = false` (`20260910143000_lodgify_integration_provider.sql`).
+**Status: LIVE.** `is_active = true`
+(`20260921170000_activate_lodgify_provider.sql`), so Lodgify is selectable in
+Settings → Integrations and Setup → PMS, and the customer-facing docs say so.
 
-The reason is narrow and worth stating precisely, because "unverified" is doing
-a lot of work in this document: **no Lodgify account has ever been connected to
-FieldStay, and `docs.lodgify.com` refuses automated fetches** (Cloudflare
-challenge), so every response shape in `lib/integrations/providers/
-lodgify.types.ts` was written from Lodgify's published reference and
-third-party integration guides rather than from a payload anyone has seen.
+**The checklist below did NOT get worked through first, and that is the thing
+to know about this integration.** No Lodgify account has ever been connected,
+and `docs.lodgify.com` refuses automated fetches (Cloudflare challenge), so
+every response shape in `lib/integrations/providers/lodgify.types.ts` is still
+written from Lodgify's published reference rather than from a payload anyone
+has seen. That is a weaker footing than Hostex (checked against its OpenAPI
+document) or Hostaway (checked against a published field list).
 
-That is a weaker footing than Hostex (checked against its OpenAPI document) or
-Hostaway (checked against a published field list), and the code is written for
-it — see "What a wrong guess costs" below.
+It ships anyway because every one of those guesses fails LOUDLY — see "What a
+wrong guess costs" below. A wrong field name produces a visible error on the
+connection, not quietly wrong data on an owner statement. The first real
+connection is therefore the verification pass, which is what makes the sections
+below a LIVE checklist rather than a pre-launch one.
+
+**Rolling back is one statement and needs no deploy:**
+```sql
+UPDATE public.integration_providers SET is_active = false WHERE id = 'lodgify';
+```
+An org that already connected keeps working — `settings/integrations/page.tsx`
+still renders a provider row for an existing connection when `is_active` is
+false; the flag governs what can be newly CONNECTED.
 
 ---
 
@@ -44,10 +54,11 @@ sentence instead of "invalid key".
 
 ---
 
-## Before flipping `is_active`
+## Verify on the first real connection
 
-Work these through with the first real Lodgify account. Each item names the
-file that changes.
+Every item here is still open. Work them through with the first Lodgify account
+that connects — ideally watching its initial sync — and fix what turns out to
+be wrong. Each item names the file that changes.
 
 ### 1. Property shape — `lodgify.types.ts`, `lodgify.mappers.ts`
 - [ ] Does `GET /v2/properties` return `{ count, items }` or a bare array?
@@ -108,39 +119,52 @@ file that changes.
       registration never fires** — the one operation that writes to the PM's
       own Lodgify account stays off, and the org syncs daily instead.
 
-### 6. Connect flow
-- [ ] Connect with a real key, confirm properties and bookings import, confirm
-      `booking/confirmed` posts revenue to owner ledgers.
-- [ ] Then, in one commit: `UPDATE integration_providers SET is_active = true
-      WHERE id = 'lodgify';` (exactly as `20260816122829_activate_hostex_provider.sql`
-      did for Hostex).
+### 6. Connect flow — DONE, but unobserved
 
-### 7. Customer-facing copy — in the SAME commit as the flag
+- [x] `is_active = true` (`20260921170000_activate_lodgify_provider.sql`).
+- [ ] **Watch the first real connect end to end**: key accepted, properties
+      imported, bookings imported, `booking/confirmed` posting revenue to owner
+      ledgers. This is the item everything above actually hangs on.
+- [ ] Check Sentry after that first sync specifically for
+      `unmappedBookingStatus` and `lodgifyExtractItems` reports. Either one
+      means a shape guess was wrong, and both name exactly what they saw.
 
-Everything below currently tells a customer Lodgify is NOT connectable. The
-moment the flag flips, each one becomes false, and a support bot answering from
-stale copy is worse than one answering "I don't know" — it tells a paying
-customer the product cannot do something it just started doing. (`SMS_ENABLED`'s
-note in CLAUDE.md records what that already cost once.)
+### 7. Customer-facing copy — DONE
 
-- [ ] `docs/support/37-connecting-lodgify.md` — rewrite from "built but not
-      switched on" to a real connect guide, modelled on
-      `34-connecting-hostex.md`. Keep the two permanent caveats: no reviews
-      (Lodgify has no such resource) and no way for us to revoke the API key.
-- [ ] `docs/support/19-faq.md` — "Does FieldStay work with the PMS I already
-      use?" names Lodgify as not-yet-available. Move it into the supported list.
-- [ ] `docs/support/19-faq.md` — "How often does my PMS sync?" says bookings
-      arrive in seconds via webhooks, with Hostex as the one exception. If
-      Lodgify goes live with `LODGIFY_WEBHOOKS_ENABLED` still off, it is a
-      SECOND exception and syncs daily — say so there.
-- [ ] `lib/faq-content.ts` — several entries enumerate the supported PMS list
-      (`SHARED_LANDING_FAQ_TAIL`, the marketing and pricing answers). Grep for
-      `Hostex` and add Lodgify wherever the list is meant to be exhaustive.
-- [ ] Re-run `npx tsx scripts/seed-support-kb.ts` — Finn answers from
-      `support_kb_chunks`, which is a SNAPSHOT of `docs/support/`. Editing the
-      markdown changes nothing a customer sees until the KB is re-seeded.
+Written as live in the same commit as the flag, per the `SMS_ENABLED` lesson in
+CLAUDE.md: docs are read as CURRENT STATE, so copy that lags the flag is worse
+than no copy.
 
----
+- [x] `docs/support/37-connecting-lodgify.md` — rewritten from "built but not
+      switched on" into a real connect guide. Keeps the permanent caveats: no
+      reviews, no staff, no owner blocks, daily sync, and no way for us to
+      revoke the API key.
+- [x] `docs/support/19-faq.md` — Lodgify moved into the supported PMS list,
+      with the two provider-specific differences (no reviews, daily sync)
+      called out rather than buried.
+- [x] `docs/support/19-faq.md` — "How often does my PMS sync?" now names
+      Lodgify as a SECOND exception alongside Hostex, since
+      `LODGIFY_WEBHOOKS_ENABLED` is still off.
+- [x] `lib/faq-content.ts` — added to the lists that are meant to be
+      exhaustive. Deliberately NOT added to the two REVIEWS answers, which
+      would be false: Lodgify has no reviews resource.
+- [ ] **Re-run `npx tsx scripts/seed-support-kb.ts`.** Finn answers from
+      `support_kb_chunks`, a SNAPSHOT of `docs/support/`. Until this runs, Finn
+      still tells customers Lodgify is not connectable. Needs an OpenAI key and
+      the service role.
+
+### 8. When webhooks are verified
+
+`LODGIFY_WEBHOOKS_ENABLED` stays off independently of `is_active`, so turning
+it on is its own change:
+
+- [ ] Work through section 5 above against a live account.
+- [ ] Set `LODGIFY_WEBHOOKS_ENABLED=true`. Existing connections register
+      themselves on their next daily reconcile — the ensure-webhook step runs
+      every pass — so nothing needs reconnecting.
+- [ ] Update the "How often it syncs" section of
+      `docs/support/37-connecting-lodgify.md` and the sync-frequency answer in
+      `19-faq.md`, and re-seed the KB. Both currently promise daily.
 
 ## Disconnect — the honest version
 

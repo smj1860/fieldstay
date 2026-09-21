@@ -2,12 +2,22 @@
 // ============================================================================
 // Lodgify API-key provider adapter.
 //
-// ⚠️ NOT YET REACHABLE BY A PM. integration_providers.lodgify.is_active is
-// false (20260910120000_lodgify_integration_provider.sql) and 'lodgify' is not
-// in PMS_PROVIDER_IDS, so neither Settings -> Integrations nor Setup -> PMS
-// offers it. Flip both in one commit once a real Lodgify account has verified
-// the items in docs/Integrations/lodgify/ENABLEMENT.md — the same
-// hold-then-activate convention Hostex shipped under.
+// ⚠️ LIVE, AND UNVERIFIED AGAINST A REAL ACCOUNT. is_active = true
+// (20260921170000_activate_lodgify_provider.sql), so a PM can connect this
+// today — but no Lodgify account has ever been connected, and every response
+// shape in lodgify.types.ts is still documentation-derived rather than seen.
+//
+// That is deliberate rather than an oversight, and it only holds because every
+// guess in this integration fails LOUDLY: lodgifyExtractItems throws and
+// reports the keys it actually saw rather than returning [], an unrecognised
+// booking status reports to Sentry rather than defaulting silently, absent
+// room counts stay null rather than overwriting a PM's correction, and money is
+// gross or null. A wrong field name surfaces as a visible error on the
+// connection, never as quietly wrong data on an owner statement.
+//
+// The first real connection is therefore the verification pass —
+// docs/Integrations/lodgify/ENABLEMENT.md is the live checklist for it, and
+// rolling back is one UPDATE with no deploy.
 //
 // LODGIFY SPECIFICS, and what each one costs us:
 //

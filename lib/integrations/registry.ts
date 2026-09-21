@@ -31,13 +31,10 @@ const providers = new Map<string, IntegrationProvider>([
   // Live: integration_providers.hostex.is_active flipped to true by
   // 20260816122829_activate_hostex_provider.sql once sync and webhooks shipped.
   ['hostex',     hostexProvider],
-  // HELD INACTIVE: integration_providers.lodgify.is_active is false, so
-  // neither PM-facing surface offers it. Registered here anyway because the
-  // adapter is what connectWithApiKey and the disconnect path resolve, and
-  // because the sync is complete — what is missing is a live Lodgify account
-  // to verify the response shapes and the webhook contract against. Flip the
-  // flag in its own commit once docs/Integrations/lodgify/ENABLEMENT.md is
-  // worked through, exactly as Hostex was.
+  // Live since 20260921170000_activate_lodgify_provider.sql. Unlike the four
+  // above, its response shapes have never been checked against a real account —
+  // see the header of providers/lodgify.ts for why that ships and what it costs
+  // if a guess is wrong.
   ['lodgify',    lodgifyProvider],
   // ['guesty',   guestyProvider],
 ])
