@@ -48,6 +48,15 @@ export interface LodgifyListEnvelope<T> {
   items?: T[]
 }
 
+/**
+ * A coordinate as Lodgify reports it.
+ *
+ * `string` is in the union because Lodgify's own examples show both forms;
+ * lodgify.mappers.ts's optionalCoord() is what narrows it to a real number
+ * and rejects 0/0.
+ */
+export type LodgifyCoordinate = number | string | null
+
 /** GET /v2/properties */
 export interface LodgifyProperty {
   /** The only field this integration REQUIRES. Everything else may be absent. */
@@ -64,8 +73,8 @@ export interface LodgifyProperty {
   zip?:           string | null
   country_code?:  string | null
 
-  latitude?:      number | string | null
-  longitude?:     number | string | null
+  latitude?:      LodgifyCoordinate
+  longitude?:     LodgifyCoordinate
 
   /** IANA zone, when Lodgify has one for the property. */
   timezone_name?: string | null
@@ -91,16 +100,33 @@ export interface LodgifyRoomType {
 }
 
 /**
- * Lodgify booking status.
+ * The booking statuses Lodgify DOCUMENTS, capitalised as it writes them.
  *
- * Documented vocabulary is Booked / Tentative / Open / Declined, capitalised.
- * Matched case-insensitively by the mapper: a provider that changes the
- * casing of an enum is far more likely than one that changes its meaning, and
- * a case mismatch would route EVERY booking through unmappedBookingStatus to
- * 'tentative' — the exact failure that left 28 OwnerRez bookings tentative and
- * out of every revenue path for weeks.
+ * Exported for the mapper's switch to be read against, not to constrain the
+ * field below — see LodgifyBookingStatus.
  */
-export type LodgifyBookingStatus = 'Booked' | 'Tentative' | 'Open' | 'Declined' | string
+export type LodgifyKnownBookingStatus = 'Booked' | 'Tentative' | 'Open' | 'Declined'
+
+/**
+ * What a booking's `status` actually is: any string.
+ *
+ * Deliberately NOT the union above. This was written as
+ * `'Booked' | … | string`, which TypeScript collapses to plain `string`
+ * anyway — four decorative members that bought no checking (SonarQube S6571).
+ * Widening it honestly is the better encoding here, because the value is
+ * UNVERIFIED provider data: nothing has ever seen a live Lodgify response, so
+ * a type claiming to know the four values would be asserting more than we
+ * know.
+ *
+ * The safety is in the mapper instead, and it is real: mapLodgifyStatus
+ * matches case-insensitively (a provider that changes an enum's casing is far
+ * likelier than one that changes its meaning, and a case mismatch would route
+ * EVERY booking through unmappedBookingStatus to 'tentative' — the exact
+ * failure that left 28 OwnerRez bookings out of every revenue path for weeks),
+ * and anything it does not recognise reports to Sentry rather than defaulting
+ * silently.
+ */
+export type LodgifyBookingStatus = string
 
 /** GET /v2/reservations/bookings and /v2/reservations/bookings/{id} */
 export interface LodgifyBooking {

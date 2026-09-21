@@ -34,10 +34,16 @@ import type { LodgifyBooking, LodgifyProperty } from './lodgify.types'
 
 // ── Small shared coercions ───────────────────────────────────────────────────
 
-/** Trimmed, or null for absent/blank — '' would defeat upsert-normalized's null checks. */
+/**
+ * Trimmed, or null for absent/blank — '' would defeat upsert-normalized's
+ * null checks.
+ *
+ * `|| null`, deliberately NOT `?? null`: an empty string is not nullish, so
+ * `??` would pass '' straight through and defeat the entire purpose of this
+ * helper.
+ */
 function optionalText(value: string | null | undefined): string | null {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : null
+  return value?.trim() || null
 }
 
 /** A finite, non-negative count, or null when the provider omitted it. */
