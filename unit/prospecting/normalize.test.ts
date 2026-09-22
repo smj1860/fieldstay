@@ -45,6 +45,17 @@ describe('normalizeEmail', () => {
     expect(normalizeEmail('jane@example')).toBeNull()
     expect(normalizeEmail('')).toBeNull()
   })
+
+  it('accepts a multi-label host', () => {
+    expect(normalizeEmail('jane@mail.sub.example.co.uk')).toBe('jane@mail.sub.example.co.uk')
+  })
+
+  it('rejects a malformed host rather than splitting it another way', () => {
+    expect(normalizeEmail('jane@example.')).toBeNull()
+    expect(normalizeEmail('jane@.com')).toBeNull()
+    expect(normalizeEmail('jane@a..com')).toBeNull()
+    expect(normalizeEmail('a@b@c.com')).toBeNull()
+  })
 })
 
 describe('normalizePhone', () => {
@@ -63,6 +74,19 @@ describe('normalizePhone', () => {
 
   it('accepts a leading country code', () => {
     expect(normalizePhone('1-865-555-0142').e164).toBe('+18655550142')
+  })
+
+  it('drops an extension written without a space, and every spelling of it', () => {
+    for (const written of [
+      '865-555-0142x12',
+      '865-555-0142 x12',
+      '865-555-0142 ext 12',
+      '865-555-0142 ext. 12',
+      '865-555-0142 extension 12',
+      '865-555-0142 EXT 12',
+    ]) {
+      expect(normalizePhone(written).e164).toBe('+18655550142')
+    }
   })
 
   it('keeps an unparseable number as raw rather than discarding it', () => {
@@ -191,6 +215,20 @@ describe('normalizePms', () => {
     expect(normalizePms('RentVine (seen)')).toEqual({ pms: 'Rentvine', evidence: 'seen' })
     expect(normalizePms('Wander OS (wander.com/os)').pms).toBe('Wander')
     expect(normalizePms('Wander (wander.com/os)').pms).toBe('Wander')
+  })
+
+  it('still recognises Track in each shape it is written', () => {
+    expect(normalizePms('Track').pms).toBe('Track')
+    expect(normalizePms('Track HS').pms).toBe('Track')
+    expect(normalizePms('Track (gcpm.trackhs.com)').pms).toBe('Track')
+    expect(normalizePms('gcpm.trackhs.com').pms).toBe('Track')
+  })
+
+  it('leaves an unclosed parenthesis in place rather than swallowing the rest', () => {
+    expect(normalizePms('Guesty (owners.guestyowners.com')).toEqual({
+      pms:      'Guesty',
+      evidence: null,
+    })
   })
 
   it('keeps an uncatalogued product name verbatim', () => {

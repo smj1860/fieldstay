@@ -48,7 +48,7 @@ export function parseCsv(text: string): string[][] {
   // A UTF-8 BOM is invisible and would otherwise become part of the first
   // header name, so "Company" stops matching its alias and the whole file
   // reads as having no company column.
-  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+  const body = text.codePointAt(0) === 0xfeff ? text.slice(1) : text
 
   const st: ScanState = { rows: [], row: [], cell: '', quoted: false }
   let i = 0

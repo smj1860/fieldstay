@@ -123,7 +123,7 @@ function printPlan(rows: Row[], changes: Change[]): void {
   }
   console.log('')
   console.log('resulting brands:')
-  console.log(`  ${[...after].sort().join(', ')}`)
+  console.log(`  ${[...after].sort((a, b) => a.localeCompare(b)).join(', ')}`)
 }
 
 async function apply(supabase: ReturnType<typeof connect>, changes: Change[]): Promise<void> {

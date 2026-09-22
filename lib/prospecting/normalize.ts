@@ -70,7 +70,12 @@ export function normalizeState(value: string): string | null {
 
 // ── contact ──────────────────────────────────────────────────────────────────
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+// Each domain label excludes the dot that separates it from the next, so
+// there is exactly ONE way to split a host and the engine never has to try
+// another. The obvious /^[^@\s]+@[^@\s]+\.[^@\s]+$/ lets the last two parts
+// both match a dot, which means a 254-character address with no final dot is
+// re-split at every position before it fails.
+const EMAIL_RE = /^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/
 
 export function normalizeEmail(value: string): string | null {
   const v = cleanText(value).replace(/^mailto:/i, '').toLowerCase()
@@ -90,7 +95,12 @@ export function normalizePhone(value: string): { e164: string | null; raw: strin
   if (raw === '') return { e164: null, raw: null }
 
   const capped = raw.slice(0, 60)
-  const withoutExt = raw.split(/\s*(?:x|ext\.?|extension)\s*\d+\s*$/i)[0] ?? raw
+  // `\s?` rather than `\s*`, and no trailing `\s*$`: cleanText has already
+  // trimmed and collapsed runs, so the unbounded forms could only ever have
+  // re-tried the same single space at every position in the string. `ext` and
+  // `extension` are one branch for the same reason — as separate alternatives
+  // the engine matches `ext`, fails, and backtracks into the longer one.
+  const withoutExt = raw.split(/\s?(?:ext(?:ension)?\.?|x)\s?\d+$/i)[0] ?? raw
   const digits = withoutExt.replace(/\D/g, '')
 
   // NANP: a real area code and exchange never start with 0 or 1.
@@ -212,7 +222,7 @@ const PMS_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/streamline/i,             'Streamline'],
   [/lodgify/i,                'Lodgify'],
   [/bright\s*side/i,          'BrightSide'],
-  [/^track(\s*hs)?\b|trackhs/i, 'Track'],
+  [/(?:^track(?:\s*hs)?\b)|trackhs/i, 'Track'],
   [/escapia/i,                'Escapia'],
   [/barefoot/i,               'Barefoot'],
   [/live\s*rez/i,             'LiveRez'],
@@ -283,7 +293,11 @@ export function normalizePms(value: string): PmsParts {
   // that is not part of a known product name.
   const parentheticals: string[] = []
   const withoutParens = cleaned
-    .replace(/\(([^)]*)\)/g, (_m, inner: string) => {
+    // `[^()]*` excludes the OPENING paren too. With `[^)]*`, a cell of
+    // unclosed parens makes the engine consume to the end from every `(` and
+    // give the characters back one at a time — quadratic on a value that is
+    // never going to match anyway.
+    .replace(/\(([^()]*)\)/g, (_m, inner: string) => {
       const t = inner.trim()
       if (t !== '') parentheticals.push(t)
       return ' '
