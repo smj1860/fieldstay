@@ -168,6 +168,24 @@ describe('the webhook token', () => {
 
     expect(registeredUrl()).toBe(`${APP_URL}/api/webhooks/lodgify/tok-winner`)
   })
+
+  it('REFUSES to register when the claim is lost AND the recheck finds nothing, rather than falling back to its own unpersisted token', async () => {
+    // The atomic claim only fails to update when webhook_token was ALREADY
+    // non-null — so some other value must be committed. If the recheck can't
+    // find it either, that invariant broke somewhere, and silently falling
+    // back to the token THIS call generated (which was never written to the
+    // database) would register a Lodgify subscription pointed at a URL no
+    // connection row can ever match: every delivery to it gets a clean 401
+    // forever, with nothing anywhere connecting the silence back to this path.
+    stubSupabase({
+      existingToken: null,
+      claimResult:   null, // lost the race
+      recheck:       null, // AND the recheck found nothing — should never happen
+    })
+
+    await expect(ensureLodgifyWebhookRegistration('u1', 'key')).rejects.toThrow(/Lost the webhook-token claim race/)
+    expect(lodgifyEnsureWebhook).not.toHaveBeenCalled()
+  })
 })
 
 describe('removal', () => {

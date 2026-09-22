@@ -218,10 +218,30 @@ describe('lodgifyBookingToNormalized', () => {
 
   it('maps a missing or non-positive total to null, not to 0', () => {
     // 0 would be posted to an owner ledger as real revenue of zero;
-    // null lets booking-events.ts fall back to its nights * rate estimate.
+    // null lets booking-events.ts fall back to its nights * rate estimate —
+    // correct for MISSING/garbage data, but see revenue_known_zero below for
+    // why a genuine 0 must not take the same path.
     expect(lodgifyBookingToNormalized(booking()).actual_total_amount).toBeNull()
     expect(lodgifyBookingToNormalized(booking({ total_amount: 0 })).actual_total_amount).toBeNull()
     expect(lodgifyBookingToNormalized(booking({ total_amount: 'free' })).actual_total_amount).toBeNull()
+  })
+
+  it('flags a GENUINE zero total as revenue_known_zero, so it never estimates fake revenue', () => {
+    // reservation-pipeline.ts's eligibility check is `status === 'confirmed'
+    // && stay_type === 'guest_stay' && !revenue_known_zero`. Without this
+    // flag, a real $0 confirmed guest stay would be marked eligible with a
+    // null actual_total_amount — and booking-events.ts prefers that field
+    // over its nights * avg_nightly_rate estimate, so a null there triggers a
+    // FABRICATED dollar figure posted to the owner's real ledger for a stay
+    // that was genuinely free. Mirrors hostaway.mappers.ts's identical flag.
+    expect(lodgifyBookingToNormalized(booking({ total_amount: 0 })).revenue_known_zero).toBe(true)
+    expect(lodgifyBookingToNormalized(booking({ total_amount: '0' })).revenue_known_zero).toBe(true)
+  })
+
+  it('does NOT flag revenue_known_zero for absence or garbage — those mean "unknown", not "$0"', () => {
+    expect(lodgifyBookingToNormalized(booking()).revenue_known_zero).toBe(false)
+    expect(lodgifyBookingToNormalized(booking({ total_amount: 'free' })).revenue_known_zero).toBe(false)
+    expect(lodgifyBookingToNormalized(booking({ total_amount: null })).revenue_known_zero).toBe(false)
   })
 
   it('defaults an unstated stay to a guest stay, the safe direction', () => {

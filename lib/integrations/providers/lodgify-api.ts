@@ -378,6 +378,43 @@ export interface LodgifyBookingWindow {
 }
 
 /**
+ * `historyMonths` back from `base`, in UTC, rounded DOWN to the 1st of the
+ * target month.
+ *
+ * Same convention as hostawayHistoryCutoff (lib/inngest/functions/hostaway/
+ * reservation-sync.ts) and for the identical reason: `setUTCMonth` does not
+ * clamp — it keeps the original day-of-month and overflows into the
+ * FOLLOWING month when the target is shorter (Mar 31 minus 1 month lands on
+ * Mar 2/3, not Feb 28), which for a lower bound moves the start date LATER
+ * than intended and silently narrows the sweep on exactly those dates.
+ * Pinning to day 1 before subtracting is deliberately coarser than clamping
+ * to the target month's real last day — every call gets a somewhat wider
+ * window rather than the precise one — in exchange for this bound NEVER
+ * narrowing, on any day, matching the one other place this codebase already
+ * solved the same problem.
+ */
+function utcMonthsBack(base: Date, months: number): Date {
+  const pinned = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 1))
+  pinned.setUTCMonth(pinned.getUTCMonth() - months)
+  return pinned
+}
+
+/**
+ * `lookaheadMonths` forward from `base`, in UTC, rounded UP to the last day
+ * of the target month — the mirror of utcMonthsBack for an UPPER bound.
+ * Pinning to day 1 (utcMonthsBack's fix) would NARROW this end instead of
+ * widening it, so an upper bound needs the opposite rounding direction to
+ * keep the same "never narrower than requested" guarantee.
+ */
+function utcMonthsForward(base: Date, months: number): Date {
+  // The 1st of the month AFTER the target, stepped back one day — lands on
+  // the target month's actual last day regardless of its length.
+  const firstOfFollowing = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + months + 1, 1))
+  firstOfFollowing.setUTCDate(firstOfFollowing.getUTCDate() - 1)
+  return firstOfFollowing
+}
+
+/**
  * A UTC date window, `historyMonths` back and `lookaheadMonths` forward.
  *
  * Exported for the same reason hostexReservationWindow is: the callers that
@@ -386,15 +423,11 @@ export interface LodgifyBookingWindow {
  * cannot drift into covering different bands.
  */
 export function lodgifyBookingWindow(historyMonths: number, lookaheadMonths: number): LodgifyBookingWindow {
-  const start = new Date()
-  start.setUTCMonth(start.getUTCMonth() - historyMonths)
-
-  const end = new Date()
-  end.setUTCMonth(end.getUTCMonth() + lookaheadMonths)
+  const now = new Date()
 
   return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate:   end.toISOString().slice(0, 10),
+    startDate: utcMonthsBack(now, historyMonths).toISOString().slice(0, 10),
+    endDate:   utcMonthsForward(now, lookaheadMonths).toISOString().slice(0, 10),
   }
 }
 
@@ -437,6 +470,15 @@ export async function lodgifyFetchBookings(
  * booking hard-deleted between the delivery and this read is a legitimate
  * outcome, not an error to retry, and ProviderEntityGoneError is exactly that
  * signal rather than a fault.
+ *
+ * A 2xx whose body carries no recognizable `id` is NOT treated the same as a
+ * 404 — that would make an unrecognized shape indistinguishable from a
+ * legitimately deleted booking, which is exactly the failure
+ * lodgifyExtractItems exists to make loud for list responses. This is the
+ * single-object equivalent of that same guard, and it matters MORE here: this
+ * is the function every webhook delivery re-reads through, so a silent null
+ * on a wrong shape guess means a real booking change is dropped on every
+ * delivery, forever, with nothing anywhere signalling the guess was wrong.
  */
 export async function lodgifyFetchBookingById(
   apiKey:    string,
@@ -444,13 +486,21 @@ export async function lodgifyFetchBookingById(
   bookingId: string,
 ): Promise<LodgifyBooking | null> {
   try {
-    const body = await lodgifyFetch<LodgifyBooking>(
+    const body = await lodgifyFetch<unknown>(
       `/reservations/bookings/${encodeURIComponent(bookingId)}`,
       apiKey,
       userId,
       { entityId: bookingId },
     )
-    return body?.id === undefined ? null : body
+
+    if (body && typeof body === 'object' && (body as { id?: unknown }).id !== undefined) {
+      return body as LodgifyBooking
+    }
+
+    const keys = body && typeof body === 'object' ? Object.keys(body as object).join(', ') : typeof body
+    const err  = new Error(`Lodgify booking ${bookingId} returned an unrecognized shape. Keys present: ${keys}`)
+    reportError(err, { site: 'lib.integrations.lodgify-api.lodgifyFetchBookingById' })
+    throw err
   } catch (err) {
     const inner = (err as { cause?: unknown })?.cause
     if (inner instanceof ProviderEntityGoneError) return null

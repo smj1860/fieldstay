@@ -35,6 +35,7 @@ import {
   isDeadLodgifyConnectionError,
   lodgifyWebhookHandler,
 } from '@/lib/inngest/functions/lodgify/webhook-handler'
+import { reconnectRequired } from '@/lib/inngest/reconnect-required'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { fetchProviderPropertyIdMap } from '@/lib/inngest/functions/shared/reservation-pipeline'
 import { syncLodgifyReservations } from '@/lib/inngest/functions/lodgify/reservation-sync'
@@ -152,12 +153,23 @@ describe('isDeadLodgifyConnectionError', () => {
     expect(isDeadLodgifyConnectionError(wrapped)).toBe(true)
   })
 
-  it('recognizes a bare NonRetriableError (e.g. reconnectRequired)', () => {
-    expect(isDeadLodgifyConnectionError(new NonRetriableError('No Lodgify API key found'))).toBe(true)
+  it('recognizes reconnectRequired() — no credential at all, not an HTTP status', () => {
+    expect(isDeadLodgifyConnectionError(reconnectRequired('No Lodgify API key found'))).toBe(true)
   })
 
   it('does NOT suppress an ordinary transient error', () => {
     expect(isDeadLodgifyConnectionError(new Error('ECONNRESET'))).toBe(false)
     expect(isDeadLodgifyConnectionError(new Error('HTTP 503'))).toBe(false)
+  })
+
+  it('does NOT treat an unrelated terminal NonRetriableError as a dead connection', () => {
+    // 400/404(list)/405/409/422 are all wrapped as NonRetriableError by
+    // throwForStatus in lodgify-api.ts, but none of them mean the CONNECTION
+    // is dead the way a 401/403 or a missing credential does — and
+    // lodgifyReservationReconcileHandler's own dead-connection check does not
+    // recognise them either, so treating them as "already handled elsewhere"
+    // here would suppress this handler's own reportError() call for a
+    // condition nothing else actually revokes the connection over.
+    expect(isDeadLodgifyConnectionError(new NonRetriableError('Lodgify /reservations/bookings/9001 failed: HTTP 422 — validation error'))).toBe(false)
   })
 })

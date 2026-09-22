@@ -77,6 +77,17 @@ function optionalAmount(value: number | string | null | undefined): number | nul
   return n
 }
 
+/**
+ * True only for a genuinely parseable 0 — never for absence, blank, or
+ * garbage, all of which optionalAmount also collapses toward null-adjacent
+ * outcomes but which mean "we don't know", not "the provider told us $0".
+ */
+function isGenuineZeroTotal(value: number | string | null | undefined): boolean {
+  if (value === null || value === undefined || value === '') return false
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) && n === 0
+}
+
 /** YYYY-MM-DD from either a date or a full timestamp; null for anything else. */
 function optionalDate(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
@@ -255,13 +266,18 @@ function isCancelled(booking: LodgifyBooking): boolean {
  * prefers this figure over its nights * avg_nightly_rate estimate, so
  * improving it improves every owner ledger without touching another file.
  *
- * `revenue_known_zero` is deliberately NOT set. That flag means "the provider
- * told us this stay was genuinely free", and it suppresses the estimate a
- * null total would otherwise get — so claiming it requires being able to tell
- * a real comped stay from a total Lodgify simply did not report. With these
- * shapes unverified, a `total_amount` of 0 could be either, and asserting the
- * stronger reading would silently zero out real revenue on an owner
- * statement. Set it once a live response shows which is which.
+ * `revenue_known_zero` mirrors hostaway.mappers.ts's identical flag: it is
+ * true ONLY for a genuinely parseable `total_amount: 0`, via
+ * isGenuineZeroTotal — never for an absent, blank or non-numeric field, all of
+ * which mean "Lodgify didn't tell us" rather than "Lodgify told us $0". The
+ * distinction is load-bearing: reservation-pipeline.ts's revenue-eligibility
+ * check is `status === 'confirmed' && stay_type === 'guest_stay' &&
+ * !revenue_known_zero`. Leaving this flag permanently false — as this file
+ * used to — marks a genuinely-free confirmed stay as eligible anyway, with a
+ * null `actual_total_amount`; booking-events.ts then falls back to a
+ * nights * avg_nightly_rate ESTIMATE and posts it to owner_transactions as if
+ * it were real money. Setting the flag correctly is what lets a real $0 stay
+ * post nothing instead.
  */
 export function lodgifyBookingToNormalized(booking: LodgifyBooking): NormalizedBooking {
   const cancelled = isCancelled(booking)
@@ -298,5 +314,6 @@ export function lodgifyBookingToNormalized(booking: LodgifyBooking): NormalizedB
     stay_type: booking.is_owner_stay === true ? 'owner_stay' : 'guest_stay',
 
     actual_total_amount: optionalAmount(booking.total_amount),
+    revenue_known_zero:  isGenuineZeroTotal(booking.total_amount),
   }
 }
