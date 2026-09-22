@@ -18,6 +18,8 @@ import {
   logProspectTouch,
   listProspectTouches,
   triggerProspectCrawl,
+  saveProspectContact,
+  promoteProspectContact,
 } from '@/app/admin/prospects/actions'
 
 interface Resp { data?: unknown; error?: unknown }
@@ -316,6 +318,147 @@ describe('admin/prospects/actions', () => {
         name: 'prospecting/crawl.requested',
         data: { requested_by: 'admin_1', limit: 25 },
       })
+    })
+  })
+})
+
+describe('admin/prospects/actions — contacts', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  describe('saveProspectContact', () => {
+    it('normalizes as it saves and never names the generated email_key', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      await saveProspectContact('p1', {
+        full_name: '  Dana Reed ',
+        title:     'Owner',
+        email:     'Dana@Example.COM',
+        phone:     '(865) 555-0142',
+      })
+
+      expect(payloads[0]).toMatchObject({
+        prospect_id:  'p1',
+        full_name:    'Dana Reed',
+        title:        'Owner',
+        email:        'dana@example.com',
+        phone:        '+18655550142',
+        email_status: 'unknown',
+      })
+      // GENERATED ALWAYS: naming it makes Postgres reject the WHOLE statement
+      // with 428C9, and the error is only logged, so the write vanishes.
+      expect(payloads[0]).not.toHaveProperty('email_key')
+    })
+
+    it('keeps a phone it cannot parse, because it is still how you reach them', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      await saveProspectContact('p1', { full_name: 'Dana', phone: 'call the office' })
+
+      expect(payloads[0]).toMatchObject({ phone: 'call the office' })
+    })
+
+    it('refuses an email it cannot parse rather than storing it', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      const res = await saveProspectContact('p1', { full_name: 'Dana', email: 'dana at example' })
+
+      expect(res.error).toMatch(/not valid/i)
+      expect(payloads).toHaveLength(0)
+    })
+
+    it('refuses a contact that names nobody and reaches nobody', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      const res = await saveProspectContact('p1', { title: 'Owner', notes: 'found on LinkedIn' })
+
+      expect(res.error).toMatch(/name, an email or a phone/i)
+      expect(payloads).toHaveLength(0)
+    })
+
+    it('refuses a LinkedIn value that is not a usable web address', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      const res = await saveProspectContact('p1', {
+        full_name: 'Dana', linkedin_url: 'javascript:alert(1)',
+      })
+
+      expect(res.error).toMatch(/not a usable web address/i)
+      expect(payloads).toHaveLength(0)
+    })
+
+    it('names the duplicate-email constraint instead of "operation failed"', async () => {
+      const { supabase } = makeSupabase({ data: null, error: { code: '23505' } })
+      asAdmin(supabase)
+
+      const res = await saveProspectContact('p1', { full_name: 'Dana', email: 'dana@example.com' })
+
+      expect(res.error).toMatch(/already has a contact with that email/i)
+    })
+
+    it('rejects an unknown email status', async () => {
+      const { supabase, payloads } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      const res = await saveProspectContact('p1', {
+        full_name:    'Dana',
+        email_status: 'retired' as never,
+      })
+
+      expect(res.error).toMatch(/unknown email status/i)
+      expect(payloads).toHaveLength(0)
+    })
+
+    it('logs the save without putting the contact details in the audit row', async () => {
+      const { supabase } = makeSupabase({ data: { id: 'c1' }, error: null })
+      asAdmin(supabase)
+
+      await saveProspectContact('p1', { full_name: 'Dana Reed', email: 'dana@example.com' })
+
+      const entry = vi.mocked(logAuditEvent).mock.calls[0][0]
+      expect(entry.action).toBe('platform_admin.prospect_contact.saved')
+      expect(JSON.stringify(entry.metadata)).not.toMatch(/dana/i)
+    })
+  })
+
+  describe('promoteProspectContact', () => {
+    it('reads the account back rather than deriving the new primary locally', async () => {
+      const primary = {
+        contact_name: 'Dana Reed', contact_title: 'Owner', email: 'dana@example.com',
+        phone: '+18655550142', linkedin_url: null,
+        email_is_generic: false, email_status: 'valid',
+      }
+      const { supabase } = makeSupabase({ data: primary, error: null })
+      asAdmin({ ...supabase, rpc: vi.fn(() => Promise.resolve({ error: null })) })
+
+      const res = await promoteProspectContact('c1', 'p1')
+
+      expect(res.error).toBeUndefined()
+      expect(res.primary).toEqual(primary)
+    })
+
+    it('reports success when the swap landed but the read-back did not', async () => {
+      // Saying it failed would invite a second promote, which swaps it back.
+      const { supabase } = makeSupabase({ data: null, error: { code: 'PGRST116' } })
+      asAdmin({ ...supabase, rpc: vi.fn(() => Promise.resolve({ error: null })) })
+
+      const res = await promoteProspectContact('c1', 'p1')
+
+      expect(res.error).toBeUndefined()
+      expect(res.primary).toBeUndefined()
+    })
+
+    it('surfaces a colliding email instead of a generic failure', async () => {
+      const { supabase } = makeSupabase()
+      asAdmin({ ...supabase, rpc: vi.fn(() => Promise.resolve({ error: { code: '23505' } })) })
+
+      const res = await promoteProspectContact('c1', 'p1')
+
+      expect(res.error).toMatch(/same email as another contact/i)
     })
   })
 })

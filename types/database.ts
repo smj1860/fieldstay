@@ -2404,6 +2404,8 @@ export interface HandWrittenRowMap {
   inspection_items:                    InspectionItem
   prospect_accounts:                   ProspectAccount
   prospect_touches:                    ProspectTouch
+  prospect_imports:                    ProspectImport
+  prospect_contacts:                   ProspectContact
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
@@ -2716,6 +2718,13 @@ export interface ProspectAccount {
   phone:            string | null
   linkedin_url:     string | null
 
+  /**
+   * Whether the PRIMARY contact's address still works
+   * (20260922140000_prospect_contacts.sql). Additional contacts carry their
+   * own on prospect_contacts.
+   */
+  email_status:   ProspectEmailStatus
+
   status:         ProspectAccountStatus
   status_note:    string | null
   notes:          string | null
@@ -2732,6 +2741,14 @@ export interface ProspectAccount {
   crawl_error:     string | null
 
   source:     string | null
+
+  /**
+   * The import that CREATED this row (20260922120000_prospect_imports.sql),
+   * or NULL for a row added another way. Never set on a row an import merely
+   * updated — undo must not delete a company that predated the file.
+   */
+  import_id:  string | null
+
   created_at: string
   updated_at: string
 }
@@ -2777,3 +2794,64 @@ export type ProspectTouchType =
   | 'replied'
   | 'meeting_set'
   | 'note'
+
+/**
+ * One admin import run against prospect_accounts
+ * (20260922120000_prospect_imports.sql). No DELETE grant for authenticated:
+ * an import reaches status 'undone', it is never erased.
+ */
+export interface ProspectImport {
+  id:            string
+  /** The operator's filename — the only way to tell two runs apart. */
+  source_name:   string
+
+  /** Counted from the plan that was applied, not from the file's row count. */
+  row_count:     number
+  created_count: number
+  updated_count: number
+  /** Rows the file carried that could not be used (no company name). */
+  skipped_count: number
+
+  status:        ProspectImportStatus
+  error:         string | null
+
+  imported_by:   string | null
+  created_at:    string
+  completed_at:  string | null
+  undone_at:     string | null
+}
+
+export type ProspectImportStatus = 'running' | 'complete' | 'failed' | 'undone'
+
+/**
+ * An ADDITIONAL person at a prospect company
+ * (20260922140000_prospect_contacts.sql).
+ *
+ * The PRIMARY contact is not in this table — it stays on
+ * prospect_accounts.contact_name/contact_title/email/phone/linkedin_url,
+ * because the contact filter, the CSV export, the crawl, the CLI importer
+ * and the email_is_generic generated column all read those columns directly.
+ * prospect_promote_contact() swaps one of these rows into that slot.
+ */
+export interface ProspectContact {
+  id:           string
+  prospect_id:  string
+
+  full_name:    string | null
+  title:        string | null
+  email:        string | null
+  phone:        string | null
+  linkedin_url: string | null
+
+  /** Whether that address still works — a bounce belongs to the person. */
+  email_status: ProspectEmailStatus
+
+  /** GENERATED ALWAYS — never name this in an insert/update payload (428C9). */
+  email_key:    string | null
+
+  notes:        string | null
+  created_at:   string
+  updated_at:   string
+}
+
+export type ProspectEmailStatus = 'unknown' | 'valid' | 'bounced'

@@ -37,7 +37,8 @@
     "load:artillery:step": "bash load-tests/step-load-artillery.sh",
     "load:artillery:smoke": "artillery run load-tests/artillery/smoke.yml",
     "load:artillery:pages": "artillery run load-tests/artillery/public-pages.yml",
-    "load:artillery:ratelimit": "artillery run load-tests/artillery/token-route-rate-limit.yml"
+    "load:artillery:ratelimit": "artillery run load-tests/artillery/token-route-rate-limit.yml",
+    "prospects:normalize-pms": "tsx scripts/prospecting/normalize-pms.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

@@ -50,6 +50,18 @@ export default function AdminOverviewPage() {
           </Link>
         </Card>
         <Card>
+          <Link href="/admin/prospects/import" className="block">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Import Accounts
+            </h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Load a prospecting CSV into the funnel — matched on domain and on
+              name plus location, with a plan to review before anything is
+              written, and an undo afterwards.
+            </p>
+          </Link>
+        </Card>
+        <Card>
           <Link href="/admin/prospects" className="block">
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               Prospecting Funnel

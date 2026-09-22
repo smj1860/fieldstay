@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: '/admin/inventory-catalog', label: 'Inventory Catalog' },
   { href: '/admin/inventory-templates', label: 'Inventory Templates' },
   { href: '/admin/prospects',        label: 'Prospecting Funnel' },
+  { href: '/admin/prospects/import', label: 'Import Accounts' },
 ]
 
 export default async function AdminLayout({
