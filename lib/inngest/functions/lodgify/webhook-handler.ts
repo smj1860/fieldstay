@@ -26,9 +26,8 @@
 // bookings arrive once that runs. Retrying would not conjure the property.
 // ============================================================================
 
-import { NonRetriableError }    from 'inngest'
 import { inngest }              from '@/lib/inngest/client'
-import { reconnectRequired }    from '@/lib/inngest/reconnect-required'
+import { reconnectRequired, isReconnectRequired } from '@/lib/inngest/reconnect-required'
 import { reportError }          from '@/lib/observability/report-error'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { isLodgifyAuthFailure } from '@/lib/integrations/providers/lodgify-api'
@@ -49,11 +48,30 @@ const SYSTEM   = 'inngest:lodgify-webhook-handler'
  * webhook, potentially many per hour for an active listing, for a condition
  * already being handled on its own daily cadence rather than a new fault.
  *
- * Mirrors isDeadHostexConnectionError, which exists for the same reason one
- * provider over.
+ * Deliberately narrower than a blanket `err instanceof NonRetriableError`.
+ * TERMINAL_STATUSES in lodgify-api.ts wraps 400, 404 (on list endpoints,
+ * where no entityId narrows it to ProviderEntityGoneError), 405, 409 and 422
+ * as NonRetriableError too — none of those are the connection being dead, and
+ * lodgifyReservationReconcileHandler's OWN dead-connection check (the thing
+ * this function's comment says "owns revoking this connection") does not
+ * recognise them either, so a blanket match here suppressed this function's
+ * inline, orgId-tagged reportError() call for all of them on the belief that
+ * reconcile would revoke the connection and cover it — it never does, for
+ * anything but a genuine auth failure. (Inngest's own dead-letter handler
+ * still reports every terminal failure generically; what a blanket match
+ * loses is the orgId-scoped context this handler's own reportError call
+ * would have attached, and it mislabels an unrelated terminal error as an
+ * already-understood dead connection in the log line below.)
+ *
+ * `isReconnectRequired` is kept as its own check rather than folded into
+ * `isLodgifyAuthFailure`: readToken's reconnectRequired() (no key in Vault at
+ * all) is a real "nothing to sync, PM must reconnect" case with no HTTP
+ * status behind it, so it cannot be typed as a ProviderAuthError — but it is
+ * exactly as terminal, and it is what the marker exists to identify.
  */
 export function isDeadLodgifyConnectionError(err: unknown): boolean {
-  return isLodgifyAuthFailure(err) || isProviderAuthFailure(err) || err instanceof NonRetriableError
+  const message = err instanceof Error ? err.message : String(err)
+  return isLodgifyAuthFailure(err) || isProviderAuthFailure(err) || isReconnectRequired(message)
 }
 
 /**

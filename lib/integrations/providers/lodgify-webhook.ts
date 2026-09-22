@@ -123,7 +123,21 @@ async function ensureWebhookToken(userId: string): Promise<string> {
 
   const recheck = unwrap(recheckRes, { site: 'lib.integrations.lodgify-webhook.recheck-token' })
 
-  return recheck?.webhook_token ?? webhookToken
+  if (!recheck?.webhook_token) {
+    // The atomic claim above only fails to update when webhook_token was
+    // ALREADY non-null — so some other value must be committed. If the
+    // recheck can't find it, that invariant broke somewhere, and falling back
+    // to `webhookToken` (this caller's own, never-persisted token) would
+    // register a Lodgify subscription pointed at a URL no row in
+    // integration_connections can ever match — silently orphaned, rejected
+    // 401 by the route forever. Refuse instead of guessing.
+    throw new Error(
+      `[Lodgify] Lost the webhook-token claim race for user ${userId} and the ` +
+      'recheck read found no token — refusing to register with an unpersisted value'
+    )
+  }
+
+  return recheck.webhook_token
 }
 
 /**

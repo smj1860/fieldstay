@@ -273,13 +273,78 @@ describe('lodgifyFetchBookingById', () => {
     await lodgifyFetchBookingById(KEY, USER, '90 01')
     expect(fetchMock.mock.calls[0]![0]).toContain('90%2001')
   })
+
+  it('THROWS and reports on a 2xx body with no recognizable id, rather than returning null', async () => {
+    // A 2xx whose shape does not match our guess is NOT the same as a 404 —
+    // returning null here would be indistinguishable from a booking that was
+    // legitimately deleted, silently dropping a real webhook-driven change on
+    // every delivery for as long as the shape guess stays wrong. This is the
+    // single-object equivalent of lodgifyExtractItems's list-shape guard.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ booking: { id: 9001 } })))
+
+    await expect(lodgifyFetchBookingById(KEY, USER, '9001')).rejects.toThrow(/unrecognized shape/)
+    expect(reportError).toHaveBeenCalled()
+  })
+
+  it('returns the booking when the id is present at the top level', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ id: 9001, status: 'Booked' })))
+    await expect(lodgifyFetchBookingById(KEY, USER, '9001')).resolves.toMatchObject({ id: 9001 })
+  })
 })
 
 describe('lodgifyBookingWindow', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('spans history back and lookahead forward as YYYY-MM-DD', () => {
     const w = lodgifyBookingWindow(12, 6)
     expect(w.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(w.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(w.startDate < w.endDate).toBe(true)
+  })
+
+  it('never narrows the START past what a naive month subtraction would overflow into', () => {
+    // On the 31st, a naive `setUTCMonth` subtraction of 1 month overflows
+    // FORWARD into March 2/3 instead of landing in February — silently
+    // narrowing "one month back" to under 29 days. Rounding down to day 1 of
+    // the target month (this codebase's established fix — see
+    // hostawayHistoryCutoff) guarantees the start never lands in March at all.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-03-31T12:00:00Z'))
+
+    const w = lodgifyBookingWindow(1, 6)
+
+    expect(w.startDate.startsWith('2027-03')).toBe(false)
+    expect(w.startDate <= '2027-02-28').toBe(true)
+  })
+
+  it('never narrows the END past what a naive month addition would overflow into', () => {
+    // The mirror case for the upper bound: 6 months forward from Aug 31
+    // overflows past the intended February 28/29 into March, which for an
+    // END bound would OVERSHOOT rather than narrow — not dangerous on its
+    // own, but the point is the END must land on the real last day of its
+    // target month, not an arbitrary rounding-down to day 1 (which WOULD
+    // narrow it).
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-08-31T12:00:00Z'))
+
+    const w = lodgifyBookingWindow(1, 6)
+
+    // 6 months forward from August lands in February (28 days in 2028 — a
+    // leap year, so the 29th).
+    expect(w.endDate).toBe('2028-02-29')
+  })
+
+  it('lands on the exact expected date on an ordinary, non-boundary day', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-06-15T12:00:00Z'))
+
+    const w = lodgifyBookingWindow(1, 1)
+
+    // Matches hostawayHistoryCutoff's own rounding for the identical input —
+    // day pinned to 1, not the 15th.
+    expect(w.startDate).toBe('2027-05-01')
+    expect(w.endDate).toBe('2027-07-31')
   })
 })
