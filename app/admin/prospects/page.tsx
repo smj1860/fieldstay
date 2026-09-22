@@ -2,20 +2,27 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { ProspectsClient } from './prospects-client'
-import { PROSPECT_STATUSES, type ProspectRow, type ProspectStatus } from './constants'
+import {
+  PROSPECT_STATUSES,
+  CONTACT_EMAIL_STATUSES,
+  type ProspectRow,
+  type ProspectStatus,
+  type ProspectContactEmailStatus,
+} from './constants'
 
 const SELECT_COLUMNS = `
   id, company, domain, website, city, state, market, portfolio_size,
   pms, pms_note, score_a, score_b, track, bucket,
-  contact_name, contact_title, email, email_is_generic, phone, linkedin_url,
+  contact_name, contact_title, email, email_is_generic, email_status, phone, linkedin_url,
   status, status_note, notes, last_touch_at, next_action_at,
   comparent_url, last_crawled_at, crawl_status
 `
 
 /** The row as the database hands it back — status is a plain text column. */
-type DbProspectRow = Omit<ProspectRow, 'status' | 'email_is_generic'> & {
+type DbProspectRow = Omit<ProspectRow, 'status' | 'email_is_generic' | 'email_status'> & {
   status:           string
   email_is_generic: boolean | null
+  email_status:     string
 }
 
 /**
@@ -29,6 +36,13 @@ function narrowStatus(value: string): ProspectStatus {
   return (PROSPECT_STATUSES as readonly string[]).includes(value)
     ? (value as ProspectStatus)
     : 'new'
+}
+
+/** Same narrowing as status: a CHECK constraint guards it, the types see text. */
+function narrowEmailStatus(value: string): ProspectContactEmailStatus {
+  return (CONTACT_EMAIL_STATUSES as readonly string[]).includes(value)
+    ? (value as ProspectContactEmailStatus)
+    : 'unknown'
 }
 
 export default async function ProspectsPage() {
@@ -52,6 +66,7 @@ export default async function ProspectsPage() {
     ...r,
     status:           narrowStatus(r.status),
     email_is_generic: r.email_is_generic ?? false,
+    email_status:     narrowEmailStatus(r.email_status),
   }))
 
   return (

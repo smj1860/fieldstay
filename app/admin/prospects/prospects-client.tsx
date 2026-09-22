@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { patchById } from '@/lib/utils'
 import { toCsv } from '@/lib/prospecting/csv'
+import { ContactsPanel } from './contacts-panel'
 import {
   updateProspect, createProspect, bulkSetStatus,
   logProspectTouch, listProspectTouches, triggerProspectCrawl,
@@ -22,6 +23,7 @@ import {
   type ProspectEditableFields,
   type ProspectTouch,
   type TouchType,
+  type PromotedPrimary,
 } from './constants'
 
 /**
@@ -131,6 +133,7 @@ function blankRow(id: string, company: string): ProspectRow {
     market: null, portfolio_size: null, pms: null, pms_note: null,
     score_a: null, score_b: null, track: null, bucket: null,
     contact_name: null, contact_title: null, email: null, email_is_generic: false,
+    email_status: 'unknown',
     phone: null, linkedin_url: null, status: 'new', status_note: null,
     notes: null, last_touch_at: null, next_action_at: null,
     comparent_url: null, last_crawled_at: null, crawl_status: null,
@@ -201,6 +204,15 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
       }
       setSavedId(id)
     })
+  }
+
+  /**
+   * Applies a change the server has ALREADY written — no round trip, no
+   * revert path. save() above is for edits this page originates; this is for
+   * the result of one it delegated, like a contact promote.
+   */
+  function patchLocal(id: string, patch: Partial<ProspectRow>) {
+    setRows(patchById<ProspectRow>(id, patch))
   }
 
   function applyBulkStatus(status: ProspectStatus) {
@@ -366,6 +378,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
                 onToggleOpen={() => setExpanded((s) => toggle(s, r.id))}
                 onToggleSelect={() => setSelected((s) => toggle(s, r.id))}
                 onSave={(patch) => save(r.id, patch)}
+                onPrimaryChanged={(primary) => patchLocal(r.id, primary)}
               />
             ))}
           </tbody>
@@ -477,16 +490,18 @@ function FacetSelect({
 }
 
 function ProspectRowView({
-  row, isOpen, isSelected, justSaved, disabled, onToggleOpen, onToggleSelect, onSave,
+  row, isOpen, isSelected, justSaved, disabled,
+  onToggleOpen, onToggleSelect, onSave, onPrimaryChanged,
 }: Readonly<{
-  row:            ProspectRow
-  isOpen:         boolean
-  isSelected:     boolean
-  justSaved:      boolean
-  disabled:       boolean
-  onToggleOpen:   () => void
-  onToggleSelect: () => void
-  onSave:         (patch: Partial<ProspectEditableFields>) => void
+  row:               ProspectRow
+  isOpen:            boolean
+  isSelected:        boolean
+  justSaved:         boolean
+  disabled:          boolean
+  onToggleOpen:      () => void
+  onToggleSelect:    () => void
+  onSave:            (patch: Partial<ProspectEditableFields>) => void
+  onPrimaryChanged:  (primary: PromotedPrimary) => void
 }>) {
   const stale = daysSince(row.last_touch_at)
 
@@ -611,6 +626,7 @@ function ProspectRowView({
             <p className="pl-12 pr-2 mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
               {crawlStatusLine(row)}
             </p>
+            <ContactsPanel prospectId={row.id} onPrimaryChanged={onPrimaryChanged} />
             <HistoryPanel prospectId={row.id} />
           </td>
         </tr>
@@ -718,7 +734,12 @@ function ContactCell({ row }: Readonly<{ row: ProspectRow }>) {
     <>
       {row.contact_name !== null && <span className="block">{row.contact_name}</span>}
       {row.email !== null && (
-        <span className={`block ${row.email_is_generic === true ? 'opacity-60' : ''}`}>
+        <span
+          className={`block ${row.email_is_generic === true ? 'opacity-60' : ''}`}
+          style={row.email_status === 'bounced'
+            ? { color: 'var(--accent-red)', textDecoration: 'line-through' }
+            : undefined}
+        >
           {row.email}{row.email_is_generic === true && ' (role)'}
         </span>
       )}

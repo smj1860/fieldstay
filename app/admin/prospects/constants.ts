@@ -66,6 +66,8 @@ export interface ProspectRow {
   contact_title:         string | null
   email:                 string | null
   email_is_generic:      boolean | null
+  /** Whether the PRIMARY address still works. Additional contacts carry their own. */
+  email_status:          ProspectContactEmailStatus
   phone:                 string | null
   linkedin_url:          string | null
   status:                ProspectStatus
@@ -129,4 +131,73 @@ export type ProspectEditableFields = Pick<
   | 'pms' | 'pms_note' | 'contact_name' | 'contact_title' | 'email'
   | 'phone' | 'linkedin_url' | 'status' | 'status_note' | 'notes'
   | 'next_action_at'
+>
+
+/**
+ * An ADDITIONAL contact at a prospect company. The PRIMARY contact is not in
+ * this list — it lives on the account row itself (contact_name / email /
+ * phone / linkedin_url), which is what the contact-channel filter, the CSV
+ * export, the crawl and email_is_generic all read. See
+ * 20260922140000_prospect_contacts.sql for why it stayed there.
+ */
+export interface ProspectContactRow {
+  id:           string
+  prospect_id:  string
+  full_name:    string | null
+  title:        string | null
+  email:        string | null
+  phone:        string | null
+  linkedin_url: string | null
+  email_status: ProspectContactEmailStatus
+  notes:        string | null
+  created_at:   string
+}
+
+export const CONTACT_EMAIL_STATUSES = ['unknown', 'valid', 'bounced'] as const
+
+export type ProspectContactEmailStatus = (typeof CONTACT_EMAIL_STATUSES)[number]
+
+export const CONTACT_EMAIL_STATUS_LABELS: Record<ProspectContactEmailStatus, string> = {
+  unknown: 'Not verified',
+  valid:   'Confirmed good',
+  bounced: 'Bounced',
+}
+
+/** What the add/edit form sends. `id` absent means a new contact. */
+export interface ProspectContactInput {
+  id?:          string
+  full_name?:   string | null
+  title?:       string | null
+  email?:       string | null
+  phone?:       string | null
+  linkedin_url?: string | null
+  email_status?: ProspectContactEmailStatus
+  notes?:       string | null
+}
+
+/** The columns every contact read selects. */
+export const CONTACT_COLUMNS_SELECT = `
+  id, prospect_id, full_name, title, email, phone, linkedin_url,
+  email_status, notes, created_at
+`
+
+/** A company with more contacts than this is a research problem, not a list. */
+export const MAX_CONTACTS_PER_PROSPECT = 25
+
+/**
+ * What the account row holds after a promote.
+ *
+ * Read back from the database rather than derived in the browser: the swap
+ * moves values in both directions and email_is_generic is a GENERATED column,
+ * so the account is the only honest source for what it now holds.
+ */
+export const PROMOTED_PRIMARY_COLUMNS = `
+  contact_name, contact_title, email, phone, linkedin_url, email_is_generic,
+  email_status
+`
+
+export type PromotedPrimary = Pick<
+  ProspectRow,
+  | 'contact_name' | 'contact_title' | 'email' | 'phone' | 'linkedin_url'
+  | 'email_is_generic' | 'email_status'
 >

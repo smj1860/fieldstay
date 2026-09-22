@@ -4709,6 +4709,7 @@ export type Database = {
           domain: string | null
           email: string | null
           email_is_generic: boolean | null
+          email_status: string
           gate: string | null
           id: string
           import_id: string | null
@@ -4747,6 +4748,7 @@ export type Database = {
           domain?: string | null
           email?: string | null
           email_is_generic?: boolean | null
+          email_status?: string
           gate?: string | null
           id?: string
           import_id?: string | null
@@ -4785,6 +4787,7 @@ export type Database = {
           domain?: string | null
           email?: string | null
           email_is_generic?: boolean | null
+          email_status?: string
           gate?: string | null
           id?: string
           import_id?: string | null
@@ -4816,6 +4819,59 @@ export type Database = {
             columns: ["import_id"]
             isOneToOne: false
             referencedRelation: "prospect_imports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospect_contacts: {
+        Row: {
+          created_at: string
+          email: string | null
+          email_key: string | null
+          email_status: string
+          full_name: string | null
+          id: string
+          linkedin_url: string | null
+          notes: string | null
+          phone: string | null
+          prospect_id: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          email_key?: string | null
+          email_status?: string
+          full_name?: string | null
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          phone?: string | null
+          prospect_id: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          email_key?: string | null
+          email_status?: string
+          full_name?: string | null
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          phone?: string | null
+          prospect_id?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_contacts_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -7217,6 +7273,10 @@ export type Database = {
       prospect_apply_import_updates: {
         Args: { p_rows: Json }
         Returns: number
+      }
+      prospect_promote_contact: {
+        Args: { p_contact_id: string }
+        Returns: undefined
       }
       prospect_undo_import: {
         Args: { p_import_id: string }
