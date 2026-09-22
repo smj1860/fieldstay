@@ -39,9 +39,14 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-
-const KNOWN_PROJECTS = ['vpmznjktllhmmbfnxuvk', 'syhthijeqlnltufdawyb']
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { connect } from './prospecting/connect'
+import {
+  normalizeDomain,
+  normalizeName,
+  normalizePms,
+  normalizeText,
+} from '../lib/prospecting/normalize'
 
 /** Columns the scorer owns: refreshed on every import when the CSV has a value. */
 const SCORER_COLUMNS = [
@@ -201,18 +206,6 @@ function integer(row: string[], at: number | undefined): number | null {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
-/** Strips scheme, www and any path so the unique index sees one spelling. */
-function normalizeDomain(raw: string | null): string | null {
-  if (raw === null) return null
-  const d = raw
-    .replace(/^https?:\/\//i, '')
-    .replace(/^www\./i, '')
-    .split('/')[0]
-    .trim()
-    .toLowerCase()
-  return d === '' ? null : d
-}
-
 /**
  * A leading integer, ignoring whatever prose follows it.
  *
@@ -235,23 +228,6 @@ function leadingInteger(raw: string | null): number | null {
   return Number.isFinite(n) ? Math.round(n) : null
 }
 
-/**
- * True when a PMS cell holds an actual product name rather than prose.
- *
- * Two things land in that column on the master sheet and neither is a PMS:
- * a spilled fragment from an unquoted comma in the size column (' not local
- * count)', ' Lake Luxury NWA' — the exact failure this file's CSV parser
- * exists to survive, arriving instead from the sheet's own authoring), and a
- * researcher's observation typed in by hand ('website directs to AirBnB').
- *
- * Both are worth KEEPING — they are evidence — but under pms_note, not pms.
- * A real product name starts with a capital or a digit; neither of those two
- * shapes does.
- */
-function looksLikePmsName(raw: string | null): boolean {
-  return raw !== null && /^[A-Z0-9]/.test(raw)
-}
-
 function toUpsert(row: string[], ix: Record<string, number>): ProspectUpsert | null {
   const company = text(row, ix.company)
   if (company === null) return null
@@ -262,12 +238,18 @@ function toUpsert(row: string[], ix: Record<string, number>): ProspectUpsert | n
   const rawPms    = text(row, ix.pms)
   const ops       = text(row, ix.ops_software)
 
-  // A PMS cell that is not a product name, plus the ops platform, are both
-  // evidence and both belong in pms_note. Joined rather than one-or-other so
-  // neither is silently dropped when a row carries both.
+  // normalizePms splits the cell into the product and the evidence for it —
+  // a crawler fingerprint ("Streamline (ownerx.streamlinevrs.com)"), a second
+  // system the cell also named, or prose that was never a product at all.
+  // The evidence, plus the ops platform, belong in pms_note. Joined rather
+  // than one-or-other so neither is dropped when a row carries both.
+  const { pms, evidence } = rawPms === null
+    ? { pms: null, evidence: null }
+    : normalizePms(rawPms)
+
   const noteParts = [
     text(row, ix.pms_note),
-    looksLikePmsName(rawPms) ? null : rawPms,
+    evidence,
     ops === null ? null : `Ops: ${ops}`,
   ].filter((part): part is string => part !== null)
 
@@ -291,7 +273,7 @@ function toUpsert(row: string[], ix: Record<string, number>): ProspectUpsert | n
     // The raw cell, always — so "6 private cabins (Dall, Loon, Moose)" survives
     // next to the 6, and a prose-only cell is not simply thrown away.
     portfolio_size_method: text(row, ix.portfolio_size_method) ?? rawSize,
-    pms:                   looksLikePmsName(rawPms) ? rawPms : null,
+    pms,
     pms_note:              noteParts.length > 0 ? noteParts.join(' | ') : null,
     score_a:               integer(row, ix.score_a),
     score_b:               integer(row, ix.score_b),
@@ -417,28 +399,6 @@ function keysOf(row: { company: string; domain: string | null; city: string | nu
   return keys
 }
 
-/**
- * Company name reduced to what identifies it.
- *
- * Case, punctuation and a trailing legal suffix are noise between two
- * spellings of one company — 372 live rows carry an LLC/Inc/Co suffix, 117 an
- * ampersand, 57 a leading "The" — and the sheet does not spell them the same
- * way the database does.
- */
-function normalizeName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/\b(llc|l\.l\.c|inc|incorporated|co|corp|corporation|ltd|limited)\b/g, ' ')
-    .replace(/^the\s+/, ' ')
-    .replace(/[^a-z0-9]+/g, '')
-}
-
-/** Lowercased and stripped of punctuation; '' for absent, so it still keys. */
-function normalizeText(raw: string | null): string {
-  return (raw ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
-}
-
 function scorerPatch(row: ProspectUpsert): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   for (const col of SCORER_COLUMNS) {
@@ -475,24 +435,6 @@ function loadRows(file: string): ProspectUpsert[] {
   console.log(`parsed ${parsed.length} rows → ${rows.length} unique (${merged} merged)`)
   console.log(`mapped columns: ${Object.keys(ix).join(', ')}`)
   return rows
-}
-
-/**
- * Refuses a URL that does not name a FieldStay project, so a stray .env never
- * points this at someone else's database.
- */
-function connect(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (url === undefined || key === undefined) {
-    console.error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.')
-    process.exit(1)
-  }
-  if (!KNOWN_PROJECTS.some((project) => url.includes(project))) {
-    console.error(`Refusing to run: ${url} does not name a known FieldStay project.`)
-    process.exit(1)
-  }
-  return createClient(url, key)
 }
 
 function printPreview(rows: ProspectUpsert[]): void {
