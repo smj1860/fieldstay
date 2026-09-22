@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { patchById } from '@/lib/utils'
+import { toCsv } from '@/lib/prospecting/csv'
 import {
   updateProspect, createProspect, bulkSetStatus,
   logProspectTouch, listProspectTouches, triggerProspectCrawl,
@@ -92,13 +93,6 @@ function matchesSearch(r: ProspectRow, q: string): boolean {
 function uniqueSorted(values: (string | null)[]): string[] {
   return [...new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v))]
     .sort((a, b) => a.localeCompare(b))
-}
-
-function csvCell(value: string | number | boolean | null): string {
-  const s = value === null ? '' : String(value)
-  // Quote whenever the value could break the row apart, and double any inner
-  // quote — pms_note routinely holds commas and quoted fingerprints.
-  return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
 }
 
 const EXPORT_COLUMNS: (keyof ProspectRow)[] = [
@@ -251,9 +245,11 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
   }
 
   function exportCsv() {
-    const header = EXPORT_COLUMNS.join(',')
-    const body   = filtered.map((r) => EXPORT_COLUMNS.map((c) => csvCell(r[c])).join(',')).join('\n')
-    const blob   = new Blob([`${header}\n${body}`], { type: 'text/csv;charset=utf-8' })
+    // toCsv quotes what needs quoting AND defuses a leading =, +, - or @ —
+    // a company literally named "=SUM(1)" would otherwise be evaluated as a
+    // formula when this file is opened in Sheets or Excel.
+    const csv  = toCsv(EXPORT_COLUMNS, filtered.map((r) => EXPORT_COLUMNS.map((c) => r[c])))
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url    = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url

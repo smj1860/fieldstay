@@ -124,11 +124,19 @@ export interface ExistingRow {
   linkedin_url:          string | null
 }
 
-/** The columns loadExisting / the identity query must select. */
-export const EXISTING_COLUMNS =
-  'id, company, domain, city, state, market, region, website, comparent_url, ' +
-  'portfolio_size, portfolio_size_method, pms, pms_note, score_a, score_b, ' +
-  'track, bucket, gate, source, contact_name, contact_title, email, phone, linkedin_url'
+/**
+ * The columns loadExisting / the identity query must select.
+ *
+ * A single template literal, not a concatenation: postgrest-js infers the row
+ * shape from the literal TYPE of the select string, and `'a' + 'b'` widens to
+ * `string`, which collapses the result to GenericStringError[].
+ */
+export const EXISTING_COLUMNS = `
+  id, company, domain, city, state, market, region, website, comparent_url,
+  portfolio_size, portfolio_size_method, pms, pms_note, score_a, score_b,
+  track, bucket, gate, source, contact_name, contact_title, email, phone,
+  linkedin_url
+`
 
 export interface MappedRow {
   /** 1-based line in the source file, for an error the operator can find. */

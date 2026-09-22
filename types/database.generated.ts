@@ -4711,6 +4711,7 @@ export type Database = {
           email_is_generic: boolean | null
           gate: string | null
           id: string
+          import_id: string | null
           last_crawled_at: string | null
           last_touch_at: string | null
           linkedin_url: string | null
@@ -4748,6 +4749,7 @@ export type Database = {
           email_is_generic?: boolean | null
           gate?: string | null
           id?: string
+          import_id?: string | null
           last_crawled_at?: string | null
           last_touch_at?: string | null
           linkedin_url?: string | null
@@ -4785,6 +4787,7 @@ export type Database = {
           email_is_generic?: boolean | null
           gate?: string | null
           id?: string
+          import_id?: string | null
           last_crawled_at?: string | null
           last_touch_at?: string | null
           linkedin_url?: string | null
@@ -4806,6 +4809,59 @@ export type Database = {
           track?: string | null
           updated_at?: string
           website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_accounts_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_imports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospect_imports: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_count: number
+          error: string | null
+          id: string
+          imported_by: string | null
+          row_count: number
+          skipped_count: number
+          source_name: string
+          status: string
+          undone_at: string | null
+          updated_count: number
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_count?: number
+          error?: string | null
+          id?: string
+          imported_by?: string | null
+          row_count?: number
+          skipped_count?: number
+          source_name: string
+          status?: string
+          undone_at?: string | null
+          updated_count?: number
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_count?: number
+          error?: string | null
+          id?: string
+          imported_by?: string | null
+          row_count?: number
+          skipped_count?: number
+          source_name?: string
+          status?: string
+          undone_at?: string | null
+          updated_count?: number
         }
         Relationships: []
       }
@@ -7158,6 +7214,14 @@ export type Database = {
         Returns: undefined
       }
       property_defaults_report: { Args: never; Returns: Json }
+      prospect_apply_import_updates: {
+        Args: { p_rows: Json }
+        Returns: number
+      }
+      prospect_undo_import: {
+        Args: { p_import_id: string }
+        Returns: number
+      }
       purge_expired_audit_events: { Args: never; Returns: Json }
       purge_org_table_batch: {
         Args: { p_batch_size?: number; p_org_id: string; p_table_name: string }

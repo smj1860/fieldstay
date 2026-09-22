@@ -2404,6 +2404,7 @@ export interface HandWrittenRowMap {
   inspection_items:                    InspectionItem
   prospect_accounts:                   ProspectAccount
   prospect_touches:                    ProspectTouch
+  prospect_imports:                    ProspectImport
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
@@ -2732,6 +2733,14 @@ export interface ProspectAccount {
   crawl_error:     string | null
 
   source:     string | null
+
+  /**
+   * The import that CREATED this row (20260922120000_prospect_imports.sql),
+   * or NULL for a row added another way. Never set on a row an import merely
+   * updated — undo must not delete a company that predated the file.
+   */
+  import_id:  string | null
+
   created_at: string
   updated_at: string
 }
@@ -2777,3 +2786,31 @@ export type ProspectTouchType =
   | 'replied'
   | 'meeting_set'
   | 'note'
+
+/**
+ * One admin import run against prospect_accounts
+ * (20260922120000_prospect_imports.sql). No DELETE grant for authenticated:
+ * an import reaches status 'undone', it is never erased.
+ */
+export interface ProspectImport {
+  id:            string
+  /** The operator's filename — the only way to tell two runs apart. */
+  source_name:   string
+
+  /** Counted from the plan that was applied, not from the file's row count. */
+  row_count:     number
+  created_count: number
+  updated_count: number
+  /** Rows the file carried that could not be used (no company name). */
+  skipped_count: number
+
+  status:        ProspectImportStatus
+  error:         string | null
+
+  imported_by:   string | null
+  created_at:    string
+  completed_at:  string | null
+  undone_at:     string | null
+}
+
+export type ProspectImportStatus = 'running' | 'complete' | 'failed' | 'undone'
