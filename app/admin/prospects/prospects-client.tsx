@@ -8,6 +8,7 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { patchById } from '@/lib/utils'
 import { toCsv } from '@/lib/prospecting/csv'
 import { ProspectEditDialog } from './edit-dialog'
+import { StrscoutSyncButton } from './strscout-sync-button'
 import { updateProspect, createProspect, bulkSetStatus, triggerProspectCrawl } from './actions'
 import {
   PROSPECT_STATUSES,
@@ -311,6 +312,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
               ))}
             </select>
           )}
+          <StrscoutSyncButton />
           <Button
             variant="secondary"
             onClick={refreshFromComparent}
