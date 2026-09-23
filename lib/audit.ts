@@ -174,6 +174,7 @@ export type AuditAction =
   | 'platform_admin.prospect_contact.deleted'
   | 'platform_admin.prospect_contact.promoted'
   | 'platform_admin.prospect_strscout.synced'
+  | 'platform_admin.prospect_pms.normalized'
   | 'platform_admin.inventory_template.items_saved'
   | 'platform_admin.inventory_template.broadcast_requested'
   | 'platform_admin.inventory_template.broadcast_synced'

@@ -7274,6 +7274,10 @@ export type Database = {
         Args: { p_rows: Json }
         Returns: number
       }
+      prospect_apply_pms_normalization: {
+        Args: { p_rows: Json }
+        Returns: number
+      }
       prospect_promote_contact: {
         Args: { p_contact_id: string }
         Returns: undefined

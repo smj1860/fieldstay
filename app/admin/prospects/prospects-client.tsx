@@ -9,6 +9,7 @@ import { patchById } from '@/lib/utils'
 import { toCsv } from '@/lib/prospecting/csv'
 import { ProspectEditDialog } from './edit-dialog'
 import { StrscoutSyncButton } from './strscout-sync-button'
+import { PmsBackfillButton } from './pms-backfill-button'
 import { updateProspect, createProspect, bulkSetStatus, triggerProspectCrawl } from './actions'
 import {
   PROSPECT_STATUSES,
@@ -313,6 +314,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
             </select>
           )}
           <StrscoutSyncButton />
+          <PmsBackfillButton />
           <Button
             variant="secondary"
             onClick={refreshFromComparent}
@@ -516,101 +518,98 @@ function ProspectRowView({
   const stale = daysSince(row.last_touch_at)
 
   return (
-    <>
-      <tr className="border-b align-top" style={{ borderColor: 'var(--border)' }}>
-        <td className="py-2">
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={onToggleSelect}
-            aria-label={`Select ${row.company}`}
+    <tr className="border-b align-top" style={{ borderColor: 'var(--border)' }}>
+      <td className="py-2">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggleSelect}
+          aria-label={`Select ${row.company}`}
+        />
+      </td>
+      <td className="py-2 pr-2">
+        <Button
+          variant="secondary"
+          onClick={onEdit}
+          aria-label={`Edit ${row.company}`}
+          className="text-xs flex items-center gap-1 whitespace-nowrap"
+        >
+          <Pencil size={12} aria-hidden="true" /> Edit
+        </Button>
+      </td>
+      <td className="py-2 pr-3">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="text-left hover:underline focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)] rounded"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {row.company}
+        </button>
+        {justSaved && (
+          <Check
+            size={12}
+            className="inline ml-1"
+            style={{ color: 'var(--accent-gold)' }}
+            aria-label="Saved"
           />
-        </td>
-        <td className="py-2 pr-2">
-          <Button
-            variant="secondary"
-            onClick={onEdit}
-            aria-label={`Edit ${row.company}`}
-            className="text-xs flex items-center gap-1 whitespace-nowrap"
+        )}
+        {row.domain !== null && (
+          <a
+            href={row.website ?? `https://${row.domain}`}
+            target="_blank"
+            rel="noreferrer"
+            className="block text-xs hover:underline"
+            style={{ color: 'var(--text-muted)' }}
           >
-            <Pencil size={12} aria-hidden="true" /> Edit
-          </Button>
-        </td>
-        <td className="py-2 pr-3">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="text-left hover:underline focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)] rounded"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            {row.company}
-          </button>
-          {justSaved && (
-            <Check
-              size={12}
-              className="inline ml-1"
-              style={{ color: 'var(--accent-gold)' }}
-              aria-label="Saved"
-            />
-          )}
-          {row.domain !== null && (
-            <a
-              href={row.website ?? `https://${row.domain}`}
-              target="_blank"
-              rel="noreferrer"
-              className="block text-xs hover:underline"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {row.domain}
-            </a>
-          )}
-        </td>
-        <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {[row.city, row.state].filter(Boolean).join(', ') || '—'}
-        </td>
-        <td className="py-2 pr-3 text-right text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {row.portfolio_size ?? '—'}
-        </td>
-        <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {row.pms ?? '—'}
-        </td>
-        <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          <ContactCell row={row} />
-        </td>
-        <td className="py-2 pr-3 text-right text-xs" style={{ color: 'var(--text-muted)' }}>
-          {row.score_a ?? '–'} / {row.score_b ?? '–'}
-        </td>
-        <td className="py-2 pr-3">
-          <select
-            className={SELECT_CLASS}
-            aria-label={`Status for ${row.company}`}
-            value={row.status}
-            disabled={disabled}
-            onChange={(e) => onSave({ status: e.target.value as ProspectStatus })}
-          >
-            {PROSPECT_STATUSES.map((s) => (
-              <option key={s} value={s}>{PROSPECT_STATUS_LABELS[s]}</option>
-            ))}
-          </select>
-          {stale !== null && (
-            <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              {stale === 0 ? 'touched today' : `${stale}d since touch`}
-            </span>
-          )}
-        </td>
-        <td className="py-2 pr-3">
-          <input
-            type="date"
-            className="input text-xs py-1"
-            aria-label={`Next action date for ${row.company}`}
-            value={row.next_action_at ?? ''}
-            disabled={disabled}
-            onChange={(e) => onSave({ next_action_at: e.target.value })}
-          />
-        </td>
-      </tr>
-
-    </>
+            {row.domain}
+          </a>
+        )}
+      </td>
+      <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        {[row.city, row.state].filter(Boolean).join(', ') || '—'}
+      </td>
+      <td className="py-2 pr-3 text-right text-xs" style={{ color: 'var(--text-secondary)' }}>
+        {row.portfolio_size ?? '—'}
+      </td>
+      <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        {row.pms ?? '—'}
+      </td>
+      <td className="py-2 pr-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <ContactCell row={row} />
+      </td>
+      <td className="py-2 pr-3 text-right text-xs" style={{ color: 'var(--text-muted)' }}>
+        {row.score_a ?? '–'} / {row.score_b ?? '–'}
+      </td>
+      <td className="py-2 pr-3">
+        <select
+          className={SELECT_CLASS}
+          aria-label={`Status for ${row.company}`}
+          value={row.status}
+          disabled={disabled}
+          onChange={(e) => onSave({ status: e.target.value as ProspectStatus })}
+        >
+          {PROSPECT_STATUSES.map((s) => (
+            <option key={s} value={s}>{PROSPECT_STATUS_LABELS[s]}</option>
+          ))}
+        </select>
+        {stale !== null && (
+          <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            {stale === 0 ? 'touched today' : `${stale}d since touch`}
+          </span>
+        )}
+      </td>
+      <td className="py-2 pr-3">
+        <input
+          type="date"
+          className="input text-xs py-1"
+          aria-label={`Next action date for ${row.company}`}
+          value={row.next_action_at ?? ''}
+          disabled={disabled}
+          onChange={(e) => onSave({ next_action_at: e.target.value })}
+        />
+      </td>
+    </tr>
   )
 }
 
