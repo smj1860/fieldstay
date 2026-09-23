@@ -185,6 +185,18 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
   'guidebook_offer_redemptions',
   'vendor_assignment_outcomes',
   'guidebook_guest_sms_optins',
+  // Outbound prospect list written by the strscout scraper with the service
+  // role. Deny-all is the DESIGN, not an omission: the table's own COMMENT
+  // says so, only service_role holds a grant (anon and authenticated have
+  // none at all), and nothing in app/ or lib/ reads it — there is no client
+  // query for a policy to permit. Reconstructed into
+  // 20260919155031_create_str_prospects.sql on 2026-09-23 after the ledger
+  // parity check found it applied to production with no file; it landed here
+  // at the same time because a deny-all table that nobody has written the
+  // decision down for is indistinguishable from a forgotten one.
+  // str_prospects_icp, the view over it, is security_invoker so it cannot
+  // become a way around this.
+  'str_prospects',
 ])
 
 // Storage buckets with deliberately NO storage.objects policy: no client ever
