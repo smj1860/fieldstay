@@ -73,10 +73,15 @@ async function loadScrapedRows(
 
   const rows: StrProspectRow[] = []
   for (let at = 0; at < keys.length; at += STRSCOUT_CHUNK) {
+    // .limit() as well as the key slice: one row comes back per key, so the
+    // slice already bounds this at STRSCOUT_CHUNK — but `.in()` is not an
+    // equality filter, so nothing structural said so, and an unbounded
+    // select is silently truncated at PostgREST's max_rows with a 200.
     const { data, error } = await supabase
       .from('str_prospects')
       .select(STR_PROSPECT_COLUMNS)
       .in('dedupe_key', keys.slice(at, at + STRSCOUT_CHUNK))
+      .limit(STRSCOUT_CHUNK)
     if (error) throw new Error(`str_prospects: ${error.message}`)
     rows.push(...((data ?? []) as unknown as StrProspectRow[]))
   }

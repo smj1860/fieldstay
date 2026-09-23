@@ -27,7 +27,7 @@ function plural(n: number, one: string, many: string): string {
  */
 export function StrscoutSyncButton() {
   const [open, setOpen]         = useState(false)
-  const [sizedOnly, setSized]   = useState(false)
+  const [sizedOnly, setSizedOnly] = useState(false)
   const [summary, setSummary]   = useState<StrscoutPlanSummary | null>(null)
   const [done, setDone]         = useState<{ added: number; filled: number } | null>(null)
   const [error, setError]       = useState('')
@@ -54,7 +54,7 @@ export function StrscoutSyncButton() {
   }
 
   function toggleSized(next: boolean): void {
-    setSized(next)
+    setSizedOnly(next)
     loadPlan(next)
   }
 

@@ -2406,11 +2406,13 @@ export interface HandWrittenRowMap {
   prospect_touches:                    ProspectTouch
   prospect_imports:                    ProspectImport
   prospect_contacts:                   ProspectContact
+  str_prospects:                       StrProspect
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
 export interface HandWrittenViewMap {
   vendor_compliance_status: VendorComplianceStatus
+  str_prospects_icp:        StrProspectIcp
 }
 
 export type { Database } from './database.generated'
@@ -2855,3 +2857,82 @@ export interface ProspectContact {
 }
 
 export type ProspectEmailStatus = 'unknown' | 'valid' | 'bounced'
+
+/**
+ * The strscout scraper's outbound prospect list
+ * (20260919155031_create_str_prospects.sql).
+ *
+ * A SEPARATE list from prospect_accounts: different source, different key, no
+ * FK between them. /admin/prospects pulls qualifying rows across into the
+ * funnel (lib/prospecting/str-prospects.ts); nothing else reads it.
+ *
+ * Service-role only — RLS is enabled with ZERO policies by design and
+ * `authenticated` holds no grant at all, so a session-scoped client cannot
+ * read this table. See the migration header before adding a policy.
+ *
+ * Only dedupe_key and name are NOT NULL. Note that the scraper writes EMPTY
+ * STRINGS rather than NULLs for the contact fields — a value being non-null
+ * here does not mean it carries anything.
+ */
+export interface StrProspect {
+  /** Primary key; the scraper upserts on it. */
+  dedupe_key:        string
+  name:              string
+  name_canonical:    string | null
+  kind:              string | null
+  state:             string | null
+  city:              string | null
+  website:           string | null
+  domain:            string | null
+  phone:             string | null
+  email:             string | null
+  address:           string | null
+  /** 0 for the scraper's "unsized" directory rows, not "no doors". */
+  property_count:    number | null
+  properties_sample: string | null
+  confidence:        number | null
+  source:            string | null
+  source_detail:     string | null
+  evidence_url:      string | null
+  first_seen:        string | null
+  last_seen:         string | null
+  status:            string | null
+  pms:               string | null
+  owner_notes:       string | null
+  updated_at:        string | null
+}
+
+/**
+ * str_prospects filtered to the FieldStay ICP
+ * (20260919155038_create_str_prospects_icp_view.sql) — 10-150 properties
+ * core, gray band to 225, plus unsized directory rows.
+ *
+ * THE VIEW OWNS THAT DEFINITION. The sync reads it for membership and reads
+ * the base table for columns, rather than repeating its WHERE clause, which
+ * would be a second copy of the rule to drift. It deliberately does not
+ * expose `domain`, which is why the two-step read exists.
+ *
+ * security_invoker, so it is not a way around the table's deny-all RLS.
+ * Every column is nullable, as a view's always are.
+ */
+export interface StrProspectIcp {
+  dedupe_key:     string | null
+  name:           string | null
+  state:          string | null
+  city:           string | null
+  website:        string | null
+  phone:          string | null
+  email:          string | null
+  property_count: number | null
+  confidence:     number | null
+  kind:           string | null
+  source:         string | null
+  source_detail:  string | null
+  evidence_url:   string | null
+  status:         string | null
+  pms:            string | null
+  owner_notes:    string | null
+  last_seen:      string | null
+  /** 'core' | 'gray' | 'unsized' | 'out_of_band', computed by the view. */
+  icp_band:       string | null
+}

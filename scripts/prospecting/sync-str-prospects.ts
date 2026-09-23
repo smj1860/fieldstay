@@ -81,6 +81,7 @@ async function loadIcpRows(supabase: Supabase, sizedOnly: boolean): Promise<StrP
       .from('str_prospects')
       .select(STR_PROSPECT_COLUMNS)
       .in('dedupe_key', slice)
+      .limit(CHUNK)
     if (error) throw new Error(`str_prospects: ${error.message}`)
     rows.push(...((data ?? []) as unknown as StrProspectRow[]))
   }
@@ -126,10 +127,10 @@ async function apply(supabase: Supabase, plan: ImportPlan): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2)
+  const args = new Set(process.argv.slice(2))
   const supabase = connect()
 
-  const scraped = await loadIcpRows(supabase, args.includes('--sized-only'))
+  const scraped = await loadIcpRows(supabase, args.has('--sized-only'))
   const mapped = scraped
     .map(toProspectUpsert)
     .filter((r): r is ProspectUpsert => r !== null)
@@ -137,7 +138,7 @@ async function main(): Promise<void> {
   const plan = planStrProspectSync(mapped, await loadExisting(supabase))
   printPlan(plan, mapped.length)
 
-  if (args.includes('--plan')) {
+  if (args.has('--plan')) {
     console.log('')
     console.log('--plan: NOTHING WRITTEN.')
     return
