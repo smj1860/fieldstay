@@ -1,29 +1,21 @@
 'use client'
 
-import { useEffect, useId, useMemo, useState, useTransition } from 'react'
-import { ChevronDown, ChevronRight, Download, Plus, Check, RefreshCw } from 'lucide-react'
+import { useId, useMemo, useState, useTransition } from 'react'
+import { Download, Plus, Check, RefreshCw, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { patchById } from '@/lib/utils'
 import { toCsv } from '@/lib/prospecting/csv'
-import { ContactsPanel } from './contacts-panel'
-import {
-  updateProspect, createProspect, bulkSetStatus,
-  logProspectTouch, listProspectTouches, triggerProspectCrawl,
-} from './actions'
+import { ProspectEditDialog } from './edit-dialog'
+import { updateProspect, createProspect, bulkSetStatus, triggerProspectCrawl } from './actions'
 import {
   PROSPECT_STATUSES,
   PROSPECT_STATUS_LABELS,
   CLOSED_STATUSES,
-  TOUCH_TYPES,
-  TOUCH_TYPE_LABELS,
   type ProspectRow,
   type ProspectStatus,
   type ProspectEditableFields,
-  type ProspectTouch,
-  type TouchType,
-  type PromotedPrimary,
 } from './constants'
 
 /**
@@ -110,23 +102,6 @@ function daysSince(iso: string | null): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 86_400_000) : null
 }
 
-/** The "Last crawled" line under an expanded row's edit fields. */
-function crawlStatusLine(row: ProspectRow): string {
-  if (row.comparent_url === null) {
-    return 'No comparent_url on file — not eligible for "Refresh from Comparent."'
-  }
-  if (row.last_crawled_at === null) return 'Never crawled.'
-
-  const days = daysSince(row.last_crawled_at)
-  const when = days === 0 ? 'today' : `${days}d ago`
-
-  let suffix = ''
-  if (row.crawl_status === 'error') suffix = ' — last attempt failed'
-  else if (row.crawl_status === 'no_website') suffix = ' — no website found'
-
-  return `Last crawled ${when}${suffix}`
-}
-
 function blankRow(id: string, company: string): ProspectRow {
   return {
     id, company, domain: null, website: null, city: null, state: null,
@@ -161,7 +136,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
   const [rows, setRows]         = useState<ProspectRow[]>(initialRows)
   const [search, setSearch]     = useState('')
   const [facets, setFacets]     = useState<Facets>(EMPTY_FACETS)
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [error, setError]       = useState('')
   const [savedId, setSavedId]   = useState('')
@@ -179,6 +154,11 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
     return rows.filter((r) => matchesFacets(r, facets) && matchesSearch(r, q))
   }, [rows, search, facets])
 
+  const editingRow = useMemo(
+    () => (editingId === null ? undefined : rows.find((r) => r.id === editingId)),
+    [rows, editingId],
+  )
+
   const doors = useMemo(
     () => filtered.reduce((sum, r) => sum + (r.portfolio_size ?? 0), 0),
     [filtered],
@@ -188,22 +168,37 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
     setFacets((f) => ({ ...f, [key]: value }))
   }
 
-  function save(id: string, patch: Partial<ProspectEditableFields>) {
-    // Optimistic: the row updates immediately and reverts only if the server
-    // rejects it. A cell that waits for a round trip is unusable when you are
-    // working down a list of forty.
+  /**
+   * Optimistic write with revert, reporting whether the server accepted it.
+   *
+   * The row updates immediately and goes back only if the server rejects it —
+   * a cell that waits for a round trip is unusable when you are working down
+   * a list of forty. The boolean is what lets the edit dialog stay OPEN on a
+   * rejection: it closed straight away once, which threw away everything the
+   * person had typed the moment a duplicate domain came back.
+   */
+  async function commit(
+    id: string,
+    patch: Partial<ProspectEditableFields>,
+  ): Promise<boolean> {
     const before = rows.find((r) => r.id === id)
     setRows(patchById<ProspectRow>(id, patch))
     setError('')
-    startTransition(async () => {
-      const res = await updateProspect(id, patch)
-      if (res.error !== undefined) {
-        setError(res.error)
-        if (before !== undefined) setRows(patchById<ProspectRow>(id, before))
-        return
-      }
-      setSavedId(id)
-    })
+
+    const res = await updateProspect(id, patch)
+    if (res.error !== undefined) {
+      setError(res.error)
+      if (before !== undefined) setRows(patchById<ProspectRow>(id, before))
+      return false
+    }
+
+    setSavedId(id)
+    return true
+  }
+
+  /** The inline row controls, which have nowhere to show a pending state. */
+  function save(id: string, patch: Partial<ProspectEditableFields>) {
+    startTransition(async () => { await commit(id, patch) })
   }
 
   /**
@@ -237,7 +232,9 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
       if (id === undefined) { setError(res.error ?? 'Could not add.'); return }
       setRows((rs) => [blankRow(id, company), ...rs])
       setNewCompany('')
-      setExpanded((s) => toggle(s, id))
+      // Straight into the editor: a company you just typed the name of is a
+      // company you are about to record an email or a contact for.
+      setEditingId(id)
     })
   }
 
@@ -292,6 +289,10 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
           {' '}of {rows.length} accounts
           {doors > 0 && <> · {doors.toLocaleString()} doors</>}
           {selected.size > 0 && <> · {selected.size} selected</>}
+          <span className="block mt-0.5">
+            Tap <strong style={{ color: 'var(--text-secondary)' }}>Edit</strong> (or a company
+            name) to add an email, a contact or notes.
+          </span>
         </p>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
@@ -347,6 +348,18 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
         </Button>
       </div>
 
+      {editingRow !== undefined && (
+        <ProspectEditDialog
+          key={editingRow.id}
+          row={editingRow}
+          open
+          saveError={error}
+          onClose={() => setEditingId(null)}
+          onSave={(patch) => commit(editingRow.id, patch)}
+          onPrimaryChanged={(primary) => patchLocal(editingRow.id, primary)}
+        />
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -355,7 +368,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
               style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
             >
               <th scope="col" className="py-2 w-8"><span className="sr-only">Select</span></th>
-              <th scope="col" className="py-2 w-8"><span className="sr-only">Expand</span></th>
+              <th scope="col" className="py-2 pr-2"><span className="sr-only">Edit</span></th>
               <th scope="col" className="py-2 pr-3">Company</th>
               <th scope="col" className="py-2 pr-3">Where</th>
               <th scope="col" className="py-2 pr-3 text-right">Doors</th>
@@ -371,14 +384,12 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
               <ProspectRowView
                 key={r.id}
                 row={r}
-                isOpen={expanded.has(r.id)}
                 isSelected={selected.has(r.id)}
                 justSaved={savedId === r.id}
                 disabled={pending}
-                onToggleOpen={() => setExpanded((s) => toggle(s, r.id))}
                 onToggleSelect={() => setSelected((s) => toggle(s, r.id))}
                 onSave={(patch) => save(r.id, patch)}
-                onPrimaryChanged={(primary) => patchLocal(r.id, primary)}
+                onEdit={() => { setError(''); setEditingId(r.id) }}
               />
             ))}
           </tbody>
@@ -490,18 +501,15 @@ function FacetSelect({
 }
 
 function ProspectRowView({
-  row, isOpen, isSelected, justSaved, disabled,
-  onToggleOpen, onToggleSelect, onSave, onPrimaryChanged,
+  row, isSelected, justSaved, disabled, onToggleSelect, onSave, onEdit,
 }: Readonly<{
-  row:               ProspectRow
-  isOpen:            boolean
-  isSelected:        boolean
-  justSaved:         boolean
-  disabled:          boolean
-  onToggleOpen:      () => void
-  onToggleSelect:    () => void
-  onSave:            (patch: Partial<ProspectEditableFields>) => void
-  onPrimaryChanged:  (primary: PromotedPrimary) => void
+  row:            ProspectRow
+  isSelected:     boolean
+  justSaved:      boolean
+  disabled:       boolean
+  onToggleSelect: () => void
+  onSave:         (patch: Partial<ProspectEditableFields>) => void
+  onEdit:         () => void
 }>) {
   const stale = daysSince(row.last_touch_at)
 
@@ -516,21 +524,25 @@ function ProspectRowView({
             aria-label={`Select ${row.company}`}
           />
         </td>
-        <td className="py-2">
-          <button
-            type="button"
-            onClick={onToggleOpen}
-            aria-expanded={isOpen}
-            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${row.company}`}
-            style={{ color: 'var(--text-muted)' }}
+        <td className="py-2 pr-2">
+          <Button
+            variant="secondary"
+            onClick={onEdit}
+            aria-label={`Edit ${row.company}`}
+            className="text-xs flex items-center gap-1 whitespace-nowrap"
           >
-            {isOpen
-              ? <ChevronDown size={14} aria-hidden="true" />
-              : <ChevronRight size={14} aria-hidden="true" />}
-          </button>
+            <Pencil size={12} aria-hidden="true" /> Edit
+          </Button>
         </td>
         <td className="py-2 pr-3">
-          <span style={{ color: 'var(--text-primary)' }}>{row.company}</span>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-left hover:underline focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)] rounded"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {row.company}
+          </button>
           {justSaved && (
             <Check
               size={12}
@@ -596,134 +608,7 @@ function ProspectRowView({
         </td>
       </tr>
 
-      {isOpen && (
-        <tr style={{ borderColor: 'var(--border)' }}>
-          <td colSpan={10} className="pb-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 pl-12 pr-2">
-              <Field label="Contact name" value={row.contact_name}
-                     onSave={(v) => onSave({ contact_name: v })} />
-              <Field label="Title" value={row.contact_title}
-                     onSave={(v) => onSave({ contact_title: v })} />
-              <Field label="Email" value={row.email}
-                     onSave={(v) => onSave({ email: v })} />
-              <Field label="Phone" value={row.phone}
-                     onSave={(v) => onSave({ phone: v })} />
-              <Field label="LinkedIn" value={row.linkedin_url}
-                     onSave={(v) => onSave({ linkedin_url: v })} />
-              <Field label="Domain" value={row.domain}
-                     onSave={(v) => onSave({ domain: v })} />
-              <Field label="PMS" value={row.pms}
-                     onSave={(v) => onSave({ pms: v })} />
-              <Field label="City" value={row.city}
-                     onSave={(v) => onSave({ city: v })} />
-              <Field label="Market" value={row.market}
-                     onSave={(v) => onSave({ market: v })} />
-              <Field label="How the PMS was identified" value={row.pms_note} textarea
-                     onSave={(v) => onSave({ pms_note: v })} className="sm:col-span-2" />
-              <Field label="Notes" value={row.notes} textarea
-                     onSave={(v) => onSave({ notes: v })} className="sm:col-span-2" />
-            </div>
-            <p className="pl-12 pr-2 mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              {crawlStatusLine(row)}
-            </p>
-            <ContactsPanel prospectId={row.id} onPrimaryChanged={onPrimaryChanged} />
-            <HistoryPanel prospectId={row.id} />
-          </td>
-        </tr>
-      )}
     </>
-  )
-}
-
-function HistoryList({ touches }: Readonly<{ touches: ProspectTouch[] | null }>) {
-  if (touches === null) {
-    return <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</p>
-  }
-  if (touches.length === 0) {
-    return <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No touches logged yet.</p>
-  }
-  return (
-    <ul className="space-y-1 mb-2">
-      {touches.map((t) => (
-        <li key={t.id} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          <span style={{ color: 'var(--text-primary)' }}>{TOUCH_TYPE_LABELS[t.touch_type]}</span>
-          {' · '}
-          {new Date(t.occurred_at).toLocaleDateString()}
-          {t.note !== null && t.note !== '' && <> — {t.note}</>}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** Lazily loads and renders one prospect's touch history, plus a form to log a new one. */
-function HistoryPanel({ prospectId }: Readonly<{ prospectId: string }>) {
-  const [touches, setTouches] = useState<ProspectTouch[] | null>(null)
-  const [loadError, setLoadError] = useState('')
-  const [touchType, setTouchType] = useState<TouchType>('note')
-  const [note, setNote] = useState('')
-  const [logging, startLogging] = useTransition()
-
-  useEffect(() => {
-    let cancelled = false
-    listProspectTouches(prospectId).then((res) => {
-      if (cancelled) return
-      if (res.error !== undefined) { setLoadError(res.error); return }
-      setTouches(res.touches ?? [])
-    })
-    return () => { cancelled = true }
-  }, [prospectId])
-
-  function logTouch() {
-    startLogging(async () => {
-      const res = await logProspectTouch(prospectId, touchType, note.trim() || undefined)
-      if (res.error !== undefined) { setLoadError(res.error); return }
-      setNote('')
-      const refreshed = await listProspectTouches(prospectId)
-      if (refreshed.touches !== undefined) setTouches(refreshed.touches)
-    })
-  }
-
-  return (
-    <div className="pl-12 pr-2 mt-3">
-      <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: 'var(--text-muted)' }}>
-        History
-      </p>
-
-      {loadError !== '' && <InlineAlert tone="error" className="mb-2">{loadError}</InlineAlert>}
-
-      <HistoryList touches={touches} />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          className={SELECT_CLASS}
-          aria-label="Touch type"
-          value={touchType}
-          disabled={logging}
-          onChange={(e) => setTouchType(e.target.value as TouchType)}
-        >
-          {TOUCH_TYPES.map((t) => (
-            <option key={t} value={t}>{TOUCH_TYPE_LABELS[t]}</option>
-          ))}
-        </select>
-        <Input
-          value={note}
-          aria-label="Touch note"
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') logTouch() }}
-          placeholder="Optional note…"
-          className="max-w-xs text-xs"
-        />
-        <Button
-          variant="secondary"
-          onClick={logTouch}
-          disabled={logging}
-          className="text-xs"
-        >
-          Log
-        </Button>
-      </div>
-    </div>
   )
 }
 
@@ -745,56 +630,5 @@ function ContactCell({ row }: Readonly<{ row: ProspectRow }>) {
       )}
       {row.phone !== null && <span className="block">{row.phone}</span>}
     </>
-  )
-}
-
-/**
- * Saves on blur rather than on every keystroke: a server action per character
- * would be one write per letter of "Tiffany Rainwater".
- */
-function Field({
-  label, value, onSave, textarea = false, className = '',
-}: Readonly<{
-  label:     string
-  value:     string | null
-  onSave:    (v: string) => void
-  textarea?: boolean
-  className?: string
-}>) {
-  const fieldId = useId()
-  const [draft, setDraft] = useState(value ?? '')
-
-  function commit() {
-    if (draft !== (value ?? '')) onSave(draft)
-  }
-
-  return (
-    <div className={className}>
-      <label
-        htmlFor={fieldId}
-        className="block text-[11px] uppercase tracking-wide mb-1"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        {label}
-      </label>
-      {textarea ? (
-        <textarea
-          id={fieldId}
-          className="input text-xs w-full"
-          rows={2}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-        />
-      ) : (
-        <Input
-          id={fieldId}
-          className="text-xs"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-        />
-      )}
-    </div>
   )
 }
