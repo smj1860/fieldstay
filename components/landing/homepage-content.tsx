@@ -750,7 +750,7 @@ export function HomepageContent() {
           <h1 className="font-display font-semibold" style={{ fontSize: 'clamp(40px, 6vw, 72px)', lineHeight: 0.98, letterSpacing: '-2.5px', color: '#102246' }}>
             <span className="block text-xs font-bold uppercase tracking-[0.14em]" style={{ color: '#6B5B3A', fontFamily: 'var(--font-archivo), Arial, sans-serif', lineHeight: 1.5, letterSpacing: '0.14em', marginBottom: 28 }}>
               Short-term rental operations software
-            </span>
+            </span>{' '}
             Make your day less stressful.
           </h1>
           <p className="text-xl leading-relaxed" style={{ color: '#3D4A63', maxWidth: 540 }}>
