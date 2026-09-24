@@ -13,7 +13,7 @@ import { monthlyCostCents, annualCostCents, MAX_SELF_SERVE_PROPERTIES } from '@/
 // ── Graduated pricing, not flat tiers (2026-08-29 rebuild) ──────────────────
 //
 // FieldStay billing moved from 4 flat-rate Stripe Products to ONE graduated
-// (marginal) price per interval: $49 for the first property, then $13/$10/$8/
+// (marginal) price per interval: $19 for the first property, then $13/$10/$8/
 // $6 per property for brackets 2-4/5-15/16-50/51-150 (lib/stripe/brackets.ts
 // is the actual billing source of truth this page's numbers are computed
 // from). There is no longer a single flat number that is "the price" for a
@@ -157,7 +157,7 @@ export function pricingTiers(entryFeatures: readonly string[]): PricingTier[] {
     {
       name: 'Hosts',
       description: 'For hosts running a handful of listings.',
-      // The site-wide anchor — property 1's flat $49, the true minimum price
+      // The site-wide anchor — property 1's flat $19, the true minimum price
       // of any FieldStay subscription. Unlike the bands above, this IS the
       // literal starting point of the whole schedule, not just this band's.
       monthly: monthlyCostCents(1)! / 100,

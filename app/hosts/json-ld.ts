@@ -8,7 +8,7 @@ import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 // shared literal on every page) lives in buildFaqSoftwareJsonLd()
 // (app/strops/json-ld.ts) — this file supplies only what's actually specific
 // to /hosts: the FAQ content, the feature/description copy, and (unlike every
-// other page) a non-default `offer` — the Hosts-tier price, not the $49
+// other page) a non-default `offer` — the Hosts-tier price, not the $19
 // site-wide anchor buildFaqSoftwareJsonLd() otherwise assumes.
 //
 // FAQ_ITEMS lives HERE rather than in page.tsx (unlike the plain-const
@@ -54,7 +54,7 @@ export function buildJsonLd(marketingUrl: string) {
     // schema — and here it is the Hosts-tier anchor specifically (numerically
     // identical today to the site-wide graduated schedule's property-1 price,
     // but a distinct concept — see HOSTS_PRICE's own comment in page.tsx),
-    // which is why it overrides buildFaqSoftwareJsonLd()'s $49 default rather
+    // which is why it overrides buildFaqSoftwareJsonLd()'s $19 default rather
     // than relying on it.
     offer: {
       price,

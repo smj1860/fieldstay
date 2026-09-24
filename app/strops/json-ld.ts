@@ -47,7 +47,7 @@ export function buildJsonLd(marketingUrl: string) {
         ],
         // The price here must also appear, in some human-readable form, on
         // the rendered page (page.tsx's hero currently says "Starting at
-        // $49/month") -- Google's structured data guidelines don't allow
+        // $19/month") -- Google's structured data guidelines don't allow
         // marking up content that isn't visible to users, and a rich result
         // can get suppressed over exactly this kind of mismatch. Verified
         // 2026-08-10 after this page shipped with no visible price at all
@@ -56,16 +56,17 @@ export function buildJsonLd(marketingUrl: string) {
         // schedule's anchor (lib/stripe/brackets.ts monthlyCostCents(1)),
         // and that same anchor against the visible page text.
         //
-        // '49' is the true minimum price of any FieldStay subscription as of
-        // the 2026-08-29 graduated-pricing rebuild — the $49 anchor for
-        // property 1 — not a flat tier price the way '89' was. "Starting at"
-        // is the accurate framing now; a customer's actual bill scales with
-        // property count from there.
+        // '19' is the true minimum price of any FieldStay subscription as of
+        // the 2026-09-24 anchor re-price (dropped from the 2026-08-29
+        // rebuild's $49) — the anchor for property 1, not a flat tier price
+        // the way '89' was before that. "Starting at" is the accurate framing
+        // now; a customer's actual bill scales with property count from
+        // there.
         offers: {
           '@type': 'Offer',
-          price: '49',
+          price: '19',
           priceCurrency: 'USD',
-          description: 'Starting at $49/month for your first property. 14-day free trial, no credit card required.',
+          description: 'Starting at $19/month for your first property. 14-day free trial, no credit card required.',
         },
       },
     ],
@@ -88,10 +89,10 @@ export interface FaqSoftwareJsonLdOptions {
   description: string
   featureList: readonly string[]
   /**
-   * Defaults to the $49 site-wide anchor — pass an object to override (e.g.
+   * Defaults to the $19 site-wide anchor — pass an object to override (e.g.
    * /hosts's tier-specific price), or `null` to omit the `offers` node
    * entirely. `null` is for a page whose whole audience is above the
-   * self-serve ceiling (/enterprise) — quoting the $49 floor there as "the
+   * self-serve ceiling (/enterprise) — quoting the $19 floor there as "the
    * price" would be technically true but misleading in a rich-result
    * snippet, and there is no single number to put in its place.
    */
@@ -117,10 +118,10 @@ export function buildFaqSoftwareJsonLd(marketingUrl: string, opts: FaqSoftwareJs
   const offer = opts.offer === null
     ? null
     : {
-        price: opts.offer?.price ?? '49',
+        price: opts.offer?.price ?? '19',
         description:
           opts.offer?.description ??
-          `Starting at $${opts.offer?.price ?? '49'}/month for your first property. 14-day free trial, no credit card required.`,
+          `Starting at $${opts.offer?.price ?? '19'}/month for your first property. 14-day free trial, no credit card required.`,
       }
 
   return {

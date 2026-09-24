@@ -71,10 +71,10 @@ const orgBillingRow = {
   plan: 'platform', stripe_subscription_id: 'sub_1',
 }
 
-// quantity 4 -> $88.00 (8800 cents) via the real graduated bracket schedule
+// quantity 4 -> $58.00 (5800 cents) via the real graduated bracket schedule
 // (lib/stripe/brackets.ts, not mocked here — it's pure math with no reason
-// to fake): the $49 anchor plus 3 properties at $13/each.
-const LOCKED_PRICE_CENTS = 8_800
+// to fake): the $19 anchor plus 3 properties at $13/each.
+const LOCKED_PRICE_CENTS = 5_800
 
 const BASE_EVENT = { data: { org_id: 'org_1' } }
 

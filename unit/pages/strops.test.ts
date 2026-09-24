@@ -168,7 +168,7 @@ describe('structured data cannot drift from the visible page', () => {
     // was added, the JSON-LD named $89 to Google and the rendered page never
     // said it anywhere -- exactly the "schema that describes copy not on the
     // page" violation the FAQ test's comment already warns about. Checked
-    // against the real bracket schedule directly, not the string '49', so
+    // against the real bracket schedule directly, not the string '19', so
     // this stays correct if the anchor price ever changes and someone
     // forgets to update the hero.
     const { monthlyCostCents } = await import('@/lib/stripe/brackets')

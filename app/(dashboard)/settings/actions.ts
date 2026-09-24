@@ -1550,7 +1550,7 @@ export async function createCheckoutSession(
     // permanently over its own cap with no signal; a graduated price has no
     // cap below MAX_SELF_SERVE_PROPERTIES, so that failure mode is gone by
     // construction). What remains is the two edges the schedule doesn't
-    // cover at all: zero properties (the $49 anchor prices "property 1", so
+    // cover at all: zero properties (the $19 anchor prices "property 1", so
     // there is nothing to bill yet) and more than the self-serve ceiling
     // (Enterprise territory, off Stripe entirely).
     //

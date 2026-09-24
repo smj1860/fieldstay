@@ -84,10 +84,10 @@ describe('resolvePlanCredit', () => {
 
   it('never credits more than the plan costs', () => {
     // The cap that became mandatory when the 6-sponsor ceiling was dropped.
-    // 40 sponsors earn $200; a 5-property plan costs $98. The org is credited
-    // $98 — its bill floors at zero and the surplus is NOT carried forward.
+    // 40 sponsors earn $200; a 5-property plan costs $68. The org is credited
+    // $68 — its bill floors at zero and the surplus is NOT carried forward.
     const fiveProperties = monthlyCostCents(5)!
-    expect(fiveProperties).toBe(9_800)
+    expect(fiveProperties).toBe(6_800)
     expect(resolvePlanCredit(40, fiveProperties)).toBe(fiveProperties)
   })
 
@@ -96,16 +96,16 @@ describe('resolvePlanCredit', () => {
     // case, and the one a naive Math.min could get wrong by capping at the
     // wrong figure.
     const oneProperty = monthlyCostCents(1)!
-    expect(oneProperty).toBe(4_900)
+    expect(oneProperty).toBe(1_900)
     expect(resolvePlanCredit(3, oneProperty)).toBe(1_500)
   })
 
   it('is exactly the plan cost at the break-even sponsor count, never a cent more', () => {
-    // The boundary. At $49 and $5/sponsor, 10 sponsors is $50 — the first
+    // The boundary. At $19 and $5/sponsor, 4 sponsors is $20 — the first
     // count that exceeds a single-property plan.
     const oneProperty = monthlyCostCents(1)!
-    expect(resolvePlanCredit(9,  oneProperty)).toBe(4_500)
-    expect(resolvePlanCredit(10, oneProperty)).toBe(oneProperty)
+    expect(resolvePlanCredit(3,  oneProperty)).toBe(1_500)
+    expect(resolvePlanCredit(4,  oneProperty)).toBe(oneProperty)
     expect(resolvePlanCredit(99, oneProperty)).toBe(oneProperty)
   })
 
@@ -122,7 +122,7 @@ describe('resolvePlanCredit', () => {
 
   it('never returns a negative credit — the handler posts the NEGATION of this', () => {
     // `amount: -planCreditCents`, so a negative here becomes a CHARGE.
-    for (const [count, cap] of [[40, 9_800], [1, 4_900], [0, 4_900], [-5, 4_900]] as const) {
+    for (const [count, cap] of [[40, 6_800], [1, 1_900], [0, 1_900], [-5, 1_900]] as const) {
       expect(resolvePlanCredit(count, cap)).toBeGreaterThanOrEqual(0)
     }
   })

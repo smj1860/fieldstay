@@ -21,6 +21,7 @@ import {
   monthlyCostCents,
   annualCostCents,
   bracketBreakdown,
+  BRACKETS,
 } from '@/lib/stripe/brackets'
 import {
   updateOrgSettings,
@@ -1315,6 +1316,23 @@ function formatCents(cents: number): string {
   return (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** Whole-dollar display (no cents) for prose copy — "$19", not "$19.00". */
+function formatWholeDollars(cents: number): string {
+  return (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })
+}
+
+/**
+ * "$13, $10, $8, then $6" — every marginal bracket rate after the anchor, in
+ * order, for the "every property after that is..." explainer. Derived from
+ * BRACKETS rather than hand-typed so a future rate change (not just the
+ * anchor) can't silently drift from this copy the way the anchor already had.
+ */
+function describeMarginalRates(): string {
+  const rates = BRACKETS.slice(1).map((b) => `$${formatWholeDollars(b.unitAmountCents ?? 0)}`)
+  if (rates.length <= 1) return rates.join('')
+  return `${rates.slice(0, -1).join(', ')}, then ${rates.at(-1)}`
+}
+
 function BillingTab({
   org, hospitablePromo, activePropertyCount,
 }: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null; activePropertyCount: number }>) {
@@ -1443,7 +1461,7 @@ function BillingTab({
           <Card>
             <p className="text-sm text-secondary-themed">
               Add a property before subscribing — FieldStay bills per property, starting at
-              $49/mo for your first one.
+              ${formatWholeDollars(monthlyCostCents(1)!)}/mo for your first one.
             </p>
           </Card>
         )}
@@ -1473,8 +1491,9 @@ function BillingTab({
                 </span>
               </p>
               <p className="text-xs text-muted-themed mt-1">
-                One property costs $49{interval === 'annual' ? ' ($490/yr)' : '/mo'}. Every property after that is
-                $13, $10, $8, then $6 as you grow — adding one more never jumps your bill, it just adds that
+                One property costs ${formatWholeDollars(monthlyCostCents(1)!)}
+                {interval === 'annual' ? ` ($${formatWholeDollars(annualCostCents(1)!)}/yr)` : '/mo'}. Every property after that is
+                {' '}{describeMarginalRates()} as you grow — adding one more never jumps your bill, it just adds that
                 property&apos;s own rate.
               </p>
             </div>

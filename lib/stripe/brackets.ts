@@ -51,19 +51,23 @@ export type Bracket =
   | { upTo: number; unitAmountCents: number; flatAmountCents?: undefined }
 
 /**
- * The locked monthly schedule (2026-08-29 pricing rebuild):
- *   - Property 1:      $49 flat (the anchor)
+ * The locked monthly schedule (anchor dropped to $19 on 2026-09-24 —
+ * adoption-focused re-price, superseding the 2026-08-29 rebuild's $49
+ * anchor):
+ *   - Property 1:      $19 flat (the anchor)
  *   - Properties 2-4:  $13/property
  *   - Properties 5-15: $10/property
  *   - Properties 16-50: $8/property
  *   - Properties 51-150: $6/property
  *
- * The first four brackets (through property 50) were chosen to be
- * revenue-neutral at every OLD flat-tier ceiling (4, 15, 50 properties) and a
- * real reduction everywhere else — a deliberate margin-for-adoption tradeoff,
- * not a mechanical translation of the old prices. See the pricing-model
- * discussion this schedule came out of; do not re-derive these four from the
- * old PLANS table.
+ * Only the anchor moved. The 2026-08-29 rebuild's marginal rates
+ * ($13/$10/$8/$6) were tuned to be revenue-neutral against the old flat-tier
+ * ceilings and are NOT revisited here — this is a deliberate margin-for-
+ * adoption cut on the single flat charge every org pays regardless of size,
+ * not a re-derivation of the whole schedule. Live subscriptions were
+ * migrated to a new Stripe Price (Prices are immutable) rather than
+ * grandfathered onto the old one — see the migration script this change
+ * shipped with.
  *
  * The last bracket's ceiling was widened from 100 to 150 on 2026-08-30 —
  * capacity headroom, not a re-tuned rate: the $6/property marginal rate is
@@ -76,7 +80,7 @@ export type Bracket =
  * nothing else in this file needed to change.
  */
 export const BRACKETS: readonly Bracket[] = [
-  { upTo: 1,   flatAmountCents: 4_900 },
+  { upTo: 1,   flatAmountCents: 1_900 },
   { upTo: 4,   unitAmountCents: 1_300 },
   { upTo: 15,  unitAmountCents: 1_000 },
   { upTo: 50,  unitAmountCents: 800 },
@@ -176,7 +180,7 @@ export interface BracketLineItem {
  * An itemized breakdown of `monthlyCostCents(quantity)` (or the annual
  * equivalent), one line per bracket the quantity actually reaches — for the
  * billing UI's "why is this my total" display. `bracketBreakdown(4)` reads
- * as "Property 1: $49" + "Properties 2–4: $13 × 3 = $39", which sums to
+ * as "Property 1: $19" + "Properties 2–4: $13 × 3 = $39", which sums to
  * exactly `monthlyCostCents(4)`.
  *
  * Returns `[]` for the same out-of-range quantities `monthlyCostCents`

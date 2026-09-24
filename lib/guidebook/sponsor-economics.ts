@@ -52,7 +52,8 @@ export const SPONSOR_PRICE_CENTS = 1500
  * removing it safe:
  *
  *   1. Bounding the plan credit. At $5 per sponsor, 6 sponsors capped the
- *      credit at $30 — under the cheapest possible subscription ($49), which
+ *      credit at $30 — under the cheapest possible subscription at the time
+ *      ($49, the pre-2026-09-24 anchor), which
  *      is what let resolvePlanCredit() stay a pure multiplication with no
  *      knowledge of what the org pays. That job now belongs to the per-org cap
  *      resolvePlanCredit() takes as an argument: the credit cannot exceed the
@@ -88,7 +89,7 @@ export const SPONSORS_TO_UNLOCK_GUIDEBOOK = 3
  * were the sort of figure that gets typed once, rounded wrong, and then
  * contradicted by the invoice.
  *
- * Rounds UP: at $5 a sponsor, a $49 plan needs 10 sponsors, not 9.8. The
+ * Rounds UP: at $5 a sponsor, a $19 plan needs 4 sponsors, not 3.8. The
  * final sponsor earns less than the full $5 because the cap clips it, which
  * is the intended shape — the program pays for the software, it does not pay
  * the customer.

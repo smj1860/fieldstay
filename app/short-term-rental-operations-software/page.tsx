@@ -86,7 +86,7 @@ export const metadata: Metadata = {
   description:
     'FieldStay is short-term rental operations software: automated turnovers, crew dispatch by proximity, ' +
     'photo-verified inspections, maintenance and inventory. Connects to OwnerRez, Hospitable and Hostaway. ' +
-    'From $49/month, 1–150 properties.',
+    'From $19/month, 1–150 properties.',
   keywords: [
     'short-term rental operations software',
     'STR operations software',
@@ -114,7 +114,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Short-Term Rental Operations Software',
-    description: 'Automated turnovers, crew dispatch, asset tracking. From $49/month.',
+    description: 'Automated turnovers, crew dispatch, asset tracking. From $19/month.',
     images: ['/logo.png'],
   },
 }
@@ -170,13 +170,13 @@ export default function StrOperationsSoftwarePage() {
                 >
                   Start free 14-day trial
                 </Link>
-                {/* The JSON-LD offers node cites $49 — Google suppresses
+                {/* The JSON-LD offers node cites $19 — Google suppresses
                     structured data describing content a visitor cannot see,
                     so the number has to appear here too. Pinned by
                     unit/pages/str-operations-software.test.ts against
                     lib/stripe/brackets.ts. */}
                 <span className="text-sm text-[var(--mkt-on-dark-soft)]">
-                  No credit card required · Starting at $49/month
+                  No credit card required · Starting at $19/month
                 </span>
               </div>
             </div>
