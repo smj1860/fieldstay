@@ -27,9 +27,15 @@ import { config, classifyRoute } from '@/proxy'
 const matcher = new RegExp(`^${config.matcher[0]}$`)
 const runsMiddleware = (path: string) => matcher.test(path)
 
-/** Every file actually shipped in /public, read from disk, not listed here. */
+/**
+ * Every file actually shipped in /public, read from disk, not listed here.
+ * Recursive: a subdirectory (public/marketing/) is not itself a served path,
+ * but every file inside it is.
+ */
 function publicFiles(): string[] {
-  return readdirSync(join(__dirname, '..', '..', 'public'))
+  return readdirSync(join(__dirname, '..', '..', 'public'), { recursive: true, withFileTypes: true })
+    .filter((d) => d.isFile())
+    .map((d) => join(d.parentPath, d.name).split(`${join(__dirname, '..', '..', 'public')}/`)[1])
 }
 
 describe('middleware matcher: static assets are excluded STRUCTURALLY', () => {
