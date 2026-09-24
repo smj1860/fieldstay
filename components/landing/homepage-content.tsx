@@ -161,13 +161,17 @@ const ROLE_CONTENT: readonly RolePanelContent[] = [
 
 function RoleTabs({ active, onChange }: Readonly<{ active: RoleKey; onChange: (key: RoleKey) => void }>) {
   return (
-    <div className="flex flex-wrap gap-2.5">
+    <div role="tablist" aria-label="Who FieldStay is for" className="flex flex-wrap gap-2.5">
       {ROLE_CONTENT.map((r) => {
         const isActive = r.key === active
         return (
           <button
             key={r.key}
             type="button"
+            role="tab"
+            id={`role-tab-${r.key}`}
+            aria-selected={isActive}
+            aria-controls={`role-panel-${r.key}`}
             onClick={() => onChange(r.key)}
             className="text-base font-semibold rounded-full px-6 py-3 transition-colors"
             style={{
@@ -713,7 +717,6 @@ function RolePanel({ content }: Readonly<{ content: RolePanelContent }>) {
 export function HomepageContent() {
   const tiers = pricingTiers(HOMEPAGE_ENTRY_FEATURES)
   const [role, setRole] = useState<RoleKey>('managers')
-  const activeContent = ROLE_CONTENT.find((r) => r.key === role) ?? ROLE_CONTENT[0]!
 
   return (
     <div className="min-h-screen" style={{ background: '#FAF7F0', color: '#14213D', fontFamily: 'var(--font-archivo), Arial, sans-serif' }}>
@@ -742,10 +745,12 @@ export function HomepageContent() {
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="flex flex-col lg:flex-row gap-10 lg:gap-16 items-center" style={{ padding: 'clamp(40px, 8vw, 72px) clamp(20px, 5vw, 40px) clamp(56px, 10vw, 96px)' }}>
         <div className="flex flex-col gap-7" style={{ maxWidth: 600 }}>
-          <p className="text-xs font-bold uppercase tracking-[0.14em]" style={{ color: '#6B5B3A' }}>
-            Property operations for short-term rentals
-          </p>
+          {/* The eyebrow lives INSIDE the h1 so the heading carries the
+              category keywords, not only the tagline. */}
           <h1 className="font-display font-semibold" style={{ fontSize: 'clamp(40px, 6vw, 72px)', lineHeight: 0.98, letterSpacing: '-2.5px', color: '#102246' }}>
+            <span className="block text-xs font-bold uppercase tracking-[0.14em]" style={{ color: '#6B5B3A', fontFamily: 'var(--font-archivo), Arial, sans-serif', lineHeight: 1.5, letterSpacing: '0.14em', marginBottom: 28 }}>
+              Short-term rental operations software
+            </span>{' '}
             Make your day less stressful.
           </h1>
           <p className="text-xl leading-relaxed" style={{ color: '#3D4A63', maxWidth: 540 }}>
@@ -818,7 +823,15 @@ export function HomepageContent() {
           Everyone gets their piece of the job. Nobody gets a login they don&apos;t need.
         </h2>
         <RoleTabs active={role} onChange={setRole} />
-        <RolePanel content={activeContent} />
+        {/* Every panel is server-rendered and the inactive ones are only
+            `hidden`, never unmounted: crawlers and AI answer engines read the
+            initial HTML and do not click tabs, so a panel rendered only on
+            click is content the search index never sees. */}
+        {ROLE_CONTENT.map((r) => (
+          <div key={r.key} role="tabpanel" id={`role-panel-${r.key}`} aria-labelledby={`role-tab-${r.key}`} hidden={r.key !== role}>
+            <RolePanel content={r} />
+          </div>
+        ))}
       </section>
 
       {/* ── A Saturday checkout, handled ─────────────────────────────────── */}
