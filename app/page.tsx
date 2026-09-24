@@ -1,7 +1,32 @@
+import localFont from 'next/font/local'
 import type { Metadata } from 'next'
 import { HomepageContent } from '@/components/landing/homepage-content'
 import { marketingUrl, marketingOrigin } from '@/lib/marketing'
 import { buildJsonLd, serializeJsonLd } from './json-ld'
+
+// Self-hosted — see the note in app/layout.tsx for why these are not
+// next/font/google. Same pair, same pattern, as app/g/kit/[media_kit_token]
+// /page.tsx: one variable-font file each, scoped to this route only (the
+// global layout only loads Inter, via --font-inter). font-display in
+// tailwind.config.ts stays mapped to var(--font-inter) — this page reaches
+// the Archivo/Source Serif weights directly via var(--font-archivo) and
+// var(--font-source-serif) in inline styles inside HomepageContent, not
+// through the font-display utility class.
+const archivo = localFont({
+  src:      './fonts/archivo-latin-var.woff2',
+  variable: '--font-archivo',
+  display:  'swap',
+  // Covers the 500-900 range this page uses; the file is the full axis.
+  weight:   '100 900',
+})
+
+const sourceSerif4 = localFont({
+  src:      './fonts/source-serif-4-latin-var.woff2',
+  variable: '--font-source-serif',
+  display:  'swap',
+  // Covers the 400/600 this page uses.
+  weight:   '200 900',
+})
 
 export const metadata: Metadata = {
   // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
@@ -32,9 +57,9 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <>
+    <div className={`${archivo.variable} ${sourceSerif4.variable}`}>
       <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
       <HomepageContent />
-    </>
+    </div>
   )
 }
