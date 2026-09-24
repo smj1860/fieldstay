@@ -45,12 +45,12 @@ export function buildJsonLd(marketingUrl: string) {
         // in human-readable form, on the rendered page — Google suppresses
         // structured data that describes content the visitor can't actually
         // see. unit/pages/breezeway-alternative.test.ts checks both halves
-        // against lib/stripe/brackets.ts directly, not the literal '49'.
+        // against lib/stripe/brackets.ts directly, not the literal '19'.
         offers: {
           '@type': 'Offer',
-          price: '49',
+          price: '19',
           priceCurrency: 'USD',
-          description: 'Starting at $49/month for your first property. 14-day free trial, no credit card required.',
+          description: 'Starting at $19/month for your first property. 14-day free trial, no credit card required.',
         },
       },
     ],

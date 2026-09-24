@@ -729,7 +729,7 @@ describe('settings/actions', () => {
     // There is no per-tier cap any more (that whole failure mode — an
     // under-sized plan leaving an org permanently over cap with no signal —
     // is gone by construction with one price and no ceiling below 150). What
-    // remains: zero properties (the $49 anchor prices "property 1", so there
+    // remains: zero properties (the $19 anchor prices "property 1", so there
     // is nothing to bill) and above the self-serve ceiling (Enterprise
     // territory, off Stripe entirely).
     it('refuses checkout for an org with zero active properties', async () => {
@@ -771,7 +771,7 @@ describe('settings/actions', () => {
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
     })
 
-    it('allows checkout at exactly 1 property — the $49 anchor', async () => {
+    it('allows checkout at exactly 1 property — the $19 anchor', async () => {
       const supabase = makeSupabase(withPropertyCount(1, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],

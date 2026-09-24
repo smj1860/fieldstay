@@ -344,7 +344,7 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
     q: 'How much does short-term rental operations software cost?',
     a:
       'FieldStay is priced per property on a graduated schedule, published with no sales call required. ' +
-      'The first property is $49/month; properties 2–4 are $13 each, 5–15 are $10 each, 16–50 are $8 each, ' +
+      'The first property is $19/month; properties 2–4 are $13 each, 5–15 are $10 each, 16–50 are $8 each, ' +
       'and 51–150 are $6 each. Only the property that crosses a boundary is re-rated, so adding one never ' +
       'jumps the whole bill. Annual billing is ten months for twelve. Every plan includes every feature — ' +
       'nothing is gated behind a higher tier — and there is a 14-day free trial with no credit card.',
@@ -358,7 +358,7 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
       'with the first sponsor and with no threshold to clear. There is no limit on how many sponsors you ' +
       'sign; the only ceiling is your own bill, because the credit stops once it reaches zero rather than ' +
       'building a balance. A property displays up to 4 sponsors, so a 5-property portfolio has room for the ' +
-      '20 sponsors that cover a 5-property plan outright — and larger portfolios need fewer sponsors per ' +
+      '14 sponsors that cover a 5-property plan outright — and larger portfolios need fewer sponsors per ' +
       'property to get there. FieldStay generates the print-ready pitch used to sell the slots.',
   },
   {
@@ -524,7 +524,7 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'Is FieldStay cheaper than Breezeway?',
     answer:
       'It depends on your property count, and for most real portfolios the honest answer is "we don\'t ' +
-      'know, because Breezeway won\'t say." For 10 properties, FieldStay is $148/month, publicly calculable ' +
+      'know, because Breezeway won\'t say." For 10 properties, FieldStay is $118/month, publicly calculable ' +
       'from the rate schedule before you ever talk to anyone. Breezeway\'s published $19.99/property rate ' +
       'only covers portfolios of 4 or fewer — at 10 properties you\'re already past that and into a custom ' +
       'quote, so there is no public number to compare against.',
@@ -693,7 +693,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing, and how is the price calculated?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $19/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
       },
       {
         id:       'billing-crew-seats',

@@ -1,7 +1,7 @@
 // app/hosts/page.tsx
 //
 // The one segment on the pricing ladder with zero top-of-funnel page. The
-// Hosts tier (starting at $49/mo, 1-4 properties — see lib/stripe/brackets.ts)
+// Hosts tier (starting at $19/mo, 1-4 properties — see lib/stripe/brackets.ts)
 // is real and billable, but today only surfaces on /ownerrez and /hospitable,
 // which a solo host only reaches via a branded PMS-specific search. This page
 // gives that persona a landing page whose ICP framing actually matches the
@@ -92,7 +92,7 @@ export const metadata: Metadata = {
   alternates: { canonical: CANONICAL },
   // Not "FieldStay for Solo Hosts" — the root layout's title template
   // already appends " — FieldStay". The original title also assumed the old
-  // flat-tier $89/mo price; HOSTS_PRICE is $49 under the graduated schedule,
+  // flat-tier $89/mo price; HOSTS_PRICE is $19 under the graduated schedule,
   // which is what makes the shorter phrasing below fit under ~60 chars
   // rendered — re-check this if HOSTS_PRICE ever changes materially.
   title: `Property Management App for Solo Hosts, ${HOSTS_PRICE}/mo`,

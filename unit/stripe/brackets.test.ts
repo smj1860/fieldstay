@@ -14,22 +14,25 @@ import {
 // ============================================================================
 // This schedule replaces the old 4-tier flat PLANS pricing (lib/stripe/
 // client.ts) specifically to remove the $110-$320 cliff a customer hit the
-// moment their property count crossed a tier boundary. The locked numbers
-// below (anchor $49, then $13/$10/$8/$6 per unit for brackets 2-4/5-15/16-50/
-// 51-150) were chosen to be revenue-neutral, within a dollar, at every OLD
-// tier's ceiling (4/15/50/100 properties) and strictly cheaper everywhere
-// else — never re-derive or "improve" these numbers without going back to
-// that design decision; they are a deliberate margin-for-adoption trade, not
-// a default that happened to fall out of the math. The one exception is the
-// last bracket's `upTo`, widened from 100 to 150 on 2026-08-30 as pure
-// capacity headroom at the SAME $6/property rate — not a re-tuned number, so
-// it isn't covered by the "never re-derive" rule above.
+// moment their property count crossed a tier boundary. The marginal rates
+// below ($13/$10/$8/$6 per unit for brackets 2-4/5-15/16-50/51-150) were
+// chosen, at the ORIGINAL $49 anchor, to be revenue-neutral within a dollar
+// at every OLD tier's ceiling (4/15/50/100 properties) and strictly cheaper
+// everywhere else. The anchor itself was cut from $49 to $19 on 2026-09-24 —
+// an adoption-focused re-price of the single flat charge only — so the
+// totals below are NO LONGER revenue-neutral against the old flat plans;
+// only the $13/$10/$8/$6 marginal rates are still the original design-locked
+// numbers. Never re-derive or "improve" either the anchor or the marginal
+// rates without going back to the relevant design decision. The one other
+// exception is the last bracket's `upTo`, widened from 100 to 150 on
+// 2026-08-30 as pure capacity headroom at the SAME $6/property rate — not a
+// re-tuned number, so it isn't covered by the "never re-derive" rule above.
 // ============================================================================
 
 describe('graduated pricing bracket schedule', () => {
   it('matches the locked schedule exactly', () => {
     expect(BRACKETS).toEqual([
-      { upTo: 1,   flatAmountCents: 4_900 },
+      { upTo: 1,   flatAmountCents: 1_900 },
       { upTo: 4,   unitAmountCents: 1_300 },
       { upTo: 15,  unitAmountCents: 1_000 },
       { upTo: 50,  unitAmountCents: 800 },
@@ -48,18 +51,20 @@ describe('graduated pricing bracket schedule', () => {
     expect(monthlyCostCents(2.5)).toBeNull()
   })
 
-  it('property 1 costs exactly the $49 anchor, flat', () => {
-    expect(monthlyCostCents(1)).toBe(4_900)
+  it('property 1 costs exactly the $19 anchor, flat', () => {
+    expect(monthlyCostCents(1)).toBe(1_900)
   })
 
-  // The exact cumulative totals the design negotiation locked in — each is
-  // "revenue-neutral within a dollar" against the OLD flat plan at that same
-  // ceiling (Hosts $89, Starter $199, Growth $479, Portfolio $799).
+  // The exact cumulative totals at the current ($19) anchor. These are no
+  // longer "revenue-neutral" against the old flat plans (Hosts $89, Starter
+  // $199, Growth $479, Portfolio $799) — that property held only at the
+  // original $49 anchor; the $30 anchor cut carries straight through every
+  // total below it.
   it.each([
-    [4,   8_800],
-    [15,  19_800],
-    [50,  47_800],
-    [100, 77_800],
+    [4,   5_800],
+    [15,  16_800],
+    [50,  44_800],
+    [100, 74_800],
   ])('totals $%i.xx at the old ceiling of %i properties', (quantity, expectedCents) => {
     expect(monthlyCostCents(quantity)).toBe(expectedCents)
   })
@@ -97,8 +102,8 @@ describe('graduated pricing bracket schedule', () => {
   // deciding "should I add one more" at exactly a boundary is the one moment
   // this number matters most, and the two readings genuinely differ there.
   it('marginalRateCentsFor reports what the NEXT property would cost, not the current bracket', () => {
-    expect(marginalRateCentsFor(0)).toBe(4_900)   // the very first property
-    expect(marginalRateCentsFor(1)).toBe(1_300)   // adding #2 costs $13, not the $49 anchor #1 was
+    expect(marginalRateCentsFor(0)).toBe(1_900)   // the very first property
+    expect(marginalRateCentsFor(1)).toBe(1_300)   // adding #2 costs $13, not the $19 anchor #1 was
     expect(marginalRateCentsFor(3)).toBe(1_300)   // #4 is still in the 2-4 bracket
     expect(marginalRateCentsFor(4)).toBe(1_000)   // #5 crosses into the 5-15 bracket — the boundary case
     expect(marginalRateCentsFor(14)).toBe(1_000)
@@ -124,13 +129,13 @@ describe('graduated pricing bracket schedule', () => {
 
     it('is just the anchor at quantity 1', () => {
       expect(bracketBreakdown(1)).toEqual([
-        { label: 'Property 1', units: 1, amountCents: 4_900, lineTotalCents: 4_900 },
+        { label: 'Property 1', units: 1, amountCents: 1_900, lineTotalCents: 1_900 },
       ])
     })
 
     it('breaks down quantity 4 into the anchor plus the 2-4 bracket', () => {
       expect(bracketBreakdown(4)).toEqual([
-        { label: 'Property 1', units: 1, amountCents: 4_900, lineTotalCents: 4_900 },
+        { label: 'Property 1', units: 1, amountCents: 1_900, lineTotalCents: 1_900 },
         { label: 'Properties 2–4', units: 3, amountCents: 1_300, lineTotalCents: 3_900 },
       ])
     })
@@ -169,7 +174,7 @@ describe('graduated pricing bracket schedule', () => {
       // the live Price. 100 (MAX_SELF_SERVE_PROPERTIES) is still the real
       // self-serve ceiling enforced everywhere else in the app.
       expect(toStripeTiers('monthly')).toEqual([
-        { up_to: 1,   flat_amount: 4_900 },
+        { up_to: 1,   flat_amount: 1_900 },
         { up_to: 4,   unit_amount: 1_300 },
         { up_to: 15,  unit_amount: 1_000 },
         { up_to: 50,  unit_amount: 800 },
@@ -179,7 +184,7 @@ describe('graduated pricing bracket schedule', () => {
 
     it('scales every amount by 10x for annual, from the SAME BRACKETS array', () => {
       expect(toStripeTiers('annual')).toEqual([
-        { up_to: 1,   flat_amount: 49_000 },
+        { up_to: 1,   flat_amount: 19_000 },
         { up_to: 4,   unit_amount: 13_000 },
         { up_to: 15,  unit_amount: 10_000 },
         { up_to: 50,  unit_amount: 8_000 },

@@ -16,9 +16,9 @@ import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 // file without the two importing each other.
 //
 // offer: null — deliberately no `offers` node. Every other page's schema
-// names the real $49 site-wide floor because it's genuinely this page's
+// names the real $19 site-wide floor because it's genuinely this page's
 // starting price; on /enterprise the audience is above the self-serve
-// ceiling, and quoting $49 as "the price" in a rich-result snippet would be
+// ceiling, and quoting $19 as "the price" in a rich-result snippet would be
 // technically true but misleading in context. See buildFaqSoftwareJsonLd()'s
 // FaqSoftwareJsonLdOptions.offer doc comment.
 // ============================================================================

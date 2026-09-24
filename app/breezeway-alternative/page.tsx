@@ -102,7 +102,7 @@ export default function BreezewayAlternativePage() {
             >
               Start free 14-day trial
             </Link>
-            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required · Starting at $49/month</span>
+            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required · Starting at $19/month</span>
           </div>
         </div>
       </section>

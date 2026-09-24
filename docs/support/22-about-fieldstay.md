@@ -40,7 +40,7 @@ Scale your portfolio without watching your software bill jump with it.
 
 | Properties | Rate |
 |---|---|
-| 1st property | $49/mo flat |
+| 1st property | $19/mo flat |
 | 2nd–4th property | $13/mo each |
 | 5th–15th property | $10/mo each |
 | 16th–50th property | $8/mo each |

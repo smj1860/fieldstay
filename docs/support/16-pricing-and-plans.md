@@ -10,7 +10,7 @@ Your bill is computed property-by-property, not by which "tier" you're in:
 
 | Properties | Rate |
 |---|---|
-| 1st property | $49/mo flat |
+| 1st property | $19/mo flat |
 | 2nd–4th property | $13/mo each |
 | 5th–15th property | $10/mo each |
 | 16th–50th property | $8/mo each |
@@ -22,13 +22,13 @@ Some worked examples (monthly):
 
 | Properties | Total/month |
 |---|---|
-| 1 | $49 |
-| 4 | $88 |
-| 5 | $98 |
-| 15 | $198 |
-| 50 | $478 |
-| 100 | $778 |
-| 150 | $1,078 |
+| 1 | $19 |
+| 4 | $58 |
+| 5 | $68 |
+| 15 | $168 |
+| 50 | $448 |
+| 100 | $748 |
+| 150 | $1,048 |
 
 Settings → Billing shows this same math for your account, itemized line by line, at your current property count.
 

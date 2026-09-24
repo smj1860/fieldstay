@@ -13,7 +13,7 @@ import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 // auth) rather than the PM-facing framing every other page uses.
 //
 // offer: null — vendors don't pay for FieldStay, so there is no price to
-// quote here at all, not even the $49 floor.
+// quote here at all, not even the $19 floor.
 // ============================================================================
 
 export const FOR_VENDORS_PATH = '/for-vendors'

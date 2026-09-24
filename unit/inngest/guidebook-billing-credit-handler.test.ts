@@ -48,7 +48,7 @@ function creditEvent(overrides: Record<string, unknown> = {}) {
  *
  * `quantity` is the org's property count and the interval decides whether the
  * cap is the monthly or annual figure — both run through lib/stripe/brackets.ts
- * in the handler. 5 properties is $98/mo, which is high enough not to bind on
+ * in the handler. 5 properties is $68/mo, which is high enough not to bind on
  * the small counts most of these tests use and low enough for the cap test
  * below to reach.
  */
@@ -73,7 +73,7 @@ describe('guidebookBillingCreditHandler', () => {
       step:  makeStep(),
     })
 
-    expect(resolvePlanCredit).toHaveBeenCalledWith(6, 9_800)
+    expect(resolvePlanCredit).toHaveBeenCalledWith(6, 6_800)
     expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
       expect.objectContaining({
         customer:    'cus_1',
@@ -90,13 +90,13 @@ describe('guidebookBillingCreditHandler', () => {
         targetType: 'organization',
         metadata:   {
           reason: 'per_sponsor_credit', activeSponsorCount: 6,
-          earnedCents: 3000, planCreditCents: 3000, planCostCents: 9_800, capped: false,
+          earnedCents: 3000, planCreditCents: 3000, planCostCents: 6_800, capped: false,
         },
       }),
     )
     expect(result).toEqual({
       orgId: 'org_1', activeSponsorCount: 6, planCreditCents: 3000,
-      planCostCents: 9_800, capped: false,
+      planCostCents: 6_800, capped: false,
     })
   })
 
@@ -117,13 +117,13 @@ describe('guidebookBillingCreditHandler', () => {
       expect.objectContaining({
         metadata: {
           reason: 'per_sponsor_credit', activeSponsorCount: 5,
-          earnedCents: 2500, planCreditCents: 2500, planCostCents: 9_800, capped: false,
+          earnedCents: 2500, planCreditCents: 2500, planCostCents: 6_800, capped: false,
         },
       }),
     )
     expect(result).toEqual({
       orgId: 'org_1', activeSponsorCount: 5, planCreditCents: 2500,
-      planCostCents: 9_800, capped: false,
+      planCostCents: 6_800, capped: false,
     })
   })
 
@@ -213,7 +213,7 @@ describe('guidebookBillingCreditHandler', () => {
   // plan, so nothing here needed a cap at all.
 
   it('caps the credit at the plan cost — an org cannot out-earn its own bill', async () => {
-    // 40 sponsors earn $200. A 5-property plan is $98. Stripe carries credit
+    // 40 sponsors earn $200. A 5-property plan is $68. Stripe carries credit
     // beyond the subtotal forward as customer balance indefinitely, so an
     // uncapped credit would not merely zero the bill, it would discount every
     // future invoice too.
@@ -225,16 +225,16 @@ describe('guidebookBillingCreditHandler', () => {
       step:  makeStep(),
     })
 
-    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 9_800)
+    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 6_800)
     expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: -9_800 }),
+      expect.objectContaining({ amount: -6_800 }),
       expect.anything(),
     )
-    expect(result).toMatchObject({ planCreditCents: 9_800, capped: true })
+    expect(result).toMatchObject({ planCreditCents: 6_800, capped: true })
   })
 
   it('says the plan is fully covered when the cap binds, rather than quoting a bare number', async () => {
-    // A host who signed 40 sponsors and sees "40 Sponsors — $98 off" with no
+    // A host who signed 40 sponsors and sees "40 Sponsors — $68 off" with no
     // explanation reads it as a billing bug.
     ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(40)
     ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'ii_capped' })
@@ -248,7 +248,7 @@ describe('guidebookBillingCreditHandler', () => {
   })
 
   it('caps an ANNUAL subscription against the annual figure, not the monthly one', async () => {
-    // 5 properties annual is $980 (ten months for twelve). Capping an annual
+    // 5 properties annual is $680 (ten months for twelve). Capping an annual
     // invoice at the MONTHLY cost would silently clip every annual org's
     // credit to a twelfth of what it should be.
     mockSubscription(5, 'year')
@@ -257,7 +257,7 @@ describe('guidebookBillingCreditHandler', () => {
 
     await invokeHandler(guidebookBillingCreditHandler, { event: creditEvent(), step: makeStep() })
 
-    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 98_000)
+    expect(resolvePlanCredit).toHaveBeenCalledWith(40, 68_000)
   })
 
   it('posts NOTHING when the plan cost cannot be resolved', async () => {

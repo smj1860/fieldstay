@@ -169,13 +169,23 @@ pages) imports from this module, which has zero dependencies (safe for
 `'use client'` components — it does not touch the Stripe SDK).
 
 ```
-Property 1:        $49/mo flat (the anchor)
+Property 1:        $19/mo flat (the anchor)
 Properties 2–4:     $13/mo each
 Properties 5–15:    $10/mo each
 Properties 16–50:   $8/mo each
 Properties 51–150:  $6/mo each
 Annual:             every figure above x10 (ANNUAL_MULTIPLIER) — 2 months free
 ```
+
+**The anchor dropped from $49 to $19 on 2026-09-24** — an adoption-focused
+cut to the flat property-1 charge only; the marginal rates above are
+unchanged from the 2026-08-29 rebuild and were not re-tuned. Because Stripe
+Prices are immutable, this required creating new `STRIPE_PRICE_PLATFORM_
+MONTHLY`/`_ANNUAL` Price objects and migrating every subscription's item to
+them (see `scripts/migrate-platform-price.ts`) rather than editing the live
+Price's tiers in place — grandfathering the old $49 Price was considered and
+rejected because it would have meant `isPlatformPriceId`/`PLATFORM_PRICE`
+permanently recognizing a second, legacy price id.
 
 150 properties is the self-serve ceiling (`MAX_SELF_SERVE_PROPERTIES`, widened
 from 100 on 2026-08-30 — capacity headroom, not a re-tuned rate: the

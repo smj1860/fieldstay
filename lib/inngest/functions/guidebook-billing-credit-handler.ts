@@ -72,7 +72,7 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
       // either what it earned or that the plan is fully covered.
       const reason      = capped ? 'per_sponsor_credit_capped' : 'per_sponsor_credit'
       // When the cap binds, the label says so. A host who signed 40 sponsors
-      // and sees "40 Sponsors — $98 off" with no explanation reads it as a
+      // and sees "40 Sponsors — $68 off" with no explanation reads it as a
       // billing bug; naming it as the plan being fully covered is the same
       // number told truthfully.
       const plural  = activeSponsorCount === 1 ? '' : 's'

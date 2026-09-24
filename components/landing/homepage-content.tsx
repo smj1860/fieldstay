@@ -21,7 +21,7 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // plan-tiers.ts against lib/stripe/client.ts's PLANS.
 //
 // The homepage's pricing section is now a ONE-CARD teaser ("Starting at
-// $49/mo") linking to /pricing for the full calculator and all five tiers —
+// $19/mo") linking to /pricing for the full calculator and all five tiers —
 // see that section's own comment for why. `pricingTiers()` is still called
 // here (below) purely to read tiers[0].monthly, the same real computed
 // number /pricing, /ownerrez and /hospitable all show, not a second literal.

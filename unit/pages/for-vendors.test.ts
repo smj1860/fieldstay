@@ -25,7 +25,7 @@ describe('/for-vendors sells nothing to the vendor', () => {
   it('has no pricing section or calculator', () => {
     expect(page).not.toContain('GenericPricingSection')
     expect(page).not.toContain('PricingCards')
-    expect(page).not.toMatch(/\$49/)
+    expect(page).not.toMatch(/\$19/)
   })
 
   it('the JSON-LD SoftwareApplication node has no offers block', async () => {

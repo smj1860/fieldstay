@@ -48,13 +48,13 @@ const ORIGIN = 'https://fieldstay.app'
 // ============================================================================
 
 describe('pricing claims match the real graduated schedule', () => {
-  it('the visible "starting at" price is the actual $49 anchor', () => {
+  it('the visible "starting at" price is the actual $19 anchor', () => {
     const anchorDollars = monthlyCostCents(1)! / 100
-    expect(anchorDollars, 'BRACKETS anchor moved off $49').toBe(49)
+    expect(anchorDollars, 'BRACKETS anchor moved off $19').toBe(19)
 
-    // The JSON-LD offers node defaults to '49' (buildFaqSoftwareJsonLd), and
+    // The JSON-LD offers node defaults to '19' (buildFaqSoftwareJsonLd), and
     // Google requires a marked-up price to be visible on the page too.
-    expect(read(PAGE), 'the hero no longer shows the $49 anchor the schema cites')
+    expect(read(PAGE), 'the hero no longer shows the $19 anchor the schema cites')
       .toContain(`Starting at $${anchorDollars}/month`)
   })
 

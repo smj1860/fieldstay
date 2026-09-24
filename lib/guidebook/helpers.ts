@@ -48,7 +48,8 @@ export { CREDIT_PER_SPONSOR_CENTS } from './sponsor-economics'
  *
  * The sponsor count USED to be bounded at 6 by
  * guidebook_sponsors_slot_number_check, so this returned at most $30 —
- * comfortably below the cheapest plan ($49) — and needed no cap. The previous
+ * comfortably below the cheapest plan at the time ($49, the pre-2026-09-24
+ * anchor) — and needed no cap. The previous
  * version of this docstring said, in as many words, that if that ceiling were
  * ever lifted this function would gain no upper bound, could exceed an
  * invoice, and that a cap "becomes mandatory then".
@@ -56,7 +57,7 @@ export { CREDIT_PER_SPONSOR_CENTS } from './sponsor-economics'
  * 20260909234738_uncap_guidebook_sponsor_slots.sql lifted it. This parameter
  * is that cap, and it is REQUIRED rather than optional precisely so the
  * mandatory thing cannot be forgotten at a call site: an org with 40 sponsors
- * earns $200 of a $98 plan and is credited $98, not $200.
+ * earns $200 of a $68 plan and is credited $68, not $200.
  *
  * Why a cap rather than letting it run negative: Stripe carries credit above
  * the invoice subtotal as customer balance, forward, indefinitely — so an

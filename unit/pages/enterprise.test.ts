@@ -11,7 +11,7 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8')
 // is covered by unit/guardrails/marketing-pages-crawlable.test.ts. This file
 // guards the two things specific to this page:
 //
-//   1. The structured data must NOT present the $49 self-serve floor as
+//   1. The structured data must NOT present the $19 self-serve floor as
 //      "the price" for an audience that is, by definition, above the
 //      self-serve ceiling — that's a real trust-eroding claim if it drifts
 //      back in, not a style nit.

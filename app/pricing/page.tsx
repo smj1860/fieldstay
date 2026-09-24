@@ -39,7 +39,7 @@ export const metadata: Metadata = {
   alternates: { canonical: CANONICAL },
   title: 'Pricing — Published Rates, No Sales Call',
   description:
-    'FieldStay pricing: $49/mo for your first property, graduated down to $6/property up to 150 units. ' +
+    'FieldStay pricing: $19/mo for your first property, graduated down to $6/property up to 150 units. ' +
     'See your exact number with the calculator. 14-day free trial, no credit card required.',
   keywords: [
     'fieldstay pricing',
@@ -76,7 +76,7 @@ export default function PricingPage() {
         title="One published rate. No sales call."
         subtitle={
           <>
-            $49/month for your first property, graduated down to $6/property as your portfolio grows —
+            $19/month for your first property, graduated down to $6/property as your portfolio grows —
             up to 150 properties, self-serve, no quote required. Use the calculator below to see your
             exact number.
           </>
