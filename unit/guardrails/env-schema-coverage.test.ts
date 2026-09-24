@@ -259,7 +259,7 @@ describe('guardrail: env validation behaviour', () => {
 // duplicated price id passes all of them — both values are present and both
 // match the `price_` prefix. It is only visible by comparison, and it is a
 // money bug: the annual id pasted into the monthly slot charges a customer who
-// expected the $49/mo anchor the full $490, with a valid Stripe receipt and no
+// expected the $19/mo anchor the full $190, with a valid Stripe receipt and no
 // error anywhere. These ids are set by hand, per environment, in a
 // _MONTHLY/_ANNUAL pair whose names differ by one word.
 // ============================================================================
