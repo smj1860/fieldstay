@@ -55,13 +55,17 @@ describe('homepage sections added alongside the pricing fix', () => {
 
   it('renders the RepuGuard live demo, not just the static feature card', () => {
     render(<HomepageContent />)
-    expect(screen.getAllByText('See RepuGuard in Action').length).toBe(1)
+    expect(screen.getAllByText(/^See RepuGuard in action$/i).length).toBe(1)
   })
 
   it('the hero eyebrow does not disqualify visitors the pricing floor accepts', () => {
     // It read "10–100 Properties" while Starter began at 5 — a 6-property
     // visitor bounced before ever reaching the table.
+    // The 2026-09-24 redesign dropped the range from the eyebrow entirely,
+    // which satisfies this by construction — what must never come back is a
+    // floor above 1, since pricing starts at the first property.
     render(<HomepageContent />)
-    expect(screen.getAllByText(/5–100\+ Properties/).length).toBe(1)
+    expect(screen.getAllByText(/Property operations for short-term rentals/i).length).toBe(1)
+    expect(screen.queryByText(/\b([2-9]|\d{2,})\s*[–-]\s*\d+\+?\s*Properties/i)).toBeNull()
   })
 })
