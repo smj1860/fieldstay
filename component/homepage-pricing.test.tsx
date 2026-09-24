@@ -65,7 +65,7 @@ describe('homepage sections added alongside the pricing fix', () => {
     // which satisfies this by construction — what must never come back is a
     // floor above 1, since pricing starts at the first property.
     render(<HomepageContent />)
-    expect(screen.getAllByText(/Property operations for short-term rentals/i).length).toBe(1)
+    expect(screen.getAllByText(/Short-term rental operations software/i).length).toBe(1)
     expect(screen.queryByText(/\b([2-9]|\d{2,})\s*[–-]\s*\d+\+?\s*Properties/i)).toBeNull()
   })
 })

@@ -51,7 +51,12 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'FieldStay — Property Operations for Short-Term Rental Managers',
     description: 'The operations layer for the work that happens between checkouts.',
-    images: ['/logo.png'],
+    images: [{
+      url:    '/marketing/hero-crew-supplies.jpg',
+      width:  1408,
+      height: 768,
+      alt:    'A FieldStay crew member carrying fresh supplies up to a lakeside cabin',
+    }],
   },
 }
 
