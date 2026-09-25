@@ -69,10 +69,29 @@ function feedStatus(lastSyncStatus: string | null, lastSyncedAt: string | null):
   return 'needs_attention'
 }
 
+/**
+ * The ical_feeds row shape this module reads. Written out because the read is
+ * drained through fetchAllRows, which is generic — unlike a bare `.select()`,
+ * it cannot infer the row type from the select string.
+ *
+ * `properties` is a PostgREST embed, so it arrives as an object or an array
+ * depending on the relationship the planner picks; unwrapJoin normalises it.
+ */
+export interface IcalFeedRow {
+  id:                string
+  property_id:       string
+  name:              string
+  source:            string | null
+  last_synced_at:    string | null
+  last_sync_status:  string | null
+  last_sync_error:   string | null
+  properties:        { name: string } | { name: string }[] | null
+}
+
 export async function getIntegrationHealth(orgId: string): Promise<IntegrationHealthItem[]> {
   const admin = createServiceClient({ system: 'lib/integrations/health' })
 
-  const [connectionsRes, providers, feedsRes] = await Promise.all([
+  const [connectionsRes, providers, feeds] = await Promise.all([
     admin
       .from('integration_connections')
       .select('id, provider_id, status, metadata, updated_at')
@@ -87,11 +106,26 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
         .range(from, to),
       { label: 'integrations.health.providers' },
     ),
-    admin
-      .from('ical_feeds')
-      .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
-      .eq('org_id', orgId)
-      .eq('is_active', true),
+    // Drained, not a bare `.select()`. One feed per property per listing
+    // platform, so a portfolio syncing Airbnb + VRBO crosses PostgREST's
+    // max_rows = 1000 at roughly 350-500 properties — and truncation here is
+    // the worst possible failure for this particular function, whose entire
+    // job is to tell a PM when a sync is broken: the feeds it drops render as
+    // healthy by absence.
+    //
+    // `.order('id')` is load-bearing, not presentation. `.range()` is OFFSET
+    // pagination, so the ordering must be TOTAL or two pages answer different
+    // questions; `name` and `source` repeat heavily across a portfolio.
+    fetchAllRows<IcalFeedRow>(
+      (from, to) => admin
+        .from('ical_feeds')
+        .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to),
+      { label: `integrations.health.ical_feeds[org=${orgId}]` },
+    ),
   ])
 
   // Both siblings' errors are surfaced rather than dropped. This function backs
@@ -102,10 +136,8 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
   throwIfAnyQueryFailed(
     { site: 'lib.integrations.health', orgId },
     connectionsRes.error,
-    feedsRes.error,
   )
   const connections = connectionsRes.data
-  const feeds       = feedsRes.data
 
   const providerNames = Object.fromEntries(providers.map((p) => [p.id, p.display_name]))
 

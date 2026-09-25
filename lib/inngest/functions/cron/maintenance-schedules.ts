@@ -12,6 +12,7 @@ import {
   notifyInspectionDue,
   computeVacancyGaps,
   chunkOverdueSchedules,
+  chunkDueSchedules,
   processOverdueBatch,
   selectActionableDueSchedules,
   type DueSoonScheduleRow,
@@ -59,6 +60,103 @@ interface DueScheduleRow extends DueSoonScheduleRow {
  * Now: one `org/maintenance_schedules.requested` per org, handled by
  * maintenanceSchedulesOrg under its own concurrency cap.
  */
+/**
+ * One actionable due schedule: create (or find) its work order, then advance
+ * next_due_date for routine schedules.
+ *
+ * Extracted to module scope rather than left inline in the step.run callback.
+ * Batching Pass 1 (see chunkDueSchedules) put a second `for` inside the step
+ * body, which pushed the callback past the repo's nesting-depth and cognitive-
+ * complexity ceilings — and a named per-schedule unit is the clearer shape
+ * anyway, matching processOverdueBatch in the helpers module.
+ *
+ * Returns the vendor-portal event to send, or null. It does NOT send it:
+ * step tooling may never run inside a step.run callback, so the caller
+ * collects these and fires one sendEvent at the function's top level.
+ */
+async function processDueSchedule(
+  supabase:     ReturnType<typeof createServiceClient>,
+  schedule:     DueScheduleRow,
+  daysUntilDue: number,
+): Promise<VendorPortalEvent | null> {
+  const vendor  = unwrapJoin(schedule.vendors)
+  const dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
+
+  // §7. An inspection schedule NOTIFIES and creates nothing: an inspection row
+  // minted here would carry started_at = this cron run, and §12.3's report
+  // presents that as how long the walk took. The row is created when someone
+  // actually begins, carrying source_schedule_id — and completion is what
+  // advances the schedule, exactly as auto_create_wo = false reminder
+  // schedules already behave.
+  if (schedule.creates === 'inspection') {
+    await notifyInspectionDue(supabase, schedule, daysUntilDue)
+    return null
+  }
+
+  // schedule.auto_create_wo === false never reaches here — that path's
+  // PM-facing surface is cron-daily-wrapup's maintenance digest section.
+  const vendorPortalEvent: VendorPortalEvent | null =
+    await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
+
+  // Advance next_due_date for routine schedules — only once a WO was actually
+  // created to track it. Reminder-only (auto_create_wo=false) schedules must
+  // NOT roll forward here: nothing acted on them yet, and cron-daily-wrapup's
+  // due-schedule section reads next_due_date at 6pm — if this 8am pass had
+  // already advanced it past today, the schedule would get no PM-facing
+  // surface at all.
+  if (schedule.schedule_type === 'routine' && schedule.frequency) {
+    const nextDue = calcNextDueDate(schedule.frequency, dueDate)
+    // Bound and org-scoped, matching advanceScheduleNextDueDate in
+    // app/(dashboard)/maintenance/actions.ts. This is the third copy of the
+    // same advance and the second that was silent.
+    //
+    // The WO has already been created by the line above, so a failed advance
+    // leaves next_due_date pointing at a date that is now handled: tomorrow
+    // the schedule looks due again, the (source_schedule_id, scheduled_date)
+    // unique constraint rejects the duplicate, and the schedule stops
+    // producing work orders for this occurrence and every future one —
+    // silently, forever.
+    //
+    // Zero rows is expected: `.eq('next_due_date', ...)` is an optimistic lock
+    // against workOrderOpsOrg advancing it first. It is ALSO what makes a
+    // retried batch safe: a schedule this batch already advanced matches zero
+    // rows the second time rather than double-advancing.
+    const { error: advanceError } = await supabase
+      .from('maintenance_schedules')
+      .update({ next_due_date: nextDue.toISOString().split('T')[0] })
+      .eq('id', schedule.id)
+      .eq('org_id', schedule.org_id)
+      .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
+
+    if (advanceError) {
+      throw new Error(
+        `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${advanceError.message}`
+      )
+    }
+  }
+
+  return vendorPortalEvent
+}
+
+/**
+ * Pass 1's unit of work: one batch of actionable due schedules, one Inngest
+ * step. Safe as a retry boundary because every schedule in it is idempotent —
+ * see chunkDueSchedules' header.
+ */
+async function processDueScheduleBatch(
+  batch: { schedule: DueScheduleRow; daysUntilDue: number }[],
+): Promise<VendorPortalEvent[]> {
+  const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
+  const events: VendorPortalEvent[] = []
+
+  for (const { schedule, daysUntilDue } of batch) {
+    const event = await processDueSchedule(supabase, schedule, daysUntilDue)
+    if (event) events.push(event)
+  }
+
+  return events
+}
+
 export const dailyMaintenanceScheduleCheck = inngest.createFunction(
   {
     id:      'cron-maintenance-schedule-check',
@@ -264,72 +362,31 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
     const actionable = await step.run('select-actionable-due-schedules', async () =>
       selectActionableDueSchedules(dueSchedules, today))
 
-    for (const { schedule, daysUntilDue } of actionable) {
-      const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
-        const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-        const vendor   = unwrapJoin(schedule.vendors)
-        const dueDate  = parseLocalDate(schedule.next_due_date, 'next_due_date')
+    // One step per BATCH of schedules, not per schedule. See chunkDueSchedules'
+    // header for why: the per-schedule shape is ~2 steps each, which a large
+    // portfolio turns into thousands in one invocation. Each unit is already
+    // idempotent (WO pre-check + optimistic-locked advance), so the batch is a
+    // sound retry boundary.
+    const dueBatches = chunkDueSchedules(actionable)
+    const vendorPortalEvents: VendorPortalEvent[] = []
 
-        // §7. An inspection schedule NOTIFIES and creates nothing: an
-        // inspection row minted here would carry started_at = this cron run,
-        // and §12.3's report presents that as how long the walk took. The row
-        // is created when someone actually begins, carrying
-        // source_schedule_id — and completion is what advances the schedule,
-        // exactly as auto_create_wo = false reminder schedules already behave.
-        if (schedule.creates === 'inspection') {
-          await notifyInspectionDue(supabase, schedule, daysUntilDue)
-          return { vendorPortalEvent: null }
-        }
+    for (let i = 0; i < dueBatches.length; i++) {
+      const batchEvents = await step.run(`process-due-batch-${i}`, () =>
+        processDueScheduleBatch(dueBatches[i]!))
 
-        // schedule.auto_create_wo === false never reaches here — that path's
-        // PM-facing surface is cron-daily-wrapup's maintenance digest section.
-        const vendorPortalEvent: VendorPortalEvent | null =
-          await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
+      vendorPortalEvents.push(...batchEvents)
+    }
 
-        // Advance next_due_date for routine schedules — only once a WO was
-        // actually created to track it. Reminder-only (auto_create_wo=false)
-        // schedules must NOT roll forward here: nothing acted on them yet,
-        // and cron-daily-wrapup's due-schedule section reads next_due_date
-        // at 6pm — if this 8am pass had already advanced it past today,
-        // the schedule would get no PM-facing surface at all.
-        if (schedule.schedule_type === 'routine' && schedule.frequency) {
-          const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-          // Bound and org-scoped, matching advanceScheduleNextDueDate in
-          // app/(dashboard)/maintenance/actions.ts. This is the third copy of
-          // the same advance and the second that was silent.
-          //
-          // The WO has already been created by the line above, so a failed
-          // advance leaves next_due_date pointing at a date that is now
-          // handled: tomorrow the schedule looks due again, the
-          // (source_schedule_id, scheduled_date) unique constraint rejects
-          // the duplicate, and the schedule stops producing work orders for
-          // this occurrence and every future one — silently, forever.
-          //
-          // Zero rows is expected: `.eq('next_due_date', ...)` is an
-          // optimistic lock against workOrderOpsOrg advancing it first.
-          const { error: advanceError } = await supabase
-            .from('maintenance_schedules')
-            .update({ next_due_date: nextDue.toISOString().split('T')[0] })
-            .eq('id', schedule.id)
-            .eq('org_id', schedule.org_id)
-            .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
-
-          if (advanceError) {
-            throw new Error(
-              `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${advanceError.message}`
-            )
-          }
-        }
-
-        return { vendorPortalEvent }
-      })
-
-      if (processResult?.vendorPortalEvent) {
-        await step.sendEvent(`fire-vendor-portal-${schedule.id}`, {
-          name: 'work-order/created' as const,
-          data: processResult.vendorPortalEvent,
-        })
-      }
+    // Hoisted out of the loop and out of the step.run bodies: step tooling may
+    // never run inside a step.run callback (CLAUDE.md, Inngest constraints),
+    // and one sendEvent carrying every event beats one step per event. The
+    // batches above are memoized, so a retry that replays them still arrives
+    // here with the full set.
+    if (vendorPortalEvents.length > 0) {
+      await step.sendEvent('fire-vendor-portal-events', vendorPortalEvents.map((data) => ({
+        name: 'work-order/created' as const,
+        data,
+      })))
     }
 
     // ── Pass 2: Overdue escalation (batched) ───────────────────────────────

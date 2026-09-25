@@ -1,5 +1,6 @@
 import { requireOrgMember } from '@/lib/auth'
-import { SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
+import { SUPABASE_MAX_ROWS, fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
 import { MaintenanceBoard } from './maintenance-board'
 import { MaintenanceTabs } from './maintenance-tabs'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -26,21 +27,71 @@ const WO_CATEGORY_OPTIONS = [
   { value: 'general' as const,       label: 'General' },
 ]
 
+/**
+ * Ceiling per drained read on this board. Deliberately snug: blowing it throws
+ * a labelled error rather than paging on forever inside a Server Component
+ * render. Sized for a 350-property portfolio (see drainBoard's callers), not
+ * for the 50-property target the previous fixed `.limit()`s were written to.
+ */
+const MAX_BOARD_ROWS = 20_000
+
+/**
+ * Three reads on this board were bounded with a fixed `.limit()` sized for the
+ * 50-property target this product was originally sold to. Every one of those
+ * ceilings is BELOW what a large portfolio actually holds:
+ *
+ *   maintenance_schedules  ~18 active per property -> ~6,000 at 334 properties, cap was 2,000
+ *   property_assets        ~9 live avg per property (21 if fully catalogued)
+ *                          -> ~3,000-7,000 at 334 properties, cap was 3,000
+ *   work_orders            every OPEN work order the org has, cap was 2,000
+ *
+ * A `.limit()` that is hit returns a short set with a 200 and no signal, so the
+ * board silently drops scheduled maintenance, assets and open work orders off
+ * the page — the exact failure mode PostgREST's max_rows produces, just
+ * self-inflicted at a different number. Draining instead means the read is
+ * complete at any portfolio size, and MAX_BOARD_ROWS turns "too big" into a
+ * loud labelled throw rather than a quiet omission.
+ *
+ * `.order('id')` last on every drained read is load-bearing, not presentation:
+ * `.range()` is OFFSET pagination, so the ordering must be TOTAL or two pages
+ * answer different questions. next_due_date, created_at and name are all
+ * non-unique across a portfolio (a whole org shares one due date after a bulk
+ * template apply), and Postgres may break those ties differently in two
+ * separately-planned queries — returning some rows twice and others never. See
+ * the same reasoning on turnovers/page.tsx and the "MUST apply a stable
+ * .order(...)" note in lib/inngest/paginate.ts.
+ *
+ * The bound stays at the CALL SITE rather than inside this helper: the semgrep
+ * unbounded-select ladder decides a read is bounded by finding `.range()` /
+ * `.limit()` in the same expression, and one moved a function call away is
+ * invisible to it.
+ */
+function drainBoard<T>(
+  label: string,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  return fetchAllRows<T>(page, { label: `page.maintenance.${label}`, maxRows: MAX_BOARD_ROWS })
+}
+
 export default async function MaintenancePage() {
   const { supabase, membership, user } = await requireOrgMember()
 
-  const [
-    workOrdersResult,
+  let workOrders, schedules, propertyAssets
+  let propertiesResult, vendorsResult, crewMembersResult,
+      vendorComplianceResult, inspectionFormsResult, orgMembersResult
+  try {
+    ;[
+    workOrders,
     propertiesResult,
     vendorsResult,
-    schedulesResult,
+    schedules,
     crewMembersResult,
-    propertyAssetsResult,
+    propertyAssets,
     vendorComplianceResult,
     inspectionFormsResult,
     orgMembersResult,
   ] = await Promise.all([
-    supabase
+    drainBoard('work_orders', (from, to) => supabase
       .from('work_orders')
       .select(`
         id, property_id, vendor_id, assigned_crew_member_id,
@@ -64,6 +115,10 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id)
       .in('status', ['pending', 'quote_requested', 'assigned', 'in_progress'])
       .order('created_at', { ascending: false })
+      // created_at is not unique — a bulk import or a cron that opens one WO
+      // per due schedule writes a whole batch inside the same millisecond — so
+      // `id` last is what makes this ordering total enough to page over.
+      .order('id', { ascending: true })
       // The embedded line items were never ordered at all here, so the board's
       // work-order detail showed them in an order Postgres chose — and could
       // choose differently on the next load. Same three keys as the standalone
@@ -72,9 +127,10 @@ export default async function MaintenancePage() {
       .order('created_at', { referencedTable: 'work_order_line_items', ascending: true })
       .order('id',         { referencedTable: 'work_order_line_items', ascending: true })
       // The .in() here is on STATUS, so this is NOT bounded by a four-element
-      // list — it returns every open work order the org has. A truncated read
-      // would drop work orders off the board with no sign they existed.
-      .limit(2000),
+      // list — it returns every open work order the org has. Drained rather
+      // than `.limit(2000)`: that cap was sized for the 50-property target and
+      // a large portfolio carries more open work than that.
+      .range(from, to)),
 
     supabase
       .from('properties')
@@ -92,7 +148,7 @@ export default async function MaintenancePage() {
       // One row per vendor in this org — tens in practice.
       .limit(1000),
 
-    supabase
+    drainBoard('maintenance_schedules', (from, to) => supabase
       .from('maintenance_schedules')
       .select(`
         id, property_id, org_id, name, description,
@@ -106,11 +162,18 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('next_due_date', { ascending: true, nullsFirst: false })
+      // next_due_date is very much not unique — applying a template across a
+      // portfolio gives every property the same due date — so `id` last is
+      // what makes this ordering total enough to page over.
+      .order('id', { ascending: true })
       // NOT hygiene, despite the org scope: live data shows ~18 active
       // schedules per property, so a portfolio at the 50-property target sits
-      // near 900 and crosses max_rows at roughly 56 properties. A truncated
-      // read silently drops scheduled maintenance off the page.
-      .limit(2000),
+      // near 900 and crosses max_rows at roughly 56 properties. At 334
+      // properties it is ~6,000 rows, which the previous `.limit(2000)` cut
+      // by two thirds — silently, with a 200 and no signal, dropping most of
+      // the org's scheduled maintenance off the page. Drained instead, so the
+      // read is complete at any portfolio size.
+      .range(from, to)),
 
     supabase
       .from('crew_members')
@@ -119,17 +182,24 @@ export default async function MaintenancePage() {
       .eq('is_active', true)
       .order('name'),
 
-    supabase
+    drainBoard('property_assets', (from, to) => supabase
       .from('property_assets')
       .select('id, name, asset_type, property_id')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name')
+      // Asset names repeat constantly across a portfolio ("Water Heater" on
+      // every property), so `id` last is what makes this ordering total
+      // enough to page over.
+      .order('id', { ascending: true })
       // NOT hygiene, despite the org scope: asset_type_standards carries 21
       // types, so a fully catalogued 50-property portfolio reaches ~1050 —
-      // past max_rows. Live orgs average 9 per property today; the bound is
-      // sized for the portfolio this product is sold to.
-      .limit(3000),
+      // past max_rows. Live orgs average 9 per property today, which puts a
+      // 334-property portfolio at ~3,000 on the live average and ~7,000 fully
+      // catalogued — either side of the previous `.limit(3000)`, i.e. a cap
+      // that truncates exactly when the portfolio is large enough to need it.
+      // Drained instead of guessing a bigger number.
+      .range(from, to)),
 
     // Bounded rather than left to PostgREST's silent max_rows truncation.
     // One row per vendor in this org, so 1000 is far above the target user's
@@ -164,16 +234,29 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id)
       .not('invite_accepted_at', 'is', null)
       .limit(500),
-  ])
+    ])
+  } catch (err) {
+    // fetchAllRows throws a plain Error with no Sentry context (a failed page,
+    // or a read past MAX_BOARD_ROWS). Report once with the call site, then
+    // rethrow so the segment's error.tsx renders a real error state — an
+    // outage must never look like an empty board.
+    reportError(err, { site: 'page.maintenance', orgId: membership.org_id })
+    throw err
+  }
 
   // A query erroring (bad filter value, RLS misconfiguration, etc.) and a
   // query legitimately returning zero rows both leave `data` empty — `?? []`
   // below can't tell them apart, so without this the board just silently
   // renders as if nothing exists instead of surfacing a real outage.
+  //
+  // The three drained reads are absent from this list because they cannot
+  // reach it in a failed state: fetchAllRows throws on a failed page rather
+  // than returning { data, error }, and the try/catch above turns that into
+  // the segment's error boundary.
   const results = [
-    ['work_orders', workOrdersResult], ['properties', propertiesResult], ['vendors', vendorsResult],
-    ['maintenance_schedules', schedulesResult], ['crew_members', crewMembersResult],
-    ['property_assets', propertyAssetsResult], ['vendor_compliance_status', vendorComplianceResult],
+    ['properties', propertiesResult], ['vendors', vendorsResult],
+    ['crew_members', crewMembersResult],
+    ['vendor_compliance_status', vendorComplianceResult],
     ['inspection_forms', inspectionFormsResult], ['organization_members', orgMembersResult],
   ] as const
   for (const [name, result] of results) {
@@ -209,12 +292,12 @@ export default async function MaintenancePage() {
         </div>
       )}
       <MaintenanceBoard
-        workOrders={workOrdersResult.data ?? []}
+        workOrders={workOrders ?? []}
         properties={propertiesResult.data ?? []}
         vendors={vendorsResult.data ?? []}
-        schedules={schedulesResult.data ?? []}
+        schedules={schedules ?? []}
         crewMembers={crewMembersResult.data ?? []}
-        propertyAssets={propertyAssetsResult.data ?? []}
+        propertyAssets={propertyAssets ?? []}
         vendorCompliance={vendorCompliance}
         inspectionForms={(inspectionFormsResult.data ?? []) as InspectionFormOption[]}
         orgMembers={orgMembers}
