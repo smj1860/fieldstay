@@ -328,11 +328,15 @@ BEGIN
   END IF;
 END $$;
 
+-- Both report SELECTs spell out ASC. It is cosmetic here — these order the
+-- rows a human reads, not a paginated drain — but the probed queries above
+-- state their direction explicitly too, and a file about sort correctness
+-- should not leave its own ORDER BYs implicit.
 SELECT name, tbl, seeks_org_index, exec_ms,
        (SELECT count(*) FROM plan_props)      AS seeded_properties,
        (SELECT count(*) FROM plan_portfolio)  AS seeded_orgs
-  FROM plan_results ORDER BY name;
+  FROM plan_results ORDER BY name ASC;
 
-SELECT name, plan FROM plan_results ORDER BY name;
+SELECT name, plan FROM plan_results ORDER BY name ASC;
 
 ROLLBACK;
