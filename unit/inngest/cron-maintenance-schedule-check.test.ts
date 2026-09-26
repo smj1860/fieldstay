@@ -63,6 +63,59 @@ function overdueSchedule(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/**
+ * `count` rows of find-due-schedules' shape (DueScheduleRow), all due the same
+ * day on one property. Sibling of overdueSchedule() above.
+ *
+ * A factory rather than an inline literal per test because SonarQube's
+ * copy-paste detector normalises literals: two of these blocks differing only
+ * in `length` and `auto_create_wo` are the same token sequence to it, which is
+ * a fair description of what they were (20.3% duplication on new code against
+ * a 3% gate). Same reasoning as drainBoard() on turnovers/page.tsx.
+ */
+function dueSchedules(count: number, overrides: Record<string, unknown> = {}) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
+    estimated_cost: null, instructions: null, auto_create_wo: true,
+    next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
+    assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
+    properties: { name: 'Lakeview Cabin' }, vendors: null,
+    ...overrides,
+  }))
+}
+
+/**
+ * Run the per-org handler over a due-schedule set with every other pass quiet,
+ * and hand back the query double, the step spy and the handler's result so a
+ * caller can assert on reads, step names and counts alike.
+ */
+async function runOverDueSchedules(rows: ReturnType<typeof dueSchedules>) {
+  const supabase = makeSupabase({
+    maintenance_schedules: [
+      { data: rows, error: null },  // find-due-schedules
+      { data: [],   error: null },  // find-overdue-schedules
+    ],
+    ...baseTables(),
+  })
+  ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+  const step   = makeStep()
+  const result = await invokeHandler(maintenanceSchedulesOrg, {
+    event:  orgEvent(),
+    step,
+    logger: { info: vi.fn(), error: vi.fn() },
+  })
+
+  return { supabase, step, result }
+}
+
+/** Every Pass 1 batch step name, in the order they ran. */
+function batchStepNames(step: ReturnType<typeof makeStep>) {
+  return step.run.mock.calls
+    .map((c) => String(c[0]))
+    .filter((n) => n.startsWith('process-due-batch-'))
+}
+
 describe('dailyMaintenanceScheduleCheck (dispatcher)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -759,29 +812,8 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     // Reminder-only schedules (auto_create_wo=false, outside no seasonal
     // window) do no writes, so this isolates the read: `checked` must equal
     // the whole seeded set, not the first 1000 rows.
-    const dueSchedules = Array.from({ length: 2_100 }, (_, i) => ({
-      id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
-      estimated_cost: null, instructions: null, auto_create_wo: false,
-      next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
-      assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
-      properties: { name: 'Lakeview Cabin' }, vendors: null,
-    }))
-
-    const supabase = makeSupabase({
-      maintenance_schedules: [
-        { data: dueSchedules, error: null }, // find-due-schedules
-        { data: [], error: null },           // find-overdue-schedules
-      ],
-      ...baseTables(),
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const step = makeStep()
-    const result = await invokeHandler(maintenanceSchedulesOrg, {
-      event:  orgEvent(),
-      step,
-      logger: { info: vi.fn(), error: vi.fn() },
-    })
+    const { supabase, step, result } =
+      await runOverDueSchedules(dueSchedules(2_100, { auto_create_wo: false }))
 
     expect(result).toMatchObject({ checked: 2_100 })
     // Three pages requested for the due-schedule scan.
@@ -800,7 +832,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     // pre-batching name — which no step is called any more, so the assertion
     // passed by matching nothing at all and would have kept passing through a
     // full regression.
-    expect(step.run.mock.calls.map((c) => c[0]).filter((n) => String(n).startsWith('process-due-batch-'))).toEqual([])
+    expect(batchStepNames(step)).toEqual([])
   })
 
   // ==========================================================================
@@ -819,38 +851,11 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
   // it passed throughout the period the step explosion was live.
   // ==========================================================================
   it('spends one step per BATCH of actionable schedules, not one per schedule', async () => {
-    const DUE = 120   // 120 actionable schedules at DUE_BATCH_SIZE=25 -> 5 batches
-
-    const dueSchedules = Array.from({ length: DUE }, (_, i) => ({
-      id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
-      estimated_cost: null, instructions: null, auto_create_wo: true,
-      next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
-      assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
-      properties: { name: 'Lakeview Cabin' }, vendors: null,
-    }))
-
-    const supabase = makeSupabase({
-      maintenance_schedules: [
-        { data: dueSchedules, error: null }, // find-due-schedules
-        { data: [], error: null },           // find-overdue-schedules
-      ],
-      ...baseTables(),
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const step = makeStep()
-    await invokeHandler(maintenanceSchedulesOrg, {
-      event:  orgEvent(),
-      step,
-      logger: { info: vi.fn(), error: vi.fn() },
-    })
-
-    const batchSteps = step.run.mock.calls
-      .map((c) => String(c[0]))
-      .filter((n) => n.startsWith('process-due-batch-'))
+    // 120 actionable schedules at DUE_BATCH_SIZE=25 -> 5 batches.
+    const { step } = await runOverDueSchedules(dueSchedules(120))
 
     // ceil(120 / 25) = 5. The old shape would be 120 here.
-    expect(batchSteps).toEqual([
+    expect(batchStepNames(step)).toEqual([
       'process-due-batch-0',
       'process-due-batch-1',
       'process-due-batch-2',
