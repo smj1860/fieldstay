@@ -22,6 +22,7 @@
     "check:comment-blind-guardrails": "tsx scripts/sweep-comment-blind-guardrails.ts",
     "check:rls-isolation": "bash scripts/run-rls-probe.sh",
     "check:rls-isolation:prod": "DB_INVARIANTS_ALLOW_PROD=1 bash scripts/run-rls-probe.sh",
+    "check:rls-plans": "bash scripts/run-plan-probe.sh",
     "inngest:dev": "npx inngest-cli@latest dev",
     "types:supabase": "supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts",
     "e2e": "playwright test",
