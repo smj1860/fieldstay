@@ -2263,7 +2263,32 @@ meta-rule, prose is for judgment calls only.
   `EXPLAIN ANALYZE` on that table's hot read path and confirm the plan is
   seeking on an index that includes `org_id`, not sequentially scanning and
   calling `is_org_member()`/`get_user_org_ids()` per row. Do NOT attempt an
-  automated lint for this one.
+  automated lint for this one — a SOURCE lint is what is ruled out, not a
+  measurement: `scripts/rls-plan-probe.sql` (`pnpm run check:rls-plans`,
+  manual, never a CI gate) seeds a 872-property / 14-org portfolio in a
+  rolled-back transaction, impersonates `authenticated`, and asserts each
+  dashboard read still seeks an `org_id` index. Carries a canary — one query
+  re-measured with `enable_indexscan = off`, which the check MUST reject — for
+  the same reason the isolation probe does.
+
+  **Measured 2026-09-26 against that fixture: all five probed reads seek an
+  `org_id` index; none evaluates the policy per row.** The reason is worth
+  knowing before changing a read: it is the application's OWN
+  `.eq('org_id', …)` that becomes the index condition, and
+  `get_user_org_ids()` is then a hashed SubPlan evaluated ONCE (`loops=1`),
+  with the policy left as a cheap post-filter. The `Seq Scan` nodes that do
+  appear in these plans sit in the policy's crew-member OR branch and are
+  marked `(never executed)` — the PM's `org_id` test short-circuits them. So
+  the item's risk is real but conditional: **a read that drops its own
+  `org_id` filter and leans on RLS alone is the case that bites**, and that is
+  what to look for rather than the policy itself.
+
+  Two findings the measurement added. `property_assets` spends as long
+  PLANNING as executing (3.4ms each) because its policy expands to ~47
+  subplans — CPU paid per request, before any rows move. And the planner's
+  cost estimate for that read is ~360,000 against a 3ms actual, so its plan
+  choice is being made on a number that is three orders of magnitude wrong;
+  it picks correctly today, but nothing about that is load-bearing.
 
 ### Code Quality
 
