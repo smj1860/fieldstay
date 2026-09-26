@@ -517,6 +517,53 @@ export function chunkOverdueSchedules(schedules: OverdueScheduleRow[]): OverdueS
 
 export const OVERDUE_BATCHING = { OVERDUE_BATCH_SIZE, UPDATE_RETURNING_CHUNK, CREATE_RACE_ATTEMPTS } as const
 
+/**
+ * Pass 1's batch size.
+ *
+ * Smaller than OVERDUE_BATCH_SIZE (100) because the two passes cost very
+ * different amounts per row. Pass 2 is bulk — two reads, one bulk UPDATE and
+ * one bulk INSERT for the WHOLE batch — so 100 rows is still a handful of
+ * round trips. Pass 1 is per-schedule by nature: an existing-WO pre-check, an
+ * insert, an audit row and an optimistic-locked advance for EACH schedule, so
+ * the batch's round-trip count scales with its size. At 25 that is ~100 round
+ * trips per step, comfortably inside the 300s maxDuration on
+ * app/api/inngest/route.ts; at 100 it would be ~400 and the step would be
+ * racing that ceiling on a large portfolio.
+ */
+const DUE_BATCH_SIZE = 25
+
+/**
+ * Pass 1 used to be `for (const {schedule} of actionable) { await step.run(...) }`
+ * — one Inngest step per actionable schedule, plus a second `step.sendEvent`
+ * step for each one with a vendor portal event.
+ *
+ * The fan-out guardrail (unit/guardrails/unbounded-fanout-loops.test.ts) waves
+ * that shape through because the collection is org-scoped, and org scope is
+ * its definition of bounded. That holds only while an org is small. Live data
+ * is ~18 active schedules per property, so a 334-property portfolio carries
+ * ~6,000 schedules; with a 7-day alert window the first run has roughly 1,400
+ * actionable, i.e. up to ~2,800 steps in ONE invocation — past Inngest's
+ * per-run step ceiling, with the memoized-state payload re-sent on every step
+ * and a single failing schedule retrying the entire tail.
+ *
+ * Batching is safe here specifically because each unit is already idempotent:
+ * createMaintenanceWorkOrder pre-checks (source_schedule_id, scheduled_date,
+ * source) before inserting, and the next_due_date advance carries an
+ * optimistic lock on the value it read. So a batch that fails partway and
+ * retries re-runs its already-done schedules as clean no-ops rather than
+ * duplicating work orders — which is what makes a batch an acceptable retry
+ * boundary instead of needing one per schedule.
+ */
+export function chunkDueSchedules<T>(actionable: T[]): T[][] {
+  const batches: T[][] = []
+  for (let i = 0; i < actionable.length; i += DUE_BATCH_SIZE) {
+    batches.push(actionable.slice(i, i + DUE_BATCH_SIZE))
+  }
+  return batches
+}
+
+export const DUE_BATCHING = { DUE_BATCH_SIZE } as const
+
 // ── Pass 1: which due-soon schedules are actually actionable ─────────────────
 
 /** The subset of DueSoonScheduleRow this filter needs to make its decision. */

@@ -6,6 +6,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { IntegrationsClient }  from './integrations-client'
 import { ChannelHealthTable }  from './channel-health-table'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
+import type { IcalFeedRow }    from '@/lib/integrations/health'
 
 export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 
@@ -60,16 +62,30 @@ export default async function IntegrationsPage() {
   // Logs + reports, then throws so the segment's error.tsx renders a real
   // error state — a failed read must not render as an empty page.
   throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, providersError)
-  const { data: icalFeeds, error: icalFeedsError } = await admin
-    .from('ical_feeds')
-    .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-
-
-  // Logs + reports, then throws so the segment's error.tsx renders a real
-  // error state — a failed read must not render as an empty page.
-  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, icalFeedsError)
+  // Drained, not a bare `.select()`. One feed per property per listing
+  // platform, so a portfolio syncing Airbnb + VRBO crosses PostgREST's
+  // max_rows = 1000 at roughly 350-500 properties. Truncation is silent — a
+  // 200 with a short set — and this table is the PM's only view of which
+  // calendars are syncing, so a dropped feed reads as a feed that does not
+  // exist rather than one that is broken.
+  //
+  // `.order('id')` is load-bearing, not presentation: `.range()` is OFFSET
+  // pagination, so the ordering must be TOTAL or two pages answer different
+  // questions. `name` and `source` repeat heavily across a portfolio.
+  //
+  // fetchAllRows throws on a failed page rather than returning { data, error },
+  // which is the same end state the throwIfAnyQueryFailed below produced — the
+  // segment's error.tsx renders a real error state instead of an empty page.
+  const icalFeeds = await fetchAllRows<IcalFeedRow>(
+    (from, to) => admin
+      .from('ical_feeds')
+      .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('id')
+      .range(from, to),
+    { label: `page.settings.integrations.ical_feeds[org=${membership.org_id}]` },
+  )
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c])
   )

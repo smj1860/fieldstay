@@ -63,6 +63,59 @@ function overdueSchedule(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/**
+ * `count` rows of find-due-schedules' shape (DueScheduleRow), all due the same
+ * day on one property. Sibling of overdueSchedule() above.
+ *
+ * A factory rather than an inline literal per test because SonarQube's
+ * copy-paste detector normalises literals: two of these blocks differing only
+ * in `length` and `auto_create_wo` are the same token sequence to it, which is
+ * a fair description of what they were (20.3% duplication on new code against
+ * a 3% gate). Same reasoning as drainBoard() on turnovers/page.tsx.
+ */
+function dueSchedules(count: number, overrides: Record<string, unknown> = {}) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
+    estimated_cost: null, instructions: null, auto_create_wo: true,
+    next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
+    assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
+    properties: { name: 'Lakeview Cabin' }, vendors: null,
+    ...overrides,
+  }))
+}
+
+/**
+ * Run the per-org handler over a due-schedule set with every other pass quiet,
+ * and hand back the query double, the step spy and the handler's result so a
+ * caller can assert on reads, step names and counts alike.
+ */
+async function runOverDueSchedules(rows: ReturnType<typeof dueSchedules>) {
+  const supabase = makeSupabase({
+    maintenance_schedules: [
+      { data: rows, error: null },  // find-due-schedules
+      { data: [],   error: null },  // find-overdue-schedules
+    ],
+    ...baseTables(),
+  })
+  ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+  const step   = makeStep()
+  const result = await invokeHandler(maintenanceSchedulesOrg, {
+    event:  orgEvent(),
+    step,
+    logger: { info: vi.fn(), error: vi.fn() },
+  })
+
+  return { supabase, step, result }
+}
+
+/** Every Pass 1 batch step name, in the order they ran. */
+function batchStepNames(step: ReturnType<typeof makeStep>) {
+  return step.run.mock.calls
+    .map((c) => String(c[0]))
+    .filter((n) => n.startsWith('process-due-batch-'))
+}
+
 describe('dailyMaintenanceScheduleCheck (dispatcher)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -325,12 +378,19 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     expect(scheduleUpdate?.args[0]).toEqual({ next_due_date: '2026-08-27' })
 
     // Vendor has portal_enabled + email → fires the vendor-portal dispatch event.
+    //
+    // ONE sendEvent carrying an ARRAY, not one step per schedule. Pass 1 is
+    // batched (chunkDueSchedules), and the events it collects are sent once at
+    // the function's top level — step tooling may never run inside a step.run
+    // callback, and a step per event is the fan-out this batching removed.
     expect(step.sendEvent).toHaveBeenCalledWith(
-      'fire-vendor-portal-sched_1',
-      expect.objectContaining({
-        name: 'work-order/created',
-        data: expect.objectContaining({ work_order_id: 'wo_new', vendor_id: 'vendor_1', portal_enabled: true }),
-      }),
+      'fire-vendor-portal-events',
+      [
+        expect.objectContaining({
+          name: 'work-order/created',
+          data: expect.objectContaining({ work_order_id: 'wo_new', vendor_id: 'vendor_1', portal_enabled: true }),
+        }),
+      ],
     )
   })
 
@@ -752,29 +812,8 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     // Reminder-only schedules (auto_create_wo=false, outside no seasonal
     // window) do no writes, so this isolates the read: `checked` must equal
     // the whole seeded set, not the first 1000 rows.
-    const dueSchedules = Array.from({ length: 2_100 }, (_, i) => ({
-      id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
-      estimated_cost: null, instructions: null, auto_create_wo: false,
-      next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
-      assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
-      properties: { name: 'Lakeview Cabin' }, vendors: null,
-    }))
-
-    const supabase = makeSupabase({
-      maintenance_schedules: [
-        { data: dueSchedules, error: null }, // find-due-schedules
-        { data: [], error: null },           // find-overdue-schedules
-      ],
-      ...baseTables(),
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const step = makeStep()
-    const result = await invokeHandler(maintenanceSchedulesOrg, {
-      event:  orgEvent(),
-      step,
-      logger: { info: vi.fn(), error: vi.fn() },
-    })
+    const { supabase, step, result } =
+      await runOverDueSchedules(dueSchedules(2_100, { auto_create_wo: false }))
 
     expect(result).toMatchObject({ checked: 2_100 })
     // Three pages requested for the due-schedule scan.
@@ -787,6 +826,44 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     // `return`. 2,100 of them in one invocation is a step explosion producing
     // nothing, and it read as healthy because the assertion above (the only
     // one there was) is about the READ being complete.
-    expect(step.run.mock.calls.map((c) => c[0]).filter((n) => String(n).startsWith('process-schedule-'))).toEqual([])
+    //
+    // The prefix is `process-due-batch-`, matching what Pass 1 actually names
+    // its steps since it was batched. It said `process-schedule-` — the
+    // pre-batching name — which no step is called any more, so the assertion
+    // passed by matching nothing at all and would have kept passing through a
+    // full regression.
+    expect(batchStepNames(step)).toEqual([])
+  })
+
+  // ==========================================================================
+  // PASS 1 IS BATCHED: STEP COUNT SCALES WITH THE BATCH SIZE, NOT THE ORG.
+  //
+  // The fan-out guardrail (unit/guardrails/unbounded-fanout-loops.test.ts)
+  // treats an org-scoped collection as bounded, which holds only while orgs are
+  // small. At ~18 active schedules per property, a 334-property portfolio
+  // carries ~6,000 schedules and a 7-day alert window makes ~1,400 of them
+  // actionable — which the old per-schedule shape turned into ~1,400 step.run
+  // steps plus one step.sendEvent each, in ONE invocation: past Inngest's
+  // per-run step ceiling, with the memoized state payload re-sent every step.
+  //
+  // This is the assertion that would have caught it. It is about the STEP
+  // COUNT, not the reads — the existing large-org test above covers those, and
+  // it passed throughout the period the step explosion was live.
+  // ==========================================================================
+  it('spends one step per BATCH of actionable schedules, not one per schedule', async () => {
+    // 120 actionable schedules at DUE_BATCH_SIZE=25 -> 5 batches.
+    const { step } = await runOverDueSchedules(dueSchedules(120))
+
+    // ceil(120 / 25) = 5. The old shape would be 120 here.
+    expect(batchStepNames(step)).toEqual([
+      'process-due-batch-0',
+      'process-due-batch-1',
+      'process-due-batch-2',
+      'process-due-batch-3',
+      'process-due-batch-4',
+    ])
+
+    // And no step is named after an individual schedule, in either pass.
+    expect(step.run.mock.calls.map((c) => String(c[0])).filter((n) => /^process-schedule-/.test(n))).toEqual([])
   })
 })

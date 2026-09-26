@@ -1794,7 +1794,20 @@ following them stops being a memory test. Five layers, checked in CI via
    - Added by the 2026-07-30 pre-launch remediation, one line each — read the
      header comment in each file for the defect it encodes:
      `unbounded-select` (the `max_rows = 1000` rule, `lib/inngest/**`),
-     `unbounded-fanout-loops` (a per-tenant fan-out must be bounded/batched),
+     `unbounded-fanout-loops` (a per-tenant fan-out must be bounded/batched —
+     note its definition of "bounded" INCLUDES "scoped to a single org", which
+     holds only while orgs are small: at ~18 schedules per property a
+     334-property org made Pass 1 of `cron/maintenance-schedules.ts` ~1,400
+     `step.run`s plus a `step.sendEvent` each in ONE invocation, past Inngest's
+     per-run step ceiling, with this guardrail green throughout. That pass is
+     now batched via `chunkDueSchedules` (`DUE_BATCH_SIZE` 25, smaller than
+     Pass 2's 100 because Pass 1 is per-schedule round trips rather than bulk),
+     with the portal events collected and fired in ONE top-level `sendEvent`.
+     Batching is only sound there because each unit is already idempotent — a
+     WO pre-check plus an optimistic-locked `next_due_date` advance — which is
+     what makes a batch an acceptable retry boundary. **A single large tenant
+     is the case this guardrail cannot see; check step counts by hand when an
+     org-scoped collection scales with properties**),
      `upload-payload-null-fields` (`'x' in payload` in Dexie upload builders),
      `crew-dead-letter-coverage` (cached-table pruning + a retry affordance for
      every `MutationTable`), `external-fetch-timeout` (no `fetch()` without a
@@ -2072,13 +2085,29 @@ following them stops being a memory test. Five layers, checked in CI via
      checklist_template_sections (7.3 — the highest, ~365 at 50 properties),
      and every template/config table. Also safe once checked: the `bookings`
      and `turnovers` page reads, which look unbounded but carry date windows.
-     NOT safe, and now bounded: `maintenance_schedules` at ~18 per property
+     NOT safe: `maintenance_schedules` at ~18 per property
      (~900 at the 50-property target, crossing `max_rows` at about 56) and
      `property_assets`, where asset_type_standards' 21 types put a fully
      catalogued 50-property portfolio at ~1050. Neither is a page-render
      nicety — a truncated read drops scheduled maintenance and assets off the
      page silently. Treat a NEW finding in this tier as a prompt to ask which
      of those two kinds of growth applies, not as automatically ignorable.
+
+     **Those two, plus the maintenance board's open-`work_orders` read, are now
+     DRAINED rather than `.limit()`-bounded**, and the reason is the rule this
+     whole tier turns on. A fixed `.limit()` is a guess at a portfolio size, so
+     it fails exactly like `max_rows` does — a short set, a 200, no signal —
+     just at a number we chose. The three caps here were 2,000 / 3,000 / 2,000,
+     sized for the 50-property target; a 334-property portfolio carries ~6,000
+     schedules and ~3,000-7,000 assets, so all three truncated at the size where
+     completeness actually mattered. `drainBoard()` in
+     `app/(dashboard)/maintenance/page.tsx` pages them through `fetchAllRows`
+     instead, which is complete at any size and turns "too big" into a loud
+     labelled throw at `MAX_BOARD_ROWS`. **Prefer a drain over picking a bigger
+     number** — the bigger number is the same bug with a later trigger date.
+     The same applies to `ical_feeds` (one per property per listing platform,
+     crossing `max_rows` around 350-500 properties), drained in both
+     `settings/integrations/page.tsx` and `lib/integrations/health.ts`.
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its
