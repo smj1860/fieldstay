@@ -75,7 +75,7 @@
 -- READING THE RESULT
 --
 -- One row per probed query:
---   seeks_org_index — the probed table is reached by an index whose condition
+--   seeks_index — the probed table is reached by an index whose condition
 --                     is org_id. This is the assertion.
 --   exec_ms         — context only, see above.
 --   plan            — the full plan, for the manual read the checklist wants.
@@ -170,11 +170,59 @@ INSERT INTO bookings (org_id, property_id, checkin_date, checkout_date, status)
          'confirmed'::booking_status
     FROM plan_props pp, generate_series(1, 8) s;
 
+-- ── The crew side ───────────────────────────────────────────────────────────
+-- checklist_instances / _items and a CREW principal, because the crew branch
+-- of those policies is the half a PM probe cannot reach.
+--
+-- checklist_instance_items' policy has no org_id path at all — both halves go
+-- through `instance_id IN (subquery)` — and the table carries no org_id index.
+-- On the PM plans every one of those subplans reports `(never executed)`: the
+-- PM's own org_id test satisfies the OR first and short-circuits the rest. So
+-- measuring this branch needs a user who is a crew member and NOT an org
+-- member, which is why an auth.users row is minted here rather than reusing
+-- plan_tgt's. Everything rolls back, auth.users included.
+CREATE TEMP TABLE plan_instances AS
+  SELECT gen_random_uuid() AS id, t.org_id, t.id AS turnover_id
+    FROM turnovers t
+   WHERE t.org_id = (SELECT org FROM plan_tgt);
+
+INSERT INTO checklist_instances (id, org_id, turnover_id, template_snapshot)
+  SELECT id, org_id, turnover_id, '{}'::jsonb FROM plan_instances;
+
+-- 30 items per checklist — the 30-60 range chunked.ts' header cites.
+INSERT INTO checklist_instance_items (instance_id, turnover_id, section_name, task, is_completed)
+  SELECT ci.id, ci.turnover_id, 'Kitchen', 'plan probe task ' || s, false
+    FROM plan_instances ci, generate_series(1, 30) s;
+
+CREATE TEMP TABLE plan_crew AS SELECT gen_random_uuid() AS usr, gen_random_uuid() AS crew;
+
+INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
+  SELECT usr, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+         'plan-probe-crew@example.invalid', '', now(), now()
+    FROM plan_crew;
+
+INSERT INTO crew_members (id, org_id, name, user_id, is_active)
+  SELECT crew, (SELECT org FROM plan_tgt), 'plan probe crew', usr, true FROM plan_crew;
+
+-- 800 assigned turnovers: a working cleaner's live scope, and enough that the
+-- crew subquery has to materialise something rather than folding to one row.
+INSERT INTO turnover_assignments (turnover_id, crew_member_id, org_id)
+  SELECT t.id, (SELECT crew FROM plan_crew), (SELECT org FROM plan_tgt)
+    FROM (SELECT id FROM turnovers
+           WHERE org_id = (SELECT org FROM plan_tgt) ORDER BY id LIMIT 800) t;
+
+INSERT INTO assignment_outcomes (org_id, turnover_id, crew_member_id, pm_rating)
+  SELECT (SELECT org FROM plan_tgt), t.id, (SELECT crew FROM plan_crew), 4
+    FROM (SELECT id FROM turnovers
+           WHERE org_id = (SELECT org FROM plan_tgt) ORDER BY id LIMIT 800) t;
+
 -- Without this every plan below is chosen from default statistics on a table
 -- the planner still believes is empty, which is a different planner input than
 -- production has and therefore a different plan. ANALYZE inside a transaction
 -- is allowed and its pg_statistic rows roll back with everything else.
-ANALYZE properties, maintenance_schedules, property_assets, work_orders, turnovers, bookings;
+ANALYZE properties, maintenance_schedules, property_assets, work_orders, turnovers, bookings,
+        checklist_instances, checklist_instance_items, crew_members, turnover_assignments,
+        assignment_outcomes;
 
 -- ── The queries under probe ─────────────────────────────────────────────────
 -- Each mirrors a real dashboard read, including the `.eq('org_id', …)` the
@@ -183,12 +231,30 @@ ANALYZE properties, maintenance_schedules, property_assets, work_orders, turnove
 -- RLS predicate as a cheap post-filter rather than the thing driving the scan.
 -- A read that omitted it and leaned on RLS alone is the case this probe would
 -- catch, so the queries must keep it exactly as the app writes it.
-CREATE TEMP TABLE plan_queries(name text PRIMARY KEY, tbl text, sql text);
+-- `expect_cond` is per-query on purpose. Not every probed read is scoped by
+-- org_id: the turnover-detail page reads assignment_outcomes by turnover_id,
+-- and the crew PWA reads checklist_instance_items by turnover_id, so a single
+-- hardcoded org_id assertion would fail on two correct plans. `run_as` picks
+-- the principal, because the crew branch of those policies is unreachable as
+-- a PM.
+CREATE TEMP TABLE plan_queries(
+  name        text PRIMARY KEY,
+  tbl         text NOT NULL,
+  run_as      text NOT NULL CHECK (run_as IN ('pm','crew')),
+  -- NOT NULL is load-bearing, not tidiness. seeks_index is computed as
+  -- `buf ~ q.expect_cond`, and in SQL `anything ~ NULL` is NULL, not false —
+  -- so a row that lost its expect_cond would store seeks_index = NULL and the
+  -- final `NOT seeks_index` filter would not select it (NULL is not true).
+  -- The probe would report a clean pass for a query it never actually
+  -- checked. The guard below catches the same thing from the other side.
+  expect_cond text NOT NULL CHECK (expect_cond <> ''),
+  sql         text NOT NULL
+);
 
 CREATE TEMP TABLE plan_results(
   name           text PRIMARY KEY,
   tbl            text,
-  seeks_org_index boolean,
+  seeks_index boolean,
   exec_ms         numeric,
   plan            text
 );
@@ -196,30 +262,51 @@ CREATE TEMP TABLE plan_results(
 DO $$
 DECLARE v_org uuid := (SELECT org FROM plan_tgt);
 BEGIN
-  INSERT INTO plan_queries(name, tbl, sql) VALUES
-    ('1_maintenance_board_work_orders', 'work_orders', format(
+  INSERT INTO plan_queries(name, tbl, run_as, expect_cond, sql) VALUES
+    ('1_maintenance_board_work_orders', 'work_orders', 'pm', 'Index Cond: \(+org_id', format(
       'SELECT id FROM work_orders WHERE org_id=%L '
       'AND status IN (''pending'',''quote_requested'',''assigned'',''in_progress'') '
       'ORDER BY created_at DESC, id LIMIT 999', v_org)),
-    ('2_maintenance_board_schedules', 'maintenance_schedules', format(
+    ('2_maintenance_board_schedules', 'maintenance_schedules', 'pm', 'Index Cond: \(+org_id', format(
       'SELECT id FROM maintenance_schedules WHERE org_id=%L AND is_active '
       'ORDER BY next_due_date ASC NULLS LAST, id LIMIT 999', v_org)),
-    ('3_maintenance_board_assets', 'property_assets', format(
+    ('3_maintenance_board_assets', 'property_assets', 'pm', 'Index Cond: \(+org_id', format(
       'SELECT id FROM property_assets WHERE org_id=%L AND is_active '
       'ORDER BY name, id LIMIT 999', v_org)),
-    ('4_turnovers_board_window', 'turnovers', format(
+    ('4_turnovers_board_window', 'turnovers', 'pm', 'Index Cond: \(+org_id', format(
       'SELECT id FROM turnovers WHERE org_id=%L AND status <> ''cancelled'' '
       'AND checkout_datetime >= now() - interval ''7 days'' '
       'AND checkout_datetime <= now() + interval ''60 days'' '
       'ORDER BY checkout_datetime, id LIMIT 999', v_org)),
-    ('5_ops_bookings_window', 'bookings', format(
+    ('5_ops_bookings_window', 'bookings', 'pm', 'Index Cond: \(+org_id', format(
       'SELECT id FROM bookings WHERE org_id=%L '
       'AND status IN (''confirmed'',''tentative'') '
       'AND checkout_date >= current_date - 7 AND checkin_date <= current_date + 60 '
-      'ORDER BY checkin_date, id LIMIT 999', v_org));
+      'ORDER BY checkin_date, id LIMIT 999', v_org)),
+
+    -- turnovers/[id]/page.tsx's completed-turnover rating lookup. Scoped by
+    -- turnover_id and NOT by org_id, so the policy is the ONLY thing keeping
+    -- it tenant-safe — the exact shape flagged above as the one that bites.
+    -- Probed for that reason: it is the read where an unhelpful plan would
+    -- actually cost something.
+    ('6_turnover_detail_rating', 'assignment_outcomes', 'pm', 'Index Cond: \(+turnover_id', format(
+      'SELECT pm_rating FROM assignment_outcomes WHERE turnover_id=%L '
+      'AND pm_rating IS NOT NULL LIMIT 1',
+      (SELECT id FROM turnovers WHERE org_id = v_org ORDER BY id LIMIT 1))),
+
+    -- The crew PWA's checklist-item pull (lib/dexie/sync/turnovers.ts), keyed
+    -- on the denormalized turnover_id in chunks of 100 and drained by range.
+    -- Run as CREW: this is the policy branch every PM plan above reports as
+    -- `(never executed)`.
+    ('7_crew_checklist_items_pull', 'checklist_instance_items', 'crew', 'Index Cond: \(+turnover_id', format(
+      'SELECT id, instance_id, turnover_id, is_completed FROM checklist_instance_items '
+      'WHERE turnover_id IN (%s) ORDER BY id LIMIT 1000',
+      (SELECT string_agg(quote_literal(id::text), ',')
+         FROM (SELECT t.id FROM turnovers t
+                 WHERE t.org_id = v_org ORDER BY t.id LIMIT 100) c)));
 END $$;
 
-GRANT SELECT         ON plan_tgt, plan_portfolio, plan_props, plan_queries TO authenticated;
+GRANT SELECT         ON plan_tgt, plan_portfolio, plan_props, plan_queries, plan_crew TO authenticated;
 GRANT SELECT, INSERT ON plan_results TO authenticated;
 
 -- ── Impersonate, exactly as PostgREST does ──────────────────────────────────
@@ -244,11 +331,22 @@ BEGIN
   END IF;
 
   FOR q IN SELECT * FROM plan_queries ORDER BY name LOOP
+    -- Swap the JWT subject per query rather than running two passes. The ROLE
+    -- stays `authenticated`; only auth.uid() moves, which is all the policies
+    -- read.
+    PERFORM set_config(
+      'request.jwt.claims',
+      json_build_object(
+        'sub', CASE q.run_as WHEN 'crew' THEN (SELECT usr FROM plan_crew)
+                             ELSE (SELECT usr FROM plan_tgt) END,
+        'role', 'authenticated')::text,
+      true);
+
     buf := '';
     FOR line IN EXECUTE 'EXPLAIN (ANALYZE, BUFFERS) ' || q.sql LOOP
       buf := buf || line || E'\n';
     END LOOP;
-    INSERT INTO plan_results(name, tbl, seeks_org_index, exec_ms, plan)
+    INSERT INTO plan_results(name, tbl, seeks_index, exec_ms, plan)
     VALUES (
       q.name,
       q.tbl,
@@ -259,7 +357,11 @@ BEGIN
       -- on the PM branch those are marked `(never executed)` because the OR
       -- short-circuits. Asserting their absence would fail on correct plans;
       -- asserting the seek is present says the thing actually meant.
-      buf ~ ('Index (Only )?Scan using [a-z0-9_]+ on ' || q.tbl)
+      -- `Bitmap Heap Scan` counts as reaching the table by index: the crew
+      -- read lands there (Bitmap Index Scan on
+      -- idx_checklist_instance_items_turnover_id feeding a Bitmap Heap Scan),
+      -- which is an index seek, not the table scan this probe exists to catch.
+      buf ~ ('(Index (Only )?Scan using [a-z0-9_]+ on |Bitmap Heap Scan on )' || q.tbl)
         -- `\(+` and not `\(`: a single-column index condition prints as
         -- `Index Cond: (org_id = …)`, but a composite one — which is most of
         -- them here (idx_turnovers_org_status_checkout,
@@ -268,7 +370,7 @@ BEGIN
         -- and the probe reported a regression on its first real run. A check
         -- that cries wolf gets muted, which is the same defect as one that
         -- never fires.
-        AND buf ~ 'Index Cond: \(+org_id',
+        AND buf ~ q.expect_cond,
       nullif(substring(buf from 'Execution Time: ([0-9.]+) ms'), '')::numeric,
       buf
     );
@@ -290,7 +392,7 @@ DECLARE
 BEGIN
   FOR line IN EXECUTE 'EXPLAIN (ANALYZE) ' || v_sql LOOP buf := buf || line || E'\n'; END LOOP;
 
-  v_ok := buf ~ 'Index (Only )?Scan using [a-z0-9_]+ on maintenance_schedules'
+  v_ok := buf ~ '(Index (Only )?Scan using [a-z0-9_]+ on |Bitmap Heap Scan on )maintenance_schedules'
           AND buf ~ 'Index Cond: \(+org_id';
 
   IF v_ok THEN
@@ -300,7 +402,7 @@ BEGIN
       'claims and every result above is meaningless.';
   END IF;
 
-  INSERT INTO plan_results(name, tbl, seeks_org_index, exec_ms, plan)
+  INSERT INTO plan_results(name, tbl, seeks_index, exec_ms, plan)
   VALUES ('0_CANARY_indexscan_disabled', 'maintenance_schedules', v_ok,
           nullif(substring(buf from 'Execution Time: ([0-9.]+) ms'), '')::numeric, buf);
 END $$;
@@ -314,13 +416,17 @@ SET LOCAL enable_indexonlyscan = on;
 DO $$
 DECLARE v_bad text[];
 BEGIN
+  -- `IS NOT TRUE` rather than `NOT seeks_index`: it catches NULL as well as
+  -- false, so a query whose shape check could not be evaluated fails loudly
+  -- instead of passing by absence.
   SELECT array_agg(name ORDER BY name) INTO v_bad
     FROM plan_results
-   WHERE name <> '0_CANARY_indexscan_disabled' AND NOT seeks_org_index;
+   WHERE name <> '0_CANARY_indexscan_disabled' AND seeks_index IS NOT TRUE;
 
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION
-      'RLS PLAN REGRESSION: % did not seek an org_id index at 872 properties. '
+      'RLS PLAN REGRESSION: % did not seek its expected index at 872 properties '
+      '(or its shape check could not be evaluated at all). '
       'Read the printed plan: an RLS-filtered sequential scan evaluates '
       'get_user_org_ids()/is_org_member() per candidate row, and that cost '
       'grows with the whole table rather than with one tenant.',
@@ -332,7 +438,7 @@ END $$;
 -- rows a human reads, not a paginated drain — but the probed queries above
 -- state their direction explicitly too, and a file about sort correctness
 -- should not leave its own ORDER BYs implicit.
-SELECT name, tbl, seeks_org_index, exec_ms,
+SELECT name, tbl, seeks_index, exec_ms,
        (SELECT count(*) FROM plan_props)      AS seeded_properties,
        (SELECT count(*) FROM plan_portfolio)  AS seeded_orgs
   FROM plan_results ORDER BY name ASC;
