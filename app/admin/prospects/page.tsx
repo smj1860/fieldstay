@@ -58,6 +58,16 @@ export default async function ProspectsPage() {
       .select(SELECT_COLUMNS)
       .order('score_a', { ascending: false, nullsFirst: false })
       .order('company')
+      // `id` last, and it is load-bearing rather than cosmetic. `.range()` is
+      // OFFSET pagination, so the ordering has to be TOTAL or two pages answer
+      // different questions. Neither key above is unique: score_a is currently
+      // NULL on every row, which collapses the sort to `company` alone, and 132
+      // live rows share a company name with another row. Postgres may order
+      // those ties differently in two separately-planned queries, so a tied row
+      // could be returned on both page 1 and page 2 while another is returned on
+      // neither — silently, since the drain only counts rows. Same reasoning as
+      // the header comment on turnovers/page.tsx.
+      .order('id', { ascending: true })
       .range(from, to),
     { label: 'admin.prospects' },
   )
