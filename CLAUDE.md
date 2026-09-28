@@ -2271,8 +2271,28 @@ meta-rule, prose is for judgment calls only.
   re-measured with `enable_indexscan = off`, which the check MUST reject — for
   the same reason the isolation probe does.
 
-  **Measured 2026-09-26 against that fixture: all five probed reads seek an
-  `org_id` index; none evaluates the policy per row.** The reason is worth
+  **Measured 2026-09-26 against that fixture, extended 2026-09-27 to seven
+  reads covering all five tables this item names: every one seeks its expected
+  index; none evaluates the policy per row.** Two of the seven are not
+  org-scoped at all and are probed for exactly that reason — the
+  turnover-detail rating read (`assignment_outcomes` by `turnover_id`) and the
+  crew PWA's checklist pull (`checklist_instance_items` by `turnover_id`) —
+  so the probe carries a per-query `expect_cond` rather than one hardcoded
+  org_id assertion. The crew read runs as a CREW principal (a seeded
+  auth.users row with a `crew_members` row and no `organization_members` row),
+  because the crew half of those policies is the half a PM probe cannot
+  reach: on every PM plan it reports `(never executed)`.
+
+  **`checklist_instance_items` is the one worth re-measuring over time.** Its
+  policy has no `org_id` path at all — both branches go through
+  `instance_id IN (subquery)` — so a crew read materialises that crew
+  member's accessible `checklist_instances` set once per query (hashed, not
+  per row). At fixture size the planner builds it with a sequential scan of
+  `checklist_instances`, and that is the CHEAPER option rather than a missing
+  index: with `enable_seqscan = off` an index plan exists and runs faster, so
+  Postgres moves off the scan on cost as the table grows. `checklist_instances`
+  grows with TIME, not with portfolio size, which is why this one is a
+  standing watch item rather than a settled answer. The reason is worth
   knowing before changing a read: it is the application's OWN
   `.eq('org_id', …)` that becomes the index condition, and
   `get_user_org_ids()` is then a hashed SubPlan evaluated ONCE (`loops=1`),
