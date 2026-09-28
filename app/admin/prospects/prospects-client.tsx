@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useMemo, useState, useTransition } from 'react'
-import { Download, Plus, Check, RefreshCw, Pencil } from 'lucide-react'
+import { Download, Plus, Check, RefreshCw, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -134,6 +134,24 @@ function toggle(set: ReadonlySet<string>, id: string): Set<string> {
 
 const SELECT_CLASS = 'input text-xs py-1'
 
+/**
+ * Rows rendered at once.
+ *
+ * The table was unpaginated, and the cost was not the row count on its own —
+ * it was what a row CONTAINS. Every row carries its own status `<select>`, and
+ * PROSPECT_STATUSES has 14 entries, so 3,623 live accounts put ~50,700
+ * `<option>` elements in the document before anyone opened a dropdown, on top
+ * of a checkbox, two buttons and an inline SVG each. Every keystroke in the
+ * search box then reconciled that whole tree.
+ *
+ * 100 keeps a scannable working set and takes the rendered `<option>` count to
+ * ~1,400. It is deliberately NOT a fetch bound: the page still loads every row
+ * (see page.tsx), so search, the doors total, bulk status and CSV export all
+ * still operate over the FULL filtered set rather than the visible page — this
+ * bounds the DOM, nothing else.
+ */
+const PAGE_SIZE = 100
+
 export function ProspectsClient({ initialRows }: Readonly<{ initialRows: ProspectRow[] }>) {
   const [rows, setRows]         = useState<ProspectRow[]>(initialRows)
   const [search, setSearch]     = useState('')
@@ -144,6 +162,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
   const [savedId, setSavedId]   = useState('')
   const [newCompany, setNewCompany] = useState('')
   const [crawlMessage, setCrawlMessage] = useState('')
+  const [page, setPage]         = useState(0)
   const [pending, startTransition] = useTransition()
 
   const states  = useMemo(() => uniqueSorted(rows.map((r) => r.state)),  [rows])
@@ -166,8 +185,31 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
     [filtered],
   )
 
+  // Clamped by DERIVATION, not by an effect that writes `page` back. A filter
+  // that shrinks the set below the current offset would otherwise render an
+  // empty table for one paint before the effect corrected it, and a row
+  // deleted from the last page would strand you past the end.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage  = Math.min(page, pageCount - 1)
+  const pageStart = safePage * PAGE_SIZE
+  const visible   = useMemo(
+    () => filtered.slice(pageStart, pageStart + PAGE_SIZE),
+    [filtered, pageStart],
+  )
+
+  // Both filter setters reset to page 1, and they do it HERE rather than in an
+  // effect keyed on `filtered`. `filtered` also changes whenever `rows` does —
+  // every inline status edit, every bulk apply — so resetting on it would yank
+  // someone on page 12 back to page 1 mid-edit. Narrowing a result set is the
+  // only thing that should move you.
+  function changeSearch(value: string) {
+    setSearch(value)
+    setPage(0)
+  }
+
   function setFacet<K extends keyof Facets>(key: K, value: Facets[K]) {
     setFacets((f) => ({ ...f, [key]: value }))
+    setPage(0)
   }
 
   /**
@@ -276,7 +318,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
 
       <FilterBar
         search={search}
-        onSearch={setSearch}
+        onSearch={changeSearch}
         facets={facets}
         onFacet={setFacet}
         states={states}
@@ -384,7 +426,7 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
+            {visible.map((r) => (
               <ProspectRowView
                 key={r.id}
                 row={r}
@@ -405,6 +447,66 @@ export function ProspectsClient({ initialRows }: Readonly<{ initialRows: Prospec
           </p>
         )}
       </div>
+
+      {filtered.length > 0 && (
+        <Pager
+          page={safePage}
+          pageCount={pageCount}
+          rangeStart={pageStart + 1}
+          rangeEnd={Math.min(pageStart + PAGE_SIZE, filtered.length)}
+          total={filtered.length}
+          onPage={setPage}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Prev/next pager. Deliberately not numbered page links: the list is sorted by
+ * a score that is currently NULL on every row, so "page 27" names nothing a
+ * person could be looking for — the way to reach a specific account here is the
+ * search box, not an offset.
+ */
+function Pager({
+  page, pageCount, rangeStart, rangeEnd, total, onPage,
+}: Readonly<{
+  page:       number
+  pageCount:  number
+  rangeStart: number
+  rangeEnd:   number
+  total:      number
+  onPage:     (page: number) => void
+}>) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Showing <strong style={{ color: 'var(--text-primary)' }}>{rangeStart}–{rangeEnd}</strong>
+        {' '}of {total}
+        {pageCount > 1 && <> · page {page + 1} of {pageCount}</>}
+      </p>
+      {pageCount > 1 && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => onPage(page - 1)}
+            disabled={page === 0}
+            aria-label="Previous page"
+            className="text-xs flex items-center gap-1"
+          >
+            <ChevronLeft size={14} aria-hidden="true" /> Prev
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => onPage(page + 1)}
+            disabled={page >= pageCount - 1}
+            aria-label="Next page"
+            className="text-xs flex items-center gap-1"
+          >
+            Next <ChevronRight size={14} aria-hidden="true" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
