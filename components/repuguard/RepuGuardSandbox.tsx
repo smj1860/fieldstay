@@ -14,7 +14,7 @@ function StarRow({ rating, color }: Readonly<{ rating: number; color: string }>)
           width="13"
           height="13"
           viewBox="0 0 24 24"
-          fill={i <= rating ? color : "var(--rg-text-dim)"}
+          fill={i <= rating ? color : "var(--rg-track)"}
         >
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
         </svg>
@@ -344,7 +344,7 @@ export default function RepuGuardSandbox() {
                         style={{
                           width: 8,
                           height: 8,
-                          background: "var(--rg-text-dim)",
+                          background: "var(--rg-track)",
                           borderRadius: "50%",
                           animation: `rg-bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
                         }}
@@ -548,28 +548,42 @@ export default function RepuGuardSandbox() {
       </div>
 
       <style>{`
+        /* This demo carries its own palette rather than the app's --text-*
+           tokens because it is pinned dark on a light marketing page (see the
+           panel backgrounds below), so it cannot follow the visitor's theme.
+           Every value that renders TEXT is at or above WCAG AA 4.5:1 against
+           --rg-panel-bg (#0a1628); the ramp below is ordered quietest-first
+           and each comment is the measured ratio. The original ramp bottomed
+           out at 1.57:1, which is why the scenario labels and the "choose a
+           scenario" placeholder read as blank space on a phone.
+
+           --rg-track is the one deliberately sub-AA value and is NEVER text:
+           it is the unfilled half of a star rating and the typing-indicator
+           dots. Those have to read as "off", so they are held at 2.4:1:
+           visible as shape, obviously inactive. Keep new text off it. */
         .repuguard-sandbox {
           --rg-bg:             #070f1f;
           --rg-panel-bg:       #0a1628;
           --rg-border:         #0e2040;
           --rg-gold-dark:      #EAB800;
-          --rg-text-subtle:    #2a4a6e;
-          --rg-text-dim:       #1e3a5e;
-          --rg-text-label:     #3a5a7e;
-          --rg-text-strong:    #c8d8e8;
-          --rg-text-body:      #6a8aaa;
+          --rg-track:          #35577a;  /* 2.41:1, graphical only, never text */
+          --rg-text-dim:       #6a8aaa;  /* 5.03:1 */
+          --rg-text-subtle:    #7392b2;  /* 5.60:1 */
+          --rg-text-label:     #7e9cba;  /* 6.35:1 */
+          --rg-text-body:      #8aa6c2;  /* 7.18:1 */
+          --rg-text-strong:    #c8d8e8;  /* 12.47:1 */
           --rg-note-bg:        #061428;
           --rg-note-border:    #1e3a6e;
-          --rg-note-label:     #3a7abf;
+          --rg-note-label:     #5a8fc5;  /* 5.33:1 */
           --rg-success-bg:     #0a2a1a;
           --rg-success-border: #16a34a;
           --rg-success-text:   #4ade80;
           --rg-flag-bg:        #200000;
           --rg-flag-border:    #7f1d1d;
           --rg-flag-text:      #ef4444;
-          --rg-flag-reason:    #9a3a3a;
-          --rg-tone-text:      #4a7aaa;
-          --rg-cta-text:       #3a6aaa;
+          --rg-flag-reason:    #c96a6a;  /* 4.97:1 */
+          --rg-tone-text:      #5a8fc5;  /* 5.33:1 */
+          --rg-cta-text:       #6a9ac5;  /* 6.08:1 */
           --rg-cta-demo-bg:    #061020;
           --rg-shadow:         0 24px 80px rgba(0,0,0,0.6);
         }

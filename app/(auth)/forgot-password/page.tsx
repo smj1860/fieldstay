@@ -20,7 +20,7 @@ export default function ForgotPasswordPage() {
       </Suspense>
 
       <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
-        <Link href="/login" className="text-brand-700 font-medium hover:underline">
+        <Link href="/login" className="font-medium hover:underline" style={{ color: 'var(--accent-blue)' }}>
           Back to sign in
         </Link>
       </p>

@@ -15,7 +15,7 @@ export default function SignupPage() {
       </Suspense>
       <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
         Already have an account?{' '}
-        <Link href="/login" className="text-brand-700 font-medium hover:underline">Sign in</Link>
+        <Link href="/login" className="font-medium hover:underline" style={{ color: 'var(--accent-blue)' }}>Sign in</Link>
       </p>
     </>
   )

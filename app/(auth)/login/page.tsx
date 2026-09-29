@@ -32,13 +32,13 @@ export default function LoginPage() {
 
       <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
         Don&apos;t have an account?{' '}
-        <Link href="/signup" className="text-brand-700 font-medium hover:underline">
+        <Link href="/signup" className="font-medium hover:underline" style={{ color: 'var(--accent-blue)' }}>
           Start free trial
         </Link>
       </p>
 
       <p className="text-center text-sm mt-2" style={{ color: 'var(--text-muted)' }}>
-        <Link href="/forgot-password" className="text-brand-700 hover:underline">
+        <Link href="/forgot-password" className="hover:underline" style={{ color: 'var(--accent-blue)' }}>
           Forgot password?
         </Link>
       </p>

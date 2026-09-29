@@ -337,7 +337,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
       {totalCount === 0 && (
         <Card className="text-center py-8 text-accent-400">
           <p className="text-sm">No checklist template assigned to this turnover.</p>
-          <Link href={`/properties/${turnover.property_id}/setup/checklist`} className="text-sm text-brand-700 hover:underline mt-1 block">
+          <Link href={`/properties/${turnover.property_id}/setup/checklist`} className="text-sm hover:underline mt-1 block" style={{ color: 'var(--accent-blue)' }}>
             Set up a checklist for this property →
           </Link>
         </Card>
