@@ -32,13 +32,13 @@ export const SCENARIOS: Scenario[] = [
     property_name: "The Carriage House",
     rating: 5,
     review:
-      "This is hands-down the best rental we have ever stayed in! The attention to detail is unmatched — from the luxury linens to the locally roasted coffee provided in the kitchen. Check-in was a breeze with the smart lock, and the host checked in on us via text to ensure we had everything we needed. 10/10, will absolutely book again next year!",
+      "This is hands-down the best rental we have ever stayed in! The attention to detail is unmatched, from the luxury linens to the locally roasted coffee provided in the kitchen. Check-in was a breeze with the smart lock, and the host checked in on us via text to ensure we had everything we needed. 10/10, will absolutely book again next year!",
     internal_note: null,
     tone: ["warm", "personable", "confident", "gracious"],
     word_count: 163,
     flags: [],
     response:
-      "Christopher, what a wonderful note to read — thank you for sharing this so thoughtfully. Hearing that The Carriage House felt like a genuine escape rather than just a place to stay means everything to us. We put real care into the details that most guests never have to think about, so knowing the locally roasted coffee and the linens made an impression tells us those choices are landing exactly as intended. The smart lock was something we introduced specifically to make arrivals feel effortless, and it's great to hear the transition into the space was seamless from the very first moment. Hospitality for us isn't just about the physical property — it's about how a guest feels throughout the entire stay, so our team reaching out to check in is simply part of how we operate. We would absolutely love to welcome you back next year. Until then, safe travels, and know that The Carriage House will be ready and waiting.",
+      "Christopher, what a wonderful note to read, and thank you for sharing this so thoughtfully. Hearing that The Carriage House felt like a genuine escape rather than just a place to stay means everything to us. We put real care into the details that most guests never have to think about, so knowing the locally roasted coffee and the linens made an impression tells us those choices are landing exactly as intended. The smart lock was something we introduced specifically to make arrivals feel effortless, and it's great to hear the transition into the space was seamless from the very first moment. Hospitality for us isn't just about the physical property. It's about how a guest feels throughout the entire stay, so our team reaching out to check in is simply part of how we operate. We would absolutely love to welcome you back next year. Until then, safe travels, and know that The Carriage House will be ready and waiting.",
   },
   {
     id: "three_star",
@@ -56,7 +56,7 @@ export const SCENARIOS: Scenario[] = [
     word_count: 172,
     flags: [],
     response:
-      "Robert, thank you for taking the time to share your thoughts after your stay at The Pine Ridge Cabin. We're glad the peaceful surroundings contributed positively to your weekend — the quiet of Pine Ridge is something many guests specifically seek out, and we're pleased that landed well for you. Your feedback about the furniture and bed frame is genuinely appreciated and has been flagged for our property team to assess during our next scheduled maintenance visit. Comfort is non-negotiable, and we take that seriously. On the listing photos and sizing — that's a fair and constructive point. We're reviewing our photo presentation and property description to ensure future guests arrive with accurate expectations around both space and proximity to dining options. Transparency in how we represent Pine Ridge matters to us, and your perspective helps sharpen that. We hope the cabin still served its purpose for a restful getaway, and we'd welcome the chance to host you again under a more refined experience.",
+      "Robert, thank you for taking the time to share your thoughts after your stay at The Pine Ridge Cabin. We're glad the peaceful surroundings contributed positively to your weekend. The quiet of Pine Ridge is something many guests specifically seek out, and we're pleased that landed well for you. Your feedback about the furniture and bed frame is genuinely appreciated and has been flagged for our property team to assess during our next scheduled maintenance visit. Comfort is non-negotiable, and we take that seriously. On the listing photos and sizing, that's a fair and constructive point. We're reviewing our photo presentation and property description to ensure future guests arrive with accurate expectations around both space and proximity to dining options. Transparency in how we represent Pine Ridge matters to us, and your perspective helps sharpen that. We hope the cabin still served its purpose for a restful getaway, and we'd welcome the chance to host you again under a more refined experience.",
   },
   {
     id: "two_star_note",
@@ -68,14 +68,14 @@ export const SCENARIOS: Scenario[] = [
     property_name: "The Summit Retreat",
     rating: 2,
     review:
-      "The location is fantastic, right in the heart of downtown. Unfortunately that's where the positives end. The Wi-Fi was practically non-existent — measured at less than 2 Mbps — which made working remotely impossible. The shower barely had any pressure and fluctuated between freezing and scalding.",
+      "The location is fantastic, right in the heart of downtown. Unfortunately that's where the positives end. The Wi-Fi was practically non-existent, measured at less than 2 Mbps, which made working remotely impossible. The shower barely had any pressure and fluctuated between freezing and scalding.",
     internal_note:
       "WiFi upgraded to 500 Mbps fiber last month. Shower pressure and temperature resolved with a new mixing valve installation.",
     tone: ["accountable", "solution-forward", "professional", "empathetic"],
     word_count: 168,
     flags: [],
     response:
-      "David, we genuinely appreciate you sharing this with such clarity — this kind of honest feedback is exactly what helps us hold The Summit Retreat to the standard it should be. We hear you completely on the connectivity. While we know that doesn't undo the frustration you experienced, we want you to know that the internet infrastructure has since been upgraded to a 500 Mbps fiber connection — a direct result of feedback like yours. Reliability for remote work was identified as a priority and we acted on it. The shower concerns have also been fully addressed with a new mixing valve installation, ensuring consistent pressure and temperature. The location continues to be one of the retreat's greatest strengths, and we want every aspect of the experience inside the property to match what's right outside the door. If you're ever in the area again, we'd be honored to show you the difference. Please reach out to us directly if we can do anything further.",
+      "David, we genuinely appreciate you sharing this with such clarity. This kind of honest feedback is exactly what helps us hold The Summit Retreat to the standard it should be. We hear you completely on the connectivity. While we know that doesn't undo the frustration you experienced, we want you to know that the internet infrastructure has since been upgraded to a 500 Mbps fiber connection, a direct result of feedback like yours. Reliability for remote work was identified as a priority and we acted on it. The shower concerns have also been fully addressed with a new mixing valve installation, ensuring consistent pressure and temperature. The location continues to be one of the retreat's greatest strengths, and we want every aspect of the experience inside the property to match what's right outside the door. If you're ever in the area again, we'd be honored to show you the difference. Please reach out to us directly if we can do anything further.",
   },
   {
     id: "one_star",
@@ -87,14 +87,14 @@ export const SCENARIOS: Scenario[] = [
     property_name: "The Lakeview Cottage",
     rating: 1,
     review:
-      "Absolute nightmare. We arrived at 9 PM after a 6-hour drive only to find the lockbox code didn't work. It took the host over an hour to respond. When we finally got inside, the place clearly hadn't been cleaned since the last guests. We didn't even stay the night — we booked a hotel. Waiting on a full refund.",
+      "Absolute nightmare. We arrived at 9 PM after a 6-hour drive only to find the lockbox code didn't work. It took the host over an hour to respond. When we finally got inside, the place clearly hadn't been cleaned since the last guests. We didn't even stay the night. We booked a hotel. Waiting on a full refund.",
     internal_note: null,
     tone: ["empathetic", "de-escalating", "accountable", "professional"],
     word_count: 170,
     flags: ["billing"],
     flag_reason:
-      "Guest explicitly states they are awaiting a full refund — active billing dispute flagged for private follow-up.",
+      "Guest explicitly states they are awaiting a full refund. Active billing dispute flagged for private follow-up.",
     response:
-      "Michael, we are deeply sorry for what happened during your arrival — there is no version of this experience that meets any reasonable standard of hospitality, and we want to acknowledge that without reservation. Arriving after a long drive to find an unresponsive lockbox, and then discovering a property that had not been properly turned over, is a serious failure on every level. Your frustration is entirely warranted, and we are grateful you took the time to document it clearly. The access issue, the condition of the property, and the delayed response — each represents a breakdown in our operational process that we are actively investigating and addressing. We understand you were forced to find alternative accommodations that evening, and we take full responsibility for that outcome. Please reach out to our team directly so we can ensure your concern is handled with the urgency it deserves. The Lakeview Cottage is held to a far higher standard than what you experienced, and we intend to make that standard visible.",
+      "Michael, we are deeply sorry for what happened during your arrival. There is no version of this experience that meets any reasonable standard of hospitality, and we want to acknowledge that without reservation. Arriving after a long drive to find an unresponsive lockbox, and then discovering a property that had not been properly turned over, is a serious failure on every level. Your frustration is entirely warranted, and we are grateful you took the time to document it clearly. The access issue, the condition of the property, and the delayed response, each represents a breakdown in our operational process that we are actively investigating and addressing. We understand you were forced to find alternative accommodations that evening, and we take full responsibility for that outcome. Please reach out to our team directly so we can ensure your concern is handled with the urgency it deserves. The Lakeview Cottage is held to a far higher standard than what you experienced, and we intend to make that standard visible.",
   },
 ];

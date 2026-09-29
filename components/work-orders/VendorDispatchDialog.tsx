@@ -141,7 +141,7 @@ function DispatchForm({
             what lets them be paid, so say so before the PM commits. */}
         {isNewVendorEmail && (
           <p className="text-xs" style={{ color: 'var(--accent-amber)' }}>
-            Not in your vendor list — they&apos;ll be added as a vendor and
+            Not in your vendor list, so they&apos;ll be added as a vendor and
             sent a payment-setup invite so you can pay them through FieldStay.
           </p>
         )}

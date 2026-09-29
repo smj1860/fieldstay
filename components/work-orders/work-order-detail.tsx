@@ -535,7 +535,7 @@ function CompletionSection({
             />
             {!!wo.vendors && !wo.completion_verified_at && (
               <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-                Assigned to a vendor — completed through their portal, which generates the invoice and Stripe payout automatically.
+                Assigned to a vendor, completed through their portal, which generates the invoice and Stripe payout automatically.
               </p>
             )}
 

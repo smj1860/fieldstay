@@ -39,7 +39,7 @@ export function CartReadyBanner({ cartData }: Readonly<CartReadyBannerProps>) {
             >
               {cartAdded
                 ? `${matchCount} items added to your ${cartData.location_name} cart`
-                : `Shopping list ready — ${matchCount} items found`}
+                : `Shopping list ready, ${matchCount} items found`}
             </p>
             <p
               className="text-xs mt-0.5"

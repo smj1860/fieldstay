@@ -69,7 +69,7 @@ export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel,
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
           Contacted {completed.businesses_contacted.length === 1
             ? completed.businesses_contacted[0]!.business_name
-            : `${completed.businesses_contacted.length} businesses`}. They&apos;ll reach out directly — this doesn&apos;t create anything in FieldStay.
+            : `${completed.businesses_contacted.length} businesses`}. They&apos;ll reach out directly. This doesn&apos;t create anything in FieldStay.
         </p>
       </Card>
     )
