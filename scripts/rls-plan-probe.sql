@@ -184,8 +184,13 @@ SELECT set_config(
 DO $$
 DECLARE
   q record; line text; buf text;
+  -- The role PostgREST runs every request as. Named because it appears both in
+  -- the impersonation assertion and in the per-query claims swap below, and the
+  -- two must agree: asserting one role while setting the claims for another
+  -- would measure a principal nothing in the app ever uses.
+  PGRST_ROLE CONSTANT text := 'authenticated';
 BEGIN
-  IF current_user <> 'authenticated' THEN
+  IF current_user <> PGRST_ROLE THEN
     RAISE EXCEPTION 'PROBE ABORTED: impersonation failed, still running as %.', current_user;
   END IF;
   IF (SELECT auth.uid()) IS DISTINCT FROM (SELECT usr FROM plan_tgt) THEN
@@ -204,7 +209,7 @@ BEGIN
       json_build_object(
         'sub', CASE q.run_as WHEN 'crew' THEN (SELECT usr FROM plan_crew)
                              ELSE (SELECT usr FROM plan_tgt) END,
-        'role', 'authenticated')::text,
+        'role', PGRST_ROLE)::text,
       true);
 
     buf := '';

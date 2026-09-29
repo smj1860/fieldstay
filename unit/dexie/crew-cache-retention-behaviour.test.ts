@@ -312,7 +312,7 @@ describe('crew cache retention — simulated', () => {
     // Stable across a further sync — nothing settled was removed prematurely,
     // so nothing is re-pulled. Compared against the count captured BEFORE the
     // sync, not against a second read of the same array.
-    expect((await db().checklist_instance_items.toArray()).length).toBe(afterPurge)
+    expect(await db().checklist_instance_items.toArray()).toHaveLength(afterPurge)
   })
 
   it('HOLE 1, CLOSED: the purge sheds a forced resync in the same pass', async () => {
@@ -324,12 +324,12 @@ describe('crew cache retention — simulated', () => {
 
     // force = true rewinds the cursors and re-pulls everything...
     await syncAssignedTurnovers(client, 'u1', 'crew1', true)
-    expect((await db().checklist_instance_items.toArray()).length).toBe(10 * ITEMS_PER)
+    expect(await db().checklist_instance_items.toArray()).toHaveLength(10 * ITEMS_PER)
 
     // ...and the prune that runs at the tail of fullCrewResync sheds it again,
     // so the inflation is transient rather than the device's new resting size.
     await pruneSettledChecklistItems('u1')
-    expect((await db().checklist_instance_items.toArray()).length).toBe(steady)
+    expect(await db().checklist_instance_items.toArray()).toHaveLength(steady)
   })
 
   // ── The scope horizon ──────────────────────────────────────────────────────

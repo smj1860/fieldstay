@@ -195,6 +195,13 @@ CREATE TEMP TABLE payload_queries(
   surface     text NOT NULL,
   run_as      text NOT NULL CHECK (run_as IN ('pm','crew')),
   limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
+  -- Fetched as chunked, drained round trips rather than one server-side read.
+  -- A FLAG rather than a test on `surface`, because two later stages —
+  -- the round-trip arithmetic and the tenure projection — were each deciding
+  -- what to compute by string-matching the display label. That makes the label
+  -- load-bearing: rename the surface for readability and the projection
+  -- silently stops being emitted, with every number still present and correct.
+  chunked     boolean NOT NULL DEFAULT false,
   sql         text NOT NULL
 );
 
@@ -204,7 +211,8 @@ CREATE TEMP TABLE payload_results(
   rows_out    bigint,
   bytes_out   bigint,
   limit_bytes bigint,
-  round_trips int
+  round_trips int,
+  chunked     boolean
 );
 
 -- plan_tgt/plan_crew come from the shared fixture, which does not grant them
@@ -223,6 +231,22 @@ DECLARE
   -- Ceilings, in bytes. See the header for why each is where it is.
   BOARD_LIMIT bigint := 24 * 1024 * 1024;
   CREW_LIMIT  bigint := 192 * 1024 * 1024;
+  -- The surface names are named rather than repeated, and that is not style:
+  -- the report GROUPs BY surface, so one mistyped surface name does not read as a
+  -- typo — it silently becomes a fourth surface with its own TOTAL row, and the
+  -- real total quietly loses a read. run_as is named alongside it because the
+  -- CHECK constraint on that column only tells you a value is wrong, not which
+  -- of eight rows carries it.
+  S_TURNOVERS  CONSTANT text := '/turnovers';
+  S_OPS        CONSTANT text := '/ops';
+  S_CREW       CONSTANT text := 'crew device';
+  AS_PM        CONSTANT text := 'pm';
+  AS_CREW      CONSTANT text := 'crew';
+  -- Query fragments shared by more than one probed read, for the same reason
+  -- `embed` below is shared: these must stay IDENTICAL across the reads that
+  -- share them, or the measurement compares two different queries.
+  FROM_TURNOVERS CONSTANT text := '  FROM turnovers t';
+  ORG_ACTIVE     CONSTANT text := ' WHERE org_id = %L AND is_active';
   -- The nested embed the two board reads share, spelled once.
   embed text := format(
     '(SELECT coalesce(json_agg(json_build_object('
@@ -236,51 +260,51 @@ BEGIN
   INSERT INTO payload_queries(name, surface, run_as, limit_bytes, sql) VALUES
 
   -- ── /turnovers — TurnoverBoard's six props ────────────────────────────────
-  ('turnovers.1_turnovers', '/turnovers', 'pm', BOARD_LIMIT, format(
+  ('turnovers.1_turnovers', S_TURNOVERS, AS_PM, BOARD_LIMIT, format(
     'SELECT t.id, t.property_id, t.booking_id, t.prev_booking_id, t.checkout_datetime,'
     '       t.checkin_datetime, t.window_minutes, t.status, t.priority, t.notes,'
     '       t.completed_at, t.started_at, t.crew_duration_minutes, t.checklist_template_id,'
     '       t.is_same_day_turnover, t.is_archived, t.suggested_crew_ids,'
     '       t.suggestion_reasoning, t.suggestion_status, %s'
-    '  FROM turnovers t'
+    || FROM_TURNOVERS ||
     ' WHERE t.org_id = %L AND t.status <> ''cancelled'''
     '   AND t.checkout_datetime >= now() - interval ''7 days'''
     '   AND t.checkout_datetime <= now() + interval ''60 days''', embed, v_org)),
 
-  ('turnovers.2_properties', '/turnovers', 'pm', BOARD_LIMIT, format(
+  ('turnovers.2_properties', S_TURNOVERS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, name, city, state FROM properties'
-    ' WHERE org_id = %L AND is_active', v_org)),
+    || ORG_ACTIVE, v_org)),
 
-  ('turnovers.3_bookings', '/turnovers', 'pm', BOARD_LIMIT, format(
+  ('turnovers.3_bookings', S_TURNOVERS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type'
     '  FROM bookings WHERE org_id = %L AND status IN (''confirmed'',''tentative'')'
     '   AND checkout_date >= (current_date - 7) AND checkin_date <= (current_date + 60)', v_org)),
 
-  ('turnovers.4_crew_members', '/turnovers', 'pm', BOARD_LIMIT, format(
+  ('turnovers.4_crew_members', S_TURNOVERS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, name, phone, email, specialty FROM crew_members'
-    ' WHERE org_id = %L AND is_active', v_org)),
+    || ORG_ACTIVE, v_org)),
 
-  ('turnovers.5_crew_availability', '/turnovers', 'pm', BOARD_LIMIT, format(
+  ('turnovers.5_crew_availability', S_TURNOVERS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, crew_member_id, available_date, is_available FROM crew_availability'
     ' WHERE org_id = %L AND available_date >= (current_date - 7)'
     '   AND available_date <= (current_date + 60)', v_org)),
 
   -- ── /ops — OpsSnapshot's props ────────────────────────────────────────────
-  ('ops.1_turnovers', '/ops', 'pm', BOARD_LIMIT, format(
+  ('ops.1_turnovers', S_OPS, AS_PM, BOARD_LIMIT, format(
     'SELECT t.id, t.property_id, t.prev_booking_id, t.checkout_datetime, t.checkin_datetime,'
     '       t.window_minutes, t.status, t.priority, t.notes, t.completed_at, t.started_at,'
     '       t.checklist_template_id, %s'
-    '  FROM turnovers t'
+    || FROM_TURNOVERS ||
     ' WHERE t.org_id = %L AND t.status <> ''cancelled'''
     '   AND t.checkout_datetime >= date_trunc(''day'', now() - interval ''1 day'')'
     '   AND t.checkout_datetime <= date_trunc(''day'', now() + interval ''30 days'')',
     embed, v_org)),
 
-  ('ops.2_properties', '/ops', 'pm', BOARD_LIMIT, format(
+  ('ops.2_properties', S_OPS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, name, city, state, lat, lng FROM properties'
-    ' WHERE org_id = %L AND is_active', v_org)),
+    || ORG_ACTIVE, v_org)),
 
-  ('ops.3_month_bookings', '/ops', 'pm', BOARD_LIMIT, format(
+  ('ops.3_month_bookings', S_OPS, AS_PM, BOARD_LIMIT, format(
     'SELECT id, property_id, checkin_date, checkout_date, status FROM bookings'
     ' WHERE org_id = %L AND status = ''confirmed'''
     '   AND checkout_date >= date_trunc(''month'', current_date)::date'
@@ -291,29 +315,31 @@ BEGIN
   -- Measured as the CREW principal, which is the half of these policies a PM
   -- session cannot reach: on a PM plan the crew branch reports
   -- `(never executed)` because the org_id test satisfies the OR first.
-  ('crew.1_assignment_scope', 'crew device', 'crew', CREW_LIMIT, format(
+  ('crew.1_assignment_scope', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L', v_crew)),
 
-  ('crew.2_turnovers', 'crew device', 'crew', CREW_LIMIT, format(
+  ('crew.2_turnovers', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT t.id, t.property_id, t.org_id, t.prev_booking_id, t.checkout_datetime,'
     '       t.checkin_datetime, t.window_minutes, t.status, t.priority, t.notes,'
     '       t.inventory_started_at, t.inventory_confirmed_complete_at,'
     '       t.inventory_confirmed_by_crew_id, t.completion_notes,'
     '       t.pending_checkout_datetime, t.pending_checkin_datetime,'
     '       t.dates_changed_at, t.dates_change_acknowledged_at, t.updated_at'
-    '  FROM turnovers t'
+    || FROM_TURNOVERS ||
     ' WHERE t.id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
     v_crew)),
 
-  ('crew.3_checklist_instances', 'crew device', 'crew', CREW_LIMIT, format(
+  ('crew.3_checklist_instances', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT ci.* FROM checklist_instances ci'
     ' WHERE ci.turnover_id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
     v_crew)),
 
-  ('crew.4_checklist_items', 'crew device', 'crew', CREW_LIMIT, format(
+  ('crew.4_checklist_items', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT i.* FROM checklist_instance_items i'
     ' WHERE i.turnover_id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
     v_crew));
+
+  UPDATE payload_queries SET chunked = true WHERE surface = S_CREW;
 END $$;
 
 -- ── Impersonate, exactly as PostgREST does ──────────────────────────────────
@@ -351,7 +377,7 @@ BEGIN
     -- Server Component read is drained server-side inside one render, so its
     -- page count is not a cost the user waits on a network for.
     v_trips := NULL;
-    IF q.surface = 'crew device' THEN
+    IF q.chunked THEN
       SELECT count(*) INTO v_assign
         FROM turnover_assignments WHERE crew_member_id = (SELECT crew FROM plan_crew);
       v_trips := CASE q.name
@@ -371,8 +397,8 @@ BEGIN
       END;
     END IF;
 
-    INSERT INTO payload_results(name, surface, rows_out, bytes_out, limit_bytes, round_trips)
-    VALUES (q.name, q.surface, v_rows, v_bytes, q.limit_bytes, v_trips);
+    INSERT INTO payload_results(name, surface, rows_out, bytes_out, limit_bytes, round_trips, chunked)
+    VALUES (q.name, q.surface, v_rows, v_bytes, q.limit_bytes, v_trips, q.chunked);
   END LOOP;
 END $$;
 
@@ -456,7 +482,7 @@ SELECT 'TOTAL',
        round(100.0 * sum(r.bytes_out) / max(r.limit_bytes), 1),
        NULL,
        sum(r.round_trips)::int,
-       CASE WHEN r.surface = 'crew device' AND sum(r.bytes_out) > 0
+       CASE WHEN bool_or(r.chunked) AND sum(r.bytes_out) > 0
             THEN round(
                    (max(r.limit_bytes)::numeric / sum(r.bytes_out))
                    * ((SELECT count(*) FROM crew_history) + 800) / 1250.0, 1)
