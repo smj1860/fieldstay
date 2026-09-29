@@ -862,6 +862,37 @@ almost the whole crew surface):
   joining stays cheaper than forking: those behaviours were each paid for with a
   production bug, and a second outbox means paying for them twice.
 
+- **The crew cache has a retention horizon, and its trigger is the CURSOR, not
+  completion.** `pruneSettledChecklistItems()` (`lib/dexie/prune.ts`, called
+  from `pruneLocalCache` so it runs on every resync) sheds
+  `checklist_instance_items` for checklists whose `completed_at` is older than
+  `cursor:checklist_items`. Three things about it are non-obvious and each was
+  paid for before the code existed:
+  - **Never shed the TURNOVER row.** `partitionByKnown()` reclassifies an id
+    the device no longer holds as `fresh`, and fresh ids are pulled WITHOUT a
+    cursor — so the row and its whole checklist return on the next sync, every
+    sync. Items have no such path (`fetchWithCursorSplit` splits on turnover
+    id, never item id), which is exactly why shedding items is durable and
+    keeping the turnover is what makes it durable.
+  - **`completed_at < cursor`, never `status === 'completed'`.**
+    `advanceCursor` stores `max(updated_at) − CURSOR_OVERLAP_MS`, so a
+    just-completed turnover sits INSIDE that overlap: purge it and the next
+    delta returns all of its items, and the pass after purges them again — a
+    permanent loop on the most recent job. Comparing against the cursor states
+    "the next pull will not return these" once, derived, instead of adding a
+    settle constant that would have to track `CURSOR_OVERLAP_MS` by hand.
+  - **Retain anything with unsent work, in EITHER outbox and in every state.**
+    photo-sync resolves a queued photo's storage org prefix by walking
+    `checklist_instance_items` → `checklist_instances` → `org_id`; shed that
+    item row and `orgPrefixedUploadPath` returns null, which dead-letters the
+    photo. A transport failure never sets `failed`, so filtering to pending
+    rows would retain the cache for the writes that are fine and shed it for
+    the ones that are not.
+  Enforced by `unit/guardrails/crew-cache-retention.test.ts`; the before/after
+  behaviour is in `unit/dexie/crew-cache-retention-behaviour.test.ts`, which
+  characterizes the sync path and should FLIP rather than be deleted when one
+  of its holes is closed.
+
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the
 safety poll (the full `resync()`/`resyncV2()` covers all of them); every such
@@ -2328,9 +2359,17 @@ meta-rule, prose is for judgment calls only.
   its live property set FROM the cached turnovers, so the turnovers are the
   root of the retention graph and leave only on server-side unassignment. A
   full resync is also 276 sequential round trips, which is ~80s at a phone's
-  RTT and is what a new device or `forceFullCrewResync()` pays. **The fix
-  when it comes is a retention horizon on the assignment scope, not a bigger
-  ceiling** — same rule as the report/export caps above.
+  RTT and is what a new device or `forceFullCrewResync()` pays.
+
+  **Half of that is now fixed.** `pruneSettledChecklistItems()` sheds the
+  checklist items once the delta cursor has moved past them (see the crew Dexie
+  section for why the trigger is the cursor and not completion), which takes the
+  100MB down to the active turnovers only and makes a forced resync's
+  re-inflation transient rather than the device's new resting size. What is NOT
+  yet bounded is the turnover and instance rows themselves — ~3.4MB at 2.6
+  years, still growing with tenure — which needs the scope horizon on
+  `fetchAssignedTurnoverIds`. **Neither fix is a bigger ceiling**, same rule as
+  the report/export caps above.
 
   Both probes plant a canary and both were fire-checked before being trusted:
   the ceiling assertion must fire on an over-ceiling row AND on a surface that

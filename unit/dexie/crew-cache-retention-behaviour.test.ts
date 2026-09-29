@@ -39,6 +39,7 @@ vi.mock('@/lib/dexie/schema', () => ({
 }))
 
 import { syncAssignedTurnovers } from '@/lib/dexie/sync/turnovers'
+import { pruneSettledChecklistItems } from '@/lib/dexie/prune'
 import type { DexieSupabaseClient } from '@/lib/dexie/sync/types'
 
 function db(): FakeDexieDb { return holder.db as FakeDexieDb }
@@ -137,7 +138,11 @@ function buildServer(): Server {
     })
     assignments.push({ turnover_id: id, crew_member_id: 'crew1' })
     instances.push({ id: `ci_${id}`, turnover_id: id, org_id: 'org1', status: 'active',
-      section_photo_path: null, started_at: null, completed_at: null,
+      section_photo_path: null, started_at: null,
+      // Settled checklists carry a real completed_at — it is the only local
+      // record of WHEN, since item rows drop updated_at in normalization, and
+      // pruneSettledChecklistItems compares it against the delta cursor.
+      completed_at: completed ? tsFor(t) : null,
       completed_by_crew_id: null, updated_at: tsFor(t) })
     for (let i = 0; i < ITEMS_PER; i++) {
       items.push({
@@ -252,31 +257,56 @@ describe('crew cache retention — simulated', () => {
     expect(await itemCount()).toBe(3 * ITEMS_PER)
   })
 
-  it('HOLE 3: a JUST-completed turnover thrashes — purged, then re-pulled every sync', async () => {
+  it('HOLE 3, CLOSED: the real purge retains a JUST-completed turnover instead of thrashing', async () => {
     const server = buildServer()
-    // Make t09 (an active one) complete RIGHT NOW: its items become both the
-    // newest rows on the server and newly eligible for the purge. This is the
-    // exact case "delete on successful completion sync" creates.
+    // t09 completes RIGHT NOW: its items become both the newest rows on the
+    // server and newly eligible for a naive "purge on completion" trigger.
     const now = new Date(BASE + 20 * DAY).toISOString()
     for (const t of server.turnovers) if (t.id === 't09') { t.status = 'completed'; t.updated_at = now }
+    for (const i of server.checklist_instances) if (i.turnover_id === 't09') { i.completed_at = now; i.updated_at = now }
     for (const i of server.checklist_instance_items) if (i.turnover_id === 't09') i.updated_at = now
 
     const { client } = makeServer(server)
     await syncAssignedTurnovers(client, 'u1', 'crew1')
-    await purgeCompletedChecklistItems()
 
-    // 9 completed purged, 1 active remains.
-    expect(await itemCount()).toBe(1 * ITEMS_PER)
+    // The naive status-based purge takes t09 with the other nine...
+    const naive = await purgeCompletedChecklistItems()
+    expect(naive).toBe(9 * ITEMS_PER)
+    await syncAssignedTurnovers(client, 'u1', 'crew1')
+    // ...and t09 comes straight back, because its updated_at is inside
+    // CURSOR_OVERLAP_MS of the cursor. That is the thrash.
+    const backAfterNaive = (await db().checklist_instance_items.toArray())
+      .filter((i) => (i as { turnover_id: string }).turnover_id === 't09')
+    expect(backAfterNaive).toHaveLength(ITEMS_PER)
+
+    // The production purge compares completed_at against the cursor instead,
+    // so it leaves t09 alone: the eight OLDER checklists go, t09's stay.
+    await pruneSettledChecklistItems('u1')
+    const afterPurge = (await db().checklist_instance_items.toArray()).length
+    expect(afterPurge).toBe(2 * ITEMS_PER)   // t09 (just completed) + t08 (active)
 
     await syncAssignedTurnovers(client, 'u1', 'crew1')
+    // Stable across a further sync — nothing settled was removed prematurely,
+    // so nothing is re-pulled. Compared against the count captured BEFORE the
+    // sync, not against a second read of the same array.
+    expect((await db().checklist_instance_items.toArray()).length).toBe(afterPurge)
+  })
 
-    // t09 is back: its updated_at sits inside CURSOR_OVERLAP_MS of the cursor,
-    // so the delta filter still matches it. Purge again and it returns again —
-    // a purge/re-pull loop for as long as it is the newest thing on the device.
-    expect(await itemCount()).toBe(2 * ITEMS_PER)
-    const back = (await db().checklist_instance_items.toArray())
-      .filter((i) => (i as { turnover_id: string }).turnover_id === 't09')
-    expect(back).toHaveLength(ITEMS_PER)
+  it('HOLE 1, CLOSED: the purge sheds a forced resync in the same pass', async () => {
+    const { client } = makeServer(buildServer())
+    await syncAssignedTurnovers(client, 'u1', 'crew1')
+    await pruneSettledChecklistItems('u1')
+    const steady = (await db().checklist_instance_items.toArray()).length
+    expect(steady).toBe(2 * ITEMS_PER)   // only the two active turnovers
+
+    // force = true rewinds the cursors and re-pulls everything...
+    await syncAssignedTurnovers(client, 'u1', 'crew1', true)
+    expect((await db().checklist_instance_items.toArray()).length).toBe(10 * ITEMS_PER)
+
+    // ...and the prune that runs at the tail of fullCrewResync sheds it again,
+    // so the inflation is transient rather than the device's new resting size.
+    await pruneSettledChecklistItems('u1')
+    expect((await db().checklist_instance_items.toArray()).length).toBe(steady)
   })
 
   it('round trips and rows transferred drop on the steady-state sync after a purge', async () => {

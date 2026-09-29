@@ -107,10 +107,19 @@ reason that can expire.
   300ms RTT), which is what a new device, a reinstall or
   `forceFullCrewResync()` pays.
 
-  Nothing is broken today and no code change is required to onboard. What this
-  means for an Enterprise account is that a retention horizon on the crew
-  assignment scope should be designed before the account's third year, not
-  after a cleaner's phone starts evicting its own cache offline.
+  **The 100MB half is fixed as of 2026-09-29.**
+  `pruneSettledChecklistItems()` sheds a checklist's items once the delta
+  cursor has moved past them, so the items no longer accumulate with tenure and
+  a forced resync's re-inflation is shed again in the same pass. The trigger is
+  the cursor rather than completion, because a just-completed turnover sits
+  inside `CURSOR_OVERLAP_MS` and a completion trigger loops purge/re-pull on the
+  most recent job — measured before the fix was written.
+
+  Still outstanding: the turnover and instance rows themselves, ~3.4MB at 2.6
+  years and still growing with tenure. That needs a date horizon on
+  `fetchAssignedTurnoverIds`. Not urgent at this size — it is single-digit
+  megabytes rather than the three figures the items were — but it is the
+  remaining unbounded thing on a crew device.
 
 - **The crew PWA's checklist pull.** `checklist_instance_items` has no
   `org_id` column in its policy at all — both branches resolve through

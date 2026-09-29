@@ -18,7 +18,7 @@
 
 import { getDexieDb, type FieldStayDexie } from './schema'
 import { deletePendingPhotoBlob, listPendingPhotoBlobKeys } from './photo-queue'
-import { invalidateCursorsFor } from './sync/cursors'
+import { getCursor, invalidateCursorsFor } from './sync/cursors'
 
 /**
  * How long a dead-lettered mutation / failed photo stays on the device
@@ -29,6 +29,116 @@ export const DEAD_LETTER_RETENTION_DAYS = 30
 
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString()
+}
+
+/**
+ * Ids with outbox work still attached, across BOTH queues and in every state.
+ *
+ * "Every state" is deliberate. A dead-lettered row and a stalled one are the
+ * two shapes a write takes when it has NOT reached the server, and a transport
+ * failure never sets `failed` at all — so filtering to pending rows here would
+ * retain exactly the mutations that are fine and drop the cache rows belonging
+ * to the ones that are not.
+ *
+ * Photos are the reason this exists rather than a nicety. photo-sync resolves
+ * a queued photo's storage org prefix by walking the LOCAL cache —
+ * checklist_instance_items -> checklist_instances -> org_id — and
+ * orgPrefixedUploadPath returns null the moment that item row is gone. A null
+ * there is a bounded, backed-off failure and then a dead letter: a crew
+ * member's photograph thrown away by a cache cleanup, which is the precise
+ * failure the dead-letter surface exists to prevent.
+ */
+async function idsWithPendingWork(db: FieldStayDexie): Promise<Set<string>> {
+  const [mutations, photos] = await Promise.all([
+    db.mutations.toArray(),
+    db.pending_photo_uploads.toArray(),
+  ])
+  const busy = new Set<string>()
+  for (const m of mutations) busy.add(m.targetId)
+  for (const p of photos)    busy.add(p.target_id)
+  return busy
+}
+
+/**
+ * Drops checklist ITEM rows for turnovers whose checklist finished long enough
+ * ago that the delta cursor has moved past them.
+ *
+ * ── Why items, and why not the turnover ────────────────────────────────────
+ *
+ * checklist_instance_items is the whole retention problem: measured at 872
+ * properties, it is 100MB of a 104MB device cache and it grows with a crew
+ * member's TENURE rather than with anything about today.
+ *
+ * Purging the TURNOVER instead does not work, and the reason is structural:
+ * partitionByKnown() reclassifies an id the device no longer holds as `fresh`,
+ * and fresh ids are pulled WITHOUT a cursor, so the row and its whole checklist
+ * come straight back on the next sync — every sync, forever. Items have no such
+ * path: fetchWithCursorSplit splits on TURNOVER id, never on item id, so while
+ * the turnover row stays cached its items are only ever re-fetched by
+ * `.gt('updated_at', cursor)`. Deleting them is therefore durable, and keeping
+ * the turnover row is what makes it durable.
+ *
+ * ── Why the cursor is the predicate, and not "is it completed" ─────────────
+ *
+ * "Purge on a successful completion sync" thrashes, which a simulation against
+ * the real sync path showed before any of this was written (see
+ * unit/dexie/crew-cache-retention-behaviour.test.ts, HOLE 3). advanceCursor
+ * stores max(updated_at) - CURSOR_OVERLAP_MS, so a turnover completed moments
+ * ago sits INSIDE that overlap window: purge it and the next delta pull returns
+ * all of its items, and the pass after that purges them again. A permanent
+ * purge/re-pull loop on the most recent job — which is also the one a crew
+ * member is most likely to reopen.
+ *
+ * Comparing against the cursor itself removes the guesswork instead of adding
+ * a settle-delay constant that would have to be kept in step with
+ * CURSOR_OVERLAP_MS by hand. `completed_at < cursor` is exactly the condition
+ * "the next delta pull will not return these rows", stated once, derived from
+ * the same value the pull uses.
+ *
+ * completed_at comes off the cached checklist_instances row: item rows drop
+ * updated_at during normalization (it feeds the cursor, not the cache), so the
+ * instance is the only local record of when this checklist settled. A NULL
+ * completed_at is never purged — unfinished, or an unknown, both mean keep.
+ *
+ * Returns the number of item rows removed.
+ */
+export async function pruneSettledChecklistItems(userId: string): Promise<number> {
+  const db = getDexieDb(userId)
+
+  // No cursor means the next pull is a FULL pull of the whole scope, so
+  // anything removed now returns immediately. Nothing to do but wait for one.
+  const cursor = await getCursor(userId, 'cursor:checklist_items')
+  if (cursor === null) return 0
+
+  const instances = await db.checklist_instances.toArray()
+  const settled = instances.filter(
+    (i) => i.completed_at !== null && i.completed_at !== undefined && i.completed_at < cursor,
+  )
+  if (!settled.length) return 0
+
+  const settledInstanceIds = new Set(settled.map((i) => i.id))
+  const items = await db.checklist_instance_items.toArray()
+  const candidates = items.filter((i) => settledInstanceIds.has(i.instance_id))
+  if (!candidates.length) return 0
+
+  // Retain a whole checklist when ANY part of it still has unsent work — the
+  // item, its instance, or the turnover. Per-item would strand a photo whose
+  // sibling rows had gone, and the photo path walks item -> instance.
+  const busy = await idsWithPendingWork(db)
+  const busyInstanceIds = new Set(
+    settled
+      .filter((i) => busy.has(i.id) || busy.has(i.turnover_id))
+      .map((i) => i.id),
+  )
+  for (const item of candidates) {
+    if (busy.has(item.id)) busyInstanceIds.add(item.instance_id)
+  }
+
+  const doomed = candidates.filter((i) => !busyInstanceIds.has(i.instance_id))
+  if (!doomed.length) return 0
+
+  await db.checklist_instance_items.bulkDelete(doomed.map((i) => i.id))
+  return doomed.length
 }
 
 /**
@@ -61,6 +171,12 @@ export async function pruneLocalCache(userId: string): Promise<void> {
     db.inventory_items.bulkDelete(inventory.filter((i) => !livePropertyIds.has(i.property_id)).map((i) => i.id)),
     db.property_assets.bulkDelete(assets.filter((a) => !livePropertyIds.has(a.property_id)).map((a) => a.id)),
   ])
+
+  // Runs on every resync, which is also the tail of forceFullCrewResync — so
+  // the repair path re-pulls the full history and then sheds it again in the
+  // same pass, rather than leaving the device inflated until something else
+  // happens to clean up.
+  await pruneSettledChecklistItems(userId)
 
   await pruneExpiredDeadLetters(userId)
   await pruneOrphanPhotoBlobs(userId)
