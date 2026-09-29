@@ -145,7 +145,12 @@ export function makeFakeSupabase(queued: Record<string, { data?: unknown; error?
     // 'order'/'range' — the one-to-many checklist reads drain each chunk via
     //            fetchInChunksPaginated, because chunking turnover_ids does
     //            NOT bound the item rows those ids fan out to.
-    for (const m of ['select', 'eq', 'in', 'gt', 'not', 'or', 'update', 'limit', 'order', 'range']) {
+    // 'gte' — the crew scope read filters turnover_assignments by the embedded
+    //          turnovers.checkout_datetime (CREW_SCOPE_HORIZON_DAYS). Recorded
+    //          like the rest; this double asserts query SHAPE, not results, so
+    //          a horizon test that needs the filter APPLIED uses its own
+    //          server-simulating fake (see crew-cache-retention-behaviour).
+    for (const m of ['select', 'eq', 'in', 'gt', 'gte', 'not', 'or', 'update', 'limit', 'order', 'range']) {
       chain[m] = (...a: unknown[]) => record(m, a)
     }
     const resolveNext = () => {

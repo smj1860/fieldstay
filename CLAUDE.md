@@ -862,6 +862,61 @@ almost the whole crew surface):
   joining stays cheaper than forking: those behaviours were each paid for with a
   production bug, and a second outbox means paying for them twice.
 
+- **The crew cache has a retention horizon, and its trigger is the CURSOR, not
+  completion.** `pruneSettledChecklistItems()` (`lib/dexie/prune.ts`, called
+  from `pruneLocalCache` so it runs on every resync) sheds
+  `checklist_instance_items` for checklists whose `completed_at` is older than
+  `cursor:checklist_items`. Three things about it are non-obvious and each was
+  paid for before the code existed:
+  - **Never shed the TURNOVER row.** `partitionByKnown()` reclassifies an id
+    the device no longer holds as `fresh`, and fresh ids are pulled WITHOUT a
+    cursor — so the row and its whole checklist return on the next sync, every
+    sync. Items have no such path (`fetchWithCursorSplit` splits on turnover
+    id, never item id), which is exactly why shedding items is durable and
+    keeping the turnover is what makes it durable.
+  - **`completed_at < cursor`, never `status === 'completed'`.**
+    `advanceCursor` stores `max(updated_at) − CURSOR_OVERLAP_MS`, so a
+    just-completed turnover sits INSIDE that overlap: purge it and the next
+    delta returns all of its items, and the pass after purges them again — a
+    permanent loop on the most recent job. Comparing against the cursor states
+    "the next pull will not return these" once, derived, instead of adding a
+    settle constant that would have to track `CURSOR_OVERLAP_MS` by hand.
+  - **Retain anything with unsent work, in EITHER outbox and in every state.**
+    photo-sync resolves a queued photo's storage org prefix by walking
+    `checklist_instance_items` → `checklist_instances` → `org_id`; shed that
+    item row and `orgPrefixedUploadPath` returns null, which dead-letters the
+    photo. A transport failure never sets `failed`, so filtering to pending
+    rows would retain the cache for the writes that are fine and shed it for
+    the ones that are not.
+  Enforced by `unit/guardrails/crew-cache-retention.test.ts`; the before/after
+  behaviour is in `unit/dexie/crew-cache-retention-behaviour.test.ts`, which
+  characterizes the sync path and should FLIP rather than be deleted when one
+  of its holes is closed.
+
+- **The assignment scope has a horizon: `CREW_SCOPE_HORIZON_DAYS` (45), in
+  `lib/dexie/sync/turnovers.ts`.** The purge above bounds the checklist items;
+  this bounds the turnover and instance rows, and the round trips a resync
+  spends fetching them. `fetchAssignedTurnoverIds` filters
+  `turnover_assignments` through a `turnovers!inner(checkout_datetime)` embed,
+  so the cut is SERVER-side — filtering on the device would fix the cache size
+  and none of the round trips. Three constraints:
+  - **It MUST exceed `DEAD_LETTER_RETENTION_DAYS`**, and the guardrail asserts
+    that rather than trusting the comment. A dead letter lives 30 days so a
+    crew member can still see and retry it; a horizon of 30 would shed the
+    turnover it belongs to at the same moment. Setting them equal is the
+    plausible-looking change this catches.
+  - **The past only — never an upper bound.** A turnover months out is still
+    theirs to prepare for; an `lte` here takes a future job off the device
+    before they ever see it.
+  - **`reconcileRemovedTurnovers` retains anything with unsent work**, however
+    it became a candidate (unassigned, or simply old). The horizon is not
+    sufficient on its own: 30 days bounds a DEAD-LETTERED row, and a stalled
+    transport failure has no expiry at all. That delete takes the turnover, its
+    instances and its items together.
+  `checkout_datetime` is NOT NULL in the live schema, which is what makes the
+  `.gte` safe; if that ever changes, the filter starts shedding those turnovers
+  from every device and nothing says so.
+
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the
 safety poll (the full `resync()`/`resyncV2()` covers all of them); every such
@@ -2310,6 +2365,42 @@ meta-rule, prose is for judgment calls only.
   choice is being made on a number that is three orders of magnitude wrong;
   it picks correctly today, but nothing about that is load-bearing.
 
+- **Payload volume is a separate question from plan shape, and it has its own
+  probe.** `scripts/payload-volume-probe.sql` (`pnpm run
+  check:payload-volume`, manual, never a CI gate) reuses the same
+  872-property fixture — now extracted to `scripts/probe-portfolio-seed.sql`
+  so both probes describe ONE platform — and measures rows and serialised
+  bytes per surface rather than milliseconds. A read can be index-perfect and
+  still ship more than a phone can parse; that is the failure the plan probe
+  is blind to by design.
+
+  Measured 2026-09-29: the PM boards are NOT the risk — `/turnovers` is
+  5,682 rows / 2.32MB and `/ops` is 2,005 / 0.71MB against a 24MB ceiling.
+  **The crew device cache is**: 176,640 rows / 104MB at ~2.6 years of one
+  crew member's tenure, 100MB of it `checklist_instance_items`, reaching the
+  192MB ceiling around year five. It grows with TENURE and never shrinks —
+  `fetchAssignedTurnoverIds` has no date window and `pruneLocalCache` derives
+  its live property set FROM the cached turnovers, so the turnovers are the
+  root of the retention graph and leave only on server-side unassignment. A
+  full resync is also 276 sequential round trips, which is ~80s at a phone's
+  RTT and is what a new device or `forceFullCrewResync()` pays.
+
+  **Both halves are now fixed, and neither is a bigger ceiling** — same rule as
+  the report/export caps above. `pruneSettledChecklistItems()` sheds the
+  checklist items once the delta cursor has moved past them (100MB → the active
+  turnovers only), and `CREW_SCOPE_HORIZON_DAYS` bounds the turnover and
+  instance rows plus the resync that fetches them. See the crew Dexie section
+  for why the purge trigger is the cursor rather than completion, and why the
+  horizon has to exceed the dead-letter window. Nothing on a crew device now
+  grows with tenure.
+
+  Both probes plant a canary and both were fire-checked before being trusted:
+  the ceiling assertion must fire on an over-ceiling row AND on a surface that
+  failed to measure (NULL bytes), and must not fire on a control; the canary
+  must fire on an empty result set AND on a one-byte fixture. A probe at
+  "everything passes" because it is measuring nothing looks exactly like a
+  healthy platform.
+
 ### Code Quality
 
 - **A guardrail must scan CODE, not prose.** Most guardrails in
@@ -2341,6 +2432,15 @@ meta-rule, prose is for judgment calls only.
   class containing a quote swallowed the rest of the file; a block comment
   mid-chain truncated the chain, under-reporting in one arrangement and
   over-reporting in the other). Do not hand-roll a third.
+  A fourth instance turned up on 2026-09-29, in the other direction — a FALSE
+  POSITIVE rather than a miss. `n-plus-one-loops` read raw source, so a comment
+  containing `for (const row of items)` near a query-shaped call was reported as
+  an N+1: it fired on a comment in `lib/dexie/sync/turnovers.ts` explaining why
+  that function does NOT loop. It walks the source by INDEX (it balances braces
+  from the match and derives the line from a slice of the same string), so the
+  fix is `blankComments()` rather than `readCode()`, per the paragraph above.
+  Fire-checked both ways: a real loop-plus-query is still caught, the same text
+  in a comment is not.
   `pnpm run check:comment-blind-guardrails` finds these: it strips every comment
   in `app`/`lib`/`components`, re-runs the suite, and reports any guardrail that
   passes on the real tree and fails without prose. Manual, not a CI gate — it

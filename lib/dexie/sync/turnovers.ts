@@ -36,7 +36,39 @@ import { getCursor, advanceCursor, partitionByKnown } from './cursors'
 import { fetchInChunks, fetchInChunksPaginated, fetchAllPages, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
 import { scopeChanged, rememberScope } from './scope'
+import { idsWithPendingWork } from '../prune'
 import { reportError } from '@/lib/observability/report-error'
+
+/**
+ * How far back a crew member's assignment scope reaches, in days. Forward is
+ * unbounded — a turnover three months out is still theirs to prepare for.
+ *
+ * WHY A HORIZON EXISTS AT ALL. The scope was a crew member's LIFETIME
+ * assignment list, so the device cache was a function of tenure rather than of
+ * the account: 176,640 rows / 104MB measured at ~2.6 years against an
+ * 872-property fixture, and a full resync of 276 sequential round trips, which
+ * is ~80 seconds at a phone's RTT. pruneSettledChecklistItems() took the
+ * checklist ITEMS out of that (the 100MB); this bounds what remains — the
+ * turnover and instance rows, and the resync that has to fetch them.
+ *
+ * WHY 45 AND NOT 30. It MUST exceed DEAD_LETTER_RETENTION_DAYS, and the
+ * guardrail asserts that rather than trusting this comment. A dead-lettered
+ * mutation stays on the device for 30 days so a crew member can still see and
+ * retry it; if the horizon were 30 too, the turnover it belongs to would fall
+ * out of scope at the same moment, and the two racing is not a race worth
+ * having. 15 days of margin is the cheap half of that trade — at ~1,250
+ * assignments a year the difference between 30 and 45 days is about 50
+ * turnovers, well under a megabyte.
+ *
+ * A HORIZON IS NOT THE ONLY PROTECTION. reconcileRemovedTurnovers refuses to
+ * delete a turnover with unsent work regardless of its age, because 30 days is
+ * the DEAD-LETTER life and a stalled transport failure has no expiry at all.
+ */
+export const CREW_SCOPE_HORIZON_DAYS = 45
+
+function scopeHorizonIso(now: number = Date.now()): string {
+  return new Date(now - CREW_SCOPE_HORIZON_DAYS * 86_400_000).toISOString()
+}
 
 const TURNOVER_COLUMNS =
   'id, property_id, org_id, prev_booking_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
@@ -85,11 +117,20 @@ async function fetchAssignedTurnoverIds(
   // also stops unrelated failures of this read collapsing into one issue.
   let pageError: unknown = null
 
+  // The `!inner` embed is what applies the horizon SERVER-side: without it the
+  // whole lifetime scope still crosses the wire and only the device discards
+  // it, which fixes the cache and none of the round trips. checkout_datetime is
+  // NOT NULL in the live schema (verified), so a .gte here cannot silently drop
+  // a row for want of a value — if that ever changes, this filter starts
+  // shedding those turnovers from every device and nothing says so.
+  const horizon = scopeHorizonIso()
+
   const rows = await fetchAllPages<{ turnover_id: string }>(async (from, to) => {
     const res = await supabase
       .from('turnover_assignments')
-      .select('turnover_id')
+      .select('turnover_id, turnovers!inner(checkout_datetime)')
       .eq('crew_member_id', crewMemberId)
+      .gte('turnovers.checkout_datetime', horizon)
       .order('turnover_id')
       .range(from, to)
     return { data: res.data as { turnover_id: string }[] | null, error: res.error }
@@ -117,17 +158,43 @@ async function reconcileRemovedTurnovers(
 ): Promise<void> {
   const db = getDexieDb(userId)
   const assignedIdSet = new Set(assignedIds)
-  const removedIds = [...localIds].filter((id) => !assignedIdSet.has(id))
+  const candidates = [...localIds].filter((id) => !assignedIdSet.has(id))
+  if (!candidates.length) return
+
+  const [instances, items] = await Promise.all([
+    db.checklist_instances.where('turnover_id').anyOf(candidates).toArray(),
+    db.checklist_instance_items.where('turnover_id').anyOf(candidates).toArray(),
+  ])
+
+  // A turnover with unsent work stays, however it came to be a candidate —
+  // unassigned, or simply older than CREW_SCOPE_HORIZON_DAYS. The horizon is
+  // not sufficient on its own: DEAD_LETTER_RETENTION_DAYS bounds only a
+  // dead-lettered row, and a STALLED mutation (a transport failure, which never
+  // sets `failed`) has no expiry at all. Deleting here takes the turnover, its
+  // instances and its items in one go, which is both the crew member's queued
+  // write and the row photo-sync walks to resolve a queued photo's org prefix.
+  //
+  // Built as one expression rather than an iteration per collection. Neither
+  // shape issues a query, but a per-row loop sitting two lines above three
+  // bulkDeletes is something a reviewer has to read carefully before believing;
+  // a union of three id sets says what it is and leaves nothing to prove.
+  const busy = await idsWithPendingWork(db)
+  const retained = new Set<string>([
+    ...candidates.filter((id) => busy.has(id)),
+    ...instances.filter((r) => busy.has(r.id)).map((r) => r.turnover_id),
+    ...items.filter((r) => busy.has(r.id)).map((r) => r.turnover_id),
+  ])
+
+  const removedIds = candidates.filter((id) => !retained.has(id))
   if (!removedIds.length) return
 
-  const instanceKeys = await db.checklist_instances
-    .where('turnover_id').anyOf(removedIds).primaryKeys()
-  const itemKeys = await db.checklist_instance_items
-    .where('turnover_id').anyOf(removedIds).primaryKeys()
+  const doomed = new Set(removedIds)
   await Promise.all([
     db.turnovers.bulkDelete(removedIds),
-    db.checklist_instances.bulkDelete(instanceKeys),
-    db.checklist_instance_items.bulkDelete(itemKeys),
+    db.checklist_instances.bulkDelete(
+      instances.filter((r) => doomed.has(r.turnover_id)).map((r) => r.id)),
+    db.checklist_instance_items.bulkDelete(
+      items.filter((r) => doomed.has(r.turnover_id)).map((r) => r.id)),
   ])
 }
 
