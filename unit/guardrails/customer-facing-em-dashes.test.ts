@@ -79,6 +79,23 @@ const OUT_OF_SCOPE = [
 ]
 
 /**
+ * Every way an em dash reaches a screen. Scanning for the literal character
+ * alone is what let 15 of them ship on the homepage: JSX renders `&mdash;`
+ * and a TS string renders `—` exactly like `—`, and neither contains the
+ * character this file was originally grepping for. A reviewer reading the
+ * source sees an escape; a visitor sees a dash. `&#8212;`/`&#x2014;` are the
+ * numeric spellings of the same entity and are included for the same reason,
+ * even though nothing uses them today — the point is that the scan cannot be
+ * defeated by choosing a different spelling.
+ *
+ * Normalised to the literal character before any other rule runs, so
+ * PLACEHOLDER and EXCEPTIONS below only ever have to reason about one form.
+ */
+const EM_DASH_FORMS = /&mdash;|&#8212;|&#[xX]2014;|\\u2014|\\U2014|\\x\{2014\}/g
+
+const toLiteralDashes = (s: string): string => s.replace(EM_DASH_FORMS, '—')
+
+/**
  * An em dash that is the ENTIRE value, rather than punctuation inside a
  * sentence: `'—'`, `"—"`, `` `—` ``, `{'—'}`, or a lone `—` JSX text node.
  */
@@ -99,18 +116,21 @@ function inScope(path: string): boolean {
 /** `path:line` for every em dash in this file that is neither comment nor placeholder. */
 function findings(file: string): string[] {
   // Cheap reject before either lexer runs: most files have no em dash at all.
-  if (!read(file).includes('—')) return []
+  if (!toLiteralDashes(read(file)).includes('—')) return []
   // Comments are not copy, so a file whose only dashes are in prose comments
   // drops out here — offsets shift, which is why the line numbers below come
   // from blankComments() instead.
-  if (!readCode(file).includes('—')) return []
+  if (!toLiteralDashes(readCode(file)).includes('—')) return []
 
   const path = rel(file)
+  // toLiteralDashes AFTER blankComments, never before: the replacement is
+  // shorter than the escape it replaces, so doing it first would shift every
+  // offset and blankComments() would blank the wrong spans.
   return blankComments(read(file))
     .split('\n')
     .flatMap((line, i) => {
       const key = `${path}:${i + 1}`
-      if (!line.replace(PLACEHOLDER, '').includes('—')) return []
+      if (!toLiteralDashes(line).replace(PLACEHOLDER, '').includes('—')) return []
       if (EXCEPTIONS.has(key)) return []
       return [key]
     })
@@ -153,11 +173,34 @@ describe('guardrail: no em dashes in customer-facing copy', () => {
   })
 
   it('fires on a real violation (a clean tree and a broken scanner look identical)', () => {
-    const line = '<p>Priced per property, no tiers.</p>'
-    expect(line.replace(PLACEHOLDER, '').includes('—')).toBe(false)
-    expect('<p>Priced per property — no tiers.</p>'.replace(PLACEHOLDER, '').includes('—')).toBe(true)
+    const hit = (s: string) => toLiteralDashes(s).replace(PLACEHOLDER, '').includes('—')
+
+    expect(hit('<p>Priced per property, no tiers.</p>')).toBe(false)
+    expect(hit('<p>Priced per property — no tiers.</p>')).toBe(true)
     // ...and does NOT fire on either shape of placeholder glyph.
-    expect("{row.name ?? '—'}".replace(PLACEHOLDER, '').includes('—')).toBe(false)
-    expect('<td>—</td>'.replace(PLACEHOLDER, '').includes('—')).toBe(false)
+    expect(hit("{row.name ?? '—'}")).toBe(false)
+    expect(hit('<td>—</td>')).toBe(false)
+  })
+
+  // The literal character is only one of the spellings that reaches a screen,
+  // and the other two are the ones that actually shipped: 13 &mdash; and 2
+  // — sat on the live homepage through a green run of this file, because
+  // the scan grepped for '—' and neither of those contains it. Each form is
+  // asserted separately so a regression names the spelling it stopped seeing.
+  it.each([
+    ['HTML entity',       'text &mdash; more'],
+    ['numeric entity',    'text &#8212; more'],
+    ['hex entity',        'text &#x2014; more'],
+    ['uppercase hex',     'text &#X2014; more'],
+    ['JS unicode escape', "'text \\u2014 more'"],
+  ])('fires on an em dash written as a %s', (_label, sample) => {
+    expect(toLiteralDashes(sample).replace(PLACEHOLDER, '').includes('—')).toBe(true)
+  })
+
+  it('does not fire on an en dash or a hyphen in any spelling', () => {
+    const clean = (s: string) => toLiteralDashes(s).replace(PLACEHOLDER, '').includes('—')
+    expect(clean('Quiet hours 10 PM&ndash;8 AM')).toBe(false)
+    expect(clean('Quiet hours 10 PM–8 AM')).toBe(false)
+    expect(clean('a well-known check-in time')).toBe(false)
   })
 })

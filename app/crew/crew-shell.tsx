@@ -359,7 +359,7 @@ export function CrewShell({
             </div>
             <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
               Logging out clears everything saved on this device. This work is
-              only here, not on FieldStay&rsquo;s servers yet &mdash; if you log out
+              only here, not on FieldStay&rsquo;s servers yet. If you log out
               now, it will be lost. Stay logged in until you have signal and it
               finishes syncing.
             </p>
