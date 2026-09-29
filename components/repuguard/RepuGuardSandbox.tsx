@@ -52,6 +52,7 @@ export default function RepuGuardSandbox() {
     >
       {/* Header bar */}
       <div
+        className="rg-header"
         style={{
           background: "var(--rg-panel-bg)",
           borderBottom: "1px solid var(--rg-border)",
@@ -90,12 +91,8 @@ export default function RepuGuardSandbox() {
 
       {/* Scenario selector */}
       <div
-        style={{
-          padding: "20px 24px 0",
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 8,
-        }}
+        className="rg-scenarios"
+        style={{ padding: "20px 24px 0", display: "grid", gap: 8 }}
       >
         {SCENARIOS.map((s) => (
           <button
@@ -130,7 +127,7 @@ export default function RepuGuardSandbox() {
       </div>
 
       {/* Main demo area */}
-      <div style={{ padding: 24 }}>
+      <div className="rg-body" style={{ padding: 24 }}>
         {!scenario ? (
           <div
             style={{
@@ -145,13 +142,7 @@ export default function RepuGuardSandbox() {
             </div>
           </div>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 16,
-            }}
-          >
+          <div className="rg-split" style={{ display: "grid", gap: 16 }}>
             {/* Left — Guest Review */}
             <div>
               <div
@@ -549,6 +540,14 @@ export default function RepuGuardSandbox() {
 
       <style>{`
         .repuguard-sandbox {
+          /* The marketing section that hosts this demo is .text-center, and
+             that inherits straight into the panel. It was survivable while the
+             response sat in a narrow column; stacked full width it centres a
+             170-word paragraph, which is the hardest thing to read there is.
+             The two places that genuinely want centring (scenario buttons,
+             empty state) set it inline, so they win over this. */
+          text-align: left;
+
           --rg-bg:             #070f1f;
           --rg-panel-bg:       #0a1628;
           --rg-border:         #0e2040;
@@ -573,6 +572,32 @@ export default function RepuGuardSandbox() {
           --rg-cta-demo-bg:    #061020;
           --rg-shadow:         0 24px 80px rgba(0,0,0,0.6);
         }
+        /* The two grids live here rather than inline because a media query is
+           the whole point and inline styles cannot carry one. At 430px the
+           1fr 1fr split gave the response column about three words per line,
+           which is legible but not readable. */
+        .rg-scenarios { grid-template-columns: repeat(4, 1fr); }
+        .rg-split     { grid-template-columns: 1fr 1fr; }
+
+        @media (max-width: 720px) {
+          /* Stack review above response. Below this width two columns cost
+             more in wrapping than they buy in side-by-side comparison. */
+          .rg-split { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 560px) {
+          /* 2x2 scenario buttons: at four across, every label wrapped to three
+             lines on a phone. */
+          .rg-scenarios { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 480px) {
+          /* Claw back horizontal space the 24px gutters were eating. */
+          .repuguard-sandbox .rg-scenarios { padding-left: 14px; padding-right: 14px; }
+          .repuguard-sandbox .rg-header    { padding-left: 14px; padding-right: 14px; }
+          .repuguard-sandbox .rg-body      { padding: 16px 14px; }
+        }
+
         @keyframes rg-spin   { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes rg-blink  { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
         @keyframes rg-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }

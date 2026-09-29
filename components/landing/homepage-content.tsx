@@ -301,7 +301,7 @@ function ManagersBoardMockup() {
             </div>
             <div className="flex items-center gap-2.5 rounded-lg" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', padding: '8px 12px' }}>
               <span className="text-[12px]" style={{ color: '#dce9f5' }}>
-                Suggested: <b className="text-white">Maria G.</b> <span style={{ color: '#9ab5cc' }}>&mdash; cleaned this property 11 times, 4 mi away</span>
+                Suggested: <b className="text-white">Maria G.</b> <span style={{ color: '#9ab5cc' }}>cleaned this property 11 times, 4 mi away</span>
               </span>
               <span className="ml-auto text-[12px] font-semibold rounded-lg" style={{ color: '#FFFFFF', background: '#2fd98c', padding: '5px 10px' }}>Accept</span>
               <span className="text-[12px]" style={{ color: '#9ab5cc' }}>Dismiss</span>
@@ -365,7 +365,7 @@ function CrewChecklistMockup() {
         </div>
         <div className="flex flex-col gap-1.5">
           <div className="flex justify-between text-[12px]">
-            <span className="font-semibold" style={{ color: '#dce9f5' }}>Checklist &mdash; 14 of 22</span>
+            <span className="font-semibold" style={{ color: '#dce9f5' }}>Checklist, 14 of 22</span>
             <span style={{ color: '#9ab5cc' }}>64%</span>
           </div>
           <div className="rounded-full" style={{ height: 7, background: '#1a3464' }}>
@@ -378,7 +378,7 @@ function CrewChecklistMockup() {
         <div className="rounded-xl flex flex-col" style={{ background: '#152b52', border: '1px solid rgba(255,255,255,0.07)' }}>
           {[
             { label: 'Strip and remake bed', sub: 'Photo attached', subColor: '#2fd98c', done: true },
-            { label: 'Photograph closet', sub: 'Photo saved \u2014 uploading when back online', subColor: '#f59e0b', done: true },
+            { label: 'Photograph closet', sub: 'Photo saved, uploading when back online', subColor: '#f59e0b', done: true },
           ].map((row) => (
             <div key={row.label} className="flex gap-2.5" style={{ padding: '11px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2fd98c" strokeWidth="2.2" aria-hidden="true">
@@ -410,7 +410,7 @@ function CrewChecklistMockup() {
 
 // ── Vendor invoice mockup — mirrors app/work-orders/[token]/vendor-portal
 // .tsx: the "Invoice Line Items" table, "Invoice Total" summary, and the
-// "Submit Invoice \u2014 $X" button copy pulled directly from that file. ────
+// "Submit Invoice, $X" button copy pulled directly from that file. ───────
 function VendorInvoiceMockup() {
   return (
     <div className="rounded-2xl mx-auto flex flex-col gap-3 shadow-xl overflow-hidden" style={{ width: '100%', maxWidth: 400, background: '#FFFFFF', padding: '26px 24px' }}>
@@ -471,7 +471,7 @@ function VendorInvoiceMockup() {
         <span className="text-[18px] font-extrabold" style={{ color: '#0f172a' }}>$189.50</span>
       </div>
       <button type="button" className="rounded-xl font-bold text-white text-[14px]" style={{ background: '#FF6B00', padding: 13 }}>
-        Submit Invoice &mdash; $189.50
+        Submit Invoice, $189.50
       </button>
     </div>
   )
@@ -577,7 +577,7 @@ function GuestGuidebookMockup() {
               <span className="text-[13px] font-semibold" style={{ color: '#D4A537' }}>Good afternoon</span>
               <span className="text-[11px] rounded-full" style={{ color: '#F4F4F5', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.14)', padding: '4px 9px' }}>&#9728;&#65039; 79&deg;F</span>
             </div>
-            <span className="text-[11px]" style={{ color: '#9A9AA2' }}>Clear skies through sunset &mdash; good evening for the dock.</span>
+            <span className="text-[11px]" style={{ color: '#9A9AA2' }}>Clear skies through sunset, good evening for the dock.</span>
             <span className="text-[10px] uppercase" style={{ color: '#D4A537', letterSpacing: '1px', marginTop: 6 }}>Your stay at</span>
             <span className="text-[21px] font-extrabold text-white" style={{ letterSpacing: '-0.3px' }}>Cedar Cove</span>
             <div className="flex justify-between items-center" style={{ marginTop: 2 }}>
@@ -754,7 +754,7 @@ export function HomepageContent() {
             Make your day less stressful.
           </h1>
           <p className="text-xl leading-relaxed" style={{ color: '#3D4A63', maxWidth: 540 }}>
-            FieldStay runs the work between checkout and check-in &mdash; turnovers, crews, supplies, repairs and owner reports &mdash; so you&apos;re not running your business out of a group text.
+            FieldStay runs the work between checkout and check-in (turnovers, crews, supplies, repairs and owner reports) so you&apos;re not running your business out of a group text.
           </p>
           <div className="flex flex-wrap gap-3.5 items-center">
             <Link href="/signup" className="font-bold text-base rounded-full" style={{ background: '#FCD116', color: '#102246', padding: '18px 28px' }}>
@@ -911,10 +911,10 @@ export function HomepageContent() {
             Guest Guidebook
           </span>
           <h3 className="font-display font-semibold" style={{ fontSize: 'clamp(24px, 3vw, 30px)', letterSpacing: '-0.5px', color: '#102246', maxWidth: 680 }}>
-            Not just another guidebook. A guest experience tool with a personal touch &mdash; and we&apos;ll pay you to use it.*
+            Not just another guidebook. A guest experience tool with a personal touch, and we&apos;ll pay you to use it.*
           </h3>
           <p className="text-base leading-relaxed" style={{ color: '#3D4A63', maxWidth: 700 }}>
-            Every FieldStay property gets a personalized guest guidebook: door codes, WiFi credentials, check-in instructions, and contextual recommendations driven by your property&apos;s amenities and live weather. Guests opt in to receive their door code by text &mdash; the moment they submit their number, your opt-in rate is nearly complete. Local business sponsors pay $15/month for featured placement, and every active sponsor takes $5/month off your FieldStay bill &mdash; from the first one, with no limit on how many you sign. Sign enough and the bill reaches zero.
+            Every FieldStay property gets a personalized guest guidebook: door codes, WiFi credentials, check-in instructions, and contextual recommendations driven by your property&apos;s amenities and live weather. Guests opt in to receive their door code by text. The moment they submit their number, your opt-in rate is nearly complete. Local business sponsors pay $15/month for featured placement, and every active sponsor takes $5/month off your FieldStay bill, from the first one, with no limit on how many you sign. Sign enough and the bill reaches zero.
           </p>
           <p className="text-xs" style={{ color: '#8A96B2' }}>
             *Plan credits applied monthly based on active sponsor count, capped at your plan cost.
@@ -927,7 +927,7 @@ export function HomepageContent() {
         <div className="flex flex-col gap-6 mx-auto" style={{ maxWidth: 760 }}>
           <span className="text-xs font-bold uppercase tracking-[0.14em]" style={{ color: '#FCD116' }}>Why FieldStay exists</span>
           <p className="font-display" style={{ fontSize: 'clamp(22px, 2.8vw, 32px)', lineHeight: 1.35, color: '#FFFFFF', letterSpacing: '-0.5px' }}>
-            &ldquo;I spent my career in hospitality operations and logistics before I ever wrote software. I built FieldStay because I believe there&apos;s a better way to do this &mdash; and I&apos;ll be as honest with you as I can about what it does and what it costs.&rdquo;
+            &ldquo;I spent my career in hospitality operations and logistics before I ever wrote software. I built FieldStay because I believe there&apos;s a better way to do this, and I&apos;ll be as honest with you as I can about what it does and what it costs.&rdquo;
           </p>
           <span className="text-base" style={{ color: '#C9D2E6' }}>
             <strong className="text-white">Stephen</strong> &middot; Founder, Dadeville, Alabama
@@ -946,7 +946,7 @@ export function HomepageContent() {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-left">
             {[
-              { n: '01', title: 'Add your properties', desc: 'Name, address, check-in times, door codes, Wi-Fi details \u2014 and paste your Airbnb or VRBO iCal URL. Bookings sync automatically.' },
+              { n: '01', title: 'Add your properties', desc: 'Name, address, check-in times, door codes, Wi-Fi details, and paste your Airbnb or VRBO iCal URL. Bookings sync automatically.' },
               { n: '02', title: 'Configure the details', desc: 'Set inventory par levels, build your turnover checklist, add maintenance schedules, invite your crew. Takes about 15 minutes per property.' },
               { n: '03', title: 'Run on autopilot', desc: 'Turnovers generate, crew works offline, purchase orders send themselves, owners see their P&L. You manage exceptions, not logistics.' },
             ].map((step) => (
@@ -974,7 +974,7 @@ export function HomepageContent() {
             ${tiers[0]!.monthly}<span className="text-xl sm:text-2xl font-semibold" style={{ color: '#5B6478', letterSpacing: 0 }}> /month to start</span>
           </span>
           <span className="text-[17px] leading-relaxed" style={{ color: '#3D4A63', maxWidth: 520 }}>
-            Adding a property moves the price a few dollars &mdash; never a cliff. Graduated down to $6/property. No sales call to find out what it costs.
+            Adding a property moves the price a few dollars, never a cliff. Graduated down to $6/property. No sales call to find out what it costs.
           </span>
           <Link href="/pricing" className="font-bold text-base" style={{ color: '#102246' }}>See the full calculator &rarr;</Link>
         </div>
@@ -997,7 +997,7 @@ export function HomepageContent() {
           See your first turnover automate itself today.
         </h2>
         <p className="text-base mb-9 mt-3 mx-auto" style={{ color: 'rgba(16,34,70,0.7)', maxWidth: 440 }}>
-          Connect your booking platform, add your first property, and watch FieldStay generate the turnover, assign the crew, and queue the checklist &mdash; automatically. Cancel with one click if it doesn&apos;t save your team real time in the first week.
+          Connect your booking platform, add your first property, and watch FieldStay generate the turnover, assign the crew, and queue the checklist, automatically. Cancel with one click if it doesn&apos;t save your team real time in the first week.
         </p>
         <Link href="/signup" className="inline-flex items-center gap-2 font-black text-base rounded-lg" style={{ background: '#102246', color: '#FFFFFF', padding: '16px 36px' }}>
           Start Your Free 14-Day Trial <span style={{ fontSize: 20 }}>&rarr;</span>

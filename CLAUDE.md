@@ -1147,6 +1147,16 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
   is shrink-only — fix the prose, never add a line to it. The swept-clean state
   dates from 2026-09-29; before that the dash was house style, so an older
   commit's copy is not a precedent.
+  **The rule is about what RENDERS, not about the character in the source.**
+  `&mdash;` in JSX and `—` in a TS string both reach the screen as `—`
+  and contain no `—` for a scanner to find. That is not hypothetical: the
+  first sweep grepped for the literal character, reported zero, and left 15
+  em dashes live on the homepage — the founder quote, the hero paragraph and
+  the guidebook section among them — through a green run of this guardrail.
+  It now normalises `&mdash;`, `&#8212;`, `&#x2014;` and `—` before
+  testing, and each spelling has its own fire-check so a regression names the
+  one it stopped seeing. Prefer the literal character in source when you do
+  want a dash somewhere out of scope; an entity only hides it from review.
 - **CSS variables** for all colors — never hardcode hex in components, and
   that includes Tailwind's own color utilities (`text-red-500`, `bg-blue-500`,
   `hover:text-red-600`, etc.) — those are just hardcoded hex under a Tailwind
@@ -1837,7 +1847,11 @@ following them stops being a memory test. Five layers, checked in CI via
      are baselined; new files may not hardcode Tailwind color utilities,
      and cleaned-up files must leave the baseline. Never add entries.
    - `customer-facing-em-dashes` — no em dash in copy any PM, crew member,
-     vendor, owner or guest reads. A standalone `'—'` placeholder glyph is
+     vendor, owner or guest reads, in ANY spelling: the literal character,
+     `&mdash;`, `&#8212;`, `&#x2014;` and `\u2014` are normalised to one form
+     before the scan, because the first version checked only the literal and
+     left 15 entity-spelled dashes live on the homepage while reporting zero.
+     A standalone `'—'` placeholder glyph is
      recognized structurally and needs no entry; `EXCEPTIONS` is `path:line`,
      holds only non-copy uses (today, two regex character classes) and is
      shrink-only, with a staleness check so an entry cannot drift onto an
