@@ -548,7 +548,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
       {preview && preview.length > 0 && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-secondary-themed">Preview — {preview.length} rows</p>
+            <p className="text-xs font-semibold text-secondary-themed">Preview: {preview.length} rows</p>
             <button onClick={() => setPreview(null)} className="text-xs text-muted-themed hover:text-primary-themed">Clear</button>
           </div>
           <div className="overflow-x-auto rounded-lg border border-themed max-h-56">

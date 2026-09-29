@@ -212,7 +212,7 @@ export async function markWorkVerified(workOrderId: string) {
   if (wo.vendor_id) {
     throw new Error(
       'This work order is assigned to a vendor. It must be completed through the vendor\'s ' +
-      'portal so the invoice and Stripe payment can be generated — not marked complete here.'
+      'portal so the invoice and Stripe payment can be generated, not marked complete here.'
     )
   }
 

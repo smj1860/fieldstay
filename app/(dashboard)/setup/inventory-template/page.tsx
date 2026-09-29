@@ -16,7 +16,7 @@ export default async function OnboardingInventoryTemplatePage() {
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Unlike the turnover checklist, supply lists aren&apos;t built for you
-          automatically — there&apos;s less to set up here right now.
+          automatically, there&apos;s less to set up here right now.
         </p>
         <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
           <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
@@ -26,7 +26,7 @@ export default async function OnboardingInventoryTemplatePage() {
               Templates → Inventory
             </Link>
             . Build a template from it whenever convenient, then set par
-            levels per property — no auto-apply, so nothing changes on a
+            levels per property, no auto-apply, so nothing changes on a
             property until you assign one.
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--text-primary)' }}>

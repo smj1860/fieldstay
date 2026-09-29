@@ -54,7 +54,7 @@ const PLAN_INFO = {
   growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'green' },
   portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'gold'  },
   enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'amber' },
-  platform:   { name: 'FieldStay', maxProperties: MAX_SELF_SERVE_PROPERTIES, description: 'Billed per property — no tiers', badge: 'gold' },
+  platform:   { name: 'FieldStay', maxProperties: MAX_SELF_SERVE_PROPERTIES, description: 'Billed per property, no tiers', badge: 'gold' },
   // Legacy alias — orgs created before the 'pro' tier was renamed to 'starter'
   pro:        { name: 'Starter',   maxProperties: 15,  description: '5–15 properties',       badge: 'blue'  },
 } as const
@@ -264,7 +264,7 @@ function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org:
           Connect your Kroger account to build shopping carts automatically from below-par inventory.
         </p>
         <p className="text-xs text-muted-themed mb-4" style={{ fontStyle: 'italic' }}>
-          Works across the entire Kroger family of stores — Ralphs, Fred Meyer, King Soopers, Smith&apos;s, Fry&apos;s, QFC,
+          Works across the entire Kroger family of stores: Ralphs, Fred Meyer, King Soopers, Smith&apos;s, Fry&apos;s, QFC,
           City Market, Dillons, Mariano&apos;s, Pick &apos;n Save, Metro Market, Harris Teeter, Gerbes, and Baker&apos;s.
         </p>
         {connections.kroger ? (
@@ -274,7 +274,7 @@ function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org:
                 <StatusDot status="good" label="Connected" />
                 Connected
                 {typeof connections.kroger.metadata?.location_name === 'string' && (
-                  <> — {connections.kroger.metadata.location_name as string}</>
+                  <>: {connections.kroger.metadata.location_name as string}</>
                 )}
               </p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -312,7 +312,7 @@ function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org:
         <h2 className="text-base font-semibold text-primary-themed mb-1">Vendor Suggestions</h2>
         <p className="text-xs text-muted-themed mb-4">
           Score vendors for new work orders based on proximity, specialty match,
-          familiarity with the property, workload, and rating history — you
+          familiarity with the property, workload, and rating history. You
           accept or pick someone else.
         </p>
         <VendorAutoAssignToggle mode={org.vendor_auto_assign_mode ?? 'disabled'} />
@@ -337,7 +337,7 @@ function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org:
 const COMMS_RETENTION_OPTIONS = [
   { value: 90,  label: '90 days' },
   { value: 180, label: '6 months (180 days)' },
-  { value: 365, label: '12 months (365 days) — default' },
+  { value: 365, label: '12 months (365 days), the default' },
   { value: 730, label: '24 months (730 days)' },
 ]
 
@@ -397,7 +397,7 @@ const AUTO_ASSIGN_OPTIONS = [
   {
     value:  'suggest' as const,
     label:  'Suggest',
-    desc:   'Shows the best-matched crew on each new turnover — you accept or change.',
+    desc:   'Shows the best-matched crew on each new turnover. You accept or change.',
   },
   {
     value:  'autopilot' as const,
@@ -484,7 +484,7 @@ const VENDOR_AUTO_ASSIGN_OPTIONS = [
   {
     value: 'suggest' as const,
     label: 'Suggest',
-    desc:  'Shows the best-matched vendor on new work orders — you accept or pick someone else.',
+    desc:  'Shows the best-matched vendor on new work orders. You accept or pick someone else.',
   },
 ]
 
@@ -868,7 +868,7 @@ function NotificationsTab({
             <p className="text-xs text-muted-themed mt-1.5">
               When a crew member sends you a message, it will also be posted to this Slack channel.
               Create one at <span className="font-mono">api.slack.com/apps</span> → Incoming Webhooks.
-              {slackWebhookConfigured && ' The current URL isn’t shown — enter a new one to replace it.'}
+              {slackWebhookConfigured && ' The current URL isn’t shown. Enter a new one to replace it.'}
             </p>
           </div>
 
@@ -1116,7 +1116,7 @@ function SmsTemplatesCard() {
                           the opt-out line silently strips it from every send. */}
                       {!hasOptOutNotice(body) ? (
                         <p className="text-xs" style={{ color: 'var(--accent-amber)' }}>
-                          Add an opt-out instruction containing &ldquo;STOP&rdquo; — required on every
+                          Add an opt-out instruction containing &ldquo;STOP&rdquo;, required on every
                           message. We&rsquo;ll append &ldquo;{SMS_OPT_OUT_NOTICE}&rdquo; if you don&rsquo;t.
                         </p>
                       ) : (
@@ -1460,7 +1460,7 @@ function BillingTab({
         {hasNoProperties && (
           <Card>
             <p className="text-sm text-secondary-themed">
-              Add a property before subscribing — FieldStay bills per property, starting at
+              Add a property before subscribing. FieldStay bills per property, starting at
               ${formatWholeDollars(monthlyCostCents(1)!)}/mo for your first one.
             </p>
           </Card>
@@ -1472,7 +1472,7 @@ function BillingTab({
               <span className="font-semibold text-primary-themed">Enterprise</span>
               <p className="text-sm text-muted-themed mt-0.5">
                 Self-serve billing covers up to {MAX_SELF_SERVE_PROPERTIES} properties. You have
-                {' '}{quantity} — let&apos;s talk about a plan that fits.
+                {' '}{quantity}. Let&apos;s talk about a plan that fits.
               </p>
             </div>
             <a href="mailto:hello@fieldstay.app" className={buttonVariantClass('secondary') + ' text-sm whitespace-nowrap'}>
@@ -1493,7 +1493,7 @@ function BillingTab({
               <p className="text-xs text-muted-themed mt-1">
                 One property costs ${formatWholeDollars(monthlyCostCents(1)!)}
                 {interval === 'annual' ? ` ($${formatWholeDollars(annualCostCents(1)!)}/yr)` : '/mo'}. Every property after that is
-                {' '}{describeMarginalRates()} as you grow — adding one more never jumps your bill, it just adds that
+                {' '}{describeMarginalRates()} as you grow, adding one more never jumps your bill, it just adds that
                 property&apos;s own rate.
               </p>
             </div>

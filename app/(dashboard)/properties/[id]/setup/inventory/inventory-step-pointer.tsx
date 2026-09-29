@@ -20,7 +20,7 @@ export function InventoryStepPointer({ propertyId }: Readonly<{ propertyId: stri
       <h2 className="text-xl font-bold text-primary-themed">Inventory Is Already Started</h2>
       <p className="text-sm text-muted-themed mt-2 max-w-xs">
         This property was stocked from your standard inventory template when it
-        was created. Par levels that scale — towels, linens, coffee — are sized
+        was created. Par levels that scale (towels, linens, coffee) are sized
         from its bedrooms, bathrooms and guest count. Add anything specific to
         this property, like pool or fire pit supplies, from Par Levels.
       </p>

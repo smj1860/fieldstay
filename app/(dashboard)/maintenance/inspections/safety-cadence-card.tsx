@@ -70,7 +70,7 @@ export function SafetyCadenceCard() {
                 Safety walk cadence
               </span>
               <span className="block text-sm mt-0.5" style={{ color: 'var(--text-primary)' }}>
-                {template ? describeSafetyTemplate(template) : 'Not set — every property is unscheduled'}
+                {template ? describeSafetyTemplate(template) : 'Not set, every property is unscheduled'}
               </span>
             </span>
           </span>
@@ -180,7 +180,7 @@ function CadenceDialog({
             before saving rather than work out afterwards. */}
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
           Applies to all {propertyCount} {noun}. A walk that is already due or
-          overdue keeps its date so nothing in progress is disturbed — it picks up
+          overdue keeps its date so nothing in progress is disturbed. It picks up
           the new cadence once it is done.
         </p>
 

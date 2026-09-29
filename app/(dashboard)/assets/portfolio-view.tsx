@@ -120,7 +120,7 @@ export function PortfolioAssetView({
         <div className="rounded-lg px-4 py-3 mb-6 text-sm flex items-center gap-2"
              style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition — budget for replacement.
+          {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition, budget for replacement.
         </div>
       )}
 
@@ -212,7 +212,7 @@ export function PortfolioAssetView({
       )}
 
       <p className="text-xs text-muted-themed mt-4">
-        Assets link to their property page for edits —{' '}
+        Assets link to their property page for edits,{' '}
         <Link href="/assets" className="underline">switch to By Property</Link> to add, edit, or import.
       </p>
     </div>

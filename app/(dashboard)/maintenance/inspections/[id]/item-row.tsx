@@ -393,7 +393,7 @@ function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
       />
 
       <label htmlFor={`${id}-nophoto`} className="text-xs" style={{ color: 'var(--text-muted)' }}>
-        No photo? Say why — an unenforceable rule produces a photograph of the floor.
+        No photo? Say why. An unenforceable rule produces a photograph of the floor.
       </label>
       <Input
         id={`${id}-nophoto`}
@@ -547,7 +547,7 @@ function RepeatPrompt({ id, concern, answer, onChange }: Readonly<{
         <History className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--accent-gold)' }} />
         <span>
           Already open since {formatOpenSince(concern.createdAt)}
-          {concern.woNumber ? ` · ${concern.woNumber}` : ''} — “{concern.title}”
+          {concern.woNumber ? ` · ${concern.woNumber}` : ''}: “{concern.title}”
         </span>
       </p>
       <div className="flex gap-2 min-w-0">

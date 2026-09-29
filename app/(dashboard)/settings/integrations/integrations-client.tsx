@@ -71,12 +71,12 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   ownerrez:   'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
   hospitable: 'Syncs properties, reservations, and crew from your Hospitable account.',
-  hostaway:   'Syncs properties, reservations and booking revenue from your Hostaway account. Updates once daily — Hostaway webhooks are not wired yet, so a change made there can take up to 24 hours to appear.',
+  hostaway:   'Syncs properties, reservations and booking revenue from your Hostaway account. Updates once daily. Hostaway webhooks are not wired yet, so a change made there can take up to 24 hours to appear.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
   hostex:     'Syncs properties and reservations from your Hostex account. Posts booking revenue to owner ledgers automatically.',
-  lodgify:    'Syncs properties and bookings from your Lodgify account, and posts booking revenue to owner ledgers automatically. Updates once daily — Lodgify webhooks are held off until their delivery contract is verified, so a change made there can take up to 24 hours to appear. Disconnecting removes FieldStay\u2019s copy of your API key; Lodgify has no way for us to revoke it, so rotate the key in Lodgify if you want it dead immediately.',
-  kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
+  lodgify:    'Syncs properties and bookings from your Lodgify account, and posts booking revenue to owner ledgers automatically. Updates once daily. Lodgify webhooks are held off until their delivery contract is verified, so a change made there can take up to 24 hours to appear. Disconnecting removes FieldStay\u2019s copy of your API key; Lodgify has no way for us to revoke it, so rotate the key in Lodgify if you want it dead immediately.',
+  kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store: Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 
 // Providers not yet wired — excluded from the rendered list until live.
@@ -294,7 +294,7 @@ function CredentialModalContent({
       {providerId === 'hostaway' && (
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
           Find these in your Hostaway dashboard under{' '}
-          <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
+          <strong>Settings → Hostaway API → Create</strong>. The key is only shown once. Save it securely.
           FieldStay exchanges it once for an access token and never stores the key itself.
         </p>
       )}
@@ -317,11 +317,11 @@ type SyncProgress = {
 
 function getSyncCopy(propertiesFound: number | null, bookingsFound: number | null): string {
   if (bookingsFound !== null) {
-    return `Found ${bookingsFound} booking${bookingsFound !== 1 ? 's' : ''} — finishing up…`
+    return `Found ${bookingsFound} booking${bookingsFound !== 1 ? 's' : ''}, finishing up…`
   }
   if (propertiesFound !== null) {
     const noun = propertiesFound !== 1 ? 'properties' : 'property'
-    return `Found ${propertiesFound} ${noun} — pulling in your booking history…`
+    return `Found ${propertiesFound} ${noun}, pulling in your booking history…`
   }
   return 'Connecting…'
 }
@@ -458,7 +458,7 @@ function SyncInProgress({ sync }: Readonly<{ sync: SyncState }>) {
     // promise of a completion email here: the only Hospitable-connected
     // notification fires at OAuth-callback time (in parallel with the sync
     // starting), not on sync completion — see email-hospitable-connected.tsx.
-    ? 'Still working. Large portfolios can take several minutes — check back here shortly.'
+    ? 'Still working. Large portfolios can take several minutes. Check back here shortly.'
     : getSyncCopy(sync.propertiesFound, sync.bookingsFound)
 
   return (

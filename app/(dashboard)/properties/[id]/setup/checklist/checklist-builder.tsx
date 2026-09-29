@@ -470,7 +470,7 @@ export function ChecklistBuilder({
           <p className="font-semibold mb-1">Double-check bedroom/bathroom count</p>
           <p>
             {bedroomBathroomWarning} If that&apos;s not right, it usually means
-            the count didn&apos;t come through from your PMS yet — check
+            the count didn&apos;t come through from your PMS yet, check
             Property Details, or just add the section(s) below yourself with
             &quot;Insert Rooms from Library.&quot;
           </p>
@@ -519,7 +519,7 @@ export function ChecklistBuilder({
               <button
                 type="button"
                 onClick={() => detachSectionFromRoom(section.tempId)}
-                title="Linked to a room template — click to detach and customize freely"
+                title="Linked to a room template, click to detach and customize freely"
                 className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0"
                 style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
               >
@@ -848,9 +848,9 @@ export function ChecklistBuilder({
         }
       >
         <p className="text-xs text-muted-themed mb-4">
-          Check the room types this property has and set how many of each —
-          click a room&apos;s name to preview its checklist first. A section
-          gets added per room, pre-filled with its tasks — rename them
+          Check the room types this property has and set how many of each.
+          Click a room&apos;s name to preview its checklist first. A section
+          gets added per room, pre-filled with its tasks. Rename them
           afterward (e.g. &quot;Primary Bedroom&quot;) if you&apos;d like.
         </p>
         <div className="border border-themed rounded-lg divide-y divide-themed max-h-96 overflow-y-auto">

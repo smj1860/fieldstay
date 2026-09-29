@@ -4,7 +4,7 @@ import { seedOrgInventoryCatalogIfNeeded } from '@/lib/inventory/seed-org-catalo
 import { InventorySubnav } from '@/components/templates/inventory-subnav'
 import { CreateTemplateBuilder } from './create-template-builder'
 
-export const metadata: Metadata = { title: 'Create Inventory Template — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Create Inventory Template | Templates | FieldStay' }
 
 export default async function CreateInventoryTemplatePage() {
   const { supabase, membership } = await requireOrgMember()
@@ -43,7 +43,7 @@ export default async function CreateInventoryTemplatePage() {
       <div className="mb-4">
         <h2 className="section-header mb-1">Create Template</h2>
         <p className="text-sm text-muted-themed">
-          Select items from your Master List — checking a category selects
+          Select items from your Master List. Checking a category selects
           every item in it. Quantities aren&apos;t set here; par levels are a
           per-property concept, set on the Par Levels screen after applying.
         </p>

@@ -196,7 +196,7 @@ export async function cancelBooking(
           transaction_type:    'expense',
           category:            'booking_revenue',
           amount:              txn.amount,
-          description:         'Booking cancelled — revenue reversal',
+          description:         'Booking cancelled, revenue reversal',
           transaction_date:    new Date().toISOString().split('T')[0],
           visible_to_owner:    true,
         })

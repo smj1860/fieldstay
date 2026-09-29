@@ -389,7 +389,7 @@ function CrewCardModal({
             {/* Invited but not yet accepted */}
             {!member.user_id && !!member.invite_sent_at && (
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Pending invite — availability will appear once crew member joins.
+                Pending invite. Availability will appear once crew member joins.
               </p>
             )}
 
@@ -582,7 +582,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
           <span>
             <span className="text-sm text-secondary-themed">Include in turnover auto-assignment</span>
             <span className="block text-xs text-muted-themed mt-0.5">
-              Uncheck for crew who don&apos;t do turnovers — a landscaper or a
+              Uncheck for crew who don&apos;t do turnovers, a landscaper or a
               maintenance tech. You can still assign them to a turnover by hand.
             </span>
           </span>
@@ -757,7 +757,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-secondary-themed">
-              Preview — {preview.length} rows
+              Preview: {preview.length} rows
             </p>
             <button onClick={() => setPreview(null)} className="text-xs text-muted-themed hover:text-primary-themed">
               Clear

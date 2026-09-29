@@ -506,7 +506,7 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
                       through FieldStay; unticking this produces the same
                       document the owner portal hands them. */}
                   <span className="block mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    Untick to produce the copy an owner receives — the same report
+                    Untick to produce the copy an owner receives, the same report
                     without the photo log.
                   </span>
                 </span>

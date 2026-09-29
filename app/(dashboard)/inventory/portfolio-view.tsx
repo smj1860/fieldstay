@@ -93,7 +93,7 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
 
   const handleCopyClipboard = async () => {
     if (!purchaseList) return
-    const text = purchaseList.map(i => `${i.name} — ${i.totalNeeded} ${i.unit}`).join('\n')
+    const text = purchaseList.map(i => `${i.name}: ${i.totalNeeded} ${i.unit}`).join('\n')
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)

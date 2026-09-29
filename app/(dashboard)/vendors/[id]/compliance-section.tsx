@@ -362,7 +362,7 @@ export function ComplianceSection({
           <div className="text-sm rounded-lg px-3 py-2 mb-3 flex items-center gap-1.5"
                style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
             <ShieldOff className="w-4 h-4 flex-shrink-0" />
-            {expiredCount} document{expiredCount > 1 ? 's' : ''} expired — this vendor may be blocked from new WO assignments.
+            {expiredCount} document{expiredCount > 1 ? 's' : ''} expired. This vendor may be blocked from new WO assignments.
           </div>
         )}
         {soonCount > 0 && expiredCount === 0 && (

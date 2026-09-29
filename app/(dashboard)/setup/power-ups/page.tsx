@@ -33,7 +33,7 @@ export default async function PowerUpsPage() {
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Your PMS is already connected from an earlier step, and your templates have a
-          head start. Kroger is the one optional integration left — everything else below
+          head start. Kroger is the one optional integration left. Everything else below
           is just worth knowing about, not something to finish right now.
         </p>
       </div>

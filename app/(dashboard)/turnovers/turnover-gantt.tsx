@@ -353,7 +353,7 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
                       // nests a second ternary inside the has-a-checkin one.
                       let barTitle = `${turnover.status} · no next booking`
                       if (hasRealCheckin) {
-                        const prefix = isTight ? 'Tight window — ' : ''
+                        const prefix = isTight ? 'Tight window: ' : ''
                         barTitle = `${prefix}${turnover.status} · ${windowHours}h window`
                       }
 

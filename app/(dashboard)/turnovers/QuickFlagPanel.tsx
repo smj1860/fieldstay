@@ -101,7 +101,7 @@ export function QuickFlagPanel({
       <Dialog
         open={showQuickFlag}
         onClose={() => setShowQuickFlag(false)}
-        title={`Flag Issue — ${propertyName}`}
+        title={`Flag Issue: ${propertyName}`}
         mobileSheet
         maxWidthClassName="max-w-sm"
       >

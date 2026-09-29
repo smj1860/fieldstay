@@ -89,7 +89,7 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
     <Dialog
       open
       onClose={onClose}
-      title={`${existing ? 'Edit' : 'Add'} Sponsor — Slot ${slotNumber}`}
+      title={`${existing ? 'Edit' : 'Add'} Sponsor: Slot ${slotNumber}`}
       maxWidthClassName="max-w-md"
     >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

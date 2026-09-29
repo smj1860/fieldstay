@@ -101,14 +101,14 @@ export function WhatIfPanel({
 
       <div className="grid grid-cols-2 gap-4 pt-3 border-t border-themed">
         <div>
-          <p className="text-xs text-muted-themed mb-1">10-Year Total — On Schedule</p>
+          <p className="text-xs text-muted-themed mb-1">10-Year Total: On Schedule</p>
           <p className="text-lg font-bold text-primary-themed">
             {fmt(summary.baselineTotalLow)}–{fmt(summary.baselineTotalHigh)}
           </p>
         </div>
         <div>
           <p className="text-xs text-muted-themed mb-1">
-            10-Year Total — Deferred {deferMonths > 0 ? `${deferMonths}mo` : ''}
+            10-Year Total: Deferred {deferMonths > 0 ? `${deferMonths}mo` : ''}
           </p>
           <p className="text-lg font-bold" style={{ color: 'var(--accent-amber)' }}>
             {fmt(summary.deferredTotalLow)}–{fmt(summary.deferredTotalHigh)}

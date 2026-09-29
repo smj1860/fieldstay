@@ -8,7 +8,7 @@ import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { SUPABASE_MAX_ROWS }   from '@/lib/inngest/paginate'
 
-export const metadata: Metadata = { title: 'Invoice — FieldStay' }
+export const metadata: Metadata = { title: 'Invoice | FieldStay' }
 
 const LINE_TYPE_LABELS: Record<string, string> = {
   labor:         'Labor',

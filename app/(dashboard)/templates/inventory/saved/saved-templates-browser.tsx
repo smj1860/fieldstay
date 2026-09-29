@@ -42,7 +42,7 @@ export function SavedTemplatesBrowser({
   const selected = templates.find((t) => t.id === selectedId) ?? null
 
   if (templates.length === 0) {
-    return <p className="text-sm text-muted-themed">No templates yet — build one on the Create Template tab.</p>
+    return <p className="text-sm text-muted-themed">No templates yet. Build one on the Create Template tab.</p>
   }
 
   return (
@@ -266,7 +266,7 @@ function TemplateDetail({
         {applyError && <InlineAlert tone="error" className="mb-3">{applyError}</InlineAlert>}
         {applyResult ? (
           <InlineAlert tone="success">
-            Applied — {applyResult.applied} item{applyResult.applied !== 1 ? 's' : ''} added across selected properties.
+            Applied: {applyResult.applied} item{applyResult.applied !== 1 ? 's' : ''} added across selected properties.
           </InlineAlert>
         ) : allProperties.length === 0 ? (
           <p className="text-sm text-muted-themed">No active properties to apply this template to.</p>

@@ -348,7 +348,7 @@ export async function submitInventoryCount(
     const owned = await verifyPropertyInOrg(
       supabase, membership.org_id, property_id,
       'serverAction.inventory.submitInventoryCount',
-      'Could not verify the property. Your counts were not saved — please try again.',
+      'Could not verify the property. Your counts were not saved, please try again.',
     )
     if (!owned.ok) return { error: owned.error }
 
@@ -609,7 +609,7 @@ async function verifyTemplateAndProperties(
   } catch (err) {
     console.error('[applyTemplateToProperties] property verification failed', err)
     reportError(err, { site: 'serverAction.inventory.applyTemplateToProperties.owned', orgId })
-    return { ok: false, error: 'Could not verify the selected properties. Nothing was applied — please try again.' }
+    return { ok: false, error: 'Could not verify the selected properties. Nothing was applied, please try again.' }
   }
 
   const verified = new Set(ownedRows.map((p) => p.id))

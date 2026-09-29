@@ -14,13 +14,13 @@ interface NextStep {
 const NEXT_STEPS: NextStep[] = [
   {
     title: 'Finish your templates',
-    body:  'Your inventory and turnover checklist templates got a head start already — finish customizing par levels, rooms, and maintenance schedules whenever it\'s convenient.',
+    body:  'Your inventory and turnover checklist templates got a head start already. Finish customizing par levels, rooms, and maintenance schedules whenever it\'s convenient.',
     href:  '/templates',
     label: 'Go to Templates',
   },
   {
     title: 'Guidebook & sponsors',
-    body:  'Set up the guest-facing guidebook for each property — WiFi, check-in instructions, house rules. You can also invite local businesses as guidebook sponsors; their offers help offset your subscription cost.',
+    body:  'Set up the guest-facing guidebook for each property: WiFi, check-in instructions, house rules. You can also invite local businesses as guidebook sponsors; their offers help offset your subscription cost.',
     href:  '/guidebook',
     label: 'Go to Guidebook',
   },
@@ -32,7 +32,7 @@ const NEXT_STEPS: NextStep[] = [
   },
   {
     title: 'Crew app',
-    body:  'Your crew already sees their turnover checklists in the crew app — nothing else to set up there.',
+    body:  'Your crew already sees their turnover checklists in the crew app, nothing else to set up there.',
     href:  '/crew-manage',
     label: 'Manage Crew',
   },
@@ -117,7 +117,7 @@ export function PowerUpsStep({ krogerConnected, finishAction }: Readonly<PowerUp
           {isPending ? 'Finishing…' : 'Finish setup →'}
         </Button>
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          None of this is required — revisit any of it later from Settings or the page itself.
+          None of this is required. Revisit any of it later from Settings or the page itself.
         </span>
       </div>
     </div>

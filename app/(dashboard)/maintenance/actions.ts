@@ -621,7 +621,7 @@ export async function sendQuoteRequests(
         sent:  rfq.sent,
         error: rfq.sent === 0
           ? 'Could not send the quote requests. Please try again.'
-          : `Sent ${rfq.sent} of ${toSend.length} quote requests — the rest failed. Please try the remaining vendors again.`,
+          : `Sent ${rfq.sent} of ${toSend.length} quote requests. The rest failed. Please try the remaining vendors again.`,
       }
     }
 
@@ -1260,9 +1260,9 @@ const VENDOR_SUGGESTION_ACCEPTABLE_STATUSES = [
 
 function terminalVendorSuggestionError(status: string): string {
   if (status === 'cancelled') {
-    return 'This work order was cancelled — accepting the suggestion would reopen it.'
+    return 'This work order was cancelled. Accepting the suggestion would reopen it.'
   }
-  return 'This work order is already complete — accepting the suggestion would reopen it.'
+  return 'This work order is already complete. Accepting the suggestion would reopen it.'
 }
 
 /**
@@ -1683,13 +1683,13 @@ async function splitVendorAssignedWorkOrders(
 function vendorAssignedBlockedMessage(count: number): string {
   const subject = count !== 1 ? 'work orders are' : 'work order is'
   const object  = count !== 1 ? 'them' : 'it'
-  return `${count} ${subject} assigned to a vendor — complete ${object} through the vendor portal instead.`
+  return `${count} ${subject} assigned to a vendor. Complete ${object} through the vendor portal instead.`
 }
 
 function vendorAssignedSkippedMessage(count: number): string {
   const subject = count !== 1 ? 'work orders were' : 'work order was'
   const object  = count !== 1 ? 'them' : 'it'
-  return `${count} vendor-assigned ${subject} skipped — complete ${object} through the vendor portal instead.`
+  return `${count} vendor-assigned ${subject} skipped. Complete ${object} through the vendor portal instead.`
 }
 
 export async function bulkUpdateWorkOrderStatus(

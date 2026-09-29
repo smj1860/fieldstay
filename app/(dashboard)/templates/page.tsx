@@ -4,7 +4,7 @@ import { CalendarCheck, Package, Wrench } from 'lucide-react'
 import { requireOrgMember } from '@/lib/auth'
 import { Card } from '@/components/ui/Card'
 
-export const metadata: Metadata = { title: 'Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Templates | FieldStay' }
 
 interface TemplateTile {
   id:          string
@@ -46,7 +46,7 @@ export default async function TemplatesPage() {
       <div className="page-header mb-6">
         <h1 className="page-title">Templates</h1>
         <p className="page-subtitle">
-          Portfolio-wide configuration — build once, reuse across every property.
+          Portfolio-wide configuration. Build once, reuse across every property.
         </p>
       </div>
 

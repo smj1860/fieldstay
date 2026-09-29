@@ -437,7 +437,7 @@ function AddItemsModal({
                 <div className="border border-themed rounded-xl overflow-hidden">
                   <div className="px-4 py-2 bg-canvas-themed border-b border-themed">
                     <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
-                      Selected — {selectedArray.length} item{selectedArray.length !== 1 ? 's' : ''}
+                      Selected: {selectedArray.length} item{selectedArray.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   {selectedArray.map(({ catalogItem, parLevel, unit }) => (
@@ -1277,7 +1277,7 @@ export function InventoryManager({
           )}
           {cartData?.status === 'nothing_below_par' && (
             <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed" style={{ color: 'var(--text-muted)' }}>
-              Nothing is currently below par — no cart needed.
+              Nothing is currently below par, no cart needed.
             </div>
           )}
           {(cartData?.status === 'retailer_not_kroger' || cartData?.status === 'no_store_configured') && (

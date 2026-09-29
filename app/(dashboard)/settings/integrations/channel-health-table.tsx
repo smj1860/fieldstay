@@ -45,7 +45,7 @@ export function ChannelHealthTable({ feeds }: Readonly<{ feeds: FeedRow[] }>) {
               {f.last_sync_status === 'pending' && <Clock className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />}
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                  {propertyName(f) ?? 'Unknown property'} — {f.name}
+                  {propertyName(f) ?? 'Unknown property'}: {f.name}
                 </p>
                 <p className="text-xs truncate" style={{ color: f.last_sync_status === 'error' ? 'var(--accent-red)' : 'var(--text-muted)' }}>
                   {f.last_sync_status === 'error' && f.last_sync_error

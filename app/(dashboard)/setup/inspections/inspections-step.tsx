@@ -46,7 +46,7 @@ export function InspectionsWizardStep({
   // pluralisation is a separate decision from "has any properties at all".
   const noun  = propertyCount === 1 ? 'property' : 'properties'
   const scope = propertyCount === 0
-    ? 'No properties yet — this will apply to each one as you add it.'
+    ? 'No properties yet. This will apply to each one as you add it.'
     : `Applied to all ${propertyCount} ${noun}, and to any you add later.`
 
   const submit = () => {
@@ -133,7 +133,7 @@ export function InspectionsWizardStep({
       >
         <Wrench className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          There are two more inspections — <strong>Indoor</strong> and <strong>Outdoor</strong> —
+          There are two more inspections, <strong>Indoor</strong> and <strong>Outdoor</strong>,
           and they are set up per property rather than across the board, because a
           condo and a lakefront house with a dock do not need the same walk. Add them
           as recurring maintenance on the properties that want them, choosing

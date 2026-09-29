@@ -392,7 +392,7 @@ function ReviewPanel({
 
                     {!canRegen && !isManual && (
                       <p className="text-xs self-center" style={{ color: 'var(--text-muted)' }}>
-                        Max regenerations reached — edit above
+                        Max regenerations reached, edit above
                       </p>
                     )}
 
@@ -530,7 +530,7 @@ function ReviewsHeader({
                 setBatchRequesting(true)
                 const result = await requestBatchGeneration()
                 setBatchMessage(
-                  result.error ?? `Drafting ${Math.min(pendingCount, 25)} review${pendingCount !== 1 ? 's' : ''} — we'll email you when it's done.`
+                  result.error ?? `Drafting ${Math.min(pendingCount, 25)} review${pendingCount !== 1 ? 's' : ''}. We'll email you when it's done.`
                 )
                 setBatchRequesting(false)
               }}
@@ -584,7 +584,7 @@ function ReviewsList({
           </h2>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
             Reviews sync automatically from your connected PMS every 6 hours. They&apos;ll appear
-            here once your first review lands — or use <strong>+ Add Review</strong> above
+            here once your first review lands, or use <strong>+ Add Review</strong> above
             to paste one from another platform.
           </p>
         </div>
@@ -854,7 +854,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         <div className="space-y-4">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             For reviews from Airbnb, Vrbo, Google, or other platforms that don&apos;t sync
-            automatically. AI response is generated once — edit the draft as needed.
+            automatically. AI response is generated once. Edit the draft as needed.
           </p>
 
           {manualError && (

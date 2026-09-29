@@ -69,7 +69,7 @@ export default async function VendorsPage() {
   if (scorecardTruncated) {
     console.warn(
       `[page.vendors] org ${membership.org_id} exceeded the ${SCORECARD_WO_LIMIT}-work-order ` +
-      'scorecard window — ratings and on-time percentages are computed from the most recent ' +
+      'scorecard window, ratings and on-time percentages are computed from the most recent ' +
       'slice only. Time to move this aggregation server-side (FUTURE_REMEDIATION 28).'
     )
   }

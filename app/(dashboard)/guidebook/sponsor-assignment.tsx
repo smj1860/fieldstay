@@ -194,7 +194,7 @@ export function SponsorPropertiesDialog({
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 12px' }}>
         Tick the properties whose guidebook and guest texts should feature this
         business. Properties marked <em>Automatic</em> already show it because
-        it is the nearest in its category — ticking one pins it there, and any
+        it is the nearest in its category. Ticking one pins it there, and any
         property you change stops being assigned automatically.
       </p>
 
@@ -331,7 +331,7 @@ export function PropertySponsorsDialog({
     >
       <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 12px' }}>
         Up to {MAX_SPONSORS_PER_PROPERTY} sponsors, and only one per named
-        category. Saving an empty list is allowed — this property will show no
+        category. Saving an empty list is allowed. This property will show no
         sponsors and stay that way.
       </p>
 
@@ -399,7 +399,7 @@ export function PropertyAssignmentSummary({
         {property.sponsors.length === 0 ? (
           <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
             {property.mode === 'manual'
-              ? 'No sponsors — set deliberately'
+              ? 'No sponsors, set deliberately'
               : 'No sponsors yet'}
           </span>
         ) : (

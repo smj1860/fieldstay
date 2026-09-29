@@ -330,7 +330,7 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
           <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
             This inspection was completed on {new Date(inspection.completed_at).toLocaleDateString()}
             {inspection.inspector_name ? ` by ${inspection.inspector_name}` : ''}. Completed
-            inspections are immutable — a correction is a new inspection, not an edit.
+            inspections are immutable. A correction is a new inspection, not an edit.
           </p>
         </Card>
       </Shell>
@@ -502,7 +502,7 @@ function QueuedSubmitPanel({ failed, lastError, signedBy }: Readonly<{
             {lastError ?? 'The server rejected it.'}
           </p>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Every answer is still held on this device. Use the sync banner to retry —
+            Every answer is still held on this device. Use the sync banner to retry,
             nothing has been lost.
           </p>
         </div>
@@ -516,7 +516,7 @@ function QueuedSubmitPanel({ failed, lastError, signedBy }: Readonly<{
         <p className="text-sm font-semibold flex items-center gap-2"
            style={{ color: 'var(--text-primary)' }}>
           <Clock className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
-          Signed off — waiting to send
+          Signed off, waiting to send
         </p>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
           Signed by {signedBy || 'the inspector'}. This is queued on the device and

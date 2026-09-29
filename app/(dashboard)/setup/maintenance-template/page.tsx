@@ -25,7 +25,7 @@ export default async function OnboardingMaintenanceTemplatePage() {
               Templates → Scheduled Maintenance
             </Link>
             . Apply the standard schedule or a custom one to any property
-            whenever convenient — nothing here needs to be built before you
+            whenever convenient, nothing here needs to be built before you
             continue.
           </p>
         </div>

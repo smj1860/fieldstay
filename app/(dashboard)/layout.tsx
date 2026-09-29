@@ -29,7 +29,7 @@ export const metadata: Metadata = {
 
 const MILESTONE_MESSAGES: Record<string, string> = {
   first_ical_sync:            'Your first bookings are syncing.',
-  first_turnover_complete:    'First turnover done — FieldStay is working.',
+  first_turnover_complete:    'First turnover done. FieldStay is working.',
   first_purchase_order:       'FieldStay just caught a restock before you ran out.',
   first_owner_portal_view:    'Your owner just viewed their P&L.',
   second_property_configured: "You're managing multiple properties with FieldStay.",

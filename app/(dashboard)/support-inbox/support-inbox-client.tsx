@@ -337,7 +337,7 @@ export function SupportInboxClient({
                   <h2 style={{ fontWeight: 700, fontSize: '13px', margin: 0 }}>{orgName(selected.organizations)}</h2>
                   {selected.needs_human && (
                     <p style={{ fontSize: '12px', color: 'var(--accent-red)', margin: '2px 0 0' }}>
-                      Escalated — {selected.escalation_reason}
+                      Escalated: {selected.escalation_reason}
                     </p>
                   )}
                 </div>

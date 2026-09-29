@@ -34,7 +34,7 @@ function successMessage(o: Extract<Outcome, { kind: 'done' }>): string {
   }
   if (o.optInsRetained > 0) {
     parts.push(
-      `${plural(o.optInsRetained, 'opt-out record')} retained — a STOP is a TCPA ` +
+      `${plural(o.optInsRetained, 'opt-out record')} retained, a STOP is a TCPA ` +
       'suppression record and must be kept so the number is never texted again.'
     )
   }

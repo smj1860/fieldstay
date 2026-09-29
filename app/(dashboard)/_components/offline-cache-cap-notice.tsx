@@ -63,7 +63,7 @@ export function OfflineCacheCapNotice({ userId, orgId }: Readonly<{ userId: stri
       <span className="flex items-start gap-2">
         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {parts.join(' and ')} {verb} cached for offline use — this device only keeps the most
+          {parts.join(' and ')} {verb} cached for offline use. This device only keeps the most
           recent set. Connect to see the rest.
         </span>
       </span>

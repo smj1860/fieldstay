@@ -71,7 +71,7 @@ export function TriggerProjectionsButton({
   if (timedOut) {
     return (
       <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
-        Still processing — check back in a moment
+        Still processing, check back in a moment
       </span>
     )
   }

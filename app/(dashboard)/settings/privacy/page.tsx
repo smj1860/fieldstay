@@ -161,7 +161,7 @@ export default async function PrivacyPage() {
             </h2>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
               Last {RECENT_LIMIT} requests fulfilled. Guest emails are recorded as an
-              irreversible hash — the full audit trail lives in{' '}
+              irreversible hash. The full audit trail lives in{' '}
               <Link href="/settings/audit" className="underline underline-offset-2">the audit log</Link>.
             </p>
           </div>
