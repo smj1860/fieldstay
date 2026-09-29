@@ -173,7 +173,7 @@ export const hospPropertyMerge = inngest.createFunction(
             previous_external_id,
             new_external_id,
             surviving_property_id:   existingNewProperty.id,
-            note: 'Both properties already existed in FieldStay — deactivated the old one; merge them manually.',
+            note: 'Both properties already existed in FieldStay. Deactivated the old one; merge them manually.',
           },
         })
 

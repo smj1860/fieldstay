@@ -79,7 +79,7 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
         {
           from:    FROM,
           to:      vendor.email,
-          subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} — ${wo.title}`,
+          subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}, ${wo.title}`,
           html: await renderVendorInvoicePaidEmail({
             vendorName:    vendor.name ?? null,
             orgName:       org?.name ?? 'Your property manager',

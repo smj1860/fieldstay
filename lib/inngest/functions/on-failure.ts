@@ -104,7 +104,7 @@ export const onFunctionFailure = inngest.createFunction(
       await resend.emails.send({
         from:    FROM,
         to:      'stephen@fieldstay.app',
-        subject: `🚨 Critical job failed — ${function_id}`,
+        subject: `🚨 Critical job failed: ${function_id}`,
         html: await renderPmAlert({
           heading:  'Critical background job exhausted retries',
           body:     `${function_id} failed permanently after exhausting all retry attempts.`,

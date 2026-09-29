@@ -59,13 +59,13 @@ const SUPPORT_NOTE =
  */
 const WHY_IT_MATTERS =
   'Completed inspections post to the owner portal on the day they are finished, ' +
-  'and together they form the inspection history for this property — the record ' +
+  'and together they form the inspection history for this property, the record ' +
   'you would provide to an insurer or a permitting authority if either asked for ' +
   'one. A missed inspection leaves a gap in that record.'
 
 const WHY_IT_MATTERS_PLURAL =
   'Completed inspections post to the owner portal on the day they are finished, ' +
-  'and together they form the inspection history for each property — the record ' +
+  'and together they form the inspection history for each property, the record ' +
   'you would provide to an insurer or a permitting authority if either asked for ' +
   'one. A missed inspection leaves a gap in that record.'
 

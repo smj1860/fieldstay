@@ -157,8 +157,8 @@ function complianceItems(rows: VendorComplianceAlertRow[]): NotificationItem[] {
     return {
       id:       `vendor-${v.vendor_id}`,
       title:    blocked
-        ? `${v.vendor_name} — compliance blocked`
-        : `${v.vendor_name} — compliance expiring`,
+        ? `${v.vendor_name}: compliance blocked`
+        : `${v.vendor_name}: compliance expiring`,
       subtitle: 'Vendor compliance',
       href:     '/vendors',
       severity: blocked ? 'red' : 'amber',

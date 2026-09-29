@@ -78,8 +78,8 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
       const plural  = activeSponsorCount === 1 ? '' : 's'
       const dollars = (planCreditCents / 100).toFixed(0)
       const creditLabel = capped
-        ? `${activeSponsorCount} Sponsor${plural} — your full plan covered ($${dollars})`
-        : `${activeSponsorCount} Sponsor${plural} — $${dollars} off your FieldStay plan`
+        ? `${activeSponsorCount} Sponsor${plural}, your full plan covered ($${dollars})`
+        : `${activeSponsorCount} Sponsor${plural}, $${dollars} off your FieldStay plan`
 
       // Idempotency key is stable across retries: org + billing cycle period end.
       //

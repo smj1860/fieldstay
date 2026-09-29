@@ -229,7 +229,7 @@ export async function sendVendorDispatchEmail(
     {
       from:    FROM,
       to:      [context.vendorEmail],
-      subject: `Work Order ${context.woNumber} — ${context.propertyName}`,
+      subject: `Work Order ${context.woNumber}: ${context.propertyName}`,
       html,
     },
     { idempotencyKey: `wo-dispatch-created-${workOrderId}-${context.vendorEmail}` }

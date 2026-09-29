@@ -68,7 +68,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
           org_id,
           property_id,
           source_turnover_id: turnover_id,
-          title:       `Issue Flagged During Turnover — ${propName}`,
+          title:       `Issue Flagged During Turnover: ${propName}`,
           description: flag_notes,
           priority:    'high',
           status:      'pending',

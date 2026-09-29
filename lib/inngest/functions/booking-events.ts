@@ -85,7 +85,7 @@ export const handleBookingConfirmed = inngest.createFunction(
         return { skipped: true, reason: 'no_rate' }
       }
 
-      const guestLabel     = booking.guest_name ? ` — ${booking.guest_name}` : ''
+      const guestLabel     = booking.guest_name ? `, ${booking.guest_name}` : ''
       const hasActualAmount = hasPositiveAmount(actual_total_amount)
 
       // A later post carrying a real actual_total_amount (e.g. Hospitable's
@@ -195,7 +195,7 @@ export const handleBookingDetected = inngest.createFunction(
         const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
         if (nights <= 0) return { skipped: 'zero_nights' }
         const amount     = Number.parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
-        const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
+        const guestLabel = booking.guest_name ? `, ${booking.guest_name}` : ''
         // Atomic upsert — concurrent workers handled at DB layer
         const { error } = await supabase.from('owner_transactions').upsert(
           {

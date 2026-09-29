@@ -192,7 +192,7 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
           from:    FROM,
           to:      pmEmail,
           replyTo: 'support@fieldstay.app',
-          subject: `Action required — reconnect your ${providerLabel} account`,
+          subject: `Action required: reconnect your ${providerLabel} account`,
           html,
         }, { idempotencyKey: `integration-reconnect-${provider_id}-${user_id}` })
 

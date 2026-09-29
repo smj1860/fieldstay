@@ -15,7 +15,7 @@ import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supab
 const GAP_REASON_COPY: Record<'none_eligible' | 'all_unavailable', string> = {
   none_eligible:
     'Every active crew member is currently switched OFF for turnover ' +
-    'auto-assignment — turn someone back on from Manage Crew, or assign this ' +
+    'auto-assignment. Turn someone back on from Manage Crew, or assign this ' +
     'turnover by hand.',
   all_unavailable:
     'Every crew member eligible for auto-assignment has marked this date as ' +
@@ -74,7 +74,7 @@ export const notifyAssignmentGap = inngest.createFunction(
           {
             from:    FROM,
             to:      member.email,
-            subject: `Action required — No crew available for ${context.propertyName} on ${dateStr}`,
+            subject: `Action required: No crew available for ${context.propertyName} on ${dateStr}`,
             html: await renderPmAlert({
               heading:  'Crew coverage gap',
               body:     `${context.propertyName} has a turnover scheduled for ${dateStr} with no available crew member to auto-assign (needed ${crew_needed}, found ${crew_found}).${reasonLine} This turnover is unassigned and waiting on manual assignment.`,

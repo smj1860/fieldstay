@@ -95,7 +95,7 @@ export function signoffSection(form: SharedSectionForm): SectionDefinition {
       },
       {
         key:    `${form}.signoff.certification`,
-        prompt: 'Certification — inspection completed on-site; all exceptions recorded with photos',
+        prompt: 'Certification: inspection completed on-site; all exceptions recorded with photos',
         remediation: 'none', default_actions: [],
       },
       {

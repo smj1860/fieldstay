@@ -473,7 +473,7 @@ export const assetHealthOrg = inngest.createFunction(
             .map((alert) => ({
               orgId,
               type:      'asset_capex_recommendation',
-              title:     `${alert.asset_name} — replacement recommended`,
+              title:     `${alert.asset_name}: replacement recommended`,
               subtitle:  alert.reasoning[0] ?? 'Repair costs and health trend suggest replacement.',
               href:      '/capital-planning',
               severity:  'amber' as const,

@@ -535,9 +535,9 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         await resend.emails.send({
           from:    FROM,
           to:      pmEmail,
-          subject: `⚡ Immediate Restock — ${property?.name} (same-day flip)`,
+          subject: `⚡ Immediate Restock: ${property?.name} (same-day flip)`,
           html: await renderPmAlert({
-            heading:  `Restock needed NOW — ${property?.name}`,
+            heading:  `Restock needed NOW: ${property?.name}`,
             body:     'Same-day flip detected. This property has a guest checking in today or tomorrow. Items below par:',
             table: {
               headers: ['Item', 'In Stock', 'Par Level', 'Need to Buy'],
@@ -548,7 +548,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
                 `${item.quantity_to_buy} ${item.unit}`,
               ]),
             },
-            note:     'Order immediately — the next guest arrives today or tomorrow.',
+            note:     'Order immediately. The next guest arrives today or tomorrow.',
             ctaLabel: 'View Purchase Order →',
             ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/inventory?property=${property_id}&po=${purchaseOrderId}`,
           }),

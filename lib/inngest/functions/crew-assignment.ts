@@ -87,7 +87,7 @@ export const handleCrewAssigned = inngest.createFunction(
           .join('')
 
         const subject = turnovers.length === 1
-          ? `Turnover assigned — ${unwrapJoin(turnovers[0]!.properties)?.name ?? 'Property'}`
+          ? `Turnover assigned: ${unwrapJoin(turnovers[0]!.properties)?.name ?? 'Property'}`
           : `${turnovers.length} turnovers assigned to you`
 
         await resend.emails.send(
@@ -157,7 +157,7 @@ export const handleCrewAssigned = inngest.createFunction(
           })
           const windowHrs = Math.round(t.windowMinutes / 60)
           const windowStr = windowHrs > 0 ? ` · ${windowHrs}hr window` : ''
-          return `• ${t.propertyName} — ${dateStr}${windowStr}`
+          return `• ${t.propertyName}, ${dateStr}${windowStr}`
         })
 
         const smsBody = await renderSmsBody(org_id, 'crew_turnover_assigned', {

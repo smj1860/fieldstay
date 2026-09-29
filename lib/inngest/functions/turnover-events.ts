@@ -101,7 +101,7 @@ export const handleTurnoverCreated = inngest.createFunction(
             await resend.emails.send({
               from:    FROM,
               to:      crew.email,
-              subject: `Turnover assigned — ${property.name} on ${checkoutDT.toLocaleDateString()}`,
+              subject: `Turnover assigned: ${property.name} on ${checkoutDT.toLocaleDateString()}`,
               html: await renderPmAlert({
                 heading:  "You've been assigned a turnover",
                 body:     `You're on the schedule for a turnover at ${property.name}.`,
@@ -378,7 +378,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       await createPmNotification(supabase, {
         orgId:     org_id,
         type:      'turnover_complete',
-        title:     `✓ Turnover complete — ${property?.name}`,
+        title:     `✓ Turnover complete: ${property?.name}`,
         subtitle:  `${property?.name} is ready for guests`,
         href:      `/turnovers/${turnover_id}`,
         severity:  'green',

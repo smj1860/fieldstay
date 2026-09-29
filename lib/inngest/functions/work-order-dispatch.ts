@@ -46,7 +46,7 @@ export const workOrderDispatch = inngest.createFunction(
         {
           from:    FROM,
           to:      [vendorEmail],
-          subject: `Work Order ${woNumber} — ${propertyName}`,
+          subject: `Work Order ${woNumber}: ${propertyName}`,
           html,
         },
         { idempotencyKey: `work-order-dispatch-${workOrderId}-${vendorEmail}` }
@@ -77,7 +77,7 @@ export const workOrderDispatch = inngest.createFunction(
 
       if (!wo) return { skipped: 'work order not found for comms log' }
 
-      const subject  = `Work Order ${woNumber} — ${propertyName}`
+      const subject  = `Work Order ${woNumber}: ${propertyName}`
       const dedupKey = `wo-dispatch:${workOrderId}`
 
       const { error } = await supabase.from('communication_logs').insert({

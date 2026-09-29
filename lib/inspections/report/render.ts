@@ -167,7 +167,7 @@ function drawHistoryCover(cur: Cursor, report: InspectionReport): void {
   line(cur, `${report.inspections.length} completed inspections`, 11, GRAY_DARK)
 
   const range = historyRange(report)
-  if (range) line(cur, `${formatStamp(range[0])} — ${formatStamp(range[1])}`, 10, GRAY_MED)
+  if (range) line(cur, `${formatStamp(range[0])} to ${formatStamp(range[1])}`, 10, GRAY_MED)
 
   // A CAP THAT IS NOT STATED is an assertion of completeness. This document's
   // entire claim is that it is the whole record, so the one case where it is
@@ -197,7 +197,7 @@ function drawHistoryCover(cur: Cursor, report: InspectionReport): void {
   heading(cur, 'Contents', 11)
   for (const inspection of report.inspections) {
     ensure(cur, 16)
-    const label = `${formatStamp(inspection.completedAt)} — ${inspection.formLabel}`
+    const label = `${formatStamp(inspection.completedAt)}: ${inspection.formLabel}`
     text(cur, label, M, cur.y, 9, cur.font, GRAY_DARK)
     const tally = `${inspection.passCount} passed, ${inspection.failCount} failed`
     textRight(cur, tally, W - M, cur.y, 9, cur.font, inspection.failCount > 0 ? RED : GREEN)
@@ -477,7 +477,7 @@ function drawPhotoLog(cur: Cursor, ins: ReportInspection): void {
   newPage(cur)
   band(cur, 'PHOTO LOG')
   cur.y -= 12
-  line(cur, `${ins.formLabel} — ${formatStamp(ins.completedAt)}`, 9, GRAY_MED)
+  line(cur, `${ins.formLabel}, ${formatStamp(ins.completedAt)}`, 9, GRAY_MED)
   cur.y -= 8
 
   photos.forEach((entry, i) => drawPhotoEntry(cur, entry, i + 1))
@@ -501,7 +501,7 @@ function drawPhotoEntry(
     // A photograph that will not embed is NAMED rather than dropped. The object
     // exists in the bucket; saying so lets someone retrieve it, where a silent
     // omission reads as no photo having been taken.
-    text(cur, `[Image could not be embedded — ${toWinAnsi(entry.photo.path)}]`,
+    text(cur, `[Image could not be embedded: ${toWinAnsi(entry.photo.path)}]`,
       M, cur.y, 8, cur.font, GRAY_MED)
     cur.y -= 16
     return

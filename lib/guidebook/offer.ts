@@ -46,16 +46,16 @@ function formatOfferPrice(value: number): string {
 function formatPercentageOffer(offerValue: number | null, offerItem: string | null): string | null {
   if (!offerValue) return null
   return offerItem
-    ? `${offerValue}% off ${offerItem} — just show this screen`
-    : `${offerValue}% off — just show this screen`
+    ? `${offerValue}% off ${offerItem}, just show this screen`
+    : `${offerValue}% off, just show this screen`
 }
 
 function formatFixedAmountOffer(offerValue: number | null, offerItem: string | null): string | null {
   if (!offerValue) return null
   const price = formatOfferPrice(offerValue)
   return offerItem
-    ? `$${price} off ${offerItem} — just show this screen`
-    : `$${price} off — just show this screen`
+    ? `$${price} off ${offerItem}, just show this screen`
+    : `$${price} off, just show this screen`
 }
 
 export function formatOffer(
@@ -72,7 +72,7 @@ export function formatOffer(
       return formatFixedAmountOffer(offerValue, offerItem)
 
     case 'item':
-      return offerItem ? `Free ${offerItem} — just show this screen` : null
+      return offerItem ? `Free ${offerItem}, just show this screen` : null
 
     case 'custom':
       return customOfferText ?? null
