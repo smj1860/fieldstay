@@ -48,7 +48,7 @@ function daysAgoIso(days: number): string {
  * member's photograph thrown away by a cache cleanup, which is the precise
  * failure the dead-letter surface exists to prevent.
  */
-async function idsWithPendingWork(db: FieldStayDexie): Promise<Set<string>> {
+export async function idsWithPendingWork(db: FieldStayDexie): Promise<Set<string>> {
   const [mutations, photos] = await Promise.all([
     db.mutations.toArray(),
     db.pending_photo_uploads.toArray(),

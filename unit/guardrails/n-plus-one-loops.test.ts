@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { blankComments, collectSourceFiles, read, rel } from './scan'
 
 // ============================================================================
 // N+1 query guardrail: a Supabase query (or RPC call) inside a per-row loop
@@ -78,7 +78,18 @@ function findLoopBody(src: string, matchStart: number, matchEnd: number): string
 function findOffenders(): string[] {
   const offenders: string[] = []
   for (const file of collectSourceFiles(['app', 'lib'])) {
-    const src = read(file)
+    // blankComments, not read(): this scanner walks the source by INDEX —
+    // findLoopBody balances braces from m.index, and the reported line is
+    // derived from a slice of the same string — so readCode() would shift every
+    // offset left and mis-key the EXCEPTIONS entries. blankComments() is
+    // offset-preserving, which is the mode CLAUDE.md names for exactly this.
+    //
+    // It is not cosmetic. On a raw read this guardrail matches a loop written
+    // inside a COMMENT: a line of prose containing `for (const row of items)`
+    // near a query-shaped call is reported as an N+1, which is how it fired on
+    // lib/dexie/sync/turnovers.ts against a comment explaining why that
+    // function does NOT loop. A guardrail that reads prose reports the prose.
+    const src = blankComments(read(file))
     LOOP_OPEN.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = LOOP_OPEN.exec(src))) {

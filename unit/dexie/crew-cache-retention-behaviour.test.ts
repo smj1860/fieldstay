@@ -38,8 +38,8 @@ vi.mock('@/lib/dexie/schema', () => ({
   isDexieShutdown: () => false,
 }))
 
-import { syncAssignedTurnovers } from '@/lib/dexie/sync/turnovers'
-import { pruneSettledChecklistItems } from '@/lib/dexie/prune'
+import { syncAssignedTurnovers, CREW_SCOPE_HORIZON_DAYS } from '@/lib/dexie/sync/turnovers'
+import { pruneSettledChecklistItems, DEAD_LETTER_RETENTION_DAYS } from '@/lib/dexie/prune'
 import type { DexieSupabaseClient } from '@/lib/dexie/sync/types'
 
 function db(): FakeDexieDb { return holder.db as FakeDexieDb }
@@ -82,6 +82,20 @@ function makeServer(server: Server) {
         gtValue = val
         rows = rows.filter((r) => String(r[col]) > val); return chain
       },
+      // The crew scope read filters on an EMBEDDED column
+      // (`turnovers.checkout_datetime`), so the dotted name is resolved against
+      // the joined row rather than the assignment row — which is the filter
+      // actually being tested, not a convenience.
+      gte: (col: string, val: string) => {
+        const [rel, field] = col.includes('.') ? col.split('.') : [null, col]
+        rows = rows.filter((r) => {
+          if (rel === null) return String(r[field!]) >= val
+          const joined = server[rel as keyof Server]
+            ?.find((j) => j.id === r[`${rel!.replace(/s$/, '')}_id`])
+          return joined ? String(joined[field!]) >= val : false
+        })
+        return chain
+      },
       order: (col: string) => {
         rows = [...rows].sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : 1)); return chain
       },
@@ -113,7 +127,16 @@ const ITEMS_PER = 57
 // the newest timestamps (the work actually in progress), which is what sets
 // the high-water mark on a real device.
 const DAY = 86_400_000
-const BASE = Date.parse('2026-02-01T00:00:00.000Z')
+// Anchored to REAL now, not a fixed date. fetchAssignedTurnoverIds applies
+// CREW_SCOPE_HORIZON_DAYS against Date.now(), so a hardcoded 2026-02-01 fixture
+// falls out of scope the moment the wall clock passes it and every turnover is
+// reconciled off the device — the tests then pass or fail by calendar date.
+// 20 days back, so the ten turnovers span now-20d .. now-11d: comfortably
+// inside CREW_SCOPE_HORIZON_DAYS with real margin. Sitting nearer the horizon
+// would make an unrelated change to that constant fail these tests for fixture
+// reasons rather than design ones, and the HORIZON cases below move their own
+// dates explicitly instead of relying on where the block happens to land.
+const BASE = Date.now() - 20 * DAY
 const tsFor = (t: number) => new Date(BASE + t * DAY).toISOString()
 
 function buildServer(): Server {
@@ -127,7 +150,7 @@ function buildServer(): Server {
     const completed = t < 8
     turnovers.push({
       id, property_id: 'p1', org_id: 'org1',
-      checkout_datetime: '2026-02-01T15:00:00Z', checkin_datetime: '2026-02-01T19:00:00Z',
+      checkout_datetime: tsFor(t), checkin_datetime: tsFor(t),
       window_minutes: 240, status: completed ? 'completed' : 'assigned',
       priority: 'medium', notes: null, prev_booking_id: null,
       inventory_started_at: null, inventory_confirmed_complete_at: null,
@@ -307,6 +330,84 @@ describe('crew cache retention — simulated', () => {
     // so the inflation is transient rather than the device's new resting size.
     await pruneSettledChecklistItems('u1')
     expect((await db().checklist_instance_items.toArray()).length).toBe(steady)
+  })
+
+  // ── The scope horizon ──────────────────────────────────────────────────────
+
+  it('HORIZON: a turnover older than CREW_SCOPE_HORIZON_DAYS leaves the device', async () => {
+    const server = buildServer()
+    // t00 checked out well before the horizon; everything else stays inside it.
+    const ancient = new Date(Date.now() - (CREW_SCOPE_HORIZON_DAYS + 10) * DAY).toISOString()
+    for (const t of server.turnovers) if (t.id === 't00') t.checkout_datetime = ancient
+
+    const { client } = makeServer(server)
+    await syncAssignedTurnovers(client, 'u1', 'crew1')
+
+    // Gone entirely — the row, its instance and its items — because the scope
+    // read no longer returns it and reconcileRemovedTurnovers treats absence
+    // from the scope as "not mine any more".
+    expect(await db().turnovers.get('t00')).toBeUndefined()
+    expect(await db().checklist_instances.get('ci_t00')).toBeUndefined()
+    expect((await db().checklist_instance_items.toArray())
+      .filter((i) => (i as { turnover_id: string }).turnover_id === 't00')).toHaveLength(0)
+
+    // ...and the other nine are untouched.
+    expect(await db().turnovers.toArray()).toHaveLength(9)
+  })
+
+  it('HORIZON: a FUTURE turnover is always in scope, however far out', async () => {
+    const server = buildServer()
+    const farOut = new Date(Date.now() + 200 * DAY).toISOString()
+    for (const t of server.turnovers) if (t.id === 't09') t.checkout_datetime = farOut
+
+    const { client } = makeServer(server)
+    await syncAssignedTurnovers(client, 'u1', 'crew1')
+
+    // The horizon bounds the PAST only: a turnover months out is still theirs
+    // to prepare for, and shedding it would take the job off the device before
+    // they ever saw it.
+    expect(await db().turnovers.get('t09')).toBeDefined()
+  })
+
+  it('HORIZON: an out-of-scope turnover with UNSENT WORK is retained', async () => {
+    const server = buildServer()
+    const ancient = new Date(Date.now() - (CREW_SCOPE_HORIZON_DAYS + 10) * DAY).toISOString()
+    for (const t of server.turnovers) if (t.id === 't00') t.checkout_datetime = ancient
+
+    const { client } = makeServer(server)
+    await syncAssignedTurnovers(client, 'u1', 'crew1')
+    expect(await db().turnovers.get('t00')).toBeUndefined()   // baseline: it goes
+
+    // Now the same device has a photo still queued against one of its items.
+    holder.db = makeFakeDexieDb()
+    const fresh = makeServer(server)
+    await db().turnovers.bulkPut([{ id: 't00', property_id: 'p1' }])
+    await db().checklist_instances.bulkPut([{ id: 'ci_t00', turnover_id: 't00' }])
+    await db().checklist_instance_items.bulkPut([
+      { id: 'item_t00_0', instance_id: 'ci_t00', turnover_id: 't00' },
+    ])
+    await db().pending_photo_uploads.put({
+      id: 'ph1', target_table: 'checklist_instance_items', target_id: 'item_t00_0',
+      target_column: 'photo_storage_path', storage_path: 'org1/x.jpg',
+      local_blob_key: 'b1', mime_type: 'image/jpeg', retry_count: 0,
+      created_at: new Date().toISOString(),
+    })
+
+    await syncAssignedTurnovers(fresh.client, 'u1', 'crew1')
+
+    // Retained despite being outside the horizon: the item row is what
+    // photo-sync walks to resolve the upload's org prefix, and 30 days of
+    // dead-letter life is not the same clock as the scope horizon.
+    expect(await db().turnovers.get('t00')).toBeDefined()
+    expect(await db().checklist_instance_items.get('item_t00_0')).toBeDefined()
+  })
+
+  it('HORIZON: exceeds DEAD_LETTER_RETENTION_DAYS', () => {
+    // Stated here as well as in the guardrail because this file is where the
+    // consequence is visible: if the horizon were the shorter of the two, a
+    // dead letter would still be on screen for a turnover the device had
+    // already shed.
+    expect(CREW_SCOPE_HORIZON_DAYS).toBeGreaterThan(DEAD_LETTER_RETENTION_DAYS)
   })
 
   it('round trips and rows transferred drop on the steady-state sync after a purge', async () => {

@@ -115,11 +115,13 @@ reason that can expire.
   inside `CURSOR_OVERLAP_MS` and a completion trigger loops purge/re-pull on the
   most recent job — measured before the fix was written.
 
-  Still outstanding: the turnover and instance rows themselves, ~3.4MB at 2.6
-  years and still growing with tenure. That needs a date horizon on
-  `fetchAssignedTurnoverIds`. Not urgent at this size — it is single-digit
-  megabytes rather than the three figures the items were — but it is the
-  remaining unbounded thing on a crew device.
+  **The rest followed the same day.** `CREW_SCOPE_HORIZON_DAYS` (45) bounds the
+  assignment scope itself, applied server-side through a
+  `turnovers!inner(checkout_datetime)` embed so the round trips shrink with the
+  cache. The past only — a future turnover is always in scope — and a turnover
+  with unsent work is retained regardless of age, because the dead-letter window
+  is a different clock from the horizon. Nothing on a crew device now grows with
+  tenure.
 
 - **The crew PWA's checklist pull.** `checklist_instance_items` has no
   `org_id` column in its policy at all — both branches resolve through

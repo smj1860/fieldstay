@@ -28,7 +28,11 @@ import { readCode } from './scan'
 // a comment-blind check is the only one that means anything here.
 // ============================================================================
 
+import { CREW_SCOPE_HORIZON_DAYS } from '@/lib/dexie/sync/turnovers'
+import { DEAD_LETTER_RETENTION_DAYS } from '@/lib/dexie/prune'
+
 const prune = readCode('lib/dexie/prune.ts')
+const sync  = readCode('lib/dexie/sync/turnovers.ts')
 
 /**
  * The body of one top-level function in prune.ts.
@@ -41,10 +45,10 @@ const prune = readCode('lib/dexie/prune.ts')
  * what a fire-check of this guardrail showed on its first run: the photo queue
  * was removed from the guard and the check stayed green.
  */
-function fnBody(name: string): string {
-  const start = prune.indexOf(`function ${name}`)
+function fnBody(name: string, src: string = prune): string {
+  const start = src.indexOf(`function ${name}`)
   if (start === -1) return ''
-  const rest = prune.slice(start)
+  const rest = src.slice(start)
   const next = rest.indexOf('\nfunction ', 1)
   const nextExport = rest.indexOf('\nexport ', 1)
   const ends = [next, nextExport].filter((n) => n > 0)
@@ -107,5 +111,52 @@ describe('crew cache retention', () => {
     expect(fn).toContain('db.checklist_instance_items.bulkDelete')
     expect(fn).not.toContain('db.turnovers.bulkDelete')
     expect(fn).not.toContain('db.checklist_instances.bulkDelete')
+  })
+})
+
+// ============================================================================
+// The scope horizon — the second half of the retention design. The purge above
+// bounds the checklist ITEMS; this bounds the turnover and instance rows, and
+// the round trips a resync spends fetching them.
+// ============================================================================
+
+describe('crew scope horizon', () => {
+  it('EXCEEDS the dead-letter retention window', () => {
+    // The coupling that is invisible from either file. A dead-lettered mutation
+    // stays on the device for DEAD_LETTER_RETENTION_DAYS so a crew member can
+    // still see and retry it; if the scope horizon were shorter or equal, the
+    // turnover it belongs to would be reconciled off the device while its
+    // failed write was still on screen. Tightening the horizon to "30, same as
+    // the dead letters" is the exact plausible-looking change this catches.
+    expect(CREW_SCOPE_HORIZON_DAYS).toBeGreaterThan(DEAD_LETTER_RETENTION_DAYS)
+  })
+
+  it('is applied SERVER-side, on the embedded turnover date', () => {
+    const fn = fnBody('fetchAssignedTurnoverIds', sync)
+    expect(fn).not.toBe('')
+    // `!inner` is what makes the filter reach the query rather than the device.
+    // Filtering locally would fix the cache size and none of the round trips,
+    // which are the other half of what the horizon is for.
+    expect(fn).toContain('turnovers!inner(checkout_datetime)')
+    expect(fn).toMatch(/\.gte\(\s*'turnovers\.checkout_datetime'/)
+  })
+
+  it('bounds the PAST only, never the future', () => {
+    const fn = fnBody('fetchAssignedTurnoverIds', sync)
+    // A turnover months out is still the crew member's to prepare for. An
+    // upper bound here would take a future job off the device before they ever
+    // saw it — a data-loss bug wearing a cache-size fix's clothes.
+    expect(fn).not.toMatch(/\.lte\(\s*'turnovers\.checkout_datetime'/)
+    expect(fn).not.toMatch(/\.lt\(\s*'turnovers\.checkout_datetime'/)
+  })
+
+  it('never reconciles away a turnover with unsent work', () => {
+    const fn = fnBody('reconcileRemovedTurnovers', sync)
+    expect(fn).not.toBe('')
+    // The horizon alone is NOT sufficient: DEAD_LETTER_RETENTION_DAYS bounds a
+    // dead-lettered row, and a stalled transport failure has no expiry at all.
+    // This delete takes the turnover, its instances AND its items together.
+    expect(fn).toContain('idsWithPendingWork(db)')
+    expect(fn).toMatch(/retained/)
   })
 })
