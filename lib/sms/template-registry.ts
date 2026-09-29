@@ -122,7 +122,7 @@ const PROPERTY_NAME_VAR: SmsTemplateVariable = {
 function offerLineVar(example: string): SmsTemplateVariable {
   return {
     token:       '{{offer_line}}',
-    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available',
+    description: 'Sponsor line: always names the active sponsor; includes their offer or custom message plus distance when available',
     example,
   }
 }
@@ -130,7 +130,7 @@ function offerLineVar(example: string): SmsTemplateVariable {
 export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   {
     key:         'door_code',
-    label:       'Door Code — Guest Check-In',
+    label:       'Door Code: Guest Check-In',
     description: 'Sent immediately when a guest opts into guidebook SMS. Delivers their door code and guidebook link.',
     audience:    'guest',
     variables: [
@@ -139,7 +139,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
       { token: '{{portal_url}}',    description: 'Personalized guidebook link',     example: 'https://app.fieldstay.app/g/b/abc123' },
     ],
     defaultBody: [
-      '{{property_name}} — you\'re all set. 🏡',
+      '{{property_name}}, you\'re all set. 🏡',
       '',
       'Door code: {{door_code}}',
       '',
@@ -151,63 +151,63 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   },
   {
     key:         'morning_nudge',
-    label:       'Morning Nudge — Guest Stay',
+    label:       'Morning Nudge: Guest Stay',
     description: 'Sent each morning guests are in their stay (7–11 AM). Includes today\'s temperature and an optional sponsor offer.',
     audience:    'guest',
     variables: [
       PROPERTY_NAME_VAR,
       { token: '{{temperature}}', description: 'Current temp in °F', example: '72' },
-      offerLineVar('Sunrise Coffee has 20% off — just show this screen (0.4 mi away)'),
+      offerLineVar('Sunrise Coffee has 20% off, just show this screen (0.4 mi away)'),
     ],
     defaultBody: 'Good morning! It\'s {{temperature}}°F at {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'arrival_reminder',
-    label:       'Arrival Reminder — Check-In Day',
+    label:       'Arrival Reminder: Check-In Day',
     description: 'Replaces the morning nudge on a guest\'s CHECK-IN day. The morning cron runs 7-11 AM but check-in is typically mid-afternoon, so a guest arriving today would otherwise get "it\'s 72°F at your rental, here\'s a coffee spot" hours before they have keys.',
     audience:    'guest',
     variables: [
       PROPERTY_NAME_VAR,
-      { token: '{{checkin_line}}',  description: 'Check-in time sentence — empty when the property has no check-in time set, so the message still reads correctly', example: 'Just a reminder that check-in is at 4:00 PM.' },
+      { token: '{{checkin_line}}',  description: 'Check-in time sentence, empty when the property has no check-in time set, so the message still reads correctly', example: 'Just a reminder that check-in is at 4:00 PM.' },
     ],
     defaultBody: 'Looking forward to hosting you at {{property_name}} today! {{checkin_line}} Reply STOP to opt out.',
   },
   {
     key:         'evening_nudge',
-    label:       'Evening Nudge — Guest Stay',
+    label:       'Evening Nudge: Guest Stay',
     description: 'Sent each evening guests are in their stay (5–9 PM). Includes an optional sponsor offer.',
     audience:    'guest',
     variables: [
       PROPERTY_NAME_VAR,
-      offerLineVar('River Bistro has free dessert — just show this screen (0.8 mi away)'),
+      offerLineVar('River Bistro has free dessert, just show this screen (0.8 mi away)'),
     ],
     defaultBody: 'Hope you\'re enjoying your stay at {{property_name}}! {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'rain_alert',
-    label:       'Rain Alert — Guest Stay',
+    label:       'Rain Alert: Guest Stay',
     description: 'Replaces the morning or evening nudge when precipitation probability is ≥60% and a rainy-day sponsor is configured.',
     audience:    'guest',
     variables: [
       PROPERTY_NAME_VAR,
-      offerLineVar('Cozy Books Café has 15% off — just show this screen (0.3 mi away)'),
+      offerLineVar('Cozy Books Café has 15% off, just show this screen (0.3 mi away)'),
     ],
-    defaultBody: 'Heads up — rain expected near {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
+    defaultBody: 'Heads up, rain expected near {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'tomorrow_outdoor',
-    label:       'Tomorrow Outdoors — Guest Stay',
+    label:       'Tomorrow Outdoors: Guest Stay',
     description: 'Replaces the evening nudge when tomorrow\'s forecast is clear and an Outdoor Adventure sponsor is configured. Sent the night before, because that is when guests decide what to do tomorrow.',
     audience:    'guest',
     variables: [
       PROPERTY_NAME_VAR,
-      offerLineVar('Ridge Kayak Co. has 10% off rentals — just show this screen (1.2 mi away)'),
+      offerLineVar('Ridge Kayak Co. has 10% off rentals, just show this screen (1.2 mi away)'),
     ],
-    defaultBody: 'Tomorrow looks clear near {{property_name}} — a good day to get outside. {{offer_line}} Reply STOP to opt out.',
+    defaultBody: 'Tomorrow looks clear near {{property_name}}, a good day to get outside. {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'stay_extension',
-    label:       'Stay Extension Offer — Guest',
+    label:       'Stay Extension Offer: Guest',
     description: 'Sent when there is availability after a guest\'s checkout and a stay extension opportunity is detected.',
     audience:    'guest',
     variables: [
@@ -225,7 +225,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   },
   {
     key:         'vendor_work_order',
-    label:       'Work Order — Vendor Notification',
+    label:       'Work Order: Vendor Notification',
     description: 'Sent to a vendor when they are assigned to a work order.',
     audience:    'vendor',
     variables: [
@@ -239,7 +239,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     ],
     defaultBody: [
       'New work order from {{pm_name}} at {{org_name}}:',
-      '{{wo_number}} — {{property_name}}{{nte_line}}{{window_line}}',
+      '{{wo_number}}, {{property_name}}{{nte_line}}{{window_line}}',
       '',
       'Review & sign off:',
       '{{portal_url}}',
@@ -268,12 +268,12 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   },
   {
     key:         'crew_turnover_assigned',
-    label:       'Turnover Assignment — Crew',
+    label:       'Turnover Assignment: Crew',
     description: 'Sent to a crew member when one or more turnovers are assigned to them.',
     audience:    'crew',
     variables: [
       { token: '{{org_name}}',     description: 'Organization name',                       example: 'Summit Property Management' },
-      { token: '{{assignments}}',  description: 'Formatted bullet list of assigned turnovers', example: '• Lakeside Lodge — Mon, Jul 7 · 4hr window\n• Mountain Cabin — Tue, Jul 8 · 3hr window' },
+      { token: '{{assignments}}',  description: 'Formatted bullet list of assigned turnovers', example: '• Lakeside Lodge, Mon, Jul 7 · 4hr window\n• Mountain Cabin, Tue, Jul 8 · 3hr window' },
     ],
     defaultBody: [
       '{{org_name}}: New turnover assignment(s) 📋',
@@ -286,7 +286,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   },
   {
     key:         'crew_turnover_cancelled',
-    label:       'Turnover Cancelled — Crew',
+    label:       'Turnover Cancelled: Crew',
     description: 'Sent to a crew member when a booking cancellation removes one or more of their assigned turnovers.',
     audience:    'crew',
     variables: [
