@@ -119,7 +119,7 @@ describe('flaggedTurnoverToWO', () => {
         org_id:             'org_1',
         property_id:        'prop_1',
         source_turnover_id: 'to_1',
-        title:              'Issue Flagged During Turnover — The Lakehouse',
+        title:              'Issue Flagged During Turnover: The Lakehouse',
         description:        FLAG_EVENT.data.flag_notes,
         priority:           'high',
         status:             'pending',
@@ -241,6 +241,6 @@ describe('flaggedTurnoverToWO', () => {
     await invokeHandler(flaggedTurnoverToWO, { event: FLAG_EVENT, step: runAllStep() })
 
     const insertCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'insert')
-    expect((insertCall?.args[0] as { title: string }).title).toBe('Issue Flagged During Turnover — Property')
+    expect((insertCall?.args[0] as { title: string }).title).toBe('Issue Flagged During Turnover: Property')
   })
 })

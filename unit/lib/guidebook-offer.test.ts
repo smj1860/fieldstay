@@ -5,13 +5,13 @@ describe('formatOffer', () => {
   describe('percentage', () => {
     it('formats a percentage offer with an item', () => {
       expect(formatOffer('percentage', 20, 'breakfast', null)).toBe(
-        '20% off breakfast — just show this screen'
+        '20% off breakfast, just show this screen'
       )
     })
 
     it('formats a percentage offer with no item', () => {
       expect(formatOffer('percentage', 15, null, null)).toBe(
-        '15% off — just show this screen'
+        '15% off, just show this screen'
       )
     })
 
@@ -27,13 +27,13 @@ describe('formatOffer', () => {
   describe('fixed_amount', () => {
     it('formats a whole-dollar fixed amount with an item', () => {
       expect(formatOffer('fixed_amount', 5, 'dessert', null)).toBe(
-        '$5 off dessert — just show this screen'
+        '$5 off dessert, just show this screen'
       )
     })
 
     it('formats a fractional fixed amount with no item', () => {
       expect(formatOffer('fixed_amount', 2.5, null, null)).toBe(
-        '$2.50 off — just show this screen'
+        '$2.50 off, just show this screen'
       )
     })
 
@@ -49,7 +49,7 @@ describe('formatOffer', () => {
   describe('item', () => {
     it('formats a free item offer', () => {
       expect(formatOffer('item', null, 'appetizer', null)).toBe(
-        'Free appetizer — just show this screen'
+        'Free appetizer, just show this screen'
       )
     })
 

@@ -43,7 +43,7 @@ function assignmentErrorMessage(err: { code?: string; message?: string }): strin
   if (err.code === UNIQUE_VIOLATION) {
     return 'That property already has a sponsor in this category. ' +
            'Each property can carry only one Morning Brew, Dinner & Pints, Rainy Day and ' +
-           'Outdoor Adventure sponsor — swap the existing one out first.'
+           'Outdoor Adventure sponsor. Swap the existing one out first.'
   }
   if (err.code === CHECK_VIOLATION) {
     return `A property can carry at most ${MAX_SPONSORS_PER_PROPERTY} sponsors. ` +

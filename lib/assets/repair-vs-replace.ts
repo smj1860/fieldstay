@@ -124,7 +124,7 @@ export function buildCapexRecommendation(input: CapexRecommendationInput): Capex
     reasoning.push(
       `Trailing 12-month repair cost${downtimeNote} totals ${formatMoney(tcoRepair)}, ` +
       `${Math.round(repairRatio * 100)}% of the estimated replacement cost ` +
-      `(${formatMoney(replacementCostEstimate)}) — at or above the ${Math.round(REPLACE_REPAIR_RATIO * 100)}% ` +
+      `(${formatMoney(replacementCostEstimate)}), at or above the ${Math.round(REPLACE_REPAIR_RATIO * 100)}% ` +
       `repair-vs-replace threshold.`
     )
   } else if (risingTrend && fairHealth) {
@@ -138,7 +138,7 @@ export function buildCapexRecommendation(input: CapexRecommendationInput): Capex
     recommendation = 'repair'
     reasoning.push(
       `Health score is ${healthScore}/100 with ${formatMoney(repairCosts.trailing12mo)} in repairs ` +
-      `over the last 12 months — below the replace threshold, but worth a closer look.`
+      `over the last 12 months, below the replace threshold, but worth a closer look.`
     )
   } else if (risingTrend) {
     recommendation = 'repair'
@@ -151,13 +151,13 @@ export function buildCapexRecommendation(input: CapexRecommendationInput): Capex
   if (recommendation === 'replace' && input.remainingBookValue && input.remainingBookValue > 0) {
     reasoning.push(
       `Note: ${formatMoney(input.remainingBookValue)} of remaining depreciable basis would be ` +
-      `forfeited by replacing before this asset is fully depreciated — a tax-timing consideration, ` +
+      `forfeited by replacing before this asset is fully depreciated, a tax-timing consideration, ` +
       `not a reason on its own to defer.`
     )
   }
 
   if (!reasoning.length) {
-    reasoning.push('No signals — repair costs and health score are within normal range.')
+    reasoning.push('No signals. Repair costs and health score are within normal range.')
   }
 
   return { recommendation, replacementCostEstimate, repairTrendPct, reasoning }

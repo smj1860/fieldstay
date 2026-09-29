@@ -240,7 +240,7 @@ describe('vendors/actions', () => {
 
       const result = await resendVendorConnectInvite('vendor_1')
 
-      expect(result).toEqual({ error: 'This vendor is already connected — no need to resend.' })
+      expect(result).toEqual({ error: 'This vendor is already connected, no need to resend.' })
       expect(sendResendConnectInvite).not.toHaveBeenCalled()
     })
 

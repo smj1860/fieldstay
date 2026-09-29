@@ -58,11 +58,11 @@ const FIVE_STAR: SandboxReview = {
   internalNotes: null,
   generated: {
     response:
-      'Marguerite, thank you — this made our whole team smile. Maria takes real ' +
+      'Marguerite, thank you. This made our whole team smile. Maria takes real ' +
       'pride in how Sandpiper Cottage looks when guests walk in, and I will make ' +
       'sure she sees your note about the pier tip. The beach chairs and umbrella ' +
       'are there precisely because guests told us they wanted them, so it is ' +
-      'wonderful to hear they landed. We would love to have you back next June — ' +
+      'wonderful to hear they landed. We would love to have you back next June, ' +
       'reach out any time and we will hold the week for you.',
     word_count:  81,
     tone_used:   'warm_appreciative',
@@ -71,7 +71,7 @@ const FIVE_STAR: SandboxReview = {
   },
   demoNote:
     'The easy case. Note it names the specific cleaner and the specific detail ' +
-    'from the review — generic gratitude reads as automated, and guests notice.',
+    'from the review. Generic gratitude reads as automated, and guests notice.',
 }
 
 const THREE_STAR_MIXED: SandboxReview = {
@@ -82,7 +82,7 @@ const THREE_STAR_MIXED: SandboxReview = {
   source:       'VRBO',
   daysAgo:      5,
   reviewText:
-    'The unit itself is great — good beds, great balcony view, well stocked ' +
+    'The unit itself is great: good beds, great balcony view, well stocked ' +
     'kitchen. But the AC struggled the entire stay. It never got below about 78 ' +
     'during the day and we called twice. Someone did come out on day three and ' +
     'it improved a little. For what we paid I expected the AC to just work.',
@@ -91,14 +91,14 @@ const THREE_STAR_MIXED: SandboxReview = {
     'old and undersized for the west exposure. Replacement quoted, scheduled.',
   generated: {
     response:
-      'Desmond, thank you for being straight with us — and you are right. An AC ' +
+      'Desmond, thank you for being straight with us, and you are right. An AC ' +
       'that cannot hold temperature is not a small inconvenience on the Gulf ' +
       'coast in July, and "it improved a little" is not the standard we hold ' +
       'ourselves to. Our tech replaced the capacitor during your stay, which is ' +
       'why you saw partial improvement, but the underlying issue is that the ' +
       'existing unit is undersized for that exposure. A full replacement is ' +
       'already quoted and scheduled. I would genuinely like to make this right ' +
-      'for you directly — please reach us at the number on your booking ' +
+      'for you directly. Please reach us at the number on your booking ' +
       'confirmation and ask for me.',
     word_count:  106,
     tone_used:   'accountable_corrective',
@@ -106,8 +106,8 @@ const THREE_STAR_MIXED: SandboxReview = {
     flag_reason: null,
   },
   demoNote:
-    'The one that sells it. The internal note — capacitor replaced, unit ' +
-    'undersized, replacement scheduled — never appears in the review, but the ' +
+    'The one that sells it. The internal note (capacitor replaced, unit ' +
+    'undersized, replacement scheduled) never appears in the review, but the ' +
     'reply uses it to explain the partial fix instead of vaguely apologizing.',
 }
 
@@ -125,11 +125,11 @@ const ONE_STAR_ANGRY: SandboxReview = {
   internalNotes:
     'Hot tub failed chemical balance check the morning of arrival after a pump ' +
     'fault. Vendor drained/refilled, back in service day 3. Guest was not ' +
-    'proactively notified — that is on us.',
+    'proactively notified. That is on us.',
   generated: {
     response:
       'Corinne, I am sorry. You should have been told before you drove down, and ' +
-      'you were not — that is our failure, not a misunderstanding. A pump fault ' +
+      'you were not. That is our failure, not a misunderstanding. A pump fault ' +
       'the morning of your arrival put the hot tub out of chemical balance; our ' +
       'vendor drained and refilled it and it was back in service on day three. ' +
       'None of that changes the fact that your kids lost the thing they were ' +
@@ -142,7 +142,7 @@ const ONE_STAR_ANGRY: SandboxReview = {
     flag_reason: null,
   },
   demoNote:
-    'Opens by conceding the actual failure — no "we are sorry you feel that ' +
+    'Opens by conceding the actual failure, with no "we are sorry you feel that ' +
     'way." Future guests read this reply far more often than they read the ' +
     'review it answers.',
 }
@@ -162,7 +162,7 @@ const BILLING_DISPUTE: SandboxReview = {
   generated: {
     response:
       'Mr. Pinkney, thank you for raising this, and I am sorry you have not been ' +
-      'able to reach anyone — that part is on us. Post-checkout charges should ' +
+      'able to reach anyone. That part is on us. Post-checkout charges should ' +
       'always come with a clear itemization, and I want to walk you through this ' +
       'one personally rather than in a public thread. Please contact us at the ' +
       'number on your booking confirmation and ask for the property manager; we ' +
@@ -172,7 +172,7 @@ const BILLING_DISPUTE: SandboxReview = {
     flags:       ['billing'],
     flag_reason:
       'Guest reports an active credit-card chargeback on a disputed post-checkout ' +
-      'charge. Held for PM review — do not state the reason for the charge ' +
+      'charge. Held for PM review, do not state the reason for the charge ' +
       'publicly while a dispute is open.',
   },
   demoNote:
@@ -198,14 +198,14 @@ const LEGAL_THREAT: SandboxReview = {
       'recovering well. We take this seriously: the board was replaced that week ' +
       'and the incident has been reported to our insurer. Because this involves ' +
       'a personal injury, I do not want to handle it through a public review ' +
-      'thread — please contact us directly at the number on your booking ' +
+      'thread. Please contact us directly at the number on your booking ' +
       'confirmation so we can speak properly.',
     word_count:  71,
     tone_used:   'empathetic_restrained',
     flags:       ['legal'],
     flag_reason:
       'Guest states they have retained counsel and intend to pursue a personal ' +
-      'injury claim. Held for PM and insurer review — no admission of liability ' +
+      'injury claim. Held for PM and insurer review, with no admission of liability ' +
       'and no discussion of the deck\'s prior condition should be posted publicly.',
   },
   demoNote:
@@ -237,7 +237,7 @@ const DEFAMATION_HOLD: SandboxReview = {
     tone_used:   'withheld',
     flags:       ['legal', 'safety'],
     flag_reason:
-      'Review alleges criminal conduct — covert recording of guests and theft ' +
+      'Review alleges criminal conduct: covert recording of guests and theft ' +
       'from personal belongings. These are allegations that carry both ' +
       'defamation exposure and platform-safety implications. No public-facing ' +
       'response should be drafted or posted. Escalate to the owner, the ' +
@@ -246,7 +246,7 @@ const DEFAMATION_HOLD: SandboxReview = {
   demoNote:
     'The one worth pausing on. Asked to answer an accusation of criminal ' +
     'conduct, the correct product behavior is to refuse to draft a public ' +
-    'reply — so it does, and says why.',
+    'reply, so it does, and says why.',
 }
 
 /** Ordered easy → hard: the deck builds toward the safeguard cases. */

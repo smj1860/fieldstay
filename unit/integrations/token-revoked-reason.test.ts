@@ -68,7 +68,7 @@ describe('TokenRevokedError — downstream handling is unchanged', () => {
   it('still maps BOTH cases to the same PM-facing reconnect sentence', () => {
     // The PM cannot act on the difference — either way they reconnect — so the
     // customer-facing copy must NOT fork. The split is for the operator.
-    const expected = 'OwnerRez authorization expired — reconnect your account to resume syncing'
+    const expected = 'OwnerRez authorization expired. Reconnect your account to resume syncing'
     expect(translateSyncError(new TokenRevokedError('u', 'no_stored_credential'))).toBe(expected)
     expect(translateSyncError(new TokenRevokedError('u', 'provider_rejected'))).toBe(expected)
   })

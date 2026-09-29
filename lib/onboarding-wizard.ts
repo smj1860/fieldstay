@@ -40,7 +40,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     key:         'checklist_template',
     label:       'Turnover Checklist',
     href:        'checklist-template',
-    description: 'Review your auto-built checklist — add any extra rooms your properties need',
+    description: 'Review your auto-built checklist, and add any extra rooms your properties need',
   },
   {
     key:         'maintenance_template',

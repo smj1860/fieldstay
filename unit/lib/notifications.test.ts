@@ -175,9 +175,9 @@ describe('getNotifications', () => {
     const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([
-      expect.objectContaining({ id: 'vendor-v1', title: 'Acme Plumbing — compliance blocked', severity: 'red' }),
-      expect.objectContaining({ id: 'vendor-v2', title: 'Bob HVAC — compliance expiring', severity: 'amber' }),
-      expect.objectContaining({ id: 'vendor-v3', title: 'Carol Electric — compliance expiring', severity: 'amber' }),
+      expect.objectContaining({ id: 'vendor-v1', title: 'Acme Plumbing: compliance blocked', severity: 'red' }),
+      expect.objectContaining({ id: 'vendor-v2', title: 'Bob HVAC: compliance expiring', severity: 'amber' }),
+      expect.objectContaining({ id: 'vendor-v3', title: 'Carol Electric: compliance expiring', severity: 'amber' }),
     ])
   })
 

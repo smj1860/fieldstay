@@ -464,7 +464,7 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
     org_id:          orgId,
     vendor_id:       v.id,
     document_type:   'coi',
-    document_name:   `${DEMO_VENDORS[i]?.name} — Certificate of Insurance`,
+    document_name:   `${DEMO_VENDORS[i]?.name}: Certificate of Insurance`,
     policy_number:   `COI-DEMO-${String(1000 + i)}`,
     issuer_name:     'Gulf Mutual Surety (Demo)',
     effective_date:  dayOffset(-200),
@@ -585,11 +585,11 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
     org_id:                  orgId,
     property_id:             propertyIdByKey.get(p.key)!,
     slug:                    `${p.key}-demo`,
-    check_in_instructions:   `Check-in is any time after 3:00 PM. Your door code is in your arrival text — punch it in, press the Schlage button, and the deadbolt releases. Parking is the two marked spots directly under the unit; the third spot belongs to the neighbor.`,
-    check_out_instructions:  `Checkout is 11:00 AM. Start the dishwasher, bag any trash and drop it in the bin at the end of the driveway, and leave towels in the tub. Leave the AC at 74 — please don't shut it off, the humidity here is unforgiving.`,
+    check_in_instructions:   `Check-in is any time after 3:00 PM. Your door code is in your arrival text. Punch it in, press the Schlage button, and the deadbolt releases. Parking is the two marked spots directly under the unit; the third spot belongs to the neighbor.`,
+    check_out_instructions:  `Checkout is 11:00 AM. Start the dishwasher, bag any trash and drop it in the bin at the end of the driveway, and leave towels in the tub. Leave the AC at 74, and please don't shut it off, the humidity here is unforgiving.`,
     wifi_network:            `${p.name.split(' ')[0]}Guest`,
     wifi_password:           'saltandsun2026', // NOSONAR -- fake guest-facing wifi password for a fictional demo property, not a real credential
-    house_rules:             `No smoking anywhere on the property, including the deck. Quiet hours 10 PM–8 AM. Maximum ${p.max_guests} guests — this is a firm limit from the HOA, not a suggestion. No parties or events. Pets are not permitted at this property.`,
+    house_rules:             `No smoking anywhere on the property, including the deck. Quiet hours 10 PM–8 AM. Maximum ${p.max_guests} guests. This is a firm limit from the HOA, not a suggestion. No parties or events. Pets are not permitted at this property.`,
     is_published:            true,
   }))
   counts.guidebook_property_configs =

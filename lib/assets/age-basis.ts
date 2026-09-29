@@ -117,7 +117,7 @@ export function assetAgeYears(asset: AgeBasisFields, now: Date = new Date()): nu
  * year rather than on a date someone recorded.
  */
 export const ESTIMATED_BASIS_NOTE =
-  'Service date estimated from the nameplate manufacture year — no installation or placed-in-service date recorded.'
+  'Service date estimated from the nameplate manufacture year, with no installation or placed-in-service date recorded.'
 
 /** Suffix marking an estimated date in a rendered artifact (CPA export, UI). */
 export const ESTIMATED_DATE_MARKER = '*'

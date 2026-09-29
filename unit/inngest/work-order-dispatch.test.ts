@@ -160,7 +160,7 @@ describe('workOrderDispatch', () => {
     const result = await invokeHandler(workOrderDispatch, { event: dispatchEvent(), step: makeStep() })
 
     expect(resend.emails.send).toHaveBeenCalledWith(
-      expect.objectContaining({ to: ['vendor@example.com'], subject: 'Work Order WO-1001 — The Lakehouse' }),
+      expect.objectContaining({ to: ['vendor@example.com'], subject: 'Work Order WO-1001: The Lakehouse' }),
       { idempotencyKey: 'work-order-dispatch-wo_1-vendor@example.com' },
     )
 

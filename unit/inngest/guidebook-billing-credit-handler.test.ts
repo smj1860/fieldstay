@@ -79,7 +79,7 @@ describe('guidebookBillingCreditHandler', () => {
         customer:    'cus_1',
         amount:      -3000,
         currency:    'usd',
-        description: expect.stringContaining('6 Sponsors — $30 off'),
+        description: expect.stringContaining('6 Sponsors, $30 off'),
       }),
       { idempotencyKey: 'guidebook-credit-org_1-1800000000' },
     )
@@ -110,7 +110,7 @@ describe('guidebookBillingCreditHandler', () => {
     })
 
     expect(stripe.invoiceItems.create).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: -2500, description: expect.stringContaining('5 Sponsors — $25 off') }),
+      expect.objectContaining({ amount: -2500, description: expect.stringContaining('5 Sponsors, $25 off') }),
       expect.anything(),
     )
     expect(logAuditEvent).toHaveBeenCalledWith(

@@ -91,7 +91,7 @@ describe('handleBookingConfirmed', () => {
       transaction_type:     'revenue',
       category:             'booking_revenue',
       amount:               450.5,
-      description:          '3 nights — Sam Guest',
+      description:          '3 nights, Sam Guest',
       transaction_date:     '2026-08-01',
       visible_to_owner:     true,
     }))

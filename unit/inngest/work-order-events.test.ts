@@ -319,7 +319,7 @@ describe('handleWorkOrderCompletedViaPortal', () => {
     expect(createPmNotification).toHaveBeenCalledWith(supabase, {
       orgId:     'org_1',
       type:      'work_order_complete',
-      title:     '✓ Work Complete — Fix the deck at The Lakehouse',
+      title:     '✓ Work Complete: Fix the deck at The Lakehouse',
       subtitle:  'Ace Plumbing completed this job (2 photos attached)',
       href:      '/maintenance/wo_1',
       severity:  'green',
@@ -514,8 +514,8 @@ describe('handleWorkOrderQuoteSubmitted', () => {
     expect(createPmNotification).toHaveBeenCalledWith(supabase, {
       orgId:     'org_1',
       type:      'work_order_quote_received',
-      title:     '💬 Quote received — Fix Sink at The Lakehouse',
-      subtitle:  'Ace Plumbing quoted $450.00 — Includes parts',
+      title:     '💬 Quote received: Fix Sink at The Lakehouse',
+      subtitle:  'Ace Plumbing quoted $450.00: Includes parts',
       href:      '/maintenance/wo_1',
       severity:  'amber',
       dedupeKey: 'wo-quote-submitted-qr_1',

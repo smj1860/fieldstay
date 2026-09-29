@@ -219,9 +219,9 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
   //     www duplicate was closed with a 308 in next.config.ts; app. cannot be,
   //     because it is the session origin — the canonical tag IS the mechanism
   //     there, and these three did not have one.
-  //   - A DOUBLED SUFFIX. app/layout.tsx applies `template: '%s — FieldStay'`,
+  //   - A DOUBLED SUFFIX. app/layout.tsx applies `template: '%s | FieldStay'`,
   //     and the titles spelled the suffix out too, so the live SERP title read
-  //     "Terms of Service — FieldStay — FieldStay".
+  //     "Terms of Service | FieldStay | FieldStay".
   //   - THE FALLBACK DESCRIPTION. With none set, all three inherited the root
   //     layout's "STR operations platform for property managers." — three
   //     pages telling Google they are the same page.
@@ -275,18 +275,18 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     const doubled = PUBLIC_MARKETING_PAGES.filter((route) => route !== '/').filter((route) => {
       const code = readCode(pageFile(route))
       const m = /title\s*:\s*'([^']*)'/.exec(code)
-      return !!m && /—\s*FieldStay\s*$/.test(m[1]!)
+      return !!m && /\|\s*FieldStay\s*$/.test(m[1]!)
     })
 
     expect(doubled, [
-      "app/layout.tsx sets `template: '%s — FieldStay'`, so a page title ending in",
-      '"— FieldStay" renders twice: "Terms of Service — FieldStay — FieldStay".',
+      "app/layout.tsx sets `template: '%s | FieldStay'`, so a page title ending in",
+      '"| FieldStay" renders twice: "Terms of Service | FieldStay | FieldStay".',
       'Drop the suffix from the page and let the template add it.',
     ].join('\n')).toEqual([])
   })
 
-  it('the homepage title spells out the brand suffix itself — the template never reaches it', () => {
-    // Next.js's `title.template` (app/layout.tsx: '%s — FieldStay') applies to
+  it('the homepage title spells out the brand suffix itself, since the template never reaches it', () => {
+    // Next.js's `title.template` (app/layout.tsx: '%s | FieldStay') applies to
     // titles from CHILD route segments only. app/page.tsx lives in the SAME
     // segment as app/layout.tsx — not a child of it — so the template never
     // applies to the homepage's own title at all, unlike every other page in
@@ -296,18 +296,18 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     // a bare 'Property Ops for ...' title here (matching the OTHER pages'
     // "let the template add the suffix" convention) rendered in
     // .next/server/app/index.html as <title>Property Ops for Short-Term
-    // Rental Managers</title> — no "— FieldStay" anywhere, and the earlier
+    // Rental Managers</title> with no "| FieldStay" anywhere, and the earlier
     // version of this file didn't catch it because this test didn't exist yet.
     const code = readCode(pageFile('/'))
     const m = /title\s*:\s*'([^']*)'/.exec(code)
 
     expect(m, 'app/page.tsx should set a literal title: \'...\' string').not.toBeNull()
     expect(m![1], [
-      'The homepage title must end in "— FieldStay" written out explicitly —',
+      'The homepage title must end in "| FieldStay" written out explicitly, because',
       'the root template does not apply to app/page.tsx (see this test\'s header',
       'comment). Omitting it, the way every other marketing page correctly does,',
       'ships a homepage <title> with no brand name in it at all.',
-    ].join('\n')).toMatch(/—\s*FieldStay\s*$/)
+    ].join('\n')).toMatch(/\|\s*FieldStay\s*$/)
   })
 
   it('every page sets its own description, not the root fallback', () => {

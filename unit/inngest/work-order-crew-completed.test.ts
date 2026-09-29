@@ -71,8 +71,8 @@ describe('handleWorkOrderCrewCompleted', () => {
     expect(createPmNotification).toHaveBeenCalledWith(supabase, {
       orgId:     'org_1',
       type:      'work_order_complete',
-      title:     '✓ Work Complete — WO-42 · The Lakehouse',
-      subtitle:  'Maria marked "Fix the sink" complete — All done, no issues',
+      title:     '✓ Work Complete: WO-42 · The Lakehouse',
+      subtitle:  'Maria marked "Fix the sink" complete: All done, no issues',
       href:      '/maintenance/wo_1',
       severity:  'green',
       dedupeKey: 'crew-wo-complete-wo_1',
@@ -98,7 +98,7 @@ describe('handleWorkOrderCrewCompleted', () => {
     })
 
     expect(createPmNotification).toHaveBeenCalledWith(supabase, expect.objectContaining({
-      title:    '✓ Work Complete — WO · the property',
+      title:    '✓ Work Complete: WO · the property',
       subtitle: 'A crew member marked "a work order" complete',
     }))
   })
@@ -147,7 +147,7 @@ describe('handleWorkOrderCrewCompleted', () => {
 
     expect(supabase.from).not.toHaveBeenCalledWith('properties')
     expect(createPmNotification).toHaveBeenCalledWith(supabase, expect.objectContaining({
-      title: '✓ Work Complete — WO-42 · the property',
+      title: '✓ Work Complete: WO-42 · the property',
     }))
   })
 })

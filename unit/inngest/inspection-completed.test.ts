@@ -951,10 +951,10 @@ describe('inspectionCompleted — the cleaning roll-up', () => {
       org_id: ORG, property_id: PROP,
       category: 'cleaning', status: 'pending', source: 'inspection',
       source_inspection_id: INSP,
-      title: 'Cleaning — 3 items from an inspection',
+      title: 'Cleaning: 3 items from an inspection',
     })
     // Every finding is named, so the cleaner knows what the walk actually found.
-    expect(String(wo.description)).toContain('Rug clean — stained')
+    expect(String(wo.description)).toContain('Rug clean: stained')
     expect(String(wo.description)).toContain('Oven clean')
     expect(String(wo.description)).toContain('No cobwebs')
   })

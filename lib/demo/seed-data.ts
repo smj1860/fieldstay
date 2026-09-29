@@ -304,7 +304,7 @@ export interface DemoSponsorSeed {
 export const DEMO_SPONSORS: DemoSponsorSeed[] = [
   {
     slot_number: 1, business_name: 'The Salty Mullet Grill',
-    business_description: 'Gulf-to-table seafood on the west end — hush puppies worth the wait.',
+    business_description: 'Gulf-to-table seafood on the west end, with hush puppies worth the wait.',
     business_phone: '+12515550130', business_website: 'https://example.com/salty-mullet',
     address: '1520 W Beach Blvd, Gulf Shores, AL 36542', lat: 30.2449, lng: -87.7142,
     slot_type: 'dinner_pints', offer_type: 'percentage', offer_value: 10, offer_item: null,

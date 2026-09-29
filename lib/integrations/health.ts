@@ -57,7 +57,7 @@ function connectionStatus(
 }
 
 function connectionDetail(status: string, syncError: string | null): string | null {
-  if (status === 'revoked' || status === 'error') return `Connection ${status} — reconnect required`
+  if (status === 'revoked' || status === 'error') return `Connection ${status}, reconnect required`
   if (status === 'disconnected') return null
   return syncError
 }
@@ -165,7 +165,7 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
       id:          f.id,
       // ical_feeds.source is nullable; 'other' is the column's own default.
       providerId:  f.source ?? 'other',
-      label:       `${property?.name ?? 'Unknown property'} — ${f.name}`,
+      label:       `${property?.name ?? 'Unknown property'}: ${f.name}`,
       status:      feedStatus(f.last_sync_status, f.last_synced_at),
       lastSyncAt:  f.last_synced_at,
       detail:      f.last_sync_error,

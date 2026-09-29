@@ -9,7 +9,7 @@ describe('buildCapexRecommendation', () => {
       healthScore:             85,
     })
     expect(result.recommendation).toBe('monitor')
-    expect(result.reasoning).toEqual(['No signals — repair costs and health score are within normal range.'])
+    expect(result.reasoning).toEqual(['No signals. Repair costs and health score are within normal range.'])
   })
 
   it('recommends monitor with no crash when there is no replacement cost estimate at all', () => {

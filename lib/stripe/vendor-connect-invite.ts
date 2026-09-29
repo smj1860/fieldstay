@@ -455,7 +455,7 @@ export async function ensureVendorConnectInvited(
       await resend.emails.send({
         from:    FROM,
         to:      params.vendorEmail,
-        subject: `${params.orgName} pays invoices via Stripe Connect — set up your payout account`,
+        subject: `${params.orgName} pays invoices via Stripe Connect. Set up your payout account`,
         html:    await renderVendorConnectInviteEmail({
           vendorName:    params.vendorName,
           orgName:       params.orgName,

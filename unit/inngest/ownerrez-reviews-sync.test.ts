@@ -264,7 +264,7 @@ describe('ownerRezReviewsSync', () => {
         p_user_id: 'user_1',
         p_patch:   expect.objectContaining({
           last_reviews_sync_status: 'error',
-          last_reviews_sync_error:  'Sync failed — will retry automatically',
+          last_reviews_sync_error:  'Sync failed, will retry automatically',
         }),
       }),
     )
