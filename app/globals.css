@@ -179,6 +179,16 @@
    identity to honor a dark preference against, so this always wins over
    :root's dark default. The media query below is the one and only path back
    to dark for these surfaces, driven purely by the OS-level signal. */
+/* The --accent-* tokens are redefined here alongside the surface tokens, and
+   that pairing is load-bearing rather than tidiness. This class overrides
+   --bg-card/--text-* but inherits every accent from whichever of :root (dark)
+   or :root.light won on <html> — which is driven by the visitor's stored
+   `fs-theme`, a signal this subtree deliberately ignores for its surfaces. So
+   the two halves could disagree: a visitor with no stored theme on an
+   OS-light device got --bg-card #FFFFFF from here and --accent-blue #4da6ff
+   from :root's dark default, i.e. 2.56:1 — a link legible to nobody. Keeping
+   the accents next to the surfaces they sit on is what makes the subtree
+   self-consistent in both directions. */
 .theme-locked-light-passive-dark {
   --bg-base:        #F8F9FA;
   --bg-canvas:      #F8F9FA;
@@ -190,6 +200,20 @@
   --text-primary:   #0D0F11;
   --text-secondary: #343A40;
   --text-muted:     #6C757D;
+
+  --accent-gold:       #b8900a;
+  --accent-gold-text:  #7a5e07;
+  --accent-gold-dim:   rgba(184, 144, 10, 0.12);
+  --accent-green:      #16a34a;
+  --accent-green-dim:  rgba(22, 163, 74, 0.12);
+  --accent-red:        #dc2626;
+  --accent-red-dim:    rgba(220, 38, 38, 0.10);
+  --accent-amber:      #d97706;
+  --accent-amber-dim:  rgba(217, 119, 6, 0.12);
+  --accent-blue:       #1d6fa4;
+  --accent-blue-dim:   rgba(29, 111, 164, 0.12);
+  --accent-purple:     #7c3aed;
+  --accent-purple-dim: rgba(124, 58, 237, 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -204,6 +228,20 @@
     --text-muted:     #9ab5cc;
     --border:         rgba(255,255,255,0.07);
     --border-strong:  rgba(255,255,255,0.14);
+
+    --accent-gold:       #FCD116;
+    --accent-gold-text:  #FCD116;
+    --accent-gold-dim:   rgba(252, 209, 22, 0.12);
+    --accent-green:      #2fd98c;
+    --accent-green-dim:  rgba(47, 217, 140, 0.10);
+    --accent-red:        #f05454;
+    --accent-red-dim:    rgba(240, 84, 84, 0.12);
+    --accent-amber:      #f59e0b;
+    --accent-amber-dim:  rgba(245, 158, 11, 0.12);
+    --accent-blue:       #4da6ff;
+    --accent-blue-dim:   rgba(77, 166, 255, 0.10);
+    --accent-purple:     #a78bfa;
+    --accent-purple-dim: rgba(167, 139, 250, 0.12);
   }
 }
 
