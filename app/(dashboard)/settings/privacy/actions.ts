@@ -193,7 +193,7 @@ async function recordPartialErasure(params: {
     optInsDeleted,
     optInsRetained,
     error: bookingsAnonymized > 0
-      ? `Erasure stopped partway — ${bookingsAnonymized} booking(s) were anonymized before it failed. Re-run to finish; already-scrubbed rows are skipped.`
+      ? `Erasure stopped partway: ${bookingsAnonymized} booking(s) were anonymized before it failed. Re-run to finish; already-scrubbed rows are skipped.`
       : 'Operation failed. Please try again.',
   }
 }

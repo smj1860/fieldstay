@@ -5,7 +5,7 @@ import type { CapExProjectionItem } from '@/lib/inngest/functions/capex-projecti
 import { loadOwnerPortalData, type OwnerPortalTxn } from './load-owner-portal-data'
 import { InspectionHistory } from './inspection-history'
 
-export const metadata: Metadata = { title: 'Owner Portal — FieldStay' }
+export const metadata: Metadata = { title: 'Owner Portal | FieldStay' }
 
 interface Props {
   params:       Promise<{ token: string }>

@@ -69,14 +69,14 @@ export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: numb
   if (result === 'empty') {
     return (
       <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-        No eligible assets — set purchase price and placed-in-service date on at least one asset
+        No eligible assets. Set purchase price and placed-in-service date on at least one asset
       </span>
     )
   }
   if (result === 'timeout') {
     return (
       <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
-        Still processing — check back in a minute
+        Still processing, check back in a minute
       </span>
     )
   }

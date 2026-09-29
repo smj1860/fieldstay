@@ -612,7 +612,7 @@ async function notifyOwnerBlockOpportunities(
           return {
             orgId,
             type:      'maintenance_opportunity',
-            title:     `Maintenance opportunity — ${propertyNameById[row.property_id] ?? 'Property'} blocked for owner use`,
+            title:     `Maintenance opportunity: ${propertyNameById[row.property_id] ?? 'Property'} blocked for owner use`,
             subtitle:  `Blocked ${window}. Candidates: ${items}`,
             href:      '/maintenance',
             severity:  'blue' as const,

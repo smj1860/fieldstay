@@ -184,12 +184,12 @@ export function ReviewPage({
               <Lock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--accent-gold)' }} />
               <span>
                 Signing off finalises this inspection and submits it into the record.
-                It cannot be edited afterwards — a correction is a new inspection.
+                It cannot be edited afterwards. A correction is a new inspection.
               </span>
             </p>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               Signing as <strong style={{ color: 'var(--text-secondary)' }}>{inspectorName.trim()}</strong>.
-              If you are not ready, cancel and go back to the form — nothing is lost.
+              If you are not ready, cancel and go back to the form. Nothing is lost.
             </p>
           </div>
         </Dialog>

@@ -5,7 +5,7 @@ import { FaqAccordion } from '@/components/help/faq-accordion'
 import { HelpContactCard } from '@/components/help/help-contact-card'
 
 export const metadata: Metadata = {
-  title: 'Help & Support — FieldStay',
+  title: 'Help & Support | FieldStay',
 }
 
 export default function HelpPage() {

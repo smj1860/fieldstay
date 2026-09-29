@@ -49,7 +49,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Readonly<Pr
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Add cleaning and maintenance team members. Invite them to the crew app after adding.
-          These team members belong to your organization and can be assigned to any property —
+          These team members belong to your organization and can be assigned to any property,
           you&apos;ll choose who works which turnover as bookings come in.
         </p>
       </div>
@@ -79,7 +79,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Readonly<Pr
           aria-hidden="true"
         />
         <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-          <span className="font-semibold">Crew view —</span>{' '}
+          <span className="font-semibold">Crew view:</span>{' '}
           Crew only see turnovers and inventory for properties actively assigned
           to them. Guest details and unassigned listings remain completely
           hidden, and the crew app never shows financials.

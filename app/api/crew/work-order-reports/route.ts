@@ -76,7 +76,7 @@ async function notifyPmOfCrewFlag(
     await createPmNotification(supabase, {
       orgId:     n.orgId,
       type:      'work_order_created',
-      title:     `${n.urgent ? '🚨 Urgent — ' : ''}Crew flagged an issue${where}`,
+      title:     `${n.urgent ? '🚨 Urgent: ' : ''}Crew flagged an issue${where}`,
       subtitle:  n.issueTitle,
       href:      `/maintenance/${workOrderId}`,
       severity:  n.urgent ? 'red' : 'amber',

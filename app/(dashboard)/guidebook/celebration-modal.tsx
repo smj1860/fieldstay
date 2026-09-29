@@ -11,7 +11,7 @@
 const TIER_COPY: Record<3 | 6, { title: string; body: string }> = {
   3: {
     title: 'Guidebook Unlocked! 🎉',
-    body:  'You\'ve filled 3 sponsor slots — your guest guidebook is now live and self-funding.',
+    body:  'You\'ve filled 3 sponsor slots. Your guest guidebook is now live and self-funding.',
   },
   6: {
     title: 'Fully Sponsored! 🏆',

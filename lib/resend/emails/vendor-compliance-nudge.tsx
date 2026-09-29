@@ -33,7 +33,7 @@ export function VendorComplianceNudgeEmail({
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 14px' }}>
-        Just a heads up — your <strong>{docLabel}</strong>{' '}on file with{' '}
+        Just a heads up, your <strong>{docLabel}</strong>{' '}on file with{' '}
         <strong>{orgName}</strong>{' '}is set to expire on <strong>{formattedExpiry}</strong>{' '}
         ({daysUntil} {dayWord} from now).
       </Text>

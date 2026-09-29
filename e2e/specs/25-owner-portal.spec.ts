@@ -95,8 +95,8 @@ test.describe('Owner portal token lifecycle', () => {
 
     // Hide the transaction from the PM side and confirm the portal reflects it.
     await ownerCard.getByRole('button', { name: /Transactions/i }).click()
-    await ownerCard.getByTitle('Visible to owner — click to hide').click()
-    await expect(ownerCard.getByTitle('Hidden from owner — click to show')).toBeVisible({ timeout: 8_000 })
+    await ownerCard.getByTitle('Visible to owner, click to hide').click()
+    await expect(ownerCard.getByTitle('Hidden from owner, click to show')).toBeVisible({ timeout: 8_000 })
 
     await publicPage.reload()
     await expect(revenueCard.getByText('$1,500.00')).not.toBeVisible()

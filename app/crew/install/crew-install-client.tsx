@@ -68,7 +68,7 @@ function IOSInstructions() {
         style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}
       >
         <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-        <span>Must be opened in <strong>Safari</strong> — Chrome on iOS does not
+        <span>Must be opened in <strong>Safari</strong>. Chrome on iOS does not
         support home screen install.</span>
       </div>
     </div>
@@ -231,7 +231,7 @@ export function CrewInstallClient() {
             className="w-full text-center text-sm transition-colors py-3"
             style={{ color: 'var(--text-muted)' }}
           >
-            Skip for now — open in browser
+            Skip for now, open in browser
           </button>
         </div>
 

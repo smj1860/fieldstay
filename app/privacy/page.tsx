@@ -44,7 +44,7 @@ export default function PrivacyPage() {
             <p>
               {CONTROLLER_NAME} (&ldquo;FieldStay,&rdquo; &ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;) is
               the data controller for personal information processed through the FieldStay platform
-              (&ldquo;Service&rdquo;) — a field operations and property management system for short-term
+              (&ldquo;Service&rdquo;), a field operations and property management system for short-term
               rental managers.
             </p>
             <p className="mt-3">
@@ -74,7 +74,7 @@ export default function PrivacyPage() {
               <div>
                 <dt className="font-semibold text-gray-800">Credentials</dt>
                 <dd className="text-sm mt-0.5">
-                  Password (stored as a bcrypt hash — we never see the plaintext). OAuth tokens for
+                  Password (stored as a bcrypt hash, so we never see the plaintext). OAuth tokens for
                   connected integrations (OwnerRez, Hospitable) stored encrypted in Supabase Vault.
                 </dd>
               </div>
@@ -91,7 +91,7 @@ export default function PrivacyPage() {
                 <dt className="font-semibold text-gray-800">Financial Data</dt>
                 <dd className="text-sm mt-0.5">
                   Billing information is collected and processed directly by Stripe. We store only your
-                  Stripe customer ID and subscription status — we never see or store full card numbers.
+                  Stripe customer ID and subscription status. We never see or store full card numbers.
                 </dd>
               </div>
               <div>
@@ -129,8 +129,8 @@ export default function PrivacyPage() {
             <p className="mt-4 font-medium text-gray-800">Sensitive Personal Information</p>
             <p className="text-sm mt-1">
               We do not intentionally collect sensitive personal information as defined under CPRA
-              (California Privacy Rights Act) — such as Social Security numbers, racial or ethnic
-              origin, health data, or precise geolocation — as part of normal Service operation.
+              (California Privacy Rights Act), such as Social Security numbers, racial or ethnic
+              origin, health data, or precise geolocation, as part of normal Service operation.
               Property addresses and zip codes are collected for operational purposes (geocoding for
               crew dispatch) and are not used for consumer profiling.
             </p>
@@ -156,7 +156,7 @@ export default function PrivacyPage() {
               <div>
                 <dt className="font-semibold text-gray-800">Contract Performance (Article 6(1)(b))</dt>
                 <dd className="text-sm mt-0.5">
-                  Processing necessary to provide the Service you have subscribed to — account creation,
+                  Processing necessary to provide the Service you have subscribed to, including account creation,
                   property management operations, sending work order notifications to crew and vendors,
                   billing via Stripe, and delivering transactional emails.
                 </dd>
@@ -167,8 +167,8 @@ export default function PrivacyPage() {
                   Security and fraud prevention (maintaining audit logs, detecting unauthorized access);
                   service improvement (aggregated usage analytics, error monitoring); and product
                   communications (feature announcements to existing customers).
-                  Our legitimate interests do not override your fundamental rights and freedoms —
-                  we conducted a balancing test for each purpose and would share that assessment on request.
+                  Our legitimate interests do not override your fundamental rights and freedoms.
+                  We conducted a balancing test for each purpose and would share that assessment on request.
                 </dd>
               </div>
               <div>
@@ -181,7 +181,7 @@ export default function PrivacyPage() {
               <div>
                 <dt className="font-semibold text-gray-800">Consent (Article 6(1)(a))</dt>
                 <dd className="text-sm mt-0.5">
-                  Push notifications to your browser — only when you explicitly grant permission.
+                  Push notifications to your browser, only when you explicitly grant permission.
                   You may withdraw this consent at any time through your browser settings or in
                   Settings → Account.
                 </dd>
@@ -482,7 +482,7 @@ export default function PrivacyPage() {
                 <dd>
                   FieldStay uses automated crew assignment suggestions based on location, availability,
                   and historical performance scores. This automation produces <em>recommendations</em>{' '}
-                  that a human property manager reviews and approves or overrides — it does not produce
+                  that a human property manager reviews and approves or overrides. It does not produce
                   decisions with legal or similarly significant effects on individuals. Crew members
                   are not excluded from consideration based solely on algorithmic output.
                 </dd>
@@ -506,7 +506,7 @@ export default function PrivacyPage() {
                   <a href="https://ico.org.uk" className="underline" target="_blank" rel="noopener noreferrer">
                     ico.org.uk
                   </a>
-                  . We encourage you to contact us first — most concerns can be resolved directly.
+                  . We encourage you to contact us first. Most concerns can be resolved directly.
                 </dd>
               </div>
             </dl>
@@ -568,7 +568,7 @@ export default function PrivacyPage() {
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-gray-800">Right to Correct (§ 1798.106 — CPRA)</dt>
+                <dt className="font-semibold text-gray-800">Right to Correct (§ 1798.106, CPRA)</dt>
                 <dd>
                   You may request correction of inaccurate personal information we maintain about you.
                   Edit your profile in Settings → Account or submit a correction request.
@@ -582,7 +582,7 @@ export default function PrivacyPage() {
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-gray-800">Right to Limit Use of Sensitive Personal Information (§ 1798.121 — CPRA)</dt>
+                <dt className="font-semibold text-gray-800">Right to Limit Use of Sensitive Personal Information (§ 1798.121, CPRA)</dt>
                 <dd>
                   We do not use sensitive personal information for purposes beyond those necessary to
                   perform the Service. No limitation request is needed.

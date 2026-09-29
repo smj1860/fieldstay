@@ -453,7 +453,7 @@ export async function GET(req: Request) {
   const pages    = pdfDoc.getPages()
   const lastPage = pages[pages.length - 1]
   lastPage.drawRectangle({ x: ML, y: MB - 4, width: CW, height: 22, color: GRAY_DARK })
-  lastPage.drawText('GRAND TOTAL — Current Year Depreciation', { x: ML + 8, y: MB + 5, size: 9, font: boldFont, color: WHITE })
+  lastPage.drawText('GRAND TOTAL: Current Year Depreciation', { x: ML + 8, y: MB + 5, size: 9, font: boldFont, color: WHITE })
   lastPage.drawText(fmt$(grandTotal), {
     x: W - MR - 120, y: MB + 5, size: 11, font: boldFont, color: GOLD,
   })

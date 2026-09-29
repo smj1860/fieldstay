@@ -112,7 +112,7 @@ const ROLE_CONTENT: readonly RolePanelContent[] = [
     tab: 'Managers',
     kicker: 'The Board',
     title: 'Every turnover in one place, sorted by what needs you.',
-    body: 'Bookings sync in from your PMS and calendars. FieldStay suggests who should take each turnover — and why — so you accept instead of figuring it out.',
+    body: 'Bookings sync in from your PMS and calendars. FieldStay suggests who should take each turnover, and why, so you accept instead of figuring it out.',
     points: ['Auto-sorted by urgency', 'Suggested crew assignment', 'One board, every property'],
     linkLabel: 'For managers',
     href: '/enterprise',

@@ -587,33 +587,33 @@ export function syncErrorDetail(err: unknown): string {
 
 export function translateSyncError(err: unknown, providerLabel: string = 'OwnerRez'): string {
   if (err instanceof RateLimitError) {
-    return `${providerLabel} sync paused due to rate limiting — will retry automatically`
+    return `${providerLabel} sync paused due to rate limiting, will retry automatically`
   }
   if (err instanceof TokenRevokedError) {
-    return `${providerLabel} authorization expired — reconnect your account to resume syncing`
+    return `${providerLabel} authorization expired. Reconnect your account to resume syncing`
   }
   if (err instanceof ProviderAuthError) {
     // Named before the generic '401'/'403' substring checks below so the
     // endpoint-specific wording survives; those checks stay for the many
     // adapters still throwing plain Errors.
-    return `${providerLabel} denied access to part of your account — reconnect your account to resume syncing`
+    return `${providerLabel} denied access to part of your account. Reconnect your account to resume syncing`
   }
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {
-    return `${providerLabel} authorization expired — reconnect your account to resume syncing`
+    return `${providerLabel} authorization expired. Reconnect your account to resume syncing`
   }
   if (lower.includes('403') || lower.includes('forbidden')) {
-    return `${providerLabel} access denied — reconnect your account`
+    return `${providerLabel} access denied. Reconnect your account`
   }
   if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('network')) {
-    return `Could not reach ${providerLabel} — sync will retry automatically`
+    return `Could not reach ${providerLabel}, sync will retry automatically`
   }
   if (lower.includes('vault') || lower.includes('credentials not found')) {
-    return `${providerLabel} credentials not found — reconnect your account`
+    return `${providerLabel} credentials not found. Reconnect your account`
   }
   if (lower.includes('upsert') || lower.includes('insert') || lower.includes('database')) {
-    return 'Sync completed with errors — some bookings may not have updated'
+    return 'Sync completed with errors, some bookings may not have updated'
   }
-  return 'Sync failed — will retry automatically'
+  return 'Sync failed, will retry automatically'
 }

@@ -18,12 +18,12 @@ export function CrewInviteEmail({ crewName, orgName, inviteUrl }: Props) {
     >
       <Text style={heading}>You&apos;ve been invited to join {orgName}</Text>
       <Text style={body}>
-        Hi {crewName} — {orgName} has invited you to their crew on FieldStay.
+        Hi {crewName}, {orgName} has invited you to their crew on FieldStay.
       </Text>
       <Text style={body}>
         FieldStay is how your team manages property turnovers. You&apos;ll be
         able to view your assigned turnovers, complete turnover checklists,
-        and capture photos — all from your phone. No app store required.
+        and capture photos, all from your phone. No app store required.
       </Text>
       <Text style={body}>
         Create your account by clicking the button below. It takes less

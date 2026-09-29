@@ -122,7 +122,7 @@ export async function triggerResync(
 
   const connection = connectionOut.data
   if (!connection || connection.status === 'revoked' || connection.status === 'disconnected') {
-    return { error: 'This integration isn’t connected — connect it first.' }
+    return { error: 'This integration isn’t connected. Connect it first.' }
   }
 
   // onError: 'deny' — this limiter exists to stop a panicking PM from
@@ -138,7 +138,7 @@ export async function triggerResync(
     { onError: 'deny', site: 'action.settings.integrations.triggerResync' },
   )
   if (!resyncLimit.allowed) {
-    return { error: 'Sync already in progress — please wait 60 seconds before trying again' }
+    return { error: 'Sync already in progress, please wait 60 seconds before trying again' }
   }
 
   const { inngest } = await import('@/lib/inngest/client')
@@ -381,7 +381,7 @@ export async function disconnectIntegration(
     })
 
     if (!connectionOut.ok) {
-      return { error: 'Couldn\'t reach the integration right now — nothing was disconnected. Please try again.' }
+      return { error: 'Couldn\'t reach the integration right now. Nothing was disconnected. Please try again.' }
     }
 
     const connection = connectionOut.data
@@ -531,13 +531,13 @@ function apiKeyConnectErrorMessage(providerId: string, message: string): string 
   const lower = message.toLowerCase()
 
   if (providerId === 'lodgify' && message.includes('403')) {
-    return 'Lodgify refused the key. The Public API is only available on Lodgify plans that include API access — check that yours does, then try again.'
+    return 'Lodgify refused the key. The Public API is only available on Lodgify plans that include API access. Check that yours does, then try again.'
   }
 
   if (message.includes('401') || message.includes('403') || lower.includes('invalid')) {
     return providerId === 'lodgify'
-      ? 'Invalid API key — copy it again from Lodgify under Settings → Public API.'
-      : 'Invalid credentials — check your Account ID and API Key.'
+      ? 'Invalid API key. Copy it again from Lodgify under Settings → Public API.'
+      : 'Invalid credentials. Check your Account ID and API Key.'
   }
 
   return 'Connection failed. Please try again or contact support.'

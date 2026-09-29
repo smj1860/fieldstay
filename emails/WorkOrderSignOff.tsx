@@ -29,7 +29,7 @@ export default function WorkOrderSignOffEmail({
   } as Intl.DateTimeFormatOptions)
 
   return (
-    <EmailLayout preview={`✓ Work Complete — ${woNumber} · ${propertyName}`}>
+    <EmailLayout preview={`✓ Work Complete: ${woNumber} · ${propertyName}`}>
       <Text style={{ fontSize: 20, color: '#0a1628', fontWeight: 700, margin: '0 0 4px' }}>
         Work Order Complete
       </Text>

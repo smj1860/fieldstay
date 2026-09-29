@@ -159,7 +159,7 @@ export function MaintenanceCalendar({
           {workOrders.length === 0 && schedules.length === 0 && (
             <div className="text-center py-10 text-sm border border-themed rounded-xl mb-4"
                  style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>
-              No items scheduled — add a date to a work order or maintenance schedule to see it here.
+              No items scheduled. Add a date to a work order or maintenance schedule to see it here.
             </div>
           )}
           <div className="grid grid-cols-7 mb-1">
@@ -256,7 +256,7 @@ export function MaintenanceCalendar({
           {workOrders.length === 0 && schedules.length === 0 && (
             <div className="text-center py-10 text-sm border border-themed rounded-xl mb-4"
                  style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>
-              No items scheduled — add a date to a work order or maintenance schedule to see it here.
+              No items scheduled. Add a date to a work order or maintenance schedule to see it here.
             </div>
           )}
           <div className="grid grid-cols-7 gap-px" style={{ background: 'var(--border)' }}>

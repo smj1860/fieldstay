@@ -627,7 +627,7 @@ describe('properties/actions', () => {
 
       const result = await bulkImportAssets('prop_1', rows)
 
-      expect(result).toEqual({ imported: 0, error: 'Import failed — please try again' })
+      expect(result).toEqual({ imported: 0, error: 'Import failed, please try again' })
       expect(reportError).toHaveBeenCalled()
       expect(supabase.from).not.toHaveBeenCalled()
     })

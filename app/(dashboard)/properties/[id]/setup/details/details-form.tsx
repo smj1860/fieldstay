@@ -142,7 +142,7 @@ export function DetailsForm({
                 value) and this flag tells saveDetails to skip the door-code
                 write entirely rather than treat "absent" as "clear it". */}
             <Input id="door_code" name="door_code" type="text" defaultValue="" disabled
-                   placeholder="Unavailable — existing code left unchanged" />
+                   placeholder="Unavailable, existing code left unchanged" />
             <input type="hidden" name="door_code_unchanged" value="1" />
             <p className="text-xs mt-1" style={{ color: 'var(--accent-amber)' }}>
               The saved door code could not be loaded right now. Saving this form will

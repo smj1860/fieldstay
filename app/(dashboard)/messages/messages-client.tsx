@@ -527,7 +527,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
               {selectedThread.messages.length === 0 && (
                 <div className="flex-1 flex items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-                  No messages yet — say hello.
+                  No messages yet, say hello.
                 </div>
               )}
               {selectedThread.messages.map((m) => {

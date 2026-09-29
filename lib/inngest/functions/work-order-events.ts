@@ -64,7 +64,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         await createPmNotification(supabase, {
           orgId:     org_id,
           type:      'work_order_dispatched',
-          title:     `Work order dispatched — ${dispatchResult.woNumber} · ${dispatchResult.propertyName}`,
+          title:     `Work order dispatched: ${dispatchResult.woNumber} · ${dispatchResult.propertyName}`,
           subtitle:  `${dispatchResult.vendorName} was notified and can sign off via their portal link`,
           href:      `/maintenance/${work_order_id}`,
           severity:  'green',
@@ -171,7 +171,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
               from:    FROM,
               to:      vendor.email,
               replyTo: 'support@fieldstay.app',
-              subject: `${orgName} uses FieldStay — set up your payment account`,
+              subject: `${orgName} uses FieldStay. Set up your payment account`,
               html:    await renderVendorConnectInviteEmail({
                 vendorName:    vendor.name,
                 orgName,
@@ -436,7 +436,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       await createPmNotification(supabase, {
         orgId:     wo.org_id,
         type:      'work_order_complete',
-        title:     `✓ Work Complete — ${wo.title} at ${property?.name}`,
+        title:     `✓ Work Complete: ${wo.title} at ${property?.name}`,
         subtitle:  `${vendor?.name ?? 'Your vendor'} completed this job${photoNote}`,
         href:      `/maintenance/${work_order_id}`,
         severity:  'green',
@@ -494,7 +494,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
         {
           from:    FROM,
           to:      pmEmail,
-          subject: `⚠️ Work order overdue — ${wo.title} at ${property?.name}`,
+          subject: `⚠️ Work order overdue: ${wo.title} at ${property?.name}`,
           html: await renderPmAlert({
             heading:  `Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue`,
             body:     `${wo.title} was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.`,
@@ -586,7 +586,7 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
         {
           from:    FROM,
           to:      vendor.email,
-          subject: `Quote request: ${wo?.title} — ${property?.name}`,
+          subject: `Quote request: ${wo?.title}: ${property?.name}`,
           html,
         },
         { idempotencyKey: `wo-quote-requested-${quote_request_id}` }
@@ -630,12 +630,12 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const vendor   = unwrapJoin(wo.vendors)
       const property = unwrapJoin(wo.properties)
 
-      const quoteNotesSuffix = quote_notes ? ` — ${quote_notes}` : ''
+      const quoteNotesSuffix = quote_notes ? `: ${quote_notes}` : ''
 
       await createPmNotification(supabase, {
         orgId:     org_id,
         type:      'work_order_quote_received',
-        title:     `💬 Quote received — ${wo.title} at ${property?.name}`,
+        title:     `💬 Quote received: ${wo.title} at ${property?.name}`,
         subtitle:  `${vendor?.name ?? 'Your vendor'} quoted $${quoted_amount.toFixed(2)}${quoteNotesSuffix}`,
         href:      `/maintenance/${work_order_id}`,
         severity:  'amber',

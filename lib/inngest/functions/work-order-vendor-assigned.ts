@@ -240,7 +240,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         {
           from:    FROM,
           to:      [vendorEmail.email!],
-          subject: `Work Order ${wo.wo_number ?? ''} — ${propertyName}`,
+          subject: `Work Order ${wo.wo_number ?? ''}: ${propertyName}`,
           html,
         },
         { idempotencyKey: `wo-dispatch-vendor-assigned-${workOrderId}-${vendorId}` }
@@ -309,7 +309,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
       await createPmNotification(supabase, {
         orgId,
         type:      'work_order_dispatched',
-        title:     `Work order dispatched — ${wo.wo_number ?? ''} · ${propertyName}`,
+        title:     `Work order dispatched: ${wo.wo_number ?? ''} · ${propertyName}`,
         subtitle:  `${vendor.name ?? 'The assigned vendor'} was notified and can access job details via their portal link`,
         href:      `/maintenance/${workOrderId}`,
         severity:  'green',

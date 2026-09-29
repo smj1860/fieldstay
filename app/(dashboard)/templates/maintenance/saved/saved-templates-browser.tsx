@@ -52,7 +52,7 @@ export function SavedTemplatesBrowser({
   const selected = templates.find((t) => t.id === selectedId) ?? null
 
   if (templates.length === 0) {
-    return <p className="text-sm text-muted-themed">No templates yet — build one on the Create Template tab.</p>
+    return <p className="text-sm text-muted-themed">No templates yet. Build one on the Create Template tab.</p>
   }
 
   return (

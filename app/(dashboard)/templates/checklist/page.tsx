@@ -8,7 +8,7 @@ import { ApplyToPropertiesButton } from './apply-to-properties-button'
 import { Card } from '@/components/ui/Card'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
-export const metadata: Metadata = { title: 'Turnover Checklist — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Turnover Checklist | Templates | FieldStay' }
 
 interface PropertyOverviewSection {
   id:    string
@@ -80,7 +80,7 @@ export default async function TemplatesChecklistPage() {
       <section>
         <h2 className="section-header">Property Overview</h2>
         <p className="text-sm text-muted-themed mb-3">
-          Status only — to add or remove a room from a specific property, open that property&apos;s own setup page.
+          Status only. To add or remove a room from a specific property, open that property&apos;s own setup page.
         </p>
         <PropertyOverviewTable rows={propertyRows} />
       </section>
@@ -139,7 +139,7 @@ function PropertyOverviewTable({ rows }: Readonly<{ rows: PropertyOverviewRow[] 
                 <span
                   className="inline-flex items-center gap-1 text-xs font-medium"
                   style={{ color: 'var(--accent-amber)' }}
-                  title="0 bedrooms or no bathroom count on file — double-check this property"
+                  title="0 bedrooms or no bathroom count on file, double-check this property"
                 >
                   <AlertTriangle className="w-3.5 h-3.5" />
                   Check bed/bath count

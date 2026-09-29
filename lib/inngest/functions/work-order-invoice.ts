@@ -70,7 +70,7 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
       await resend.emails.send({
         from:    FROM,
         to:      pmEmail,
-        subject: `🧾 Invoice received — ${wo.title} · ${invoice.invoice_number}`,
+        subject: `🧾 Invoice received: ${wo.title} · ${invoice.invoice_number}`,
         html: await renderPmAlert({
           heading:  'Invoice ready for payment',
           body:     `${vendor?.name ?? 'Your vendor'} has completed ${wo.title} and submitted an invoice.`,

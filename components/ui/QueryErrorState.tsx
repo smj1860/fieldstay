@@ -20,7 +20,7 @@ export function QueryErrorState({ label, className = '' }: Readonly<QueryErrorSt
         Couldn&apos;t load {label}.
       </p>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        This is a problem on our end, not an empty list — it has been logged.
+        This is a problem on our end, not an empty list. It has been logged.
         Refresh to try again.
       </p>
     </Card>

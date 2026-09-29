@@ -200,7 +200,7 @@ export async function GET() {
   if (audit.truncated || assignments.truncated) {
     console.warn(
       `[gdpr/export] user ${user.id} hit the ${HISTORY_ROW_CEILING}/series ceiling ` +
-      `(audit_trail=${audit.truncated}, crew_assignments=${assignments.truncated}) — ` +
+      `(audit_trail=${audit.truncated}, crew_assignments=${assignments.truncated}), ` +
       'export returned partial and said so'
     )
   }

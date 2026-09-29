@@ -72,7 +72,7 @@ export async function GET(
   //    e.g. user clicked "Deny" on the provider's authorization screen.
   if (providerError) {
     console.warn(
-      `[OAuth:${providerId}:oneclick] Authorization denied: ${providerError} — ${errorDescription}`
+      `[OAuth:${providerId}:oneclick] Authorization denied: ${providerError}, ${errorDescription}`
     )
     return errorRedirect(providerError)
   }
@@ -114,7 +114,7 @@ export async function GET(
   }
 
   console.log(
-    `[OAuth:${providerId}:oneclick] Authorization code held — exchange deferred until post-signup claim`
+    `[OAuth:${providerId}:oneclick] Authorization code held, exchange deferred until post-signup claim`
   )
 
   // Periodic TTL cleanup of expired never-claimed holds — fire-and-forget,

@@ -137,7 +137,7 @@ function saveButtonLabel(saving: boolean, saved: boolean) {
 
 function continueButtonLabel(continuing: boolean, propertyCount: number | undefined): string {
   if (continuing) return 'Applying…'
-  if (propertyCount) return `Continue — apply to ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'}`
+  if (propertyCount) return `Continue, apply to ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'}`
   return 'Continue'
 }
 
@@ -259,8 +259,8 @@ export function RoomLibraryBuilder({
         <div className="border border-dashed border-themed rounded-xl p-8 text-center">
           <Home className="w-6 h-6 mx-auto mb-2 text-muted-themed" />
           <p className="text-sm text-muted-themed">
-            No room templates yet. Build your first one below — e.g. &quot;Standard Bedroom&quot;
-            or &quot;Standard Bathroom&quot; — then use it when setting up any property&apos;s checklist.
+            No room templates yet. Build your first one below, e.g. &quot;Standard Bedroom&quot;
+            or &quot;Standard Bathroom&quot;, then use it when setting up any property&apos;s checklist.
           </p>
         </div>
       )}
@@ -295,7 +295,7 @@ export function RoomLibraryBuilder({
             value={newRoomName}
             onChange={(e) => setNewRoomName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleCreateRoom() }}
-            placeholder="New room name — e.g. Standard Bedroom"
+            placeholder="New room name, e.g. Standard Bedroom"
             className="input flex-1 text-sm"
           />
           <Button
@@ -408,7 +408,7 @@ function RoomCard({
             <span className="text-xs text-muted-themed">
               Automatically include this room on every property&apos;s checklist
               (for whole-home walkthroughs, not opt-in rooms like bedrooms or
-              bathrooms — those get added per-property via the quantity picker).
+              bathrooms, which get added per-property via the quantity picker).
             </span>
           </label>
 

@@ -260,6 +260,6 @@ describe('hospReviewsBackfill', () => {
     )
     const metadata = (metaUpdate?.args[0] as { metadata: Record<string, unknown> }).metadata
     expect(metadata.last_reviews_backfill_status).toBe('error')
-    expect(metadata.last_reviews_backfill_error).toBe('Hospitable authorization expired — reconnect your account to resume syncing')
+    expect(metadata.last_reviews_backfill_error).toBe('Hospitable authorization expired. Reconnect your account to resume syncing')
   })
 })

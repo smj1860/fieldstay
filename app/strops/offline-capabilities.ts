@@ -25,7 +25,7 @@ export const LOADS_OFFLINE: Capability = {
   title: 'The app opens with no signal at all',
   body:
     'FieldStay installs to the home screen as a PWA with a service worker that caches the app shell. ' +
-    'Screens your crew has opened on that phone come straight back from the device — not a spinner, ' +
+    'Screens your crew has opened on that phone come straight back from the device, not a spinner, ' +
     'not a dinosaur, the actual screen. Static assets are content-hashed and cached permanently.',
   source: 'public/sw.js',
 }
@@ -61,7 +61,7 @@ export const READ_OFFLINE: Capability[] = [
 export const WRITE_OFFLINE: Capability[] = [
   {
     title: 'Tick off checklist items',
-    body: 'Every item, with its completion timestamp — the timestamps duration tracking is built on.',
+    body: 'Every item, with its completion timestamp, the timestamps duration tracking is built on.',
     source: 'checklist_instance_items:PUT / :PATCH',
   },
   {
@@ -88,7 +88,7 @@ export const WRITE_OFFLINE: Capability[] = [
   },
   {
     title: 'Message the office',
-    body: 'Sending queues offline. Reading the thread back needs a connection — see below.',
+    body: 'Sending queues offline. Reading the thread back needs a connection. See below.',
     source: 'messages:PUT',
   },
 ]
@@ -104,7 +104,7 @@ export const RELIABILITY: Capability[] = [
     title: 'A tap cannot be half-saved',
     body:
       'The on-screen change and its queued upload commit in a single IndexedDB transaction. ' +
-      'A phone killed by the OS mid-tap either has both or neither — never a checkbox that looks ticked ' +
+      'A phone killed by the OS mid-tap either has both or neither, never a checkbox that looks ticked ' +
       'but was never queued to send.',
     source: 'lib/dexie/helpers.ts → writeAndQueue()',
   },

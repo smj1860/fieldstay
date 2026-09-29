@@ -202,11 +202,11 @@ export const handleTrialLifecycle = inngest.createFunction(
 
 I'm truly sorry FieldStay wasn't the right fit for you at this time.
 
-I'm not reaching out to sell you on coming back. I genuinely want to know what we could have done better or what feature we were missing — that's it.
+I'm not reaching out to sell you on coming back. I genuinely want to know what we could have done better or what feature we were missing. That's it.
 
 No follow-ups after this. No sales pitch. I just want to build the best product I can and your answer helps me do that.
 
-— Stephen
+Stephen
 
 P.S. If you ever want to give us another shot, your data stays for 30 days. ${appUrl}/billing-wall
 

@@ -246,7 +246,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
           if (!claimed) return { skipped: true, reason: 'already_notified' }
 
           const text =
-            `Stay extension opportunity — ${propName}: guest checks out ` +
+            `Stay extension opportunity at ${propName}: guest checks out ` +
             `${booking?.checkout_date}, ${gapDays} day${gapDays !== 1 ? 's' : ''} ` +
             `before next booking.${discountLine} Guest was messaged via the guidebook.`
 
@@ -289,7 +289,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
           })
 
           const { error } = await resend.emails.send(
-            { from: FROM, to: pmEmail, subject: `Stay Extension Opportunity — ${propName}`, html },
+            { from: FROM, to: pmEmail, subject: `Stay Extension Opportunity: ${propName}`, html },
             { idempotencyKey: `stay-extension-pm-${requestId}` }
           )
           if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)

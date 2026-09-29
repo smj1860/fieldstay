@@ -943,7 +943,7 @@ async function deliverCrewInviteEmail(args: {
     from:    FROM,
     to:      crew.email,
     replyTo: 'help@fieldstay.app',
-    subject: `You've been invited to join ${orgName ?? 'FieldStay'} — crew app access`,
+    subject: `You've been invited to join ${orgName ?? 'FieldStay'} | crew app access`,
     html,
   })
 
@@ -1132,7 +1132,7 @@ async function deliverBulkCrewInvite(args: {
       from:    from,
       to:      crew.email,
       replyTo: 'help@fieldstay.app',
-      subject: `You've been invited to join ${orgName ?? 'FieldStay'} — crew app access`,
+      subject: `You've been invited to join ${orgName ?? 'FieldStay'} | crew app access`,
       html,
     })
     if (!emailError) delivered = true
@@ -1525,7 +1525,7 @@ function checkoutFailureMessage(err: unknown): SettingsActionState {
   if (isStripeConfigFault(err)) {
     return {
       error:
-        'This plan cannot be purchased right now — it is a problem on our side, not with your card. ' +
+        'This plan cannot be purchased right now. It is a problem on our side, not with your card. ' +
         'Email support@fieldstay.app and we will sort it out and get you set up.',
     }
   }
@@ -1576,7 +1576,7 @@ export async function createCheckoutSession(
 
     const propertyCount = activeProperties ?? 0
     if (propertyCount < 1) {
-      return { error: 'Add a property before subscribing — FieldStay bills per property.' }
+      return { error: 'Add a property before subscribing. FieldStay bills per property.' }
     }
     if (propertyCount > MAX_SELF_SERVE_PROPERTIES) {
       return {
@@ -1809,7 +1809,7 @@ export async function saveOrgSmsTemplate(
     // the PM, instead of quietly rewriting what they typed.
     if (!hasOptOutNotice(body)) {
       return {
-        error: 'Every message must tell guests how to opt out — include "STOP" (e.g. "Reply STOP to opt out.").',
+        error: 'Every message must tell guests how to opt out, include "STOP" (e.g. "Reply STOP to opt out.").',
       }
     }
 

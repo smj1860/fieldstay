@@ -6,7 +6,7 @@ import { TeamClient }          from './team-client'
 import { buttonVariantClass }  from '@/components/ui/Button'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
-export const metadata: Metadata = { title: 'Team — FieldStay' }
+export const metadata: Metadata = { title: 'Team | FieldStay' }
 
 export default async function TeamPage() {
   const { user, membership } = await requireOrgMember()

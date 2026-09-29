@@ -192,7 +192,7 @@ export function InventoryView({
           className="flex items-center justify-between gap-2 -mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
           style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
         >
-          <span>Confirmation didn&rsquo;t sync — check your connection.</span>
+          <span>Confirmation didn&rsquo;t sync. Check your connection.</span>
           <button
             type="button"
             className="font-semibold underline flex-shrink-0"

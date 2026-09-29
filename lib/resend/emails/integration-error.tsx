@@ -13,7 +13,7 @@ export function IntegrationErrorEmail({
 }: IntegrationErrorEmailProps) {
   return (
     <EmailLayout
-      preview={`Action required — Your ${providerName} connection needs attention`}
+      preview={`Action required: Your ${providerName} connection needs attention`}
       ctaLabel={`Reconnect ${providerName} →`}
       ctaUrl={reconnectUrl}
       footerNote="You're receiving this because you have an active FieldStay account."

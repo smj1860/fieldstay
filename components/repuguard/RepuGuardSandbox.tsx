@@ -426,7 +426,7 @@ export default function RepuGuardSandbox() {
                             marginBottom: 2,
                           }}
                         >
-                          FLAGGED —{" "}
+                          FLAGGED:{" "}
                           {scenario.flags
                             .map((f) => f.toUpperCase())
                             .join(", ")}
@@ -509,7 +509,7 @@ export default function RepuGuardSandbox() {
                         fontStyle: "italic",
                       }}
                     >
-                      Review before posting — you&apos;re always in control
+                      Review before posting, you&apos;re always in control
                     </span>
                     <div
                       style={{

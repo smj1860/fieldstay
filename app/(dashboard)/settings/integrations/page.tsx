@@ -9,7 +9,7 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import type { IcalFeedRow }    from '@/lib/integrations/health'
 
-export const metadata: Metadata = { title: 'Integrations — FieldStay' }
+export const metadata: Metadata = { title: 'Integrations | FieldStay' }
 
 // Fixed platform registry (a handful of providers today); the explicit bound
 // documents that and keeps it out of the unbounded-select class.

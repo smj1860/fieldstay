@@ -388,7 +388,7 @@ function VisibilityToggle({ txn }: { txn: Transaction }) {
       variant="ghost"
       onClick={toggle}
       disabled={pending}
-      title={txn.visible_to_owner ? 'Visible to owner — click to hide' : 'Hidden from owner — click to show'}
+      title={txn.visible_to_owner ? 'Visible to owner, click to hide' : 'Hidden from owner, click to show'}
       className={cn(
         'p-1 disabled:opacity-40',
         txn.visible_to_owner ? 'text-green-600 hover:text-green-700' : 'text-muted-themed hover:text-secondary-themed'
@@ -764,7 +764,7 @@ function OwnerCard({
       formData.set('transaction_type', 'revenue')
       formData.set('category',         'booking_revenue')
       formData.set('amount',           String(amount))
-      formData.set('description',      `Monthly revenue — ${monthLabel} (manual entry)`)
+      formData.set('description',      `Monthly revenue, ${monthLabel} (manual entry)`)
       formData.set('transaction_date', txnDate)
       const result = await addOwnerTransaction(null, formData)
       if (!result?.error) {
@@ -816,7 +816,7 @@ function OwnerCard({
       <div className="mt-3 pt-3 border-t border-themed">
         <label htmlFor="monthly-revenue-amount" className="label text-xs">
           Monthly Revenue ($)
-          <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
+          <span className="text-muted-themed font-normal ml-1">enter before sharing portal link</span>
         </label>
         <div className="flex gap-2 flex-wrap">
           <Input
@@ -955,7 +955,7 @@ export function OwnersManager({
       {multiPropertyGroups.length > 0 && (
         <div className="mb-6">
           <h2 className="text-sm font-semibold text-secondary-themed mb-2">
-            Multi-Property Owners — Combined Portfolio Links
+            Multi-Property Owners: Combined Portfolio Links
           </h2>
           <div className="space-y-3">
             {multiPropertyGroups.map((group) => (

@@ -107,8 +107,7 @@ export default async function ChecklistPage({ params }: Props) {
         This property&apos;s checklist was already built automatically from its
         bedroom/bathroom count and the standard rooms (Whole Home, Kitchen,
         Living Room). Use this screen to add a room this property has that
-        wasn&apos;t auto-included, or remove one it doesn&apos;t actually have —
-        e.g. no Living Room.
+        wasn&apos;t auto-included, or remove one it doesn&apos;t actually have, e.g. no Living Room.
       </p>
       <ChecklistBuilder
         propertyId={property.id}

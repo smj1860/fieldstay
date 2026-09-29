@@ -569,7 +569,7 @@ function useBookingFilters(): BookingFilters {
 function ConnectionPill({ connection }: Readonly<{ connection: ConnectionRow }>) {
   const isHealthy = connection.status === 'active'
   const lastSynced = connection.last_used_at
-    ? ` — last synced ${new Date(connection.last_used_at).toLocaleString()}`
+    ? `, last synced ${new Date(connection.last_used_at).toLocaleString()}`
     : ''
   const lastSyncError = asJsonObject(connection.metadata)?.last_sync_error
   const syncError = typeof lastSyncError === 'string' ? lastSyncError : 'connection needs attention'
@@ -732,7 +732,7 @@ function BookingsHeader({
           )}
         </div>
         <p className="page-subtitle">
-          Log bookings not synced automatically — direct, social media, or phone.
+          Log bookings not synced automatically: direct, social media, or phone.
           Connected accounts sync in real time via webhook, with a backup sync
           every 30 minutes.
         </p>
@@ -857,7 +857,7 @@ export function BookingsClient({
           }}
         >
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-          <span className="text-sm font-medium">Booking added — a turnover will be generated automatically.</span>
+          <span className="text-sm font-medium">Booking added. A turnover will be generated automatically.</span>
         </div>
       )}
 

@@ -71,7 +71,7 @@ export default async function SyncIncidentsPage({
       </div>
       <p className="text-xs mb-6" style={{ color: 'var(--text-muted)' }}>
         Every row here is a device-reported dead-letter or stalled sync, never
-        something a person entered by hand — a monitoring signal for crew sync
+        something a person entered by hand, a monitoring signal for crew sync
         reliability, not a customer-facing claim.
       </p>
 

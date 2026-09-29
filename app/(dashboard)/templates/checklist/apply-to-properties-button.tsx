@@ -32,14 +32,14 @@ export function ApplyToPropertiesButton({ propertyIds }: Readonly<Props>) {
             : `Apply room library to all ${propertyIds.length} propert${propertyIds.length === 1 ? 'y' : 'ies'}`}
         </Button>
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Pushes any auto-include rooms onto every active property&apos;s checklist —
+          Pushes any auto-include rooms onto every active property&apos;s checklist,
           useful after adding or changing a room template.
         </span>
       </div>
       {result?.error && <InlineAlert tone="error">{result.error}</InlineAlert>}
       {result?.queued !== undefined && (
         <InlineAlert tone="success">
-          Queued for {result.queued} propert{result.queued === 1 ? 'y' : 'ies'} — this runs in the background.
+          Queued for {result.queued} propert{result.queued === 1 ? 'y' : 'ies'}. This runs in the background.
         </InlineAlert>
       )}
     </div>

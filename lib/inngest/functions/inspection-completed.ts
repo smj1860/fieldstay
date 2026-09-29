@@ -612,7 +612,7 @@ function buildDescription(
     // open one" is the most that can be claimed without risking filing a real
     // fault as a footnote on an unrelated job.
     const since = prior.created_at.slice(0, 10)
-    const ref = prior.wo_number ? `${prior.wo_number} — ` : ''
+    const ref = prior.wo_number ? `${prior.wo_number}: ` : ''
     lines.push('', `⚠️ A work order for this item is already open since ${since}: ${ref}${prior.title}`)
   }
 
@@ -665,7 +665,7 @@ async function createCleaningWorkOrder(
   const { error } = await supabase.from('work_orders').insert({
     org_id:      orgId,
     property_id: propertyId,
-    title:       `Cleaning — ${items.length} ${items.length === 1 ? 'item' : 'items'} from an inspection`,
+    title:       `Cleaning: ${items.length} ${items.length === 1 ? 'item' : 'items'} from an inspection`,
     description: buildCleaningDescription(items),
     category:    'cleaning' as const,
     priority:    'medium' as const,
@@ -804,8 +804,8 @@ function cleanerReasoning(cleaners: Cleaner[]): string {
   const names = cleaners.map((c) => c.name).join(' & ')
   const when  = cleaners[0]!.when
   return when
-    ? `${names} — last cleaned this property on ${when}`
-    : `${names} — last cleaned this property`
+    ? `${names}, last cleaned this property on ${when}`
+    : `${names}, last cleaned this property`
 }
 
 function buildCleaningDescription(items: FailedItem[]): string {
@@ -813,7 +813,7 @@ function buildCleaningDescription(items: FailedItem[]): string {
 
   for (const item of items.slice(0, MAX_LISTED_CLEANING_ITEMS)) {
     const detail = item.note?.trim()
-    lines.push(detail ? `• ${item.prompt_snapshot} — ${detail}` : `• ${item.prompt_snapshot}`)
+    lines.push(detail ? `• ${item.prompt_snapshot}: ${detail}` : `• ${item.prompt_snapshot}`)
   }
 
   const elided = items.length - MAX_LISTED_CLEANING_ITEMS

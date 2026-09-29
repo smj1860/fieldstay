@@ -33,8 +33,8 @@ const CREW_DICT = {
 
   dashboardWelcomePrefix:       { en: 'Welcome,', es: 'Bienvenido,' },
   dashboardLoading:             { en: 'Loading your assignments…', es: 'Cargando tus asignaciones…' },
-  dashboardLoadError:           { en: "Couldn't load your assignments — check your connection and pull to refresh.", es: 'No se pudieron cargar tus asignaciones — revisa tu conexión y desliza para actualizar.' },
-  dashboardCaughtUp:            { en: "You're all caught up — no active assignments.", es: 'Estás al día — no tienes asignaciones activas.' },
+  dashboardLoadError:           { en: "Couldn't load your assignments. Check your connection and pull to refresh.", es: 'No se pudieron cargar tus asignaciones. Revisa tu conexión y desliza para actualizar.' },
+  dashboardCaughtUp:            { en: "You're all caught up, no active assignments.", es: 'Estás al día, no tienes asignaciones activas.' },
   dashboardTodaysTurnovers:     { en: "Today's Turnovers", es: 'Rotaciones de hoy' },
   dashboardUpcoming:            { en: 'Upcoming', es: 'Próximas' },
   dashboardNoTodaysTurnovers:   { en: "No today's turnovers", es: 'Sin rotaciones para hoy' },
@@ -86,7 +86,7 @@ const CREW_DICT = {
   discoveryNotApplicable:     { en: "This property doesn't have one", es: 'Esta propiedad no tiene uno' },
   discoveryErrorGeneric:      { en: 'Could not save. Check your connection and try again.', es: 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.' },
   discoveryErrorRequired:     { en: 'Add a make/model, a photo, or mark this as not applicable.', es: 'Agrega una marca/modelo, una foto, o márcalo como no aplicable.' },
-  discoverySuccessScanQueued: { en: "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment.", es: 'Bien guardado. Estamos leyendo la foto ahora — la marca y el modelo se completarán automáticamente en un momento.' },
+  discoverySuccessScanQueued: { en: "Asset saved. We're reading the photo now, and make and model will fill in automatically in a moment.", es: 'Bien guardado. Estamos leyendo la foto ahora, y la marca y el modelo se completarán automáticamente en un momento.' },
   discoverySuccessSimple:     { en: 'Asset details saved.', es: 'Detalles del bien guardados.' },
 
   syncChecklistTaskUpdate:         { en: 'Checklist task update', es: 'Actualización de tarea de la lista' },
@@ -129,13 +129,13 @@ const CREW_DICT = {
   offlineBody: {
     en: 'Your assignments and checklists are saved on your device. '
       + 'You can complete turnovers and check off tasks without a '
-      + 'signal — everything syncs automatically when you reconnect.',
+      + 'signal, and everything syncs automatically when you reconnect.',
     es: 'Tus asignaciones y listas de verificación están guardadas en tu dispositivo. '
       + 'Puedes completar rotaciones y marcar tareas sin '
-      + 'señal — todo se sincroniza automáticamente cuando te reconectas.',
+      + 'señal, y todo se sincroniza automáticamente cuando te reconectas.',
   },
 
-  faqTitle:    { en: 'FieldStay Crew App — FAQ', es: 'FieldStay Crew App — Preguntas frecuentes' },
+  faqTitle:    { en: 'FieldStay Crew App: FAQ', es: 'FieldStay Crew App: Preguntas frecuentes' },
   faqNeedHelp: { en: 'Need help?', es: '¿Necesitas ayuda?' },
 
   done: { en: 'Done', es: 'Listo' },

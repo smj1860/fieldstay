@@ -535,7 +535,7 @@ function WorkOrderCard({
               </span>
               {wo.suggestion_reasoning && (
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
-                  — {wo.suggestion_reasoning}
+                  {wo.suggestion_reasoning}
                 </span>
               )}
               <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">

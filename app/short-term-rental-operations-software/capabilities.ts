@@ -89,7 +89,7 @@ export const SELF_SERVE_CEILING = MAX_SELF_SERVE_PROPERTIES
 export const DEFINITION =
   'FieldStay is short-term rental operations software: the layer that runs turnovers, crew ' +
   'scheduling, maintenance, inventory and vendor work orders after a booking is made. It does not ' +
-  'replace a property management system — it connects to the one you already run (OwnerRez, ' +
+  'replace a property management system. It connects to the one you already run (OwnerRez, ' +
   'Hospitable, Hostaway) and takes over the field work those systems leave to spreadsheets and ' +
   'group texts.'
 
@@ -99,7 +99,7 @@ export const PILLARS: Pillar[] = [
     heading: 'The crew shows up already knowing the plan.',
     claim:
       'A checkout, a maintenance schedule or an inspection window creates the job itself, and the job ' +
-      'routes to the nearest crew member with room in their workload — no dispatcher, no group text.',
+      'routes to the nearest crew member with room in their workload, no dispatcher, no group text.',
     items: [
       {
         title: 'Automatic job assignment by proximity and workload',
@@ -113,13 +113,13 @@ export const PILLARS: Pillar[] = [
         title: 'An offline-first crew app',
         body:
           'Checklists, photos, inventory counts and turnover completion all work with no cell service and ' +
-          'sync themselves when the phone finds a bar. Not a read-only cache — the full job, start to finish.',
+          'sync themselves when the phone finds a bar. Not a read-only cache, but the full job, start to finish.',
         source: 'lib/dexie/* · public/sw.js',
       },
       {
         title: 'Scheduled maintenance that fires itself',
         body:
-          'Recurring service — filters, batteries, deep cleans — creates its own work order on schedule and ' +
+          'Recurring service (filters, batteries, deep cleans) creates its own work order on schedule and ' +
           'selects the vendor, weekly through annual.',
         source: 'maintenance_schedules.auto_create_wo (default true) · schedule_frequency',
       },
@@ -137,7 +137,7 @@ export const PILLARS: Pillar[] = [
     heading: 'Every appliance has a paper trail.',
     claim:
       'FieldStay keeps a per-asset ledger with a health score, a depreciation schedule and photo evidence ' +
-      'from every visit — the documentation you want before a warranty dispute or a tax filing, not after.',
+      'from every visit, the documentation you want before a warranty dispute or a tax filing, not after.',
     items: [
       {
         title: 'Photo-verified inspections',
@@ -149,7 +149,7 @@ export const PILLARS: Pillar[] = [
       {
         title: 'Asset health and replacement forecasting',
         body:
-          'Twenty-one asset types — HVAC, water heaters, roofs, pool pumps, septic systems and the rest — ' +
+          'Twenty-one asset types (HVAC, water heaters, roofs, pool pumps, septic systems and the rest), ' +
           'each with lifespan ranges and replacement costs, scored 0 to 100 so you see what is aging toward ' +
           'failure while it is still a plan rather than an emergency.',
         source: 'asset_type_standards (21 rows) · property_assets.health_score',
@@ -165,7 +165,7 @@ export const PILLARS: Pillar[] = [
         title: 'Par-level inventory with automatic restocking',
         body:
           'Supply levels tracked against per-property thresholds. Drop below par and the restock cart builds ' +
-          'itself — counts are fractional, so half a case is half a case.',
+          'itself, and counts are fractional, so half a case is half a case.',
         source: 'inventory_items.par_level · lib/inventory/quantity.ts · Kroger cart automation',
       },
       {
@@ -182,15 +182,15 @@ export const PILLARS: Pillar[] = [
     heading: 'Local businesses fund your guidebook. Literally.',
     claim:
       `Your guest guidebook carries local sponsors. Each pays ${dollars(SPONSOR_PRICE_CENTS)} a month, and ` +
-      `${dollars(CREDIT_PER_SPONSOR_CENTS)} of that credits straight against your FieldStay bill — from the ` +
+      `${dollars(CREDIT_PER_SPONSOR_CENTS)} of that credits straight against your FieldStay bill, from the ` +
       'first sponsor, with no threshold to clear and no cap on how many you sign. Enough of them and your ' +
       'bill reaches zero.',
     items: [
       {
         title: 'A turnkey sponsor media kit',
         body:
-          'FieldStay generates the pitch — a print-ready one-pager for restaurants, activity companies and ' +
-          'rental shops — so selling a slot is a conversation, not a design project. Every slot gets its own ' +
+          'FieldStay generates the pitch, a print-ready one-pager for restaurants, activity companies and ' +
+          'rental shops, so selling a slot is a conversation, not a design project. Every slot gets its own ' +
           'link that previews the listing and lets the business subscribe on the spot.',
         source: 'guidebook_sponsors.media_kit_token',
       },
@@ -198,7 +198,7 @@ export const PILLARS: Pillar[] = [
         title: `${dollars(SPONSOR_PRICE_CENTS)} per sponsor, ${dollars(CREDIT_PER_SPONSOR_CENTS)} back to you, no ceiling`,
         body:
           'A flat one-third revenue share, credited automatically on your invoice every billing cycle. No ' +
-          'tiers, no minimum, and no limit on sponsor count — the only cap is your own plan cost, because ' +
+          'tiers, no minimum, and no limit on sponsor count, and the only cap is your own plan cost, because ' +
           'the credit stops once your bill reaches zero rather than accruing a balance.',
         source: 'lib/guidebook/helpers.ts → resolvePlanCredit()',
       },
@@ -207,7 +207,7 @@ export const PILLARS: Pillar[] = [
         body:
           `Each property shows up to ${MAX_SPONSORS_PER_PROPERTY} local businesses, so a portfolio of ` +
           `${BREAK_EVEN_PROPERTIES} properties has room for ${BREAK_EVEN_PROPERTIES * MAX_SPONSORS_PER_PROPERTY} ` +
-          `sponsors — exactly what it takes to cover a ${BREAK_EVEN_PROPERTIES}-property plan in full. Past ` +
+          `sponsors, exactly what it takes to cover a ${BREAK_EVEN_PROPERTIES}-property plan in full. Past ` +
           'that the ratio improves: bigger portfolios need fewer sponsors per property to reach zero.',
         source: 'MAX_SPONSORS_PER_PROPERTY · sponsorsToCoverPlan()',
       },
@@ -244,7 +244,7 @@ export const TURNOVER_STEPS: ReadonlyArray<{ name: string; text: string }> = [
   {
     name: 'The crew completes it in the field',
     text:
-      'Checklists, photos and inventory counts are captured on site — working with no cell service if the ' +
+      'Checklists, photos and inventory counts are captured on site, working with no cell service if the ' +
       'property has none.',
   },
   {
@@ -270,7 +270,7 @@ export const BOUNDARIES: ReadonlyArray<{ q: string; a: string }> = [
     q: 'It is not a booking platform or channel manager.',
     a:
       'FieldStay does not list your properties, take reservations or manage rates. It connects to the ' +
-      'system that does — OwnerRez, Hospitable, Hostaway, or a plain iCal feed from Airbnb and VRBO.',
+      'system that does: OwnerRez, Hospitable, Hostaway, or a plain iCal feed from Airbnb and VRBO.',
   },
   {
     q: 'It is not a guest-messaging suite.',

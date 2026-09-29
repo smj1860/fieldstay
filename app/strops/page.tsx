@@ -159,7 +159,7 @@ export default function OfflineTurnoverAppPage() {
           </p>
           <p className="text-base text-[var(--mkt-on-dark-soft)] max-w-2xl mx-auto mb-9">
             Checklists, photos, inventory counts and turnover completion all work offline.
-            Everything syncs itself the moment the phone finds a bar — no sync button, nothing lost.
+            Everything syncs itself the moment the phone finds a bar, no sync button, nothing lost.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
@@ -268,7 +268,7 @@ export default function OfflineTurnoverAppPage() {
             Try it somewhere with no signal.
           </h2>
           <p className="text-[var(--mkt-on-dark-softer)] mb-8">
-            Genuinely — that is the test. Install it, put the phone in airplane mode, and run a
+            Genuinely, that is the test. Install it, put the phone in airplane mode, and run a
             turnover. Fourteen days free, no credit card.
           </p>
           <Link

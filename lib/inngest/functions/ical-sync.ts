@@ -498,7 +498,7 @@ export const syncIcalFeed = inngest.createFunction(
           {
             from:    FROM,
             to:      pmEmail,
-            subject: `⚠️ Possible double-booking — ${property?.name ?? 'a property'}`,
+            subject: `⚠️ Possible double-booking: ${property?.name ?? 'a property'}`,
             html: await renderPmAlert({
               heading: 'Possible double-booking detected',
               body:    `${newConflicts.length} confirmed booking${newConflicts.length !== 1 ? 's' : ''} at ${property?.name ?? 'this property'} overlap another confirmed booking. Review before guests arrive.`,

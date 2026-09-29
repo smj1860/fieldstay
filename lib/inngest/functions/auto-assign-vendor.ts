@@ -232,7 +232,7 @@ export const autoAssignVendor = inngest.createFunction(
     if (top.breakdown.workload    > 0.8)  reasons.push('light workload')
 
     const reasoning = reasons.length
-      ? `${top.name} — ${reasons.join(', ')}`
+      ? `${top.name}: ${reasons.join(', ')}`
       : top.name
 
     await step.run('write-suggestion', async () => {

@@ -126,7 +126,7 @@ export const SAFETY_FORM: FormDefinition = {
         },
         {
           key:    'safety.fire.co_present',
-          prompt: 'CO alarms on every level and within 10 ft of each sleeping area — required wherever there is a fuel-burning appliance, fireplace or attached garage',
+          prompt: 'CO alarms on every level and within 10 ft of each sleeping area: required wherever there is a fuel-burning appliance, fireplace or attached garage',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'electrical', wo_priority: 'urgent',
           concern_key: 'co_detector_present',
@@ -284,7 +284,7 @@ export const SAFETY_FORM: FormDefinition = {
           // 911 from a house they arrived at in the dark frequently cannot say
           // where they are.
           key:    'safety.fire.evacuation_plan',
-          prompt: 'Evacuation diagram posted at the main exit — floor layout, exit routes, extinguisher and first-aid locations, the property address, and emergency contacts',
+          prompt: 'Evacuation diagram posted at the main exit: floor layout, exit routes, extinguisher and first-aid locations, the property address, and emergency contacts',
           remediation: 'purchase_order', default_actions: ['replace'],
         },
         {
@@ -325,7 +325,7 @@ export const SAFETY_FORM: FormDefinition = {
         },
         {
           key:    'safety.electrical_gas.gas_appliances',
-          prompt: 'Gas appliances — furnace, water heater, range — leak-checked, vented, no odour',
+          prompt: 'Gas appliances (furnace, water heater, range): leak-checked, vented, no odour',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'general', wo_priority: 'urgent',
           concern_key: 'gas_appliance_safe',
@@ -337,7 +337,7 @@ export const SAFETY_FORM: FormDefinition = {
           // reaches one. Same urgency class as 17 for the same reason: a gas
           // risk is life-safety, not maintenance.
           key:    'safety.electrical_gas.gas_line_integrity',
-          prompt: 'Gas supply line intact — no corrosion, damage, or exposed fittings; shut-off valve accessible and labelled',
+          prompt: 'Gas supply line intact: no corrosion, damage, or exposed fittings; shut-off valve accessible and labelled',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'general', wo_priority: 'urgent',
           concern_key: 'gas_line_integrity',
@@ -359,7 +359,7 @@ export const SAFETY_FORM: FormDefinition = {
           // property silent about gas detection — the walk most likely to be
           // the one before a permit inspection.
           key:    'safety.electrical_gas.gas_detector',
-          prompt: 'Combustible-gas detector fitted near each fuel-burning appliance — mounted low for propane, high for natural gas',
+          prompt: 'Combustible-gas detector fitted near each fuel-burning appliance: mounted low for propane, high for natural gas',
           remediation: 'purchase_order', default_actions: ['replace'],
           wo_priority: 'high',
           concern_key: 'gas_detector',
@@ -388,7 +388,7 @@ export const SAFETY_FORM: FormDefinition = {
       items: [
         {
           key:    'safety.structural.handrails',
-          prompt: 'Handrail on every flight of four or more risers — graspable, secure, full length; treads slip-resistant and clear',
+          prompt: 'Handrail on every flight of four or more risers: graspable, secure, full length; treads slip-resistant and clear',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural', wo_priority: 'high',
           concern_key: 'handrail_secure',
@@ -402,14 +402,14 @@ export const SAFETY_FORM: FormDefinition = {
         },
         {
           key:    'safety.structural.flooring',
-          prompt: 'Flooring sound — no torn carpet, loose tile or warped boards',
+          prompt: 'Flooring sound: no torn carpet, loose tile or warped boards',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'flooring',
           concern_key: 'flooring_sound',
         },
         {
           key:    'safety.structural.deck_guardrail',
-          prompt: 'Guardrails wherever a walking surface sits more than 30in above grade — at least 36in high, spindles under 4in apart, posts and ledger secure',
+          prompt: 'Guardrails wherever a walking surface sits more than 30in above grade: at least 36in high, spindles under 4in apart, posts and ledger secure',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural', wo_priority: 'urgent',
           asset_type: 'deck_structure',
@@ -550,7 +550,7 @@ export const SAFETY_FORM: FormDefinition = {
           // depends on belongs here, and shares a concern_key with its Outdoor
           // twin so the two askings are one job.
           key:    'safety.exterior_amenity.address_numbers',
-          prompt: 'House numbers legible from the street day and night — at least 4in high, contrasting with their background',
+          prompt: 'House numbers legible from the street day and night: at least 4in high, contrasting with their background',
           remediation: 'purchase_order', default_actions: ['replace'],
           concern_key: 'address_visible',
         },
@@ -621,7 +621,7 @@ export const SAFETY_FORM: FormDefinition = {
           // that require a permit number in the advertisement check it from a
           // desk, on the platform, without visiting the property at all.
           key:    'safety.permits.permit_number_displayed',
-          prompt: 'Permit or licence number displayed as the ordinance requires — posted inside and shown in every listing',
+          prompt: 'Permit or licence number displayed as the ordinance requires: posted inside and shown in every listing',
           remediation: 'notify', default_actions: [],
         },
         {

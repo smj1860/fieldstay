@@ -33,7 +33,7 @@ export function buildJsonLd(marketingUrl: string) {
           'Short-term rental operations platform: offline-first crew app, no-login vendor work orders, ' +
           'graduated per-property pricing published up to 150 properties with no sales call required.',
         featureList: [
-          'Offline-first crew PWA — no app store install',
+          'Offline-first crew PWA, no app store install',
           'No-login, no-app vendor work order portal',
           'Published graduated pricing, calculable up to 150 properties',
           'Owner P&L portal',

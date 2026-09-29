@@ -57,7 +57,7 @@ export const sendSubscriberCheckin = inngest.createFunction(
           subject: 'checking in',
           text: `Hi ${first_name},
 
-You've been on FieldStay for a few weeks now and I wanted to reach out personally — how's it going?
+You've been on FieldStay for a few weeks now and I wanted to reach out personally. How's it going?
 
 ${propertyLine}, but I'd love to ask you one thing.
 
@@ -65,7 +65,7 @@ If you could add one feature to FieldStay that would make your day-to-day easier
 
 We're building fast and your feedback goes directly into what we prioritize next.
 
-— Stephen
+Stephen
 
 P.S. If you ever hit a snag or have a question, just reply here. I'm reachable.`,
         },

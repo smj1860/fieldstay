@@ -113,7 +113,7 @@ function isoFirstOfMonth(year: number, month: number): string {
 export function describeSafetyTemplate(template: SafetyTemplate): string {
   const names = templateMonths(template).map((m) => MONTH_NAMES[m - 1])
   const cadence = template.frequency === 'annual' ? 'Once a year' : 'Twice a year'
-  return `${cadence} — ${names.join(' and ')}`
+  return `${cadence}: ${names.join(' and ')}`
 }
 
 export const MONTH_NAMES = [

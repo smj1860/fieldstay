@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name:             'FieldStay Crew',
     short_name:       'FieldStay',
-    description:      'FieldStay crew management — turnovers, checklists, messaging',
+    description:      'FieldStay crew management: turnovers, checklists, messaging',
     start_url:        '/crew',
     scope:            '/crew',
     display:          'standalone',

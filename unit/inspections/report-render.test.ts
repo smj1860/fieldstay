@@ -126,8 +126,8 @@ describe('attachmentLine — the line that must never be printed unconditionally
   })
 
   it('claims an appended log only when one is appended', () => {
-    expect(attachmentLine(true, 3, 3)).toBe('Photo log appended — 3 photographs')
-    expect(attachmentLine(true, 1, 1)).toBe('Photo log appended — 1 photograph')
+    expect(attachmentLine(true, 3, 3)).toBe('Photo log appended: 3 photographs')
+    expect(attachmentLine(true, 1, 1)).toBe('Photo log appended: 1 photograph')
   })
 
   it('admits a PARTIAL log rather than overstating it', () => {
@@ -135,7 +135,7 @@ describe('attachmentLine — the line that must never be printed unconditionally
     // bucket. Printing "3 photographs" over a log holding 2 is the same class
     // of false claim as the owner case above.
     expect(attachmentLine(true, 3, 2))
-      .toBe('Photo log appended — 2 of 3 photographs (1 could not be retrieved)')
+      .toBe('Photo log appended: 2 of 3 photographs (1 could not be retrieved)')
     expect(attachmentLine(true, 3, 0))
       .toBe('3 photographs on file; none could be retrieved for this copy')
   })
@@ -229,7 +229,7 @@ describe('remediationLine', () => {
     // suspicious.
     expect(remediationLine(answer({
       remediation: { kind: 'work_order', reference: 'WO-2026-0031', status: 'in_progress' },
-    }))).toBe('Work order WO-2026-0031 — In progress as of report date')
+    }))).toBe('Work order WO-2026-0031, In progress as of report date')
   })
 
   it('is silent when nothing was raised', () => {

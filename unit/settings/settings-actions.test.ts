@@ -739,7 +739,7 @@ describe('settings/actions', () => {
       const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({
-        error: 'Add a property before subscribing — FieldStay bills per property.',
+        error: 'Add a property before subscribing. FieldStay bills per property.',
       })
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()

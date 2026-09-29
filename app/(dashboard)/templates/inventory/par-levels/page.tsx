@@ -18,7 +18,7 @@ interface ParLevelItem {
   preferred_brand:    string | null
 }
 
-export const metadata: Metadata = { title: 'Par Levels — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Par Levels | Templates | FieldStay' }
 
 export default async function ParLevelsPage() {
   const { supabase, membership } = await requireOrgMember()

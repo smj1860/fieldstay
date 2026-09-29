@@ -66,7 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const rows: string[] = ['Timestamp,Type,Title,Detail,Actor']
   if (omittedCount > 0) {
-    rows.push(csvField(`Showing ${events.length} of ${totalCount} events in this range — narrow the date range to see the rest.`))
+    rows.push(csvField(`Showing ${events.length} of ${totalCount} events in this range. Narrow the date range to see the rest.`))
   }
   for (const event of events) {
     rows.push([

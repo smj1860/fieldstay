@@ -302,7 +302,7 @@ export async function loadPropertyHistory(params: LoadParams): Promise<PropertyH
     })),
     ...woUpdateRows.map((row): PropertyHistoryEvent => {
       const wo = one(row.work_orders)
-      const label = wo?.wo_number ? `${wo.wo_number} — ${wo.title}` : (wo?.title ?? 'Work order')
+      const label = wo?.wo_number ? `${wo.wo_number}: ${wo.title}` : (wo?.title ?? 'Work order')
       return {
         type:       'work_order_update',
         occurredAt: row.created_at,
@@ -316,7 +316,7 @@ export async function loadPropertyHistory(params: LoadParams): Promise<PropertyH
     }),
     ...woPhotoRows.map((row): PropertyHistoryEvent => {
       const wo = one(row.work_orders)
-      const label = wo?.wo_number ? `${wo.wo_number} — ${wo.title}` : (wo?.title ?? 'Work order')
+      const label = wo?.wo_number ? `${wo.wo_number}: ${wo.title}` : (wo?.title ?? 'Work order')
       return {
         type:             'work_order_photo',
         occurredAt:       row.created_at,

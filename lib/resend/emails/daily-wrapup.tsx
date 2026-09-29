@@ -128,7 +128,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading={`Tomorrow's turnovers (${tomorrow.length})`}>
           {tomorrow.map((t, i) => (
             <Text key={i} style={lineStyle}>
-              {t.property} — {t.time} — crew: {t.crew}
+              {t.property}, {t.time}, crew: {t.crew}
             </Text>
           ))}
         </SectionWrapper>
@@ -138,7 +138,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Open discovery checklist items">
           {checklist.map((c) => (
             <Text key={c.propertyId} style={lineStyle}>
-              {c.propertyName} — {c.openCount} open item{c.openCount !== 1 ? 's' : ''}
+              {c.propertyName}, {c.openCount} open item{c.openCount !== 1 ? 's' : ''}
               {c.isNew && <NewTag />}
             </Text>
           ))}
@@ -149,7 +149,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Lowest asset health scores this week">
           {assetHealth.map((a, i) => (
             <Text key={i} style={lineStyle}>
-              {a.propertyName} — {a.score}/100
+              {a.propertyName}, {a.score}/100
             </Text>
           ))}
         </SectionWrapper>
@@ -159,7 +159,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Vendor compliance docs expiring soon">
           {compliance.map((c, i) => (
             <Text key={i} style={lineStyle}>
-              {c.vendorName} — {c.docType.replace(/_/g, ' ')} — expires {new Date(c.expiryDate).toLocaleDateString()}
+              {c.vendorName}, {c.docType.replace(/_/g, ' ')}, expires {new Date(c.expiryDate).toLocaleDateString()}
               {c.isNew && <NewTag />}
             </Text>
           ))}
@@ -170,12 +170,12 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Maintenance">
           {maintenance.due.map((d, i) => (
             <Text key={`due-${i}`} style={lineStyle}>
-              Due today: {d.name} — {d.property}
+              Due today: {d.name}, {d.property}
             </Text>
           ))}
           {maintenance.unassigned.map((wo, i) => (
             <Text key={`unassigned-${i}`} style={lineStyle}>
-              Unassigned WO {wo.woNumber}: {wo.title} — {wo.property}
+              Unassigned WO {wo.woNumber}: {wo.title}, {wo.property}
               {wo.suggested ? ` (suggested: ${wo.suggested})` : ''}
             </Text>
           ))}
@@ -186,7 +186,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Escalated to Urgent in the last 24h">
           {escalations.map((e, i) => (
             <Text key={i} style={lineStyle}>
-              {e.woNumber}: {e.title} — {e.property}
+              {e.woNumber}: {e.title}, {e.property}
             </Text>
           ))}
         </SectionWrapper>
@@ -196,7 +196,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Vacancy gaps in the week ahead">
           {vacancy.map((v, i) => (
             <Text key={i} style={lineStyle}>
-              {v.propertyName} — {v.gapDays}-day gap starting {new Date(v.gapStart).toLocaleDateString()}
+              {v.propertyName}, {v.gapDays}-day gap starting {new Date(v.gapStart).toLocaleDateString()}
             </Text>
           ))}
         </SectionWrapper>
@@ -206,7 +206,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Repeat maintenance issues">
           {repeatIssues.map((r, i) => (
             <Text key={i} style={lineStyle}>
-              {r.propertyName} — {r.category.replace(/_/g, ' ')} ({r.count}x in 90 days)
+              {r.propertyName}, {r.category.replace(/_/g, ' ')} ({r.count}x in 90 days)
             </Text>
           ))}
         </SectionWrapper>
@@ -216,7 +216,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Turnovers still unassigned">
           {unassignedTurnovers.map((t, i) => (
             <Text key={i} style={lineStyle}>
-              {t.property} — checkout {new Date(t.checkout).toLocaleString('en-US', {
+              {t.property}, checkout {new Date(t.checkout).toLocaleString('en-US', {
                 month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
               })}
             </Text>
@@ -237,7 +237,7 @@ export function DailyWrapUpEmail({
         <SectionWrapper heading="Inventory restock needed today">
           {inventory.map((po, i) => (
             <Text key={i} style={lineStyle}>
-              {po.property} — {po.items.join(', ')}
+              {po.property}, {po.items.join(', ')}
             </Text>
           ))}
         </SectionWrapper>

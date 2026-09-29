@@ -4,7 +4,7 @@ import { seedOrgInventoryCatalogIfNeeded } from '@/lib/inventory/seed-org-catalo
 import { InventorySubnav } from '@/components/templates/inventory-subnav'
 import { MasterListEditor } from './master-list-editor'
 
-export const metadata: Metadata = { title: 'Inventory Master List — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Inventory Master List | Templates | FieldStay' }
 
 /** The org's own catalog — the platform seed plus any custom items, small by construction. */
 const CATALOG_LIMIT = 500
@@ -41,7 +41,7 @@ export default async function MasterListPage() {
         <h2 className="section-header mb-1">Master List</h2>
         <p className="text-sm text-muted-themed">
           Your org&apos;s editable copy of the FieldStay starter catalog. Add,
-          rename, or remove items here — changes never touch the shared
+          rename, or remove items here. Changes never touch the shared
           platform catalog.
         </p>
       </div>

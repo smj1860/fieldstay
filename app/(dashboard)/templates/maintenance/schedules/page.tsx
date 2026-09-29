@@ -5,7 +5,7 @@ import { MaintenanceSubnav } from '@/components/templates/maintenance-subnav'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { SchedulesBrowser } from './schedules-browser'
 
-export const metadata: Metadata = { title: 'Maintenance Schedules — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Maintenance Schedules | Templates | FieldStay' }
 
 export default async function MaintenanceSchedulesPage() {
   const { supabase, membership } = await requireOrgMember()

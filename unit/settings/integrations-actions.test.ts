@@ -197,7 +197,7 @@ describe('settings/integrations/actions', () => {
 
       const result = await triggerResync('ownerrez')
 
-      expect(result).toEqual({ error: 'This integration isn’t connected — connect it first.' })
+      expect(result).toEqual({ error: 'This integration isn’t connected. Connect it first.' })
       const eqCalls = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'eq')
       expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
     })
@@ -219,7 +219,7 @@ describe('settings/integrations/actions', () => {
 
       const result = await triggerResync('ownerrez')
 
-      expect(result).toEqual({ error: 'Sync already in progress — please wait 60 seconds before trying again' })
+      expect(result).toEqual({ error: 'Sync already in progress, please wait 60 seconds before trying again' })
       expect(inngest.send).not.toHaveBeenCalled()
     })
 
@@ -498,7 +498,7 @@ describe('settings/integrations/actions', () => {
 
       const result = await connectWithApiKey('hostaway', { accountId: '1', apiKey: 'k' })
 
-      expect(result).toEqual({ error: 'Invalid credentials — check your Account ID and API Key.' })
+      expect(result).toEqual({ error: 'Invalid credentials. Check your Account ID and API Key.' })
       expect(JSON.stringify(result)).not.toContain('sk_live_abcdef')
     })
   })

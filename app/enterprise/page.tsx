@@ -96,8 +96,8 @@ export default function EnterprisePage() {
         }
         subtitle={
           <>
-            FieldStay scales the same operations engine every property manager uses — turnovers, crew,
-            inventory, maintenance, and reporting — up to a full portfolio, with unlimited properties and
+            FieldStay scales the same operations engine every property manager uses (turnovers, crew,
+            inventory, maintenance, and reporting) up to a full portfolio, with unlimited properties and
             volume pricing once you outgrow the self-serve schedule.
           </>
         }
@@ -122,7 +122,7 @@ export default function EnterprisePage() {
           One operations board, however many cities you&apos;re in.
         </h2>
         <p className="text-[var(--mkt-muted-strong)] leading-relaxed max-w-3xl">
-          Every property in your portfolio — whatever state or city it&apos;s in — lives on the same
+          Every property in your portfolio, whatever state or city it&apos;s in, lives on the same
           turnover board and can be filtered by property or by crew member, so a manager overseeing
           multiple regions can pull up exactly the slice they&apos;re responsible for without leaving
           the app. Crew members only ever see their own assigned turnovers, wherever they&apos;re
@@ -138,7 +138,7 @@ export default function EnterprisePage() {
           </h2>
           <p className="text-[var(--mkt-muted-strong)] leading-relaxed max-w-3xl">
             The Ops Snapshot dashboard rolls up today&apos;s unassigned turnovers, open and urgent work
-            orders, and low-stock alerts across your entire portfolio — not property by property. It&apos;s
+            orders, and low-stock alerts across your entire portfolio, not property by property. It&apos;s
             built for a single organization&apos;s full operation, however many properties that is, not a
             report you have to reassemble from separate views.
           </p>
@@ -152,7 +152,7 @@ export default function EnterprisePage() {
         </h2>
         <p className="text-[var(--mkt-muted-strong)] leading-relaxed max-w-3xl">
           If you&apos;re on OwnerRez, Hospitable, or Hostex, connecting your account pulls in your full
-          booking history — not just what&apos;s upcoming — the moment you connect, so nothing before
+          booking history, not just what&apos;s upcoming, the moment you connect, so nothing before
           today is lost. There&apos;s no separate migration product beyond that sync; it&apos;s the same
           connection every FieldStay account uses, just running at your scale. Portfolio and Enterprise
           accounts get custom onboarding and dedicated account support to walk through the cutover with

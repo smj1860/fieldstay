@@ -1142,7 +1142,7 @@ export async function bulkImportAssets(
     if (isRealQueryError(propertyError)) {
       console.error('[bulkImportAssets] property read failed', propertyError)
       reportError(propertyError, { site: 'serverAction.properties.bulkImportAssets.property', orgId: membership.org_id })
-      return { imported: 0, error: 'Import failed — please try again' }
+      return { imported: 0, error: 'Import failed, please try again' }
     }
     if (!property) return { imported: 0, error: 'Property not found' }
 
@@ -1247,7 +1247,7 @@ export async function bulkImportAssets(
     const { error } = await supabase.from('property_assets').insert(insertRows)
     if (error) {
       console.error('[bulkImportAssets]', error)
-      return { imported: 0, error: 'Import failed — please try again' }
+      return { imported: 0, error: 'Import failed, please try again' }
     }
 
     await logAuditEvent({
@@ -1281,7 +1281,7 @@ export async function bulkImportAssets(
   } catch (err) {
     console.error('[bulkImportAssets]', err)
     reportError(err, { site: 'serverAction.properties.bulkImportAssets' })
-    return { imported: 0, error: 'Import failed — please try again' }
+    return { imported: 0, error: 'Import failed, please try again' }
   }
 }
 

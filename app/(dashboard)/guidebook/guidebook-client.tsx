@@ -167,7 +167,7 @@ function statusDetail({
 
   if (gracePeriodEndsAt) {
     const deadline = new Date(gracePeriodEndsAt).toLocaleDateString()
-    return `Grace period — fill the slot before ${deadline} to avoid losing your guidebook`
+    return `Grace period: fill the slot before ${deadline} to avoid losing your guidebook`
   }
 
   return `Add ${sponsorsNeeded} more sponsor${plural(sponsorsNeeded)} to unlock`
@@ -237,7 +237,7 @@ function LockedBanner({
           </p>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
             Your 30-day trial has ended. 3 active sponsors unlock the Guidebook
-            permanently — keep adding to earn plan credits.
+            permanently. Keep adding to earn plan credits.
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
             {[0, 1, 2].map((i) => (
@@ -407,7 +407,7 @@ export function GuidebookClient({
           Guidebook
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '15px', margin: 0 }}>
-          Your guest-facing recommendation engine. Fill 3 sponsor slots to unlock it — free forever.
+          Your guest-facing recommendation engine. Fill 3 sponsor slots to unlock it, free forever.
         </p>
       </div>
 
@@ -500,7 +500,7 @@ export function GuidebookClient({
             </span>
           </div>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            Each slot gets its own Media Kit link — share it with a local business during
+            Each slot gets its own Media Kit link. Share it with a local business during
             your sponsor conversation. It previews their listing exactly as guests will see
             it and lets them subscribe on the spot, no paperwork required.
           </p>
@@ -562,7 +562,7 @@ export function GuidebookClient({
                   </>
                 ) : (
                   <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
-                    Empty slot — add a local business
+                    Empty slot, add a local business
                   </span>
                 )}
               </div>
@@ -641,7 +641,7 @@ export function GuidebookClient({
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
               Each property shows up to {MAX_SPONSORS_PER_PROPERTY} sponsors. Properties are assigned
-              automatically by proximity until you change one — after that your
+              automatically by proximity until you change one. After that your
               choice stays put.
             </p>
           </div>
@@ -745,11 +745,11 @@ export function publishLockReasonFor({
 
   if (gracePeriodEndsAt) {
     const by = new Date(gracePeriodEndsAt).toLocaleDateString()
-    return `Publishing is paused — fill your open sponsor slot before ${by} to keep your guidebook.`
+    return `Publishing is paused. Fill your open sponsor slot before ${by} to keep your guidebook.`
   }
 
   const plural = sponsorsNeeded !== 1 ? 's' : ''
-  return `Publishing is locked until the guidebook is active — add ${sponsorsNeeded} more sponsor${plural} to unlock it.`
+  return `Publishing is locked until the guidebook is active. Add ${sponsorsNeeded} more sponsor${plural} to unlock it.`
 }
 
 function PropertyGuidebookRow({
@@ -1106,7 +1106,7 @@ function PropertyGuidebookForm({
             <legend style={{ ...labelStyle, padding: 0 }}>Guidebook Featured Amenities (up to {MAX_FEATURED_AMENITIES})</legend>
             {syncedAmenityKeys.length === 0 ? (
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 10px' }}>
-                No amenities synced for this property yet — nothing to feature until your PMS syncs some.
+                No amenities synced for this property yet, nothing to feature until your PMS syncs some.
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
@@ -1193,7 +1193,7 @@ function PropertyGuidebookForm({
               // guidebook is locked reads as "published" — the save is real,
               // it just wrote is_published: false, and the URL stays dark.
               <span style={{ fontSize: '13px', color: isGuidebookActive ? 'var(--accent-green)' : 'var(--accent-amber)' }}>
-                {isGuidebookActive ? 'Saved' : 'Saved — still unpublished'}
+                {isGuidebookActive ? 'Saved' : 'Saved, still unpublished'}
               </span>
             )}
             <button
@@ -1314,7 +1314,7 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
               placeholder="—"
               style={inputStyle}
             />
-            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>% off — leave blank for no discount</span>
+            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>% off, leave blank for no discount</span>
           </div>
         </div>
 

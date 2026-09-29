@@ -86,7 +86,7 @@ export default function FaqSection({ items }: Readonly<FaqSectionProps>) {
           >
             Email us
           </a>{' '}
-          — we respond same day.
+          and we respond same day.
         </p>
 
       </div>

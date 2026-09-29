@@ -135,13 +135,13 @@ export function buildSponsorLine(
   const locationSuffix = distanceMiles !== null ? ` (${distanceMiles.toFixed(1)} mi away)` : ''
 
   if (offerType === 'custom') {
-    return customOfferText?.trim() || `Try ${businessName}${locationSuffix} — a local favorite.`
+    return customOfferText?.trim() || `Try ${businessName}${locationSuffix}, a local favorite.`
   }
 
   const offerLine = formatOffer(offerType, offerValue, offerItem, customOfferText)
   return offerLine
     ? `${businessName} has ${offerLine}${locationSuffix}.`
-    : `Try ${businessName}${locationSuffix} — a local favorite.`
+    : `Try ${businessName}${locationSuffix}, a local favorite.`
 }
 
 interface SendSmsResult {
@@ -196,7 +196,7 @@ async function suppressIfDemoOrg(
     // A failure to resolve demo status must not silently become a real send
     // to a fake 555 number during the demo. Fail CLOSED: suppress the send
     // and say why.
-    console.error('[sms:demo-check] failed — suppressing send', {
+    console.error('[sms:demo-check] failed, suppressing send', {
       orgId,
       error: err instanceof Error ? err.message : String(err),
     })
@@ -282,7 +282,7 @@ async function claimNudgeSlotOrExplain(): Promise<SendSmsResult | null> {
   } catch (err) {
     // Fail closed: without Redis there is no spend ceiling, and a skipped
     // nudge is a non-event for the guest. Never applies to transactional.
-    console.error('[sms:nudge-budget] Redis unavailable — skipping nudge send', {
+    console.error('[sms:nudge-budget] Redis unavailable, skipping nudge send', {
       error: err instanceof Error ? err.message : String(err),
     })
     reportError(err, { site: 'sms.telnyx.nudge_budget_unavailable' })
@@ -290,7 +290,7 @@ async function claimNudgeSlotOrExplain(): Promise<SendSmsResult | null> {
   }
 
   if (!claimed) {
-    console.warn('[sms:nudge-budget] daily nudge budget exhausted — skipping send')
+    console.warn('[sms:nudge-budget] daily nudge budget exhausted, skipping send')
     return { sent: false, reason: 'daily nudge budget exhausted' }
   }
 
@@ -343,7 +343,7 @@ export function buildDoorCodeSMS(
   portalUrl:    string
 ): string {
   return [
-    `${propertyName} — you're all set. 🏡`,
+    `${propertyName}, you're all set. 🏡`,
     ``,
     `Door code: ${doorCode}`,
     ``,
@@ -372,7 +372,7 @@ export function buildEveningNudgeSMS(
 }
 
 export function buildRainAlertSMS(propertyName: string, sponsorLine: string | null): string {
-  const base = `Heads up — rain expected near ${propertyName} today.`
+  const base = `Heads up, rain expected near ${propertyName} today.`
   return sponsorLine
     ? `${base} ${sponsorLine} Reply STOP to opt out.`
     : `${base} Check your guidebook for rainy-day recommendations. Reply STOP to opt out.`
@@ -381,7 +381,7 @@ export function buildRainAlertSMS(propertyName: string, sponsorLine: string | nu
 export function buildTomorrowOutdoorSMS(propertyName: string, offerLine: string | null): string {
   // Sent the EVENING BEFORE, about tomorrow — the tense is the whole point of
   // the message and the reason this is not a variant of the evening nudge.
-  const base = `Tomorrow looks clear near ${propertyName} — a good day to get outside.`
+  const base = `Tomorrow looks clear near ${propertyName}, a good day to get outside.`
   return offerLine
     ? `${base} ${offerLine} Reply STOP to opt out.`
     : `${base} Check your guidebook for local ideas. Reply STOP to opt out.`
@@ -406,7 +406,7 @@ export function buildVendorWorkOrderSMS(params: {
 
   return [
     `New work order from ${params.pmName} at ${params.orgName}:`,
-    `${params.woNumber} — ${params.propertyName}${nte}${windowLine}`,
+    `${params.woNumber}, ${params.propertyName}${nte}${windowLine}`,
     ``,
     `Review & sign off:`,
     params.portalUrl,
@@ -445,7 +445,7 @@ export function buildCrewTurnoverAssignedSMS(params: {
     })
     const windowHours = Math.round(t.windowMinutes / 60)
     const windowStr   = windowHours > 0 ? ` · ${windowHours}hr window` : ''
-    return `• ${t.propertyName} — ${dateStr}${windowStr}`
+    return `• ${t.propertyName}, ${dateStr}${windowStr}`
   })
 
   return [

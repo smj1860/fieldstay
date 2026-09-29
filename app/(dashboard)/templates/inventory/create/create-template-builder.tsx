@@ -122,7 +122,7 @@ function MasterListPicker({
   if (groups.length === 0) {
     return (
       <p className="text-sm text-muted-themed">
-        No items in your Master List yet — add some on the Master List tab first.
+        No items in your Master List yet. Add some on the Master List tab first.
       </p>
     )
   }
@@ -284,7 +284,7 @@ function CsvPreviewTable({ rows }: Readonly<{ rows: ParsedCSVRow[] }>) {
               <td className="px-3 py-1.5 text-primary-themed">{row.name}</td>
               <td className="px-3 py-1.5">
                 {row.categoryInvalid ? (
-                  <span className="inline-flex items-center gap-1" style={{ color: 'var(--accent-amber)' }} title={`"${row.categoryRaw}" isn't a known category — will save as Other`}>
+                  <span className="inline-flex items-center gap-1" style={{ color: 'var(--accent-amber)' }} title={`"${row.categoryRaw}" isn't a known category, will save as Other`}>
                     <AlertTriangle className="w-3 h-3" /> {row.categoryRaw} → Other
                   </span>
                 ) : (
@@ -349,7 +349,7 @@ function CsvImportPanel({ csv }: Readonly<{ csv: CsvImport }>) {
       <CsvSourceToggle csv={csv} />
 
       <p className="text-xs text-muted-themed">
-        Columns: <code>name</code> (required), <code>category</code>, <code>unit</code>, <code>par_level</code>, <code>preferred_brand</code> — header row optional.
+        Columns: <code>name</code> (required), <code>category</code>, <code>unit</code>, <code>par_level</code>, <code>preferred_brand</code>. Header row optional.
       </p>
 
       {csv.parseError && <InlineAlert tone="error">{csv.parseError}</InlineAlert>}
@@ -421,7 +421,7 @@ function ApplyToPropertiesBody({
     return (
       <InlineAlert tone="success" className="flex items-start gap-2">
         <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-        <span>Applied — {state.applyResult.applied} item{state.applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
+        <span>Applied: {state.applyResult.applied} item{state.applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
       </InlineAlert>
     )
   }

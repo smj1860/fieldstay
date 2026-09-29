@@ -126,7 +126,7 @@ function DayCell({
               background: `${crewColor.get(member.id)}20`,
               color:       crewColor.get(member.id),
             }}
-            title={`${member.name} — unavailable`}
+            title={`${member.name}: unavailable`}
           >
             <span
               className="w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center
@@ -357,7 +357,7 @@ function DayAvailabilityModal({
     <Dialog open onClose={onClose} title={dateLabel} maxWidthClassName="max-w-sm">
       {records.length === 0 ? (
         <p className="text-sm text-muted-themed">
-          No availability changes recorded for this day — all crew are assumed available.
+          No availability changes recorded for this day. All crew are assumed available.
         </p>
       ) : (
         <div className="space-y-2">

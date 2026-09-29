@@ -6,7 +6,7 @@ import { MaintenanceSubnav } from '@/components/templates/maintenance-subnav'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { SavedTemplatesBrowser } from './saved-templates-browser'
 
-export const metadata: Metadata = { title: 'Saved Maintenance Templates — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Saved Maintenance Templates | Templates | FieldStay' }
 
 interface SavedTemplateRow {
   id:          string

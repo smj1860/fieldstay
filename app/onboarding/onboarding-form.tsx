@@ -151,7 +151,7 @@ export function OnboardingForm({ userEmail, initialStep = 'name-org', inviteFail
           className="text-sm rounded-lg px-4 py-3 border mb-4"
           style={{ background: 'var(--accent-amber-dim)', borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)' }}
         >
-          That invitation could not be accepted — it may have expired, already
+          That invitation could not be accepted. It may have expired, already
           been used, or been sent to a different email address. Ask whoever
           invited you for a new link. Creating an organization below makes a
           NEW, separate account rather than joining theirs.
@@ -275,7 +275,7 @@ function ConnectPmsStep() {
         className="block text-center text-sm py-2.5"
         style={{ color: 'var(--text-muted)' }}
       >
-        Skip for now — I&apos;ll connect later →
+        Skip for now, I&apos;ll connect later →
       </Link>
     </>
   )

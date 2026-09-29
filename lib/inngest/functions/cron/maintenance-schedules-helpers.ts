@@ -360,7 +360,7 @@ async function escalateOpenWorkOrders(
       updated_via_vendor_portal: false,
       status_from:               wo.status,
       status_to:                 wo.status,
-      notes:                     `Priority auto-escalated to Urgent — ${pluralDays(daysLate)} past scheduled date`,
+      notes:                     `Priority auto-escalated to Urgent, ${pluralDays(daysLate)} past scheduled date`,
     }))
   )
   if (noteError) throw new Error(`work_order_updates escalation notes failed: ${noteError.message}`)

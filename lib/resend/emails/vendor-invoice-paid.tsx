@@ -28,7 +28,7 @@ export function VendorInvoicePaidEmail({
     <EmailLayout
       preview={`You've been paid ${amount} for ${woTitle}`}
       headerSub="Vendor Payments"
-      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
+      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf. We do not manage job bookings directly."
     >
       <Text style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 16px' }}>
         {greeting}

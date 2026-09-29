@@ -81,7 +81,7 @@ function Section179Badge() {
          style={{ background: 'rgba(59,130,246,0.08)', color: 'var(--accent-blue)', border: '1px solid rgba(59,130,246,0.2)' }}>
       <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
       <span>
-        <strong>Section 179 eligible</strong> — full cost may be immediately deductible.
+        <strong>Section 179 eligible</strong>. Full cost may be immediately deductible.
         Confirm with your CPA.
       </span>
     </div>
@@ -213,7 +213,7 @@ function AssetForm({
       const data = await res.json() as ScanResult
       setScanResult(data)
     } catch {
-      setScanError('Could not read data plate — please enter details manually.')
+      setScanError('Could not read data plate, please enter details manually.')
     } finally {
       setScanning(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -274,8 +274,8 @@ function AssetForm({
                    border:     `1px solid ${scanResult.confidence === 'low' ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.2)'}`,
                  }}>
               {scanResult.confidence === 'low'
-                ? <><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Low confidence — please verify details below.</>
-                : <><Check className="w-3.5 h-3.5 flex-shrink-0" /> Data plate read — review and confirm.</>}
+                ? <><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Low confidence, please verify details below.</>
+                : <><Check className="w-3.5 h-3.5 flex-shrink-0" /> Data plate read, review and confirm.</>}
             </div>
           )}
         </div>
@@ -402,7 +402,7 @@ function AssetForm({
               />
               <p className="text-xs text-muted-themed mt-1">
                 Off the nameplate. Used to estimate age, health and replacement
-                timing when no installation date is recorded — always marked as an
+                timing when no installation date is recorded, always marked as an
                 estimate where it appears.
               </p>
               {scanResult?.capacity && (
@@ -781,7 +781,7 @@ function PropertyAssetDetail({
                 <div className="rounded-lg px-3 py-2 mb-3 text-sm flex items-center gap-1.5"
                      style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition — budget for replacement.
+                  {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition, budget for replacement.
                 </div>
               )}
 

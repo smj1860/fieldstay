@@ -52,7 +52,7 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Re
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Add service vendors and contractors for maintenance and specialized work.
-          These vendors are available across your whole portfolio — you&apos;ll assign
+          These vendors are available across your whole portfolio. You&apos;ll assign
           them to maintenance work orders for specific properties as needed.
         </p>
       </div>

@@ -31,8 +31,8 @@ export function PrintKit({ sponsor, orgName, kitUrl }: Readonly<PrintKitProps>) 
   const lede = `Guests staying in our vacation rentals open a digital guidebook on their phone the moment they arrive. ${getKitLedeContext(sponsor.slot_type)}. We'd like that place to be ${sponsor.business_name}.`
 
   const slotTitle = isNamedSlot
-    ? `The ${copy.label} spot is open — and it's yours first.`
-    : 'One of only six local spots — and one is being held for you.'
+    ? `The ${copy.label} spot is open, and it's yours first.`
+    : 'One of only six local spots, and one is being held for you.'
 
   return (
     <div className={styles.pageOuter}>
@@ -100,12 +100,12 @@ export function PrintKit({ sponsor, orgName, kitUrl }: Readonly<PrintKitProps>) 
             <div className={styles.big}>
               $15<small>/month</small>
             </div>
-            <p>About 50¢ a day. One extra purchase a week and it pays for itself. Cancel anytime — no contract, no setup fee.</p>
+            <p>About 50¢ a day. One extra purchase a week and it pays for itself. Cancel anytime, no contract, no setup fee.</p>
           </div>
           <div className={styles.ctaGroup}>
             <div className={styles.cta}>
               Claim the {copy.label} spot
-              <small>Scan to sign up — takes 2 minutes</small>
+              <small>Scan to sign up, takes 2 minutes</small>
             </div>
             <div>
               <div className={styles.qrBox}>

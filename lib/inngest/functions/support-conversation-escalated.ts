@@ -51,7 +51,7 @@ export const handleSupportEscalation = inngest.createFunction(
         {
           from:    FROM,
           to:      ['stephen@fieldstay.app'],
-          subject: `Support escalation — ${context.orgName}`,
+          subject: `Support escalation: ${context.orgName}`,
           html: `
             <p><strong>${escapeHtml(context.orgName)}</strong> needs human follow-up in the support chat.</p>
             <p><em>${escapeHtml(reason)}</em></p>

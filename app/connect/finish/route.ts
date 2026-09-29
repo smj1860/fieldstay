@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
     // authenticated, the provider auto-approves an already-granted app, so
     // this is a single silent redirect bounce rather than a dead end.
     console.warn(
-      `[connect/finish] Deferred token exchange failed for ${providerId} — ` +
+      `[connect/finish] Deferred token exchange failed for ${providerId}: ` +
       `falling back to standard connect flow:`, err
     )
     const url = new URL(`/api/integrations/${providerId}/connect`, appUrl)

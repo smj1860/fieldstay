@@ -609,8 +609,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Qué significan los íconos en los elementos de la lista de verificación?',
     },
     a: {
-      en: 'The note icon on a checklist item means your property manager has added specific instructions for that task. Tap it to read what they need done — it could be details about a specific area, a known quirk of the property, or a special request from the owner.',
-      es: 'El ícono de nota en un elemento de la lista significa que tu gerente de propiedad agregó instrucciones específicas para esa tarea. Tócalo para leer lo que necesitan que hagas — puede ser detalles sobre un área específica, una particularidad conocida de la propiedad, o una solicitud especial del propietario.',
+      en: 'The note icon on a checklist item means your property manager has added specific instructions for that task. Tap it to read what they need done. It could be details about a specific area, a known quirk of the property, or a special request from the owner.',
+      es: 'El ícono de nota en un elemento de la lista significa que tu gerente de propiedad agregó instrucciones específicas para esa tarea. Tócalo para leer lo que necesitan que hagas. Puede ser detalles sobre un área específica, una particularidad conocida de la propiedad, o una solicitud especial del propietario.',
     },
   },
   installNotifications: {
@@ -619,8 +619,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Por qué la app me pide instalarla y activar las notificaciones?',
     },
     a: {
-      en: 'Installing the app adds a FieldStay icon to your home screen — just like any app from the App Store or Google Play. Turning on notifications means you\'ll know the moment a new turnover or work order is assigned to you, without having to open the app to check.',
-      es: 'Instalar la app agrega un ícono de FieldStay a tu pantalla de inicio — igual que cualquier app de App Store o Google Play. Activar las notificaciones significa que sabrás en el momento en que se te asigne una nueva rotación u orden de trabajo, sin tener que abrir la app para revisar.',
+      en: 'Installing the app adds a FieldStay icon to your home screen, just like any app from the App Store or Google Play. Turning on notifications means you\'ll know the moment a new turnover or work order is assigned to you, without having to open the app to check.',
+      es: 'Instalar la app agrega un ícono de FieldStay a tu pantalla de inicio, igual que cualquier app de App Store o Google Play. Activar las notificaciones significa que sabrás en el momento en que se te asigne una nueva rotación u orden de trabajo, sin tener que abrir la app para revisar.',
     },
   },
   worksOffline: {
@@ -629,8 +629,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿La app funciona sin servicio celular o WiFi?',
     },
     a: {
-      en: 'Yes. FieldStay Crew Ops is built to work offline. If you\'re at a property with no signal, the app will continue to work normally — you can complete checklists, count inventory, and take photos. Everything syncs automatically once you\'re back online.',
-      es: 'Sí. FieldStay Crew Ops está diseñada para funcionar sin conexión. Si estás en una propiedad sin señal, la app seguirá funcionando normalmente — puedes completar listas de verificación, contar inventario y tomar fotos. Todo se sincroniza automáticamente cuando vuelves a tener conexión.',
+      en: 'Yes. FieldStay Crew Ops is built to work offline. If you\'re at a property with no signal, the app will continue to work normally. You can complete checklists, count inventory, and take photos. Everything syncs automatically once you\'re back online.',
+      es: 'Sí. FieldStay Crew Ops está diseñada para funcionar sin conexión. Si estás en una propiedad sin señal, la app seguirá funcionando normalmente. Puedes completar listas de verificación, contar inventario y tomar fotos. Todo se sincroniza automáticamente cuando vuelves a tener conexión.',
     },
   },
   photographingStickers: {
@@ -639,8 +639,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Por qué fotografiamos las etiquetas del fabricante y las placas de datos de los electrodomésticos?',
     },
     a: {
-      en: 'Three reasons. First, we use that information to build a resource guide for guests (for example, how to operate the dishwasher). Second, knowing the age and model of appliances helps the owner plan for replacements before they become expensive emergencies. Third, we build a service database so that when a vendor gets a work order, they already have the make, model, and serial number — which means faster parts ordering and faster repairs.',
-      es: 'Tres razones. Primero, usamos esa información para crear una guía de recursos para los huéspedes (por ejemplo, cómo operar el lavavajillas). Segundo, saber la antigüedad y el modelo de los electrodomésticos ayuda al propietario a planificar reemplazos antes de que se conviertan en emergencias costosas. Tercero, construimos una base de datos de servicio para que, cuando un proveedor reciba una orden de trabajo, ya tenga la marca, el modelo y el número de serie — lo que significa pedidos de piezas y reparaciones más rápidos.',
+      en: 'Three reasons. First, we use that information to build a resource guide for guests (for example, how to operate the dishwasher). Second, knowing the age and model of appliances helps the owner plan for replacements before they become expensive emergencies. Third, we build a service database so that when a vendor gets a work order, they already have the make, model, and serial number, which means faster parts ordering and faster repairs.',
+      es: 'Tres razones. Primero, usamos esa información para crear una guía de recursos para los huéspedes (por ejemplo, cómo operar el lavavajillas). Segundo, saber la antigüedad y el modelo de los electrodomésticos ayuda al propietario a planificar reemplazos antes de que se conviertan en emergencias costosas. Tercero, construimos una base de datos de servicio para que, cuando un proveedor reciba una orden de trabajo, ya tenga la marca, el modelo y el número de serie, lo que significa pedidos de piezas y reparaciones más rápidos.',
     },
   },
   parLevel: {
@@ -649,8 +649,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Qué es un nivel par (par level) y por qué importa?',
     },
     a: {
-      en: 'A par level is the minimum quantity of an item — paper towels, trash bags, laundry pods — that needs to be on hand before we reorder. You\'re the person who sees these items at every turnover, which makes your count the most accurate data we have. If a par level seems too low or too high for a property, let your PM know — your input directly changes what gets ordered.',
-      es: 'Un nivel par es la cantidad mínima de un artículo — toallas de papel, bolsas de basura, cápsulas de detergente — que debe haber disponible antes de reordenar. Tú eres quien ve estos artículos en cada rotación, lo que hace que tu conteo sea el dato más preciso que tenemos. Si un nivel par parece demasiado bajo o demasiado alto para una propiedad, avísale a tu gerente — tu aporte cambia directamente lo que se ordena.',
+      en: 'A par level is the minimum quantity of an item (paper towels, trash bags, laundry pods) that needs to be on hand before we reorder. You\'re the person who sees these items at every turnover, which makes your count the most accurate data we have. If a par level seems too low or too high for a property, let your PM know. Your input directly changes what gets ordered.',
+      es: 'Un nivel par es la cantidad mínima de un artículo (toallas de papel, bolsas de basura, cápsulas de detergente) que debe haber disponible antes de reordenar. Tú eres quien ve estos artículos en cada rotación, lo que hace que tu conteo sea el dato más preciso que tenemos. Si un nivel par parece demasiado bajo o demasiado alto para una propiedad, avísale a tu gerente. Tu aporte cambia directamente lo que se ordena.',
     },
   },
   wrongUnit: {
@@ -659,8 +659,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Qué pasa si el inventario se está contando en la unidad incorrecta?',
     },
     a: {
-      en: 'Let your PM know using the notes field on that inventory item (preferred), or send them an in-app message. The unit matters because your count is used to automatically populate a restock order — if the unit is wrong, the wrong quantity gets ordered.',
-      es: 'Avísale a tu gerente usando el campo de notas en ese artículo de inventario (preferido), o envíale un mensaje dentro de la app. La unidad importa porque tu conteo se usa para completar automáticamente un pedido de reabastecimiento — si la unidad es incorrecta, se pide la cantidad equivocada.',
+      en: 'Let your PM know using the notes field on that inventory item (preferred), or send them an in-app message. The unit matters because your count is used to automatically populate a restock order, and if the unit is wrong, the wrong quantity gets ordered.',
+      es: 'Avísale a tu gerente usando el campo de notas en ese artículo de inventario (preferido), o envíale un mensaje dentro de la app. La unidad importa porque tu conteo se usa para completar automáticamente un pedido de reabastecimiento, y si la unidad es incorrecta, se pide la cantidad equivocada.',
     },
   },
   inventoryAccuracy: {
@@ -679,8 +679,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Exactamente qué se guarda cuando no tengo señal?',
     },
     a: {
-      en: 'Checklist taps, crew notes, photos, inventory counts, starting or completing a turnover, completing a work order, messages to your operations team, and time-off requests all save to your phone instantly and sync automatically once you’re back online. The one thing that needs a connection is READING older messages — your conversation history loads live, so it may be blank until you’re back in range.',
-      es: 'Los toques en la lista de verificación, las notas de la cuadrilla, las fotos, los conteos de inventario, iniciar o completar una rotación, completar una orden de trabajo, los mensajes a tu equipo de operaciones y las solicitudes de tiempo libre se guardan en tu teléfono al instante y se sincronizan automáticamente cuando vuelves a tener conexión. Lo único que necesita conexión es LEER mensajes anteriores — el historial de tu conversación se carga en vivo, así que puede aparecer vacío hasta que vuelvas a tener cobertura.',
+      en: 'Checklist taps, crew notes, photos, inventory counts, starting or completing a turnover, completing a work order, messages to your operations team, and time-off requests all save to your phone instantly and sync automatically once you’re back online. The one thing that needs a connection is READING older messages. Your conversation history loads live, so it may be blank until you’re back in range.',
+      es: 'Los toques en la lista de verificación, las notas de la cuadrilla, las fotos, los conteos de inventario, iniciar o completar una rotación, completar una orden de trabajo, los mensajes a tu equipo de operaciones y las solicitudes de tiempo libre se guardan en tu teléfono al instante y se sincronizan automáticamente cuando vuelves a tener conexión. Lo único que necesita conexión es LEER mensajes anteriores. El historial de tu conversación se carga en vivo, así que puede aparecer vacío hasta que vuelvas a tener cobertura.',
     },
   },
   howKnowNotSynced: {
@@ -689,8 +689,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Cómo sé si algo todavía no se ha sincronizado?',
     },
     a: {
-      en: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about, and nothing is lost while it’s showing. If something genuinely couldn’t be saved to FieldStay, a red "didn’t sync" panel appears at the top of every screen listing exactly what’s stuck, with a Retry all button. Tap it once you’re back in range.',
-      es: 'Aparece una etiqueta de "Sin conexión" en la parte superior de la pantalla cuando tu teléfono no tiene conexión — eso es normal y no hay de qué preocuparse, y no se pierde nada mientras se muestra. Si algo realmente no pudo guardarse en FieldStay, aparece un panel rojo de "no se sincronizó" en la parte superior de cada pantalla que enumera exactamente lo que quedó atascado, con un botón de Reintentar todo. Tócalo cuando vuelvas a tener cobertura.',
+      en: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection. That’s expected and nothing to worry about, and nothing is lost while it’s showing. If something genuinely couldn’t be saved to FieldStay, a red "didn’t sync" panel appears at the top of every screen listing exactly what’s stuck, with a Retry all button. Tap it once you’re back in range.',
+      es: 'Aparece una etiqueta de "Sin conexión" en la parte superior de la pantalla cuando tu teléfono no tiene conexión. Eso es normal y no hay de qué preocuparse, y no se pierde nada mientras se muestra. Si algo realmente no pudo guardarse en FieldStay, aparece un panel rojo de "no se sincronizó" en la parte superior de cada pantalla que enumera exactamente lo que quedó atascado, con un botón de Reintentar todo. Tócalo cuando vuelvas a tener cobertura.',
     },
   },
   keepAppOpen: {
@@ -709,8 +709,8 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Perderé mi trabajo si cierro la app, reinicio mi teléfono, o se cierra inesperadamente mientras estoy sin conexión?',
     },
     a: {
-      en: 'No — everything is saved to your phone as you go, not just held in memory. Reopening the app picks up right where you left off. The one thing that does clear your saved work is logging out, so don’t log out until you’re confident everything has synced.',
-      es: 'No — todo se guarda en tu teléfono a medida que avanzas, no solo se mantiene en la memoria. Volver a abrir la app retoma justo donde lo dejaste. Lo único que sí borra tu trabajo guardado es cerrar sesión, así que no cierres sesión hasta que estés seguro de que todo se ha sincronizado.',
+      en: 'No. Everything is saved to your phone as you go, not just held in memory. Reopening the app picks up right where you left off. The one thing that does clear your saved work is logging out, so don’t log out until you’re confident everything has synced.',
+      es: 'No. Todo se guarda en tu teléfono a medida que avanzas, no solo se mantiene en la memoria. Volver a abrir la app retoma justo donde lo dejaste. Lo único que sí borra tu trabajo guardado es cerrar sesión, así que no cierres sesión hasta que estés seguro de que todo se ha sincronizado.',
     },
   },
   logOutUnsynced: {
@@ -719,18 +719,18 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Puedo cerrar sesión mientras todavía tengo trabajo sin sincronizar?',
     },
     a: {
-      en: 'The app will warn you first. If you try to log out with anything still unsynced, it’ll show you how many items and ask you to confirm — logging out anyway clears everything saved on that device, including anything that hasn’t synced yet. If you’re not sure, stay logged in until you’re somewhere with better signal and try again.',
-      es: 'La app te avisará primero. Si intentas cerrar sesión con algo todavía sin sincronizar, te mostrará cuántos elementos hay y te pedirá que confirmes — cerrar sesión de todas formas borra todo lo guardado en ese dispositivo, incluido lo que no se haya sincronizado. Si no estás seguro, mantente conectado hasta que estés en un lugar con mejor señal y vuelve a intentarlo.',
+      en: 'The app will warn you first. If you try to log out with anything still unsynced, it’ll show you how many items and ask you to confirm. Logging out anyway clears everything saved on that device, including anything that hasn’t synced yet. If you’re not sure, stay logged in until you’re somewhere with better signal and try again.',
+      es: 'La app te avisará primero. Si intentas cerrar sesión con algo todavía sin sincronizar, te mostrará cuántos elementos hay y te pedirá que confirmes. Cerrar sesión de todas formas borra todo lo guardado en ese dispositivo, incluido lo que no se haya sincronizado. Si no estás seguro, mantente conectado hasta que estés en un lugar con mejor señal y vuelve a intentarlo.',
     },
   },
   checkOnOtherDevice: {
     q: {
-      en: 'I finished a turnover on my phone — can I check it on a different phone or tablet later?',
-      es: 'Terminé una rotación en mi teléfono — ¿puedo verla en otro teléfono o tablet más tarde?',
+      en: 'I finished a turnover on my phone. Can I check it on a different phone or tablet later?',
+      es: 'Terminé una rotación en mi teléfono. ¿Puedo verla en otro teléfono o tablet más tarde?',
     },
     a: {
-      en: 'Not until it syncs. Offline work is saved to the specific device you entered it on, so it won’t show up anywhere else — including your PM’s dashboard — until that device gets a connection and pushes it up.',
-      es: 'No hasta que se sincronice. El trabajo sin conexión se guarda en el dispositivo específico donde lo ingresaste, así que no aparecerá en ningún otro lugar — incluido el panel de tu gerente — hasta que ese dispositivo tenga conexión y lo envíe.',
+      en: 'Not until it syncs. Offline work is saved to the specific device you entered it on, so it won’t show up anywhere else, including your PM’s dashboard, until that device gets a connection and pushes it up.',
+      es: 'No hasta que se sincronice. El trabajo sin conexión se guarda en el dispositivo específico donde lo ingresaste, así que no aparecerá en ningún otro lugar, incluido el panel de tu gerente, hasta que ese dispositivo tenga conexión y lo envíe.',
     },
   },
   splittingTurnover: {
@@ -739,18 +739,18 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: 'Mi compañero y yo estamos dividiendo una rotación. Si uno de nosotros no tiene señal, ¿veremos los toques de lista de verificación del otro?',
     },
     a: {
-      en: 'Not in real time — you’ll each only see what’s on your own phone until the offline one reconnects. The moment it does, it automatically pulls the latest state, so nothing gets lost, it just catches up rather than updating live.',
-      es: 'No en tiempo real — cada uno verá solo lo que está en su propio teléfono hasta que el que está sin conexión se reconecte. En el momento en que se reconecta, automáticamente obtiene el estado más reciente, así que no se pierde nada, simplemente se pone al día en lugar de actualizarse en vivo.',
+      en: 'Not in real time. You’ll each only see what’s on your own phone until the offline one reconnects. The moment it does, it automatically pulls the latest state, so nothing gets lost, it just catches up rather than updating live.',
+      es: 'No en tiempo real. Cada uno verá solo lo que está en su propio teléfono hasta que el que está sin conexión se reconecte. En el momento en que se reconecta, automáticamente obtiene el estado más reciente, así que no se pierde nada, simplemente se pone al día en lugar de actualizarse en vivo.',
     },
   },
   multiCrewStart: {
     q: {
       en: MULTI_CREW_START_FAQ.question,
-      es: 'Dos miembros de la cuadrilla están asignados a la misma rotación — ¿por qué solo uno de ellos vio el trabajo de Iniciar rotación?',
+      es: 'Dos miembros de la cuadrilla están asignados a la misma rotación. ¿Por qué solo uno de ellos vio el trabajo de Iniciar rotación?',
     },
     a: {
       en: MULTI_CREW_START_FAQ.answer,
-      es: 'Esto es normal. Una rotación tiene un solo estado compartido (Asignada → En progreso → Completa) — no se rastrea por separado para cada miembro de la cuadrilla. El primer miembro asignado que toque Iniciar rotación la mueve a En progreso para todos, y el botón desaparece entonces de la pantalla de los demás miembros asignados. Esto ocurre con más frecuencia cuando la cuadrilla se divide y trabaja distintas partes de la misma propiedad al mismo tiempo. Solo se necesita un toque — el otro miembro de la cuadrilla no necesita hacer nada diferente, ya que todos los miembros asignados ya tienen acceso completo a la lista de verificación y al inventario sin importar quién tocó Iniciar.',
+      es: 'Esto es normal. Una rotación tiene un solo estado compartido (Asignada → En progreso → Completa). No se rastrea por separado para cada miembro de la cuadrilla. El primer miembro asignado que toque Iniciar rotación la mueve a En progreso para todos, y el botón desaparece entonces de la pantalla de los demás miembros asignados. Esto ocurre con más frecuencia cuando la cuadrilla se divide y trabaja distintas partes de la misma propiedad al mismo tiempo. Solo se necesita un toque. El otro miembro de la cuadrilla no necesita hacer nada diferente, ya que todos los miembros asignados ya tienen acceso completo a la lista de verificación y al inventario sin importar quién tocó Iniciar.',
     },
   },
   notifiedWhileOffline: {
@@ -759,28 +759,28 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: '¿Me notificarán si me asignan un nuevo trabajo mientras estoy sin conexión?',
     },
     a: {
-      en: 'No, notifications need a connection to arrive. You’ll see any new assignment the moment your phone reconnects — it’s not lost, just delayed until then.',
-      es: 'No, las notificaciones necesitan conexión para llegar. Verás cualquier asignación nueva en el momento en que tu teléfono se reconecte — no se pierde, solo se retrasa hasta entonces.',
+      en: 'No, notifications need a connection to arrive. You’ll see any new assignment the moment your phone reconnects. It’s not lost, just delayed until then.',
+      es: 'No, las notificaciones necesitan conexión para llegar. Verás cualquier asignación nueva en el momento en que tu teléfono se reconecte. No se pierde, solo se retrasa hasta entonces.',
     },
   },
   messageNoSignal: {
     q: {
-      en: 'I sent a message with no signal — did it go through?',
-      es: 'Envié un mensaje sin señal — ¿se envió?',
+      en: 'I sent a message with no signal. Did it go through?',
+      es: 'Envié un mensaje sin señal. ¿Se envió?',
     },
     a: {
-      en: 'It’s saved and waiting. A message you send with no signal shows a clock icon and “Sending when you have signal”, and it goes out on its own the moment you’re back in range — you don’t need to retype or resend it. If it ever genuinely can’t be delivered it moves to the red “didn’t sync” panel at the top of the screen. Older messages in the conversation only load when you have a connection, so the thread above may look empty while you’re offline.',
-      es: 'Está guardado y esperando. Un mensaje que envías sin señal muestra un ícono de reloj y "Enviando cuando tengas señal", y se envía por sí solo en el momento en que vuelves a tener cobertura — no necesitas volver a escribirlo ni reenviarlo. Si en algún momento realmente no puede entregarse, pasa al panel rojo de "no se sincronizó" en la parte superior de la pantalla. Los mensajes anteriores en la conversación solo se cargan cuando tienes conexión, así que el hilo de arriba puede verse vacío mientras estás sin conexión.',
+      en: 'It’s saved and waiting. A message you send with no signal shows a clock icon and “Sending when you have signal”, and it goes out on its own the moment you’re back in range, and you don’t need to retype or resend it. If it ever genuinely can’t be delivered it moves to the red “didn’t sync” panel at the top of the screen. Older messages in the conversation only load when you have a connection, so the thread above may look empty while you’re offline.',
+      es: 'Está guardado y esperando. Un mensaje que envías sin señal muestra un ícono de reloj y "Enviando cuando tengas señal", y se envía por sí solo en el momento en que vuelves a tener cobertura, y no necesitas volver a escribirlo ni reenviarlo. Si en algún momento realmente no puede entregarse, pasa al panel rojo de "no se sincronizó" en la parte superior de la pantalla. Los mensajes anteriores en la conversación solo se cargan cuando tienes conexión, así que el hilo de arriba puede verse vacío mientras estás sin conexión.',
     },
   },
   screenWontLoad: {
     q: {
-      en: 'I just got to a property with no signal and a screen won’t load / shows an error page — what happened?',
-      es: 'Llegué a una propiedad sin señal y una pantalla no carga / muestra una página de error — ¿qué pasó?',
+      en: 'I just got to a property with no signal and a screen won’t load / shows an error page. What happened?',
+      es: 'Llegué a una propiedad sin señal y una pantalla no carga / muestra una página de error. ¿Qué pasó?',
     },
     a: {
-      en: 'Each screen needs to load once while you have signal before it’s available offline. If you head straight to a dead zone without opening the app first, a page you haven’t visited yet on that device may not load. Open the app and tap into your assignments while you still have service — at the office, in the driveway, wherever — before you lose signal for the day.',
-      es: 'Cada pantalla necesita cargarse una vez mientras tienes señal antes de estar disponible sin conexión. Si vas directo a una zona sin cobertura sin abrir la app antes, una página que no has visitado todavía en ese dispositivo puede no cargar. Abre la app y entra a tus asignaciones mientras todavía tienes servicio — en la oficina, en el camino, donde sea — antes de perder la señal por el día.',
+      en: 'Each screen needs to load once while you have signal before it’s available offline. If you head straight to a dead zone without opening the app first, a page you haven’t visited yet on that device may not load. Open the app and tap into your assignments while you still have service, at the office, in the driveway, wherever, before you lose signal for the day.',
+      es: 'Cada pantalla necesita cargarse una vez mientras tienes señal antes de estar disponible sin conexión. Si vas directo a una zona sin cobertura sin abrir la app antes, una página que no has visitado todavía en ese dispositivo puede no cargar. Abre la app y entra a tus asignaciones mientras todavía tienes servicio, en la oficina, en el camino, donde sea, antes de perder la señal por el día.',
     },
   },
   photoStorage: {

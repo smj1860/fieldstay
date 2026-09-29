@@ -278,7 +278,7 @@ export function useTurnoverActions(id: string) {
     // be queued at all — the crew's own turnover row carries it.
     const orgId = turnover?.org_id
     if (!orgId) {
-      setUploadError('Could not save section photo yet — this turnover is still loading. Please try again.')
+      setUploadError('Could not save section photo yet, this turnover is still loading. Please try again.')
       setSectionPhotoPrompt(null)
       e.target.value = ''
       return
@@ -331,7 +331,7 @@ export function useTurnoverActions(id: string) {
     // Same org-prefix requirement as handleSectionPhoto above.
     const orgId = turnover?.org_id
     if (!orgId) {
-      setUploadError('Could not save photo yet — this turnover is still loading. Please try again.')
+      setUploadError('Could not save photo yet, this turnover is still loading. Please try again.')
       setUploadingItemId(null)
       return
     }

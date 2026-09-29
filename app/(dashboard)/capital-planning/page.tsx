@@ -223,7 +223,7 @@ export default async function CapitalPlanningPage({
           <h1 className="page-title">Capital Planning</h1>
           <p className="page-subtitle">
             {selectedProperty
-              ? `${selectedProperty.name} — replacement forecast`
+              ? `${selectedProperty.name}: replacement forecast`
               : '10-year replacement cost forecast based on asset age & lifespan'}
           </p>
         </div>
@@ -249,7 +249,7 @@ export default async function CapitalPlanningPage({
             <h3 className="font-semibold text-primary-themed">Depreciation Ledger</h3>
             <p className="text-xs text-muted-themed mt-0.5">
               {deprValue
-                ? `${priorYear} ledger — ${deprValue.entry_count} assets · $${(deprValue.total_depr ?? 0).toLocaleString()} total depreciation`
+                ? `${priorYear} ledger: ${deprValue.entry_count} assets · $${(deprValue.total_depr ?? 0).toLocaleString()} total depreciation`
                 : `No ${priorYear} ledger generated yet`}
             </p>
           </div>
@@ -320,7 +320,7 @@ export default async function CapitalPlanningPage({
           <div className="mb-3">
             <h3 className="font-semibold text-primary-themed">Repair vs. Replace Signals</h3>
             <p className="text-xs text-muted-themed mt-0.5">
-              Flagged from recent repair spend and health score — independent of the age-based
+              Flagged from recent repair spend and health score, independent of the age-based
               forecast below, so an asset can surface here before it ages into that projection.
             </p>
           </div>
@@ -434,7 +434,7 @@ export default async function CapitalPlanningPage({
         ) : (
           <div className="text-center py-10 text-muted-themed text-sm">
             <p>No projection data yet.</p>
-            <p className="mt-1">Click Generate Projections — assets with installation dates will populate the forecast immediately.</p>
+            <p className="mt-1">Click Generate Projections. Assets with installation dates will populate the forecast immediately.</p>
           </div>
         )}
       </Card>

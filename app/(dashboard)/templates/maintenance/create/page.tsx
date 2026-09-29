@@ -3,7 +3,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { MaintenanceSubnav } from '@/components/templates/maintenance-subnav'
 import { CreateTemplateBuilder } from './create-template-builder'
 
-export const metadata: Metadata = { title: 'Create Maintenance Template — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Create Maintenance Template | Templates | FieldStay' }
 
 export default async function CreateMaintenanceTemplatePage() {
   const { supabase, membership } = await requireOrgMember()
@@ -41,7 +41,7 @@ export default async function CreateMaintenanceTemplatePage() {
         <h2 className="section-header mb-1">Create Template</h2>
         <p className="text-sm text-muted-themed">
           Select from the FieldStay standard schedule, type in your own
-          items, or both — then apply to whichever properties get picked in
+          items, or both, then apply to whichever properties get picked in
           the same flow.
         </p>
       </div>

@@ -63,7 +63,7 @@ const CANONICAL = marketingUrl(PATH)
 // entry card. No PMS named first (unlike /ownerrez and /hospitable's entry
 // bullets) since this page doesn't sell against one specific integration.
 const HOSTS_FEATURES = [
-  'Airbnb/VRBO iCal sync — or connect OwnerRez/Hospitable',
+  'Airbnb/VRBO iCal sync, or connect OwnerRez/Hospitable',
   'Offline turnover checklist + photo capture',
   'Self-funding guest guidebook',
   'No-login vendor portal',
@@ -223,7 +223,7 @@ export default function HostsPage() {
             <p className="text-white/52 text-lg leading-relaxed mb-8 mx-auto" style={{ maxWidth: 560 }}>
               FieldStay gives 1–4 property owners the same offline turnover checklists,
               no-login vendor invoicing, and owner-grade CapEx forecasting used by
-              professional management companies — starting at ${hostsTier.monthly}/month.
+              professional management companies, starting at ${hostsTier.monthly}/month.
               The guest guidebook can pay some of that back.
             </p>
 
@@ -253,7 +253,7 @@ export default function HostsPage() {
             <div className="bg-[var(--mkt-surface)] border border-[var(--mkt-border)] rounded-2xl p-6">
               <p className="font-bold text-lg mb-2 text-[var(--mkt-ink)]">Not on a PMS</p>
               <p className="text-sm leading-relaxed text-[var(--mkt-muted)]">
-                Paste your Airbnb or VRBO iCal link. Bookings sync automatically — no
+                Paste your Airbnb or VRBO iCal link. Bookings sync automatically, no
                 account to connect, nothing to authorize.
               </p>
             </div>
@@ -281,9 +281,9 @@ export default function HostsPage() {
               Priced like you&apos;re actually solo.
             </h2>
             <p className="text-[var(--mkt-muted-strong)] text-sm max-w-md mx-auto">
-              Most STR software prices per property or per user — brutal at this scale.
+              Most STR software prices per property or per user. Brutal at this scale.
               FieldStay starts at ${hostsTier.monthly}/mo for your first property, and stays
-              gentle from there — never a steep jump for adding one more.
+              gentle from there, never a steep jump for adding one more.
             </p>
           </div>
 
@@ -324,7 +324,7 @@ export default function HostsPage() {
                   </span>
                   <span className={`text-sm ml-1 ${badge ? 'text-white/50' : 'text-[var(--mkt-muted)]'}`}>/mo</span>
                   <p className={`text-xs mt-1 ${badge ? 'text-white/40' : 'text-[var(--mkt-muted)]'}`}>
-                    or ${tier.annual!.toLocaleString()}/yr — save ${tier.annualSavings}
+                    or ${tier.annual!.toLocaleString()}/yr, save ${tier.annualSavings}
                   </p>
                 </div>
                 <ul className="space-y-2 mb-6">
@@ -365,7 +365,7 @@ export default function HostsPage() {
             Built for hosts who are also the owner.
           </h2>
           <p className="text-[var(--mkt-muted)] text-center mb-12">
-            Not a stripped-down version of the professional tier — the same engine, sized for you.
+            Not a stripped-down version of the professional tier. The same engine, sized for you.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -373,7 +373,7 @@ export default function HostsPage() {
               {
                 num: '01',
                 title: 'Self-Funding Guest Guidebook',
-                body: 'Local businesses sponsor a placement in your guest guidebook for $15/month each, and every active sponsor takes $5/month off your bill — from the first one, with no limit on how many you sign. Each property shows up to 4, so a handful of listings with a full roster covers a meaningful slice of your plan; the credit is capped only by the bill itself.',
+                body: 'Local businesses sponsor a placement in your guest guidebook for $15/month each, and every active sponsor takes $5/month off your bill, from the first one, with no limit on how many you sign. Each property shows up to 4, so a handful of listings with a full roster covers a meaningful slice of your plan; the credit is capped only by the bill itself.',
                 highlight: true,
               },
               {
@@ -384,14 +384,14 @@ export default function HostsPage() {
               {
                 num: '03',
                 title: 'Asset Health + CapEx Forecasting',
-                body: 'You’re the owner too. Every appliance gets a health score that updates daily, rolled into a 10-year capital forecast — know what the next water heater costs before it fails, not after.',
+                body: 'You’re the owner too. Every appliance gets a health score that updates daily, rolled into a 10-year capital forecast. Know what the next water heater costs before it fails, not after.',
               },
               {
                 num: '04',
                 title: 'Offline Turnover Checklist',
                 body: (
                   <>
-                    Works with zero signal —{' '}
+                    Works with zero signal,{' '}
                     <Link href="/strops" className="underline font-semibold text-[var(--mkt-ink)]">
                       built specifically for that
                     </Link>.

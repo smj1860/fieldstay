@@ -16,7 +16,7 @@ import { isOnline } from '@/lib/dexie/net'
  * screen is different from every other one they use.
  */
 const OFFLINE_MESSAGE =
-  "You're offline. Time off needs a connection — this one screen can't save your request for later."
+  "You're offline. Time off needs a connection, and this one screen can't save your request for later."
 
 function failureMessage(fallback: string): string {
   return isOnline() ? fallback : OFFLINE_MESSAGE
@@ -163,7 +163,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
       setSavedAt(new Date())
       startTransition(() => router.refresh())
     } catch (err) {
-      setSaveError(failureMessage('Failed to save — please try again'))
+      setSaveError(failureMessage('Failed to save, please try again'))
       console.error('[TimeOffRequest] save error:', err)
     } finally {
       setSaving(false)
@@ -186,7 +186,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
       }
       startTransition(() => router.refresh())
     } catch (err) {
-      setCancelError(failureMessage('Failed to cancel — please try again'))
+      setCancelError(failureMessage('Failed to cancel, please try again'))
       console.error('[TimeOffRequest] cancel error:', err)
     } finally {
       setCancellingId(null)

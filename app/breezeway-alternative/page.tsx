@@ -49,7 +49,7 @@ export const metadata: Metadata = {
   // layout's metadataBase (NEXT_PUBLIC_APP_URL) and name the wrong one.
   alternates: { canonical: CANONICAL },
   openGraph: {
-    title: 'FieldStay vs Breezeway — pricing and features compared',
+    title: 'FieldStay vs Breezeway: pricing and features compared',
     description:
       'Published graduated pricing up to 150 properties, no sales call required. A vendor work order that ' +
       'needs no account and no app. See the full comparison.',
@@ -113,7 +113,7 @@ export default function BreezewayAlternativePage() {
           FieldStay vs Breezeway, side by side
         </h2>
         <p className="text-[var(--mkt-muted)] mb-10 max-w-2xl">
-          Every claim below cites where it comes from — see the note at the bottom of this section.
+          Every claim below cites where it comes from. See the note at the bottom of this section.
         </p>
 
         <div className="overflow-x-auto rounded-2xl border border-[var(--mkt-border)]">
@@ -139,7 +139,7 @@ export default function BreezewayAlternativePage() {
 
         <p className="text-xs text-[var(--mkt-muted)] mt-4">
           FieldStay claims are verifiable against this product directly. Breezeway information reflects
-          Breezeway&apos;s public website and help documentation as checked on {RESEARCHED_ON} — a
+          Breezeway&apos;s public website and help documentation as checked on {RESEARCHED_ON}. A
           competitor&apos;s pricing and features can change at any time, so verify current details at{' '}
           <a
             href="https://www.breezeway.io/pricing"
@@ -170,7 +170,7 @@ export default function BreezewayAlternativePage() {
                 ${examplePriceDollars}<span className="text-lg font-semibold text-[var(--mkt-muted)]">/mo</span>
               </div>
               <p className="text-sm text-[var(--mkt-muted-strong)]">
-                For {EXAMPLE_QTY} properties, computed from the published graduated rate schedule — see it for
+                For {EXAMPLE_QTY} properties, computed from the published graduated rate schedule. See it for
                 your own count with{' '}
                 <Link href="/pricing" className="underline hover:text-[var(--mkt-gold-hover)]">
                   the calculator on the pricing page
@@ -184,7 +184,7 @@ export default function BreezewayAlternativePage() {
               </div>
               <p className="text-sm text-[var(--mkt-muted)]">
                 Breezeway&apos;s published $19.99/property rate only covers portfolios of 4 or fewer. At{' '}
-                {EXAMPLE_QTY} properties you&apos;re past that — pricing requires a demo.
+                {EXAMPLE_QTY} properties you&apos;re past that, so pricing requires a demo.
               </p>
             </div>
           </div>
@@ -208,7 +208,7 @@ export default function BreezewayAlternativePage() {
           Also worth knowing
         </h2>
         <p className="text-[var(--mkt-muted)] mb-10 max-w-2xl">
-          Real, shipped FieldStay capabilities — not compared above because we couldn&apos;t independently
+          Real, shipped FieldStay capabilities, not compared above because we couldn&apos;t independently
           confirm Breezeway&apos;s equivalent one way or the other, and this page only makes claims it can back up.
         </p>
         <div className="grid md:grid-cols-2 gap-8">

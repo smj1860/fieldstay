@@ -340,7 +340,7 @@ export function CreateWorkOrderModal({
                     <option value="">None</option>
                     {assetsForProperty.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name} — {a.asset_type.replace(/_/g, ' ')}
+                        {a.name}: {a.asset_type.replace(/_/g, ' ')}
                       </option>
                     ))}
                   </select>
@@ -408,7 +408,7 @@ export function CreateWorkOrderModal({
                   <label htmlFor="wo-time" className="label mt-3">
                     Scheduled time
                     <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
-                      Optional — use for same-day flip vendor windows
+                      Optional, use for same-day flip vendor windows
                     </span>
                   </label>
                   <Input id="wo-time" name="scheduled_time" type="time" />
@@ -481,7 +481,7 @@ export function CreateWorkOrderModal({
             <select name="assigned_crew_member_id" className="input">
               <option value="">Select crew member…</option>
               {crewMembers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}{c.role ? ` — ${c.role}` : ''}</option>
+                <option key={c.id} value={c.id}>{c.name}{c.role ? `: ${c.role}` : ''}</option>
               ))}
             </select>
           ) : (
@@ -533,7 +533,7 @@ export function CreateWorkOrderModal({
                     <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
                       <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                      COI or license expires soon — assign now but remind vendor to renew.
+                      COI or license expires soon, assign now but remind vendor to renew.
                     </div>
                   )}
                   {selectedCompliance === 'no_documents' && (
@@ -560,7 +560,7 @@ export function CreateWorkOrderModal({
                 <div className="border border-themed rounded-xl overflow-hidden">
                   <div className="px-3 py-2 bg-canvas-themed border-b border-themed">
                     <p className="text-xs text-muted-themed">
-                      Select vendors to receive an RFQ — you&apos;ll be taken to the work order to review and approve quotes.
+                      Select vendors to receive an RFQ. You&apos;ll be taken to the work order to review and approve quotes.
                     </p>
                   </div>
                   {vendors.map((v) => (

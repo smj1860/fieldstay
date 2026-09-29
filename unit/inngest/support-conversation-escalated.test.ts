@@ -79,7 +79,7 @@ describe('handleSupportEscalation', () => {
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
         to:      ['stephen@fieldstay.app'],
-        subject: 'Support escalation — Lake Martin Delivery',
+        subject: 'Support escalation: Lake Martin Delivery',
         html:    expect.stringContaining("Guest asked about a refund I can&#39;t help with"),
       }),
       { idempotencyKey: 'support-escalation-conv_1' },

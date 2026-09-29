@@ -5,7 +5,7 @@ import { InventorySubnav } from '@/components/templates/inventory-subnav'
 import { SavedTemplatesBrowser } from './saved-templates-browser'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
-export const metadata: Metadata = { title: 'Saved Inventory Templates — Templates — FieldStay' }
+export const metadata: Metadata = { title: 'Saved Inventory Templates | Templates | FieldStay' }
 
 export default async function SavedInventoryTemplatesPage() {
   const { supabase, membership } = await requireOrgMember()

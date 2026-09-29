@@ -45,7 +45,7 @@ export const OUTDOOR_FORM: FormDefinition = {
       items: [
         {
           key:    'outdoor.roof_drainage.roofing',
-          prompt: 'Roofing — shingles/tiles intact, no sagging, loose flashing or storm damage',
+          prompt: 'Roofing: shingles/tiles intact, no sagging, loose flashing or storm damage',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'roofing', wo_priority: 'high',
           asset_type: 'roof',
@@ -66,25 +66,25 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.roof_drainage.chimney',
-          prompt: 'Chimney and flue — cap present, masonry intact, no cracks',
+          prompt: 'Chimney and flue: cap present, masonry intact, no cracks',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'roofing',
         },
         {
           key:    'outdoor.roof_drainage.siding_trim',
-          prompt: 'Siding, trim and exterior paint sound — no rot, gaps or peeling',
+          prompt: 'Siding, trim and exterior paint sound: no rot, gaps or peeling',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural',
         },
         {
           key:    'outdoor.roof_drainage.foundation',
-          prompt: 'Foundation — no new cracks, settling or water pooling against it',
+          prompt: 'Foundation: no new cracks, settling or water pooling against it',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'structural', wo_priority: 'high',
         },
         {
           key:    'outdoor.roof_drainage.windows_doors',
-          prompt: 'Exterior windows and doors — seals intact, screens present, no storm damage',
+          prompt: 'Exterior windows and doors: seals intact, screens present, no storm damage',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'windows_doors',
         },
@@ -111,14 +111,14 @@ export const OUTDOOR_FORM: FormDefinition = {
           // 9 and 10 share one key deliberately: the same trip-hazard concern
           // asked about two surfaces, and one uneven approach is one job.
           key:    'outdoor.grounds.driveway',
-          prompt: 'Driveway and parking — level, no major cracks, potholes or oil slicks',
+          prompt: 'Driveway and parking: level, no major cracks, potholes or oil slicks',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'landscaping',
           concern_key: 'walkway_trip_hazard',
         },
         {
           key:    'outdoor.grounds.walkways',
-          prompt: 'Walkways and steps — pavers stable and level, path lighting installed',
+          prompt: 'Walkways and steps: pavers stable and level, path lighting installed',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'landscaping',
           concern_key: 'walkway_trip_hazard',
@@ -185,7 +185,7 @@ export const OUTDOOR_FORM: FormDefinition = {
       items: [
         {
           key:    'outdoor.decks.decking',
-          prompt: 'Decking — boards secure, no rot, loose fasteners, splinters or cupping',
+          prompt: 'Decking: boards secure, no rot, loose fasteners, splinters or cupping',
           remediation: 'work_order', default_actions: ['repair'],
           wo_category: 'structural',
           asset_type: 'deck_structure',
@@ -226,7 +226,7 @@ export const OUTDOOR_FORM: FormDefinition = {
       items: [
         {
           key:    'outdoor.exterior_utilities.lighting',
-          prompt: 'Exterior lighting — motion, dusk-to-dawn and entry lights all functional',
+          prompt: 'Exterior lighting: motion, dusk-to-dawn and entry lights all functional',
           remediation: 'purchase_order', default_actions: ['replace'],
           concern_key: 'exterior_lighting',
         },
@@ -273,13 +273,13 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.exterior_utilities.cameras',
-          prompt: 'Exterior cameras and doorbell — powered, reporting, sited only outdoors',
+          prompt: 'Exterior cameras and doorbell: powered, reporting, sited only outdoors',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'other',
         },
         {
           key:    'outdoor.exterior_utilities.freeze_protection',
-          prompt: 'Freeze protection in place seasonally — bibbs covered, lines drained',
+          prompt: 'Freeze protection in place seasonally: bibbs covered, lines drained',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'plumbing',
         },
@@ -341,7 +341,7 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.well.check_valve',
-          prompt: 'Check valve holding — system keeps pressure with the pump off',
+          prompt: 'Check valve holding: system keeps pressure with the pump off',
           remediation: 'purchase_order', default_actions: ['replace'],
           asset_type: 'well_pump',
           per_unit: true, concern_key: 'well_short_cycle',
@@ -410,7 +410,7 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.amenities.grill',
-          prompt: 'Grill — grease tray clean, gas line leak-tested, igniter works, tank secured',
+          prompt: 'Grill: grease tray clean, gas line leak-tested, igniter works, tank secured',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'general', wo_priority: 'high',
           concern_key: 'grill_safe',
@@ -422,7 +422,7 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.amenities.furniture',
-          prompt: 'Outdoor furniture sound — no rust-through or sharp edges, cushions clean',
+          prompt: 'Outdoor furniture sound: no rust-through or sharp edges, cushions clean',
           remediation: 'purchase_order', default_actions: ['replace'],
         },
         {
@@ -437,7 +437,7 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.amenities.generator',
-          prompt: 'Generator — starts, fuel adequate, exhaust clear of the structure',
+          prompt: 'Generator: starts, fuel adequate, exhaust clear of the structure',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'electrical',
           asset_type: 'generator',
@@ -445,7 +445,7 @@ export const OUTDOOR_FORM: FormDefinition = {
         },
         {
           key:    'outdoor.amenities.solar',
-          prompt: 'Solar array — panels unshaded and intact, inverter reporting',
+          prompt: 'Solar array: panels unshaded and intact, inverter reporting',
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'electrical',
           asset_type: 'solar_system',

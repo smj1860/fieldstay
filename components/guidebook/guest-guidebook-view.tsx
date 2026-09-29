@@ -138,22 +138,22 @@ function buildMomentLine(params: {
 
   if (skyState === 'morning' && weather?.isCold && heroSponsor?.slot_type === 'morning_brew') {
     return distanceMinutes !== null
-      ? `Chilly one out there — coffee's ${distanceMinutes} minutes away.`
-      : "Chilly one out there — coffee's nearby."
+      ? `Chilly one out there, coffee's ${distanceMinutes} minutes away.`
+      : "Chilly one out there, coffee's nearby."
   }
 
   switch (skyState) {
     case 'evening':
-      return 'Perfect night to eat out — dinner ideas below.'
+      return 'Perfect night to eat out, dinner ideas below.'
     case 'checkout':
       return checkOutTime
         ? `Checkout is at ${checkOutTime}. Here's your quick list.`
         : "Here's your quick list before you go."
     case 'daytime':
-      return "Good afternoon — here's your stay at a glance."
+      return "Good afternoon, here's your stay at a glance."
     case 'morning':
     default:
-      return "Good morning — here's your stay at a glance."
+      return "Good morning, here's your stay at a glance."
   }
 }
 
@@ -781,7 +781,7 @@ function ExtendStayCard({
       <p className={styles.extendK}>Extend your stay</p>
       <p className={styles.extendP}>
         {extensionRequest.gap_days} night{extensionRequest.gap_days !== 1 ? 's' : ''} available after your checkout
-        {extensionRequest.discount_pct ? ` — ${extensionRequest.discount_pct}% off if you book now` : ''}.
+        {extensionRequest.discount_pct ? `, ${extensionRequest.discount_pct}% off if you book now` : ''}.
       </p>
       {extensionConfig.extension_contact_method === 'ownerrez_url' && extensionConfig.extension_ownerrez_url ? (
         <a
@@ -853,7 +853,7 @@ function RedemptionPassOverlay({
             <div className={styles.passClock}>{formatClock(new Date())}</div>
           </div>
         </div>
-        <p className={styles.passHint}>Show this screen to staff — clock proves it&apos;s live</p>
+        <p className={styles.passHint}>Show this screen to staff, the clock proves it&apos;s live</p>
         <button type="button" className={styles.passClose} onClick={onClose}>Done</button>
       </div>
     </div>

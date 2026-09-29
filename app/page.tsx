@@ -46,10 +46,10 @@ export const metadata: Metadata = {
   // double-suffix) and was wrong for this one page specifically, unlike
   // /ownerrez, /hospitable, and /hosts, which really do get the suffix
   // auto-appended since their page.tsx files live one segment below layout.tsx.
-  title: 'Property Ops for Short-Term Rental Managers — FieldStay',
+  title: 'Property Ops for Short-Term Rental Managers | FieldStay',
   description: 'FieldStay handles crew scheduling, turnovers, maintenance, inventory, vendor work orders, and guest communications for STR property managers.',
   openGraph: {
-    title: 'FieldStay — Property Operations for Short-Term Rental Managers',
+    title: 'FieldStay | Property Operations for Short-Term Rental Managers',
     description: 'The operations layer for the work that happens between checkouts.',
     images: [{
       url:    '/marketing/hero-crew-supplies.jpg',

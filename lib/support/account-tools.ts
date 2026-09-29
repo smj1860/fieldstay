@@ -455,7 +455,7 @@ function explainPar(
     return {
       setBy: `scales with ${plural}`,
       explanation:
-        `The par level is ${par}. It scales with the property's ${plural} — this one has ${count} — ` +
+        `The par level is ${par}. It scales with the property's ${plural} (this one has ${count}), ` +
         `which works out to about ${perUnit} per ${singular}, including a safety buffer. ` +
         (touched
           ? 'You set this level yourself, and it will keep adjusting from your number if the property changes.'
@@ -468,7 +468,7 @@ function explainPar(
   return {
     setBy: 'fixed number',
     explanation:
-      `The par level is ${par}. This is a fixed number — it does not scale with the property's size ` +
+      `The par level is ${par}. This is a fixed number. It does not scale with the property's size ` +
       'and does not change on its own.',
     whatChangesIt: 'Type a new number on the inventory page.',
   }

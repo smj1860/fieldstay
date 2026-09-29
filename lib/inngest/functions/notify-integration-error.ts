@@ -87,13 +87,13 @@ export const notifyIntegrationError = inngest.createFunction(
           {
             from:    FROM,
             to:      member.email,
-            subject: `Action required — your ${providerName} connection stopped working`,
+            subject: `Action required: your ${providerName} connection stopped working`,
             html: await renderPmAlert({
               heading:  `${providerName} needs reconnecting`,
               body:
                 `FieldStay can no longer reach your ${providerName} account, so turnovers, `
                 + `calendars and crew are no longer syncing from it. Nothing already in `
-                + `FieldStay has been lost — new changes on ${providerName} just are not `
+                + `FieldStay has been lost, and new changes on ${providerName} just are not `
                 + `arriving. Reconnecting takes about a minute.`,
               ctaLabel: 'Reconnect →',
               ctaUrl:   `${appUrl}/settings/integrations`,

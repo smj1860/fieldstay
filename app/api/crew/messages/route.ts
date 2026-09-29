@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
   if (!content)   return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 })
   if (content.length > MAX_MESSAGE_LENGTH) {
     return NextResponse.json(
-      { error: `Message is too long — please keep it under ${MAX_MESSAGE_LENGTH} characters.` },
+      { error: `Message is too long. Please keep it under ${MAX_MESSAGE_LENGTH} characters.` },
       { status: 400 },
     )
   }

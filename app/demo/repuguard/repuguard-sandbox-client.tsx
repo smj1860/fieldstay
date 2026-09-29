@@ -27,7 +27,7 @@ export function RepuGuardSandboxClient() {
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5" style={{ color: 'var(--accent-gold)' }} aria-hidden="true" />
           <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-            RepuGuard — Sandbox
+            RepuGuard: Sandbox
           </h1>
         </div>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -330,7 +330,7 @@ function HeldNotice({ reason }: Readonly<{ reason: string | null }>) {
       <ShieldAlert className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} aria-hidden="true" />
       <div>
         <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          Held in the moderation queue — not auto-posted
+          Held in the moderation queue, not auto-posted
         </p>
         {reason !== null && (
           <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>

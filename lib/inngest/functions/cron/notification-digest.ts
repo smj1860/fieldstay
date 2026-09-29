@@ -110,7 +110,7 @@ export const notificationDigest = inngest.createFunction(
             org_id:     orgId,
             type:       'work_order_created_digest',
             title:      `${count} work order${count !== 1 ? 's' : ''} created today`,
-            subtitle:   'Already assigned — tonight\'s wrap-up covers any still needing a vendor',
+            subtitle:   'Already assigned, tonight\'s wrap-up covers any still needing a vendor',
             href:       '/maintenance',
             severity:   'blue',
             dedupe_key: `wo-created-digest-${orgId}-${today}`,

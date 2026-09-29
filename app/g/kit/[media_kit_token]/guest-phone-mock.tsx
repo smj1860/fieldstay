@@ -38,7 +38,7 @@ export function GuestPhoneMock({ sponsor, copy }: Readonly<GuestPhoneMockProps>)
           <div className={styles.btn}>Get directions</div>
         </div>
       </div>
-      <div className={styles.caption}>What guests actually see — with you in it.</div>
+      <div className={styles.caption}>What guests actually see, with you in it.</div>
     </div>
   )
 }

@@ -20,7 +20,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '7:42 AM',
     mockWeather: '43°F ☁️',
     cardLabel:   'Our pick for breakfast',
-    proofMoment: "Not a buried listing — you appear on the guest's phone at breakfast time, when they're deciding where to go.",
+    proofMoment: "Not a buried listing. You appear on the guest's phone at breakfast time, when they're deciding where to go.",
   },
   dinner_pints: {
     label:       'Dinner & Pints',
@@ -30,7 +30,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '6:15 PM',
     mockWeather: '74°F 🌇',
     cardLabel:   "Tonight's dinner pick",
-    proofMoment: "Not a buried listing — you appear on the guest's phone right as dinner time approaches, when they're deciding where to go.",
+    proofMoment: "Not a buried listing. You appear on the guest's phone right as dinner time approaches, when they're deciding where to go.",
   },
   rainy_day: {
     label:       'Rainy Day Refuge',
@@ -40,7 +40,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '1:20 PM',
     mockWeather: '61°F 🌧️',
     cardLabel:   'Our rainy-day pick',
-    proofMoment: "Not a buried listing — the guidebook watches the forecast and surfaces you the moment rain rolls in.",
+    proofMoment: "Not a buried listing. The guidebook watches the forecast and surfaces you the moment rain rolls in.",
   },
   outdoor_adventure: {
     label:       'Outdoor Adventure',
@@ -50,7 +50,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '9:05 AM',
     mockWeather: '78°F ☀️',
     cardLabel:   'Our pick for today',
-    proofMoment: "Not a buried listing — you appear on clear-sky days, exactly when guests are planning time on the water.",
+    proofMoment: "Not a buried listing. You appear on clear-sky days, exactly when guests are planning time on the water.",
   },
   general: {
     label:       'Local Favorite',
@@ -60,7 +60,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '11:30 AM',
     mockWeather: '72°F ⛅',
     cardLabel:   'Our local pick',
-    proofMoment: "Not a buried listing — you're one of a handful of hand-picked local businesses guests see during their stay.",
+    proofMoment: "Not a buried listing. You're one of a handful of hand-picked local businesses guests see during their stay.",
   },
   other: {
     label:       'Local Favorite',
@@ -70,7 +70,7 @@ export const KIT_SLOT_COPY: Record<GuidebookSlotType, KitSlotCopy> = {
     mockTime:    '11:30 AM',
     mockWeather: '72°F ⛅',
     cardLabel:   'Our local pick',
-    proofMoment: "Not a buried listing — you're one of a handful of hand-picked local businesses guests see during their stay.",
+    proofMoment: "Not a buried listing. You're one of a handful of hand-picked local businesses guests see during their stay.",
   },
 }
 

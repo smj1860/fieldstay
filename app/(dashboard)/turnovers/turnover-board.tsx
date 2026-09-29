@@ -501,7 +501,7 @@ function TurnoverCard({
               </span>
               {turnover.suggestion_reasoning && (
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
-                  — {turnover.suggestion_reasoning}
+                  {turnover.suggestion_reasoning}
                 </span>
               )}
               <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
@@ -893,7 +893,7 @@ function SplitAssignModal({
       }
     >
       <p className="text-xs text-muted-themed -mt-3 mb-4">
-        {selected.length} turnovers — pick a crew member for each
+        {selected.length} turnovers, pick a crew member for each
       </p>
 
       {error && (

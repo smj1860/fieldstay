@@ -50,10 +50,10 @@ export function attachmentLine(
   if (!photosIncluded)  return `Photographs on file (${onFile}); not included in this copy`
   if (embedded === 0)   return `${plural(onFile)} on file; none could be retrieved for this copy`
   if (embedded < onFile) {
-    return `Photo log appended — ${embedded} of ${onFile} photographs `
+    return `Photo log appended: ${embedded} of ${onFile} photographs `
       + `(${onFile - embedded} could not be retrieved)`
   }
-  return `Photo log appended — ${plural(embedded)}`
+  return `Photo log appended: ${plural(embedded)}`
 }
 
 function plural(n: number): string {
@@ -138,7 +138,7 @@ export function remediationLine(answer: ReportAnswer): string | null {
   if (r.kind === 'none') return null
   const noun = r.kind === 'work_order' ? 'Work order' : 'Purchase order'
   const ref  = r.reference ? ` ${r.reference}` : ''
-  return `${noun}${ref} — ${titleCase(r.status)} as of report date`
+  return `${noun}${ref}, ${titleCase(r.status)} as of report date`
 }
 
 /** The pre-ticked work classification, plus the independent cleaning flag (§5). */

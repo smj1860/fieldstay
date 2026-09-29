@@ -166,8 +166,8 @@ describe('describeSafetyTemplate', () => {
     // The whole point of the summary line on the onboarding step: someone who
     // picks March needs to see September BEFORE they commit, not discover it
     // later on the Maintenance board.
-    expect(describeSafetyTemplate(t('semi_annual', 3))).toBe('Twice a year — March and September')
-    expect(describeSafetyTemplate(t('annual', 11))).toBe('Once a year — November')
-    expect(describeSafetyTemplate(t('semi_annual', 10))).toBe('Twice a year — April and October')
+    expect(describeSafetyTemplate(t('semi_annual', 3))).toBe('Twice a year: March and September')
+    expect(describeSafetyTemplate(t('annual', 11))).toBe('Once a year: November')
+    expect(describeSafetyTemplate(t('semi_annual', 10))).toBe('Twice a year: April and October')
   })
 })

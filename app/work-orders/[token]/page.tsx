@@ -6,7 +6,7 @@ import { VendorPortal } from './vendor-portal'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
-export const metadata: Metadata = { title: 'Complete Work Order — FieldStay' }
+export const metadata: Metadata = { title: 'Complete Work Order | FieldStay' }
 
 export default async function VendorPortalPage({
   params,

@@ -73,12 +73,12 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
       const woTitle  = context.wo?.title ?? 'a work order'
       const propName = context.property?.name ?? 'the property'
 
-      const notesSuffix = notes ? ` — ${notes}` : ''
+      const notesSuffix = notes ? `: ${notes}` : ''
 
       await createPmNotification(supabase, {
         orgId,
         type:      'work_order_complete',
-        title:     `✓ Work Complete — ${context.wo?.wo_number ?? 'WO'} · ${propName}`,
+        title:     `✓ Work Complete: ${context.wo?.wo_number ?? 'WO'} · ${propName}`,
         subtitle:  `${crewName} marked "${woTitle}" complete${notesSuffix}`,
         href:      `/maintenance/${workOrderId}`,
         severity:  'green',

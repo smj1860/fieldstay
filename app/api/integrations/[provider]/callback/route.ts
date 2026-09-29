@@ -93,7 +93,7 @@ function classifyTokenExchangeError(
     // internal config detail, not an actionable reason, and showing it
     // to an unauthenticated visitor is pure information disclosure with
     // no upside (they can't fix a missing env var by retrying).
-    console.error(`[OAuth:${providerId}] MISCONFIGURED — check ${providerId.toUpperCase()}_CLIENT_ID/SECRET env vars`)
+    console.error(`[OAuth:${providerId}] MISCONFIGURED: check ${providerId.toUpperCase()}_CLIENT_ID/SECRET env vars`)
     return { reason: 'token_exchange_failed' }
   }
 
@@ -232,7 +232,7 @@ export async function GET(
   //    or a redirect_uri mismatch occurred
   if (providerError) {
     console.warn(
-      `[OAuth:${providerId}] Authorization denied: ${providerError} — ${errorDescription}`
+      `[OAuth:${providerId}] Authorization denied: ${providerError}, ${errorDescription}`
     )
     return errorRedirect(providerError)
   }
@@ -265,7 +265,7 @@ export async function GET(
 
   if (stateError || !stateRecord) {
     console.error(
-      `[OAuth:${providerId}] State validation failed — ` +
+      `[OAuth:${providerId}] State validation failed: ` +
       `possible CSRF attempt, replayed callback, or expired flow (state: ${returnedState?.slice(0, 8)}...)`
     )
     return errorRedirect('invalid_state')
@@ -302,7 +302,7 @@ export async function GET(
   //    ever exchanged.
   if (stateCookie !== null && !sameBrowser) {
     console.error(
-      `[OAuth:${providerId}] State cookie mismatch — the callback was completed in a ` +
+      `[OAuth:${providerId}] State cookie mismatch: the callback was completed in a ` +
       `different browser session than the one that started it (state: ${returnedState.slice(0, 8)}...)`
     )
     return errorRedirect('invalid_state')
@@ -353,7 +353,7 @@ export async function GET(
   if (stateRecord.user_id && sessionUser?.id && sessionUser.id !== stateRecord.user_id && !sameBrowser) {
     console.error(
       `[OAuth:${providerId}] State owner does not match the active session and the ` +
-      `originating browser cannot be confirmed — refusing to bind this connection ` +
+      `originating browser cannot be confirmed, refusing to bind this connection ` +
       `(state: ${returnedState.slice(0, 8)}...)`
     )
     return errorRedirect('invalid_state')
@@ -435,7 +435,7 @@ export async function GET(
   returnUrl.searchParams.set('connected', providerId)
 
   console.log(
-    `[OAuth:${providerId}] Successfully connected — ` +
+    `[OAuth:${providerId}] Successfully connected: ` +
     `FieldStay user ${appUserId} / external user ${tokenData.externalUserId}`
   )
 

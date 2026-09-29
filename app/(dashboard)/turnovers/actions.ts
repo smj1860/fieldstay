@@ -266,7 +266,7 @@ async function sendAssignmentPush(
 
     const count = turnovers.length
     const body = count === 1 && propName
-      ? `${propName} — ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+      ? `${propName}: ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
       : `${count} new assignment${count !== 1 ? 's' : ''} added`
 
     await sendPushToCrewMember(subs, { title: 'New Assignment', body, url: '/crew' })
@@ -481,7 +481,7 @@ export async function assignCrew(
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
-    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off, please verify manually.`)
     if (timeOffCount > 0) warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
 
     if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
@@ -538,7 +538,7 @@ export async function assignCrewIndividually(
     if (failed.length) {
       const applied = results.length - failed.length
       return applied > 0
-        ? { error: `${applied} of ${results.length} crew assignments were applied before one failed — reload the board before retrying.` }
+        ? { error: `${applied} of ${results.length} crew assignments were applied before one failed. Reload the board before retrying.` }
         : { error: failed[0]!.error }
     }
 
@@ -791,7 +791,7 @@ export async function createManualTurnover(
     )
 
     if (windowMinutes > MAX_TURNOVER_WINDOW_MINUTES) {
-      return { error: 'That turnover window is longer than 30 days — please check the dates.' }
+      return { error: 'That turnover window is longer than 30 days, please check the dates.' }
     }
 
     const priority =
@@ -986,9 +986,9 @@ export async function addCrewToTurnover(
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
-    if (existingAssignments === null) warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts — please verify manually.`)
+    if (existingAssignments === null) warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts, please verify manually.`)
     if (conflictCount > 0) warnings.push(`${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`)
-    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off, please verify manually.`)
     if (timeOffCount > 0)  warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
 
     if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
@@ -1104,7 +1104,7 @@ export async function bulkUpdateTurnoverStatus(
     // (fine), RLS refused the write, or the ids belong to another org. The PM
     // clicked "complete" on a selection and deserves to know none of it took.
     if (!completed?.length) {
-      return { error: 'None of those turnovers could be completed — they may already be complete, cancelled, or no longer available to you.' }
+      return { error: 'None of those turnovers could be completed. They may already be complete, cancelled, or no longer available to you.' }
     }
 
     // Fire the same automation event single-completion uses.
@@ -1190,7 +1190,7 @@ export async function archiveTurnover(
       const skipped = turnoverIds.length - archived.length
       return {
         success: true,
-        warning: `${skipped} turnover(s) weren't archived — only completed turnovers can be.`,
+        warning: `${skipped} turnover(s) weren't archived. Only completed turnovers can be.`,
       }
     }
     return { success: true }
@@ -1298,9 +1298,9 @@ const SUGGESTION_ACCEPTABLE_STATUSES = [
 
 function terminalSuggestionError(status: string): string {
   if (status === 'cancelled') {
-    return 'This turnover was cancelled — accepting the suggestion would reopen it.'
+    return 'This turnover was cancelled. Accepting the suggestion would reopen it.'
   }
-  return 'This turnover is already complete — accepting the suggestion would reopen it.'
+  return 'This turnover is already complete. Accepting the suggestion would reopen it.'
 }
 
 export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActionState> {

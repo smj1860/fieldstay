@@ -182,7 +182,7 @@ export function pricingTiers(entryFeatures: readonly string[]): PricingTier[] {
  * competitor being sold against in the first line.
  */
 export const GENERIC_ENTRY_FEATURES = [
-  'iCal sync (Airbnb, VRBO) — or connect OwnerRez/Hospitable',
+  'iCal sync (Airbnb, VRBO), or connect OwnerRez/Hospitable',
   'Offline-ready crew app with photo capture',
   'No-login vendor work order portal',
   'Inventory with auto-restock',

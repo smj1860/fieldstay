@@ -80,10 +80,10 @@ const EMPTY_PENDING_PHOTOS: VendorPendingPhotoRow[] = []
 
 function getDeadLetterMessage(reason: VendorWoMutationRow['terminalReason'] | 'generic'): string {
   if (reason === 'closed') {
-    return 'This work order was already closed through another link before your completion could reach the server — no action needed on your end. Contact the property manager if that seems wrong.'
+    return 'This work order was already closed through another link before your completion could reach the server, and no action needed on your end. Contact the property manager if that seems wrong.'
   }
   if (reason === 'expired') {
-    return 'Your link expired before this could be submitted. Your entries are still saved on this device — contact the property manager for a new link.'
+    return 'Your link expired before this could be submitted. Your entries are still saved on this device. Contact the property manager for a new link.'
   }
   return "This couldn't be submitted after several attempts. Your entries are still saved on this device."
 }
@@ -373,7 +373,7 @@ function vendorPortalStatusScreen({
         </h2>
         <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
           {queued
-            ? "This will finish submitting the moment you're back in range — no need to do anything else."
+            ? "This will finish submitting the moment you're back in range, with no need to do anything else."
             : 'Your invoice has been sent to the property manager. Payment will be deposited to your Stripe payout account once approved.'}
         </p>
       </div>
@@ -615,7 +615,7 @@ export function VendorPortal({
   async function removePhoto(id: number) {
     const removed = await removeVendorPendingPhoto(token, id)
     if (!removed) {
-      setError('Could not remove this photo — please try again.')
+      setError('Could not remove this photo, please try again.')
       return
     }
     setPreviewUrls((prev) => {
@@ -705,7 +705,7 @@ export function VendorPortal({
           </p>
           <p style={{ fontSize: 13, color: '#7c2d12', lineHeight: 1.55, margin: 0 }}>
             Invoices are paid via Stripe Connect directly to your bank.
-            Setting up takes about 2 minutes — you&apos;ll need your bank details.
+            Setting up takes about 2 minutes, and you&apos;ll need your bank details.
           </p>
         </div>
         <a
@@ -828,7 +828,7 @@ export function VendorPortal({
                     <button
                       type="button"
                       onClick={() => retryPhoto(id)}
-                      title="Upload failed — tap to retry"
+                      title="Upload failed, tap to retry"
                       style={{ position: 'absolute', inset: 0, background: 'rgba(185,28,28,0.55)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                     >
                       <RotateCw style={{ width: 18, height: 18, color: '#fff' }} />
@@ -893,7 +893,7 @@ export function VendorPortal({
             padding: '14px', fontSize: 15, fontWeight: 700, cursor: submitting || subtotal <= 0 ? 'not-allowed' : 'pointer',
           }}
         >
-          {submitting ? 'Submitting…' : `Submit Invoice — $${subtotal.toFixed(2)}`}
+          {submitting ? 'Submitting…' : `Submit Invoice, $${subtotal.toFixed(2)}`}
         </button>
 
         <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 10 }}>
@@ -1196,7 +1196,7 @@ export function VendorQuotePortal({
           <p className="text-sm text-accent-500">The property manager will review your quote and be in touch.</p>
           <div className="mt-4 p-3 bg-accent-50 rounded-lg text-left">
             <p className="text-xs text-accent-500 mb-1">
-              Your quote — {submitted.count} line item{submitted.count === 1 ? '' : 's'}:
+              Your quote, {submitted.count} line item{submitted.count === 1 ? '' : 's'}:
             </p>
             <p className="text-2xl font-bold text-accent-900">${submitted.total.toFixed(2)}</p>
             {notes && <p className="text-sm text-accent-600 mt-1">{notes}</p>}
@@ -1261,7 +1261,7 @@ export function VendorQuotePortal({
         {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
           <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
             <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} />
-            This quote exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. You can still submit it — the property manager will see the overage.
+            This quote exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. You can still submit it, and the property manager will see the overage.
           </p>
         )}
 

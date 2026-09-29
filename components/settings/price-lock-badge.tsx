@@ -29,7 +29,7 @@ export function PriceLockBadge({ promo }: Readonly<Props>) {
     <Badge tone="gold" className="text-sm px-3 py-1">
       <span aria-hidden>🔒</span>
       {label}
-      {expiresLabel ? ` — locked through ${expiresLabel}` : ''}
+      {expiresLabel ? `, locked through ${expiresLabel}` : ''}
     </Badge>
   )
 }

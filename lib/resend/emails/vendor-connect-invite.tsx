@@ -27,9 +27,9 @@ export function VendorConnectInviteEmail({
 
   return (
     <EmailLayout
-      preview={`${senderLine} — set up your Stripe payout account to get paid`}
+      preview={`${senderLine}: set up your Stripe payout account to get paid`}
       headerSub="Vendor Payments"
-      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
+      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf. We do not manage job bookings directly."
       ctaLabel="Set Up My Payout Account →"
       ctaUrl={onboardingUrl}
     >
@@ -44,12 +44,12 @@ export function VendorConnectInviteEmail({
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 14px' }}>
         To get paid for your work, you&apos;ll need to connect your bank account
         to FieldStay&apos;s payment platform. Once set up, payments are sent directly
-        to your bank — no checks, no follow-up, no delays.
+        to your bank, no checks, no follow-up, no delays.
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 24px' }}>
         It takes <strong>3–5 minutes</strong>{' '}and is powered by{' '}
-        <strong>Stripe</strong> — the same platform used by millions of businesses
+        <strong>Stripe</strong>, the same platform used by millions of businesses
         worldwide. You&apos;ll need your bank account and routing numbers handy.
       </Text>
 
@@ -57,7 +57,7 @@ export function VendorConnectInviteEmail({
 
       <Text style={{ fontSize: 13, color: '#64748b', lineHeight: 1.55, margin: '0 0 8px' }}>
         <strong>Why Stripe?</strong>{' '}Stripe is PCI-compliant and the industry
-        standard for contractor payouts. FieldStay never holds your funds —
+        standard for contractor payouts. FieldStay never holds your funds,
         money moves directly from the property manager&apos;s account to yours.
       </Text>
 

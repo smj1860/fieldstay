@@ -335,7 +335,7 @@ export const workOrderOpsOrg = inngest.createFunction(
             updated_via_vendor_portal: false,
             status_from:               wo.status,
             status_to:                 wo.status,
-            notes:                     `Priority auto-escalated to Urgent — open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without update`,
+            notes:                     `Priority auto-escalated to Urgent, open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without update`,
           }
         })
       )
@@ -485,8 +485,8 @@ export const workOrderOpsOrg = inngest.createFunction(
         await createPmNotification(supabase, {
           orgId:     schedule.org_id,
           type:      'work_order_created',
-          title:     `Work order auto-created — ${schedule.name}`,
-          subtitle:  `${property?.name ?? 'Property'}${vendorId ? '' : ' — no vendor assigned yet'}`,
+          title:     `Work order auto-created: ${schedule.name}`,
+          subtitle:  `${property?.name ?? 'Property'}${vendorId ? '' : ', no vendor assigned yet'}`,
           href:      `/maintenance/${wo.id}`,
           severity:  'blue',
           dedupeKey: `auto-wo-created-${schedule.id}-${schedule.next_due_date}`,

@@ -107,7 +107,7 @@ export async function generateMetadata({
   }
 
   return {
-    title: `${property.name} — Guidebook`,
+    title: `${property.name} Guidebook`,
     description: `Check-in instructions, wifi, house rules, and local recommendations for ${property.name}.`,
   }
 }

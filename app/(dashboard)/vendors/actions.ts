@@ -252,7 +252,7 @@ export async function resendVendorConnectInvite(
     if (!vendor) return { error: 'Vendor not found' }
     if (!vendor.email) return { error: 'This vendor has no email address on file.' }
     if (vendor.stripe_connect_charges_enabled) {
-      return { error: 'This vendor is already connected — no need to resend.' }
+      return { error: 'This vendor is already connected, no need to resend.' }
     }
 
     // Rate limit AFTER the ownership check: an unauthorized or nonexistent
