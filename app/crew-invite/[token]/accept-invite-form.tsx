@@ -55,7 +55,7 @@ export function AcceptInviteForm({
               autoComplete="email"
             />
             <p className="text-xs text-muted mt-1">
-              We don&apos;t have an email on file for you yet — enter one to finish setting up your account.
+              We don&apos;t have an email on file for you yet. Enter one to finish setting up your account.
             </p>
           </>
         )}

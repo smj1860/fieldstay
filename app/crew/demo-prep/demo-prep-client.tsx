@@ -135,8 +135,8 @@ function ReadinessBanner({ ready }: Readonly<{ ready: boolean }>) {
         : <AlertTriangle className="w-5 h-5 flex-shrink-0" style={{ color: tone }} aria-hidden="true" />}
       <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
         {ready
-          ? 'Fully synced — safe for offline demo'
-          : 'Not ready — resolve the items below before going offline'}
+          ? 'Fully synced, safe for offline demo'
+          : 'Not ready, resolve the items below before going offline'}
       </p>
     </output>
   )

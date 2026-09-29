@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-export const metadata: Metadata = { title: 'Connection Error — FieldStay' }
+export const metadata: Metadata = { title: 'Connection Error | FieldStay' }
 
 const REASON_MESSAGES: Record<string, string> = {
   access_denied:          'You declined the authorization request.',

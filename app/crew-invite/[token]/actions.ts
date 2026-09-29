@@ -51,10 +51,10 @@ async function createActivationUser(
       return { error: 'An account with this email already exists. Try logging in instead.' }
     }
     console.error('[activateCrewAccount]', error)
-    return { error: 'Account creation failed — please try again' }
+    return { error: 'Account creation failed, please try again' }
   }
 
-  if (!data.user) return { error: 'Account creation failed — please try again' }
+  if (!data.user) return { error: 'Account creation failed, please try again' }
 
   return { userId: data.user.id }
 }

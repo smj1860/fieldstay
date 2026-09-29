@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { DemoPrepClient } from './demo-prep-client'
 
 export const metadata: Metadata = {
-  title: 'Prep for Demo — FieldStay Crew',
+  title: 'Prep for Demo | FieldStay Crew',
   description: 'Verify the local cache is warm before running the offline crew demo.',
 }
 

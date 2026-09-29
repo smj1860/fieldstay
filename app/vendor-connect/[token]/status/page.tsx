@@ -70,7 +70,7 @@ export default async function VendorConnectStatusPage({
         <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: '0 0 24px' }}>
           {isComplete
             ? `You're all set, ${vendorName}. When you submit invoices through FieldStay, payments will be deposited directly to your bank account.`
-            : 'Stripe is verifying your account information. This usually takes a few minutes. You can close this window — we\'ll let you know when your payout account is active.'}
+            : 'Stripe is verifying your account information. This usually takes a few minutes. You can close this window, and we\'ll let you know when your payout account is active.'}
         </p>
 
         {!isComplete && (

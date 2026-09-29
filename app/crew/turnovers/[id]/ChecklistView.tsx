@@ -142,7 +142,7 @@ export function ChecklistView({
               className="flex items-center justify-between gap-2 -mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
               style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
             >
-              <span>Confirmation didn&rsquo;t sync — check your connection.</span>
+              <span>Confirmation didn&rsquo;t sync. Check your connection.</span>
               <button
                 type="button"
                 className="font-semibold underline flex-shrink-0"
@@ -201,7 +201,7 @@ function ChecklistProgress({
     <div className="mb-3">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-sm font-semibold text-secondary-themed">
-          Checklist — {completedCount} of {totalCount}
+          Checklist, {completedCount} of {totalCount}
         </span>
         <span className="text-sm text-muted-themed">{pct}%</span>
       </div>
@@ -374,7 +374,7 @@ function ItemStatusLines({
       )}
       {!item.photo_storage_path && photoQueued && (
         <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
-          <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
+          <Loader2 className="w-3 h-3 animate-spin" /> Photo saved, uploading when back online
         </p>
       )}
       {needsPhoto && !uploading && !photoQueued && (
@@ -510,7 +510,7 @@ function SectionPhotoPrompt({
     >
       <Camera className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--accent-gold)' }} />
       <div className="flex-1 text-sm font-medium" style={{ color: 'var(--accent-gold)' }}>
-        Section complete — add a final photo
+        Section complete, add a final photo
       </div>
       <input
         type="file"

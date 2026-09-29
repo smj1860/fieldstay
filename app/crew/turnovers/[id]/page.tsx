@@ -102,7 +102,7 @@ export default function CrewTurnoverPage() {
               This turnover was cancelled
             </p>
             <p className="text-sm mt-0.5" style={{ color: 'var(--accent-red)' }}>
-              A cancelled booking removed this turnover — no need to go. Check with
+              A cancelled booking removed this turnover, no need to go. Check with
               your manager before doing any more work on it.
             </p>
           </div>
@@ -198,7 +198,7 @@ export default function CrewTurnoverPage() {
                     {formatPropertyDateTime(turnover.pending_checkin_datetime, property?.timezone ?? 'America/Chicago')}
                   </span>.</>
                 )}
-                {' '}The times above haven&apos;t been changed automatically — let your PM know if this affects your plan.
+                {' '}The times above haven&apos;t been changed automatically, so let your PM know if this affects your plan.
               </p>
               <button
                 type="button"

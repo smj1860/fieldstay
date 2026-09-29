@@ -23,7 +23,7 @@ function isDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' |
 function assetLabel(asset: PropertyAssetRow, locale: CrewLocale): string {
   const typeName = assetTypeDisplayName(asset.asset_type as AssetType, locale)
   const detail = [asset.make, asset.model].filter(Boolean).join(' ')
-  return detail ? `${typeName} — ${detail}` : typeName
+  return detail ? `${typeName}, ${detail}` : typeName
 }
 
 export default function CrewPropertyAssetsPage() {

@@ -73,7 +73,7 @@ function Finding({ finding }: Readonly<{ finding: OwnerInspectionFinding }>) {
         className="text-xs mt-1"
         style={{ color: label && !isSettled(finding.remediation) ? 'var(--accent-amber)' : 'var(--text-muted)' }}
       >
-        {label ?? 'Noted — no repair or purchase raised'}
+        {label ?? 'Noted, no repair or purchase raised'}
       </p>
     </li>
   )
@@ -168,8 +168,8 @@ function InspectionCard({
 function historySubtitle(shown: number, total: number): string {
   const scope = 'not limited to the month above'
   return total > shown
-    ? `Showing the ${shown} most recent of ${total} completed inspections — ${scope}.`
-    : `Every completed inspection, most recent first — ${scope}.`
+    ? `Showing the ${shown} most recent of ${total} completed inspections, ${scope}.`
+    : `Every completed inspection, most recent first, ${scope}.`
 }
 
 export function InspectionHistory({

@@ -3,7 +3,7 @@ import Link              from 'next/link'
 import { Suspense }      from 'react'
 import { SignupForm }    from './signup-form'
 
-export const metadata: Metadata = { title: 'Sign Up — FieldStay' }
+export const metadata: Metadata = { title: 'Sign Up | FieldStay' }
 
 export default function SignupPage() {
   return (

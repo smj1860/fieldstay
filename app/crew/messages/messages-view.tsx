@@ -146,7 +146,7 @@ export function CrewMessagesView({
               <p className="text-sm whitespace-pre-wrap break-words">{String(m.payload.content ?? '')}</p>
               <p className="text-[10px] mt-1 text-brand-200 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                {m.failed ? 'Didn’t send — see the banner above' : 'Sending when you have signal'}
+                {m.failed ? 'Didn’t send, see the banner above' : 'Sending when you have signal'}
               </p>
             </div>
           </div>
