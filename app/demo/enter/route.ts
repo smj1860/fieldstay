@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   const org = await getDemoOrg()
   if (!org) {
-    console.error('[demo enter] demo org not found — run scripts/seed-demo-org.ts first')
+    console.error('[demo enter] demo org not found, run scripts/seed-demo-org.ts first')
     return NextResponse.json(
       { error: 'Demo org not seeded. Run scripts/seed-demo-org.ts.' },
       { status: 503 },

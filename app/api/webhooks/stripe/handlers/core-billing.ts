@@ -177,7 +177,7 @@ async function resolveSubscriptionOrg(
   // checkout.session.completed. Returning here is what left a paid customer
   // silently entitlement-less.
   throw new Error(
-    `[stripe] core subscription ${subscription.id} (price ${priceId}) has no resolvable org — ` +
+    `[stripe] core subscription ${subscription.id} (price ${priceId}) has no resolvable org, ` +
     `customer ${customerId} is not linked to an organization yet. Retrying.`
   )
 }
@@ -523,7 +523,7 @@ export async function handleCoreInvoicePaymentFailed(
   await createPmNotification(supabase, {
     orgId:     org.id,
     type:      'billing_payment_failed',
-    title:     'Payment failed — update your card',
+    title:     'Payment failed. Update your card',
     subtitle:  'Stripe could not collect your latest FieldStay invoice. Your plan stays active while Stripe retries.',
     href:      '/settings',
     severity:  'red',

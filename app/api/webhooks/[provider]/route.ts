@@ -78,7 +78,7 @@ async function notifyRevokedConnection(
 ): Promise<void> {
   if (!orgId) {
     console.warn(
-      `[Webhook:${providerId}] Revoked connection has no org_id — cannot notify PM for user ${appUserId}`
+      `[Webhook:${providerId}] Revoked connection has no org_id, cannot notify PM for user ${appUserId}`
     )
     reportError(new Error('Revoked integration connection has no org_id'), {
       site:  'webhook.provider.revocation_missing_org_id',
@@ -187,7 +187,7 @@ async function processRevocation(args: {
   if (!actionable.length) {
     console.log(
       `[Webhook:${providerId}] Revocation already processed or connection ` +
-      `not found for external user ${externalUserId} — skipping`
+      `not found for external user ${externalUserId}, skipping`
     )
     return
   }
@@ -197,7 +197,7 @@ async function processRevocation(args: {
 
     await revokeIntegrationToken(appUserId, providerId)
     console.log(
-      `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
+      `[Webhook:${providerId}] Token revoked: FieldStay user ${appUserId} ` +
       `(external user ${externalUserId})`
     )
     await logAuditEvent({

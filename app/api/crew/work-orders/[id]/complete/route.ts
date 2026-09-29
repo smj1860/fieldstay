@@ -61,7 +61,7 @@ export async function POST(
 
   if (typeof notes === 'string' && notes.length > MAX_NOTES_LENGTH) {
     return NextResponse.json(
-      { error: `Completion notes are too long — please keep them under ${MAX_NOTES_LENGTH} characters.` },
+      { error: `Completion notes are too long. Please keep them under ${MAX_NOTES_LENGTH} characters.` },
       { status: 400 },
     )
   }

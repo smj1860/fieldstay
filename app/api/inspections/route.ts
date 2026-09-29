@@ -292,7 +292,7 @@ async function captureConditions(
   startedAt: string,
 ): Promise<ConditionsSnapshot | null> {
   if (Date.now() - Date.parse(startedAt) > WEATHER_FRESHNESS_MS) {
-    return reportedConditions('Started offline — conditions not recorded at the time of the walk.')
+    return reportedConditions('Started offline, conditions not recorded at the time of the walk.')
   }
   if (property.lat === null || property.lng === null) return null
 

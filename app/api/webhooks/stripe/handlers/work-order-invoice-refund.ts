@@ -92,7 +92,7 @@ export async function handleWorkOrderInvoiceRefunded(
   // releases the dedup claim (see route.ts) and lets Stripe's retry re-read
   // the row fresh rather than silently posting a wrong-amount credit.
   if (!updated) {
-    throw new Error(`refund update lost a concurrency race for invoice ${inv.id} — retry`)
+    throw new Error(`refund update lost a concurrency race for invoice ${inv.id}, retry`)
   }
 
   // Compensating credit against the SAME category the original expense

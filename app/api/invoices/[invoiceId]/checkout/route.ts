@@ -169,7 +169,7 @@ export async function POST(
           unit_amount:  amountCents,
           product_data: {
             name:        `Invoice ${invoiceId.slice(-8).toUpperCase()}`,
-            description: `Work order payment — ${property?.name ?? 'Property'}`,
+            description: `Work order payment: ${property?.name ?? 'Property'}`,
           },
         },
         quantity: 1,

@@ -1132,6 +1132,21 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 
 ## Styling Conventions
 
+- **Never use an em dash in customer-facing copy.** Rewrite with a comma or a
+  period. This covers everything a PM, crew member, vendor, owner or guest can
+  read: marketing and legal pages, page titles and email subjects, the
+  dashboard, the crew PWA (both languages), the owner and vendor portals,
+  transactional email, SMS, in-app notifications, the FAQ, and inspection
+  prompts. Two things are not copy and are allowed: a standalone placeholder
+  glyph (`{value ?? '—'}`, `placeholder="—"`), which has no wording to
+  re-punctuate, and an em dash a regex operates ON rather than prints. Where a
+  comma would create a splice, use a period; where it would blur into a list
+  the sentence already contains, a colon (`Label: detail`) or parentheses are
+  correct. `app/admin/**` is staff-only and out of scope. Enforced by
+  `unit/guardrails/customer-facing-em-dashes.test.ts`, whose `EXCEPTIONS` set
+  is shrink-only — fix the prose, never add a line to it. The swept-clean state
+  dates from 2026-09-29; before that the dash was house style, so an older
+  commit's copy is not a precedent.
 - **CSS variables** for all colors — never hardcode hex in components, and
   that includes Tailwind's own color utilities (`text-red-500`, `bg-blue-500`,
   `hover:text-red-600`, etc.) — those are just hardcoded hex under a Tailwind
@@ -1214,6 +1229,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `.modify(q => ...)` on a Supabase query | Not a real method. Build the query conditionally with `if` blocks before awaiting it |
 | Direct Supabase reads in crew PWA client components (`app/crew/*`) | Dexie (`getDexieDb` / `useLiveQuery`) reading the local IndexedDB cache |
 | Service role key in client code | Server Actions and Inngest steps only |
+| An em dash in customer-facing copy (page text, page titles, email subjects and bodies, SMS, notification titles, error messages a user reads, inspection prompts) | A comma, or a period where a comma would splice two independent clauses. A colon for a `Label: detail` heading, parentheses for an aside that already contains commas. A standalone `'—'` placeholder glyph is fine. Enforced by `unit/guardrails/customer-facing-em-dashes.test.ts` |
 | Hardcoded colors in components, incl. Tailwind color utilities (`text-red-500`, `hover:text-red-600`) | CSS variables (`var(--text-primary)` etc.) — use the arbitrary-value bracket syntax (`hover:text-[var(--accent-red)]`) if it needs to stay in `className` |
 | Hand-rolling a new tab bar | `components/ui/Tabs.tsx` |
 | Renaming an internal status/lookup key (e.g. `healthDot()`'s `'critical'`/`'offline'` return values) during a copy change | Only rename the display-string helper (`healthLabel()`) and hardcoded JSX text — internal keys are branched on elsewhere and renaming them silently breaks color/variant mapping |
@@ -1820,6 +1836,13 @@ following them stops being a memory test. Five layers, checked in CI via
    - `tailwind-color-ratchet` — files that predate the color-token rule
      are baselined; new files may not hardcode Tailwind color utilities,
      and cleaned-up files must leave the baseline. Never add entries.
+   - `customer-facing-em-dashes` — no em dash in copy any PM, crew member,
+     vendor, owner or guest reads. A standalone `'—'` placeholder glyph is
+     recognized structurally and needs no entry; `EXCEPTIONS` is `path:line`,
+     holds only non-copy uses (today, two regex character classes) and is
+     shrink-only, with a staleness check so an entry cannot drift onto an
+     unrelated line. `app/admin/**` and the `why:` registry in
+     `lib/inspections/forms/index.ts` are out of scope and say so in the file.
    - `n-plus-one-loops` — no Supabase query (or `rpc()` call) inside a
      per-row loop body (`for...of`, `for await...of`, `.forEach`,
      `.map(async`) outside a named, justified `EXCEPTIONS` entry. Classic

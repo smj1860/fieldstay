@@ -196,7 +196,7 @@ async function suppressIfDemoOrg(
     // A failure to resolve demo status must not silently become a real send
     // to a fake 555 number during the demo. Fail CLOSED: suppress the send
     // and say why.
-    console.error('[sms:demo-check] failed — suppressing send', {
+    console.error('[sms:demo-check] failed, suppressing send', {
       orgId,
       error: err instanceof Error ? err.message : String(err),
     })
@@ -282,7 +282,7 @@ async function claimNudgeSlotOrExplain(): Promise<SendSmsResult | null> {
   } catch (err) {
     // Fail closed: without Redis there is no spend ceiling, and a skipped
     // nudge is a non-event for the guest. Never applies to transactional.
-    console.error('[sms:nudge-budget] Redis unavailable — skipping nudge send', {
+    console.error('[sms:nudge-budget] Redis unavailable, skipping nudge send', {
       error: err instanceof Error ? err.message : String(err),
     })
     reportError(err, { site: 'sms.telnyx.nudge_budget_unavailable' })
@@ -290,7 +290,7 @@ async function claimNudgeSlotOrExplain(): Promise<SendSmsResult | null> {
   }
 
   if (!claimed) {
-    console.warn('[sms:nudge-budget] daily nudge budget exhausted — skipping send')
+    console.warn('[sms:nudge-budget] daily nudge budget exhausted, skipping send')
     return { sent: false, reason: 'daily nudge budget exhausted' }
   }
 
