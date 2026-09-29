@@ -59,7 +59,7 @@ const analyticsEnabled  = process.env.VERCEL_ENV === 'production'
 export const metadata: Metadata = {
   title: {
     default:  'FieldStay',
-    template: '%s — FieldStay',
+    template: '%s | FieldStay',
   },
   description: 'STR operations platform for property managers.',
   metadataBase: new URL(

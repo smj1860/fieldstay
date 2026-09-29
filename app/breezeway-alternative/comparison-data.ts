@@ -33,7 +33,7 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
       'properties. No sales call at any size.',
     breezeway:
       '$19.99/property/month, but only published for portfolios of 4 properties or fewer. 5 or more ' +
-      'properties requires a demo and a custom quote — no self-serve price is published above 4 units.',
+      'properties requires a demo and a custom quote. No self-serve price is published above 4 units.',
     fieldstaySource: 'lib/stripe/brackets.ts',
     breezewaySource: 'breezeway.io pricing page + third-party pricing summaries, checked 2026-08-30',
   },
@@ -51,7 +51,7 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
   {
     category: 'Crew app',
     fieldstay:
-      'A progressive web app — no App Store or Play Store install. Works fully offline; every checklist ' +
+      'A progressive web app, no App Store or Play Store install. Works fully offline; every checklist ' +
       'step, photo, and inventory count queues locally and syncs automatically once signal returns.',
     breezeway:
       'Native iOS and Android apps (separate App Store / Play Store installs), with offline syncing for ' +
@@ -63,7 +63,7 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
     category: 'Asset planning & CapEx forecasting',
     fieldstay:
       'Every major appliance and system gets a health score that updates daily from its age and expected ' +
-      'lifespan, rolled into a 10-year capital expenditure forecast automatically — feeding the capital ' +
+      'lifespan, rolled into a 10-year capital expenditure forecast automatically, feeding the capital ' +
       'planning page, the owner portal, and a CPA-ready CSV export.',
     breezeway:
       'Asset tracking logs appliance performance and maintenance history for reference. No health scoring or ' +
@@ -78,7 +78,7 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
       'sign into your guidebook takes a real $5/month off your bill automatically, from the first one.',
     breezeway:
       'The digital welcome book ("Guide") sits in the higher "Operations + Guest Experience" tier above the ' +
-      'base Operations plan, and Breezeway\'s own pricing page lists it among the add-ons priced a la carte — ' +
+      'base Operations plan, and Breezeway\'s own pricing page lists it among the add-ons priced a la carte, ' +
       'an added monthly cost, with no revenue-sharing or bill-credit mechanism advertised.',
     fieldstaySource: 'lib/guidebook/helpers.ts, lib/inngest/functions/guidebook-billing-credit-handler.ts',
     breezewaySource: 'breezeway.io/breezeway-pricing ("Get everything in Operations Pro plus: ... Guide, digital welcome books ... All add-ons are priced a la carte."), checked 2026-08-30',
@@ -92,7 +92,7 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
       'Breezeway markets an AI-powered guest messaging "Concierge" for in-stay communication; whether it ' +
       'drafts responses to posted reviews specifically was not independently confirmed, so no comparison is made here.',
     fieldstaySource: 'lib/inngest/functions/repuguard-batch-generate.ts, components/repuguard/',
-    breezewaySource: 'breezeway.io/property-maintenance-software, checked 2026-08-30 — not confirmed either way',
+    breezewaySource: 'breezeway.io/property-maintenance-software, checked 2026-08-30, not confirmed either way',
   },
 ] as const
 
@@ -113,7 +113,7 @@ export interface TrialOffer {
 export const TRIAL_OFFER: TrialOffer = {
   title: 'Try it on your hardest properties, risk-free.',
   body:
-    'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
+    'Run FieldStay on 3–5 of your most demanding properties for 14 days, the ones with spotty signal, ' +
     'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
     'one click. No contract, no penalty.',
   source: 'app/(auth)/signup/page.tsx',
@@ -137,14 +137,14 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     title: 'You\'ll never have to take anyone\'s word for it.',
     body:
       'Every checklist step, every photo, and every work order status change is timestamped and logged as ' +
-      'it happens — including the ones your crew records with no signal at all. When an owner asks whether ' +
+      'it happens, including the ones your crew records with no signal at all. When an owner asks whether ' +
       'the house was ready, or a guest says something was missed, you open the property, pick the date, ' +
       'and read what happened.',
     source: 'lib/audit.ts, types/database.ts, app/(dashboard)/properties/[id]/history/page.tsx',
   },
   {
     title: 'Owner P&L portal',
-    body: 'A secure, tokenized link for property owners — no account, no login — showing revenue, expenses, and net income by period.',
+    body: 'A secure, tokenized link for property owners, with no account and no login, showing revenue, expenses, and net income by period.',
     source: 'app/owner/[token]/**',
   },
   {
@@ -159,7 +159,7 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     title: 'Built for the people who actually have to use it.',
     body:
       'The app walks your crew through the checklist step by step, and works with no signal. Your vendors ' +
-      'don\'t need to download anything or remember a password — every work order arrives as a link they ' +
+      'don\'t need to download anything or remember a password. Every work order arrives as a link they ' +
       'open, quote, and complete from their phone.',
     source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
   },

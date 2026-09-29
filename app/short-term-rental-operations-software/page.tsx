@@ -160,7 +160,7 @@ export default function StrOperationsSoftwarePage() {
                 <span className="block text-[var(--mkt-gold)]">Software paid for.</span>
               </h1>
               <p className="text-lg text-[var(--mkt-on-dark-softer)] max-w-xl mb-8">
-                FieldStay routes your crew, verifies every clean, tracks every asset — and turns your
+                FieldStay routes your crew, verifies every clean, tracks every asset, and turns your
                 guest guidebook into local sponsor revenue that credits straight back to your bill.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
@@ -196,17 +196,17 @@ export default function StrOperationsSoftwarePage() {
               </div>
 
               <div className="rounded-xl border border-white/10 bg-[var(--mkt-ink)] p-4 mb-3">
-                <div className="font-semibold mb-1">Villa 14 — Turnover clean</div>
+                <div className="font-semibold mb-1">Villa 14: Turnover clean</div>
                 <div className="text-sm text-[var(--mkt-on-dark-soft)] mb-3">
                   Checkout 11:00a · Next check-in 4:00p
                 </div>
                 <span className="inline-block text-xs font-bold px-2.5 py-1 rounded-full bg-[var(--mkt-gold)]/15 text-[var(--mkt-gold)]">
-                  Assigned — Marcus R. · 0.6mi away
+                  Assigned: Marcus R. · 0.6mi away
                 </span>
               </div>
 
               <div className="rounded-xl border border-white/10 bg-[var(--mkt-ink)] p-4">
-                <div className="font-semibold mb-1">Unit 22 — HVAC filter swap</div>
+                <div className="font-semibold mb-1">Unit 22: HVAC filter swap</div>
                 <div className="text-sm text-[var(--mkt-on-dark-soft)] mb-3">
                   Scheduled maintenance · Due this week
                 </div>
@@ -226,7 +226,7 @@ export default function StrOperationsSoftwarePage() {
             Built for portfolios of{' '}
             <b className="text-[var(--mkt-ink)]">1–{SELF_SERVE_CEILING} properties</b>
           </span>
-          <span>Works offline in the field — no signal required</span>
+          <span>Works offline in the field, no signal required</span>
           <span>
             Live with <b className="text-[var(--mkt-ink)]">OwnerRez</b>,{' '}
             <b className="text-[var(--mkt-ink)]">Hospitable</b> &amp;{' '}
@@ -248,7 +248,7 @@ export default function StrOperationsSoftwarePage() {
         <p className="text-[var(--mkt-muted)] leading-relaxed">
           The distinction matters when you are comparing tools. A property management system owns the
           booking: listings, calendars, rates, guest messaging, payments. An operations platform owns
-          what the booking then requires on the ground — who is cleaning which unit, whether the clean
+          what the booking then requires on the ground: who is cleaning which unit, whether the clean
           was verified, when the water heater is due for replacement, which vendor is certified to take
           the job, and what the owner sees at the end of the month. They meet at exactly one point, the
           reservation, which is why you connect them rather than choose between them.
@@ -334,7 +334,7 @@ export default function StrOperationsSoftwarePage() {
             Connects to the PMS you already run
           </h2>
           <p className="text-[var(--mkt-muted)] mb-8 max-w-2xl">
-            Reservations and property data sync in — no double entry. No PMS at all? A plain iCal feed
+            Reservations and property data sync in, no double entry. No PMS at all? A plain iCal feed
             from Airbnb or VRBO is enough to get your turnover schedule building itself.
           </p>
           <div className="flex flex-wrap gap-3">
@@ -369,7 +369,7 @@ export default function StrOperationsSoftwarePage() {
       <section className="max-w-6xl mx-auto px-6 py-16">
         <GenericPricingSection entryFeatures={GENERIC_ENTRY_FEATURES} signupHref={ctaHref} />
         <p className="text-center text-sm text-[var(--mkt-muted)] mt-10 max-w-2xl mx-auto">
-          Pricing is graduated, so only the property that crosses a bracket is re-rated — adding your
+          Pricing is graduated, so only the property that crosses a bracket is re-rated, so adding your
           fifth property adds that property&apos;s rate, not a new tier&apos;s. Full schedule on the{' '}
           <Link href="/pricing" className="underline hover:text-[var(--mkt-ink)]">
             pricing page

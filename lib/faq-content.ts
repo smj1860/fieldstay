@@ -69,7 +69,7 @@ export const CREW_VISIBILITY_FAQ = {
 export const TEAM_ACCESS_FAQ = {
   question: 'What can team members see and do?',
   answer:
-    'Anyone you invite to your team joins as an Admin with full access to the app — properties, turnovers, work orders, crew scheduling, inventory, owner reporting, and billing. Two things stay with the account Owner: only the Owner can invite or remove team members, and only the Owner can delete the account. Everything a team member sees is scoped to your organization, so they never have access to another company\'s data.',
+    'Anyone you invite to your team joins as an Admin with full access to the app: properties, turnovers, work orders, crew scheduling, inventory, owner reporting, and billing. Two things stay with the account Owner: only the Owner can invite or remove team members, and only the Owner can delete the account. Everything a team member sees is scoped to your organization, so they never have access to another company\'s data.',
 } as const
 
 /**
@@ -82,9 +82,9 @@ export const TEAM_ACCESS_FAQ = {
  * Turnover button. Confirmed against live production data 2026-07-31.
  */
 export const MULTI_CREW_START_FAQ = {
-  question: 'Two crew members are assigned to the same turnover — why did only one of them see Start Turnover work?',
+  question: 'Two crew members are assigned to the same turnover. Why did only one of them see Start Turnover work?',
   answer:
-    'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete) — it isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed — the other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start.',
+    'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete). It isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed. The other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start.',
 } as const
 
 /**
@@ -172,8 +172,8 @@ export const SHARED_LANDING_FAQ_TAIL: ReadonlyArray<{ q: string; a: string }> = 
 export const HOSTS_CREW_REQUIRED_FAQ = {
   question: 'Do I need to run a crew to use this?',
   answer:
-    'No. Add yourself as your own crew member — a name, a role, and an email or phone number, which takes ' +
-    'under a minute — and you can assign yourself to turnovers, work checklists, and track inventory from ' +
+    'No. Add yourself as your own crew member (a name, a role, and an email or phone number, which takes ' +
+    'under a minute) and you can assign yourself to turnovers, work checklists, and track inventory from ' +
     'day one. No separate account or invite is involved. You can send yourself an app login, or invite an ' +
     'actual cleaner, later if you ever need to. Nothing about the Hosts plan requires a team.',
 } as const
@@ -181,11 +181,11 @@ export const HOSTS_CREW_REQUIRED_FAQ = {
 export const HOSTS_REPLACES_PMS_FAQ = {
   question: 'Does FieldStay replace Airbnb, VRBO, or my PMS?',
   answer:
-    'No. Airbnb, VRBO, OwnerRez, Hospitable, Hostex, and Lodgify handle bookings, rates, and guest messaging — ' +
+    'No. Airbnb, VRBO, OwnerRez, Hospitable, Hostex, and Lodgify handle bookings, rates, and guest messaging. ' +
     'FieldStay handles what happens on the ground after a guest books: turnovers, checklists, inventory, vendor ' +
     'work orders, and your own P&L. If you\'re on OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify, connect it ' +
     'in about 2 minutes and everything syncs automatically. If you\'re on none of them, paste your Airbnb or ' +
-    'VRBO iCal link instead — ' +
+    'VRBO iCal link instead, ' +
     'same result.',
 } as const
 
@@ -206,7 +206,7 @@ export const HOSTS_REPLACES_PMS_FAQ = {
 export const ENTERPRISE_SLA_FAQ = {
   question: 'What SLA do you offer for Enterprise accounts?',
   answer:
-    'Enterprise accounts get an uptime SLA and dedicated support commitments — the specific terms are set ' +
+    'Enterprise accounts get an uptime SLA and dedicated support commitments, and the specific terms are set ' +
     'per contract based on your deployment, so we don\'t publish a single number here. Talk to us and we\'ll ' +
     'work out what\'s right for your operation.',
 } as const
@@ -215,9 +215,9 @@ export const ENTERPRISE_SECURITY_FAQ = {
   question: 'What security and compliance measures does FieldStay have in place?',
   answer:
     'All data is encrypted in transit (TLS 1.2+) and sensitive credentials and tokens are encrypted at rest ' +
-    '(AES-256, via Supabase Vault). Every security-relevant action — logins, permission changes, data exports ' +
-    '— is written to an append-only audit log retained for 3 years, consistent with SOC 2 Type II audit ' +
-    'requirements. A signed Data Processing Agreement (GDPR Article 28) is available for any account — see ' +
+    '(AES-256, via Supabase Vault). Every security-relevant action (logins, permission changes, data exports) ' +
+    'is written to an append-only audit log retained for 3 years, consistent with SOC 2 Type II audit ' +
+    'requirements. A signed Data Processing Agreement (GDPR Article 28) is available for any account. See ' +
     '/dpa. We don\'t hold a SOC 2 or ISO 27001 certification today; if that\'s a hard requirement for your ' +
     'organization, tell us and we can talk through where things stand.',
 } as const
@@ -226,7 +226,7 @@ export const ENTERPRISE_TEAM_ACCESS_FAQ = {
   question: 'Can different teams or regions have different levels of access?',
   answer:
     'Not yet, and we\'d rather say that plainly than let you find out after signing up. Today, every person ' +
-    'you invite to your organization joins with full Admin access to the whole account — every property, ' +
+    'you invite to your organization joins with full Admin access to the whole account: every property, ' +
     'every region. Crew members are separate and already scoped to only their own assigned turnovers, but ' +
     'there is no region- or property-scoped permission tier for office staff. If granular, per-region access ' +
     'control is a requirement for your team, talk to us before you commit.',
@@ -236,7 +236,7 @@ export const ENTERPRISE_MIGRATION_FAQ = {
   question: 'What happens to our existing data when we switch to FieldStay?',
   answer:
     'If you\'re on OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify, connecting your account pulls in your ' +
-    'booking history — not just upcoming stays — on the first sync, so nothing before today is lost. There isn\'t a ' +
+    'booking history, not just upcoming stays, on the first sync, so nothing before today is lost. There isn\'t a ' +
     'separate white-glove migration product beyond that connection: it\'s the same sync every FieldStay ' +
     'account uses, just at your scale. Portfolio and Enterprise accounts get custom onboarding and dedicated ' +
     'account support to walk through the cutover with you.',
@@ -259,18 +259,18 @@ export const ENTERPRISE_MIGRATION_FAQ = {
 export const VENDOR_NO_ACCOUNT_FAQ = {
   question: 'Do I need to create an account to use FieldStay?',
   answer:
-    'No. A work order arrives as a link by email — you open it, see the property details and the ' +
+    'No. A work order arrives as a link by email. You open it, see the property details and the ' +
     'authorized spending limit, and can submit a quote or mark the job complete with photos, all with no ' +
     'account and nothing to install. The one exception: before you can submit an invoice for payment, ' +
     'you\'ll be asked to set up a Stripe Connect payout account (a one-time step, so payment can reach your ' +
-    'bank) — that\'s a Stripe account, not a FieldStay login.',
+    'bank), and that\'s a Stripe account, not a FieldStay login.',
 } as const
 
 export const VENDOR_PAYOUT_TIMING_FAQ = {
   question: 'How fast do I get paid?',
   answer:
     'Once the property manager reviews and approves your invoice, payment is sent via Stripe Connect ' +
-    'directly to your bank account. We don\'t control — and won\'t promise a specific number of days for — ' +
+    'directly to your bank account. We don\'t control (and won\'t promise a specific number of days for) ' +
     'how quickly a given property manager reviews an invoice, and Stripe\'s own transfer timing applies ' +
     'once payment is released.',
 } as const
@@ -278,7 +278,7 @@ export const VENDOR_PAYOUT_TIMING_FAQ = {
 export const VENDOR_MULTIPLE_PMS_FAQ = {
   question: 'What if I work with multiple property managers who don\'t all use FieldStay?',
   answer:
-    'Nothing changes on your end. Each work order link is independent and tied to that one job — there\'s ' +
+    'Nothing changes on your end. Each work order link is independent and tied to that one job. There\'s ' +
     'no FieldStay account for you to maintain across property managers, so a job from a manager who uses ' +
     'FieldStay works exactly like any other, and the property managers who don\'t use it just reach you the ' +
     'way they always have.',
@@ -327,14 +327,14 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
       'Short-term rental operations software runs the physical work a rental generates after a booking ' +
       'is confirmed: turnover cleans, crew scheduling and dispatch, inspections, maintenance work orders, ' +
       'vendor coordination and supply restocking. It is distinct from a property management system (PMS), ' +
-      'which handles listings, reservations, rates and guest messaging. Most operators run both — the PMS ' +
+      'which handles listings, reservations, rates and guest messaging. Most operators run both: the PMS ' +
       'owns the booking, the operations platform owns everything the booking then requires on the ground. ' +
       'FieldStay is an operations platform of this kind, built for managers running 1 to 150 properties.',
   },
   {
     q: 'Is FieldStay a property management system, or does it replace OwnerRez or Hospitable?',
     a:
-      'No — FieldStay does not replace your PMS and is not a booking platform. It connects to OwnerRez, ' +
+      'No. FieldStay does not replace your PMS and is not a booking platform. It connects to OwnerRez, ' +
       'Hospitable or Hostaway (or reads a plain iCal feed from Airbnb and VRBO) and takes over the field ' +
       'operations those systems leave to spreadsheets and group texts. Your reservations, rates and guest ' +
       'messaging stay where they are; FieldStay reads the bookings and builds the turnover schedule, crew ' +
@@ -346,19 +346,19 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
       'FieldStay is priced per property on a graduated schedule, published with no sales call required. ' +
       'The first property is $19/month; properties 2–4 are $13 each, 5–15 are $10 each, 16–50 are $8 each, ' +
       'and 51–150 are $6 each. Only the property that crosses a boundary is re-rated, so adding one never ' +
-      'jumps the whole bill. Annual billing is ten months for twelve. Every plan includes every feature — ' +
-      'nothing is gated behind a higher tier — and there is a 14-day free trial with no credit card.',
+      'jumps the whole bill. Annual billing is ten months for twelve. Every plan includes every feature, ' +
+      'nothing is gated behind a higher tier, and there is a 14-day free trial with no credit card.',
   },
   {
     q: 'Can property management software pay for itself?',
     a:
-      'In FieldStay, yes — completely, at portfolio scale. Each property\'s guest guidebook carries local ' +
+      'In FieldStay, yes. Completely, at portfolio scale. Each property\'s guest guidebook carries local ' +
       'business sponsors: restaurants, activity companies, rental shops. A sponsor pays $15/month for the ' +
       'placement and $5/month of that is credited automatically against your FieldStay invoice, starting ' +
       'with the first sponsor and with no threshold to clear. There is no limit on how many sponsors you ' +
       'sign; the only ceiling is your own bill, because the credit stops once it reaches zero rather than ' +
       'building a balance. A property displays up to 4 sponsors, so a 5-property portfolio has room for the ' +
-      '14 sponsors that cover a 5-property plan outright — and larger portfolios need fewer sponsors per ' +
+      '14 sponsors that cover a 5-property plan outright, and larger portfolios need fewer sponsors per ' +
       'property to get there. FieldStay generates the print-ready pitch used to sell the slots.',
   },
   {
@@ -368,21 +368,21 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
       'messaging, payments. An operations platform is staff-facing and asset-facing: who is cleaning which ' +
       'unit, whether the clean was verified with photos, when the HVAC filter is due, which vendor is ' +
       'certified to take the job, and what the owner sees at the end of the month. They overlap at exactly ' +
-      'one point — the booking — which is why an operations platform is normally connected to a PMS ' +
+      'one point, the booking, which is why an operations platform is normally connected to a PMS ' +
       'rather than chosen instead of one.',
   },
   {
     q: 'How many properties does FieldStay handle?',
     a:
       'Self-serve pricing covers 1 to 150 properties. Above 150 it is an Enterprise contract negotiated ' +
-      'directly rather than a published rate — a commercial boundary, not a technical limit. There is no ' +
+      'directly rather than a published rate, a commercial boundary, not a technical limit. There is no ' +
       'minimum: a single-property host and a 150-property manager use the same platform with the same ' +
       'features, and only the per-property price differs.',
   },
   {
     q: 'How does automatic crew assignment decide who gets a job?',
     a:
-      'FieldStay scores each crew member against the job on proximity and current workload — every crew ' +
+      'FieldStay scores each crew member against the job on proximity and current workload. Every crew ' +
       'member has a home location and a capacity score, and a reliability score built from their completion ' +
       'history. The suggestion is stored with the reasoning behind it, so a manager can see why a given ' +
       'person was picked and override it. Overrides are recorded and feed back into later suggestions.',
@@ -390,8 +390,8 @@ export const STR_OPERATIONS_FAQ: ReadonlyArray<{ q: string; a: string }> = [
   {
     q: 'Does it track appliances and capital expenses?',
     a:
-      'Yes. FieldStay keeps a per-asset ledger across 21 asset types — HVAC, water heaters, roofs, pool ' +
-      'pumps, septic systems, appliances and others — each with lifespan ranges and replacement costs, and ' +
+      'Yes. FieldStay keeps a per-asset ledger across 21 asset types (HVAC, water heaters, roofs, pool ' +
+      'pumps, septic systems, appliances and others) each with lifespan ranges and replacement costs, and ' +
       'a health score from 0 to 100 that shows what is aging toward replacement before it fails. Assets ' +
       'carry purchase price, placed-in-service date, warranty expiry and a MACRS depreciation class, with ' +
       'annual depreciation entries that export for tax filing.',
@@ -432,14 +432,14 @@ export const STROPS_FAQ: readonly FaqItem[] = [
       'FieldStay is built offline-first for exactly this. The crew app installs to the phone and stores ' +
       'the day\'s turnovers, checklists, property details and inventory on the device, so it opens and ' +
       'works with no bars at all. Cleaners tick items, take photos and complete turnovers normally; ' +
-      'everything queues locally and uploads the moment the phone finds signal again — usually before ' +
+      'everything queues locally and uploads the moment the phone finds signal again, usually before ' +
       'they have driven back to the main road.',
   },
   {
     id:       'strops-does-the-cleaning-checklist',
     question: 'Does the cleaning checklist work without internet?',
     answer:
-      'Yes. The entire checklist — every room and item, including photo requirements — is cached on the ' +
+      'Yes. The entire checklist, every room and item, including photo requirements, is cached on the ' +
       'phone before the crew arrives. Ticking items, adding notes and attaching photos all work with the ' +
       'phone in airplane mode. Completion timestamps are recorded on the device at the moment of the tap, ' +
       'not when it syncs, so job duration stays accurate even if the upload happens an hour later.',
@@ -458,7 +458,7 @@ export const STROPS_FAQ: readonly FaqItem[] = [
     question: 'Will I lose work if the phone dies or the app closes mid-turnover?',
     answer:
       'No. Each change and its pending upload are written to the phone in a single transaction, so a ' +
-      'phone killed mid-tap either has the change and the queued upload or neither — never a checkbox ' +
+      'phone killed mid-tap either has the change and the queued upload or neither, never a checkbox ' +
       'that looks ticked but was never queued. Reopening the app picks up exactly where the crew left off.',
   },
   {
@@ -491,7 +491,7 @@ export const STROPS_FAQ: readonly FaqItem[] = [
     question: 'Is FieldStay offline-first or just offline-tolerant?',
     answer:
       'Offline-first. The crew app reads from local device storage as its normal mode of operation and ' +
-      'syncs in the background — it is not an online app with a cache bolted on. There is no separate ' +
+      'syncs in the background. It is not an online app with a cache bolted on. There is no separate ' +
       '"offline mode" to switch into, because there is no online mode to switch out of.',
   },
 ] as const
@@ -526,14 +526,14 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'It depends on your property count, and for most real portfolios the honest answer is "we don\'t ' +
       'know, because Breezeway won\'t say." For 10 properties, FieldStay is $118/month, publicly calculable ' +
       'from the rate schedule before you ever talk to anyone. Breezeway\'s published $19.99/property rate ' +
-      'only covers portfolios of 4 or fewer — at 10 properties you\'re already past that and into a custom ' +
+      'only covers portfolios of 4 or fewer. At 10 properties you\'re already past that and into a custom ' +
       'quote, so there is no public number to compare against.',
   },
   {
     id:       'breezeway-alternative-vendor-app',
     question: 'Do vendors need to download an app to work with FieldStay, the way they do with Breezeway?',
     answer:
-      'No. A FieldStay work order is dispatched as a link — the vendor opens it on their phone, sees the ' +
+      'No. A FieldStay work order is dispatched as a link. The vendor opens it on their phone, sees the ' +
       'job details, submits a quote or completion photos, and is done. No account, no password, no app to ' +
       'install. Breezeway\'s vendor and cleaner workflow runs through dedicated Android and iOS apps with ' +
       'account login, per Breezeway\'s own help documentation.',
@@ -542,7 +542,7 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     id:       'breezeway-alternative-offline',
     question: 'Does FieldStay work offline the way Breezeway does?',
     answer:
-      'Both platforms support offline field work, so this isn\'t a capability gap — the real difference is ' +
+      'Both platforms support offline field work, so this isn\'t a capability gap. The real difference is ' +
       'HOW. FieldStay\'s crew app is a progressive web app: no App Store or Play Store install, added ' +
       'straight to the home screen, and it works with zero signal because it reads from the phone\'s local ' +
       'storage as its normal mode, not a special "offline mode." Breezeway ships native iOS and Android ' +
@@ -552,7 +552,7 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     id:       'breezeway-alternative-switching',
     question: 'How do I switch from Breezeway to FieldStay?',
     answer:
-      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway — it connects TO ' +
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway. It connects TO ' +
       'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
       'schedule ' +
       'from your existing bookings automatically. Most teams run FieldStay on a handful of properties during ' +
@@ -562,11 +562,11 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     id:       'breezeway-alternative-guidebook',
     question: 'Does FieldStay charge extra for a guest guidebook, the way Breezeway does?',
     answer:
-      'No — FieldStay\'s guest guidebook is included on every plan at no extra cost, and it can actually pay ' +
+      'No. FieldStay\'s guest guidebook is included on every plan at no extra cost, and it can actually pay ' +
       'for itself: every local business sponsor you sign into your guidebook applies a real $5/month credit ' +
       'against your bill automatically, from the first one. Breezeway\'s digital welcome ' +
       'book ("Guide") sits in a higher "Operations + Guest Experience" tier, and Breezeway\'s own pricing page ' +
-      'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
+      'lists it among the add-ons priced a la carte, an added monthly cost with no revenue-sharing back to you.',
   },
   {
     // Renamed from breezeway-alternative-guarantee — FieldStay does not
@@ -579,7 +579,7 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'How do I know what actually happened during a turnover?',
     answer:
       'You\'ll never have to take anyone\'s word for it. Every checklist step, every photo, and every work ' +
-      'order status change is timestamped and logged as it happens — including the ones your crew records ' +
+      'order status change is timestamped and logged as it happens, including the ones your crew records ' +
       'with no signal at all. When an owner asks whether the house was ready, or a guest says something was ' +
       'missed, you don\'t go looking for someone to ask. You open the property, pick the date, and read ' +
       'what happened.',
@@ -613,7 +613,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-historical',
         question: 'Will historical bookings sync over, or only future ones?',
         answer:
-          'On your initial connection, FieldStay syncs your full booking history from your PMS, not just upcoming stays — so past bookings are already there for reporting from day one. All future booking changes sync in real time as your PMS sends webhook events. Note this only applies to the first connection: if you disconnect and reconnect later, that re-sync only pulls in active and future bookings, not your full history again.',
+          'On your initial connection, FieldStay syncs your full booking history from your PMS, not just upcoming stays, so past bookings are already there for reporting from day one. All future booking changes sync in real time as your PMS sends webhook events. Note this only applies to the first connection: if you disconnect and reconnect later, that re-sync only pulls in active and future bookings, not your full history again.',
       },
       {
         id:       'or-not-updating',
@@ -631,7 +631,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'crew-invite',
         question: 'How do crew members access FieldStay?',
         answer:
-          'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row (or "Invite All" to send every pending invite at once). They\'ll receive a link to create their account and install the app. Crew members see only their assigned turnovers and checklists — not financial data, owner reports, or other crew members\' work.',
+          'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row (or "Invite All" to send every pending invite at once). They\'ll receive a link to create their account and install the app. Crew members see only their assigned turnovers and checklists, not financial data, owner reports, or other crew members\' work.',
       },
       {
         // Replaces an earlier answer that claimed crew "cannot view ...
@@ -653,13 +653,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'crew-offline',
         question: 'Can crew complete checklists without cell service?',
         answer:
-          'Yes. The crew app uses local-first sync — checklists, property details, and assignments download to the device. Crew can work through an entire turnover offline and capture photos. Everything syncs to the cloud automatically when connectivity returns.',
+          'Yes. The crew app uses local-first sync: checklists, property details, and assignments download to the device. Crew can work through an entire turnover offline and capture photos. Everything syncs to the cloud automatically when connectivity returns.',
       },
       {
         id:       'crew-pwa',
         question: 'Does the crew app need to be installed from the App Store?',
         answer:
-          'No. It\'s a Progressive Web App (PWA). After accepting the invite, crew open the link in Safari (iPhone) or Chrome (Android) and tap "Add to Home Screen." It installs like a native app with offline support — no App Store or Google Play account required.',
+          'No. It\'s a Progressive Web App (PWA). After accepting the invite, crew open the link in Safari (iPhone) or Chrome (Android) and tap "Add to Home Screen." It installs like a native app with offline support, no App Store or Google Play account required.',
       },
       {
         id:       'crew-multi-assign-start',
@@ -681,7 +681,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'team-vs-crew',
         question: 'What\'s the difference between a team member and a crew member?',
         answer:
-          'Team members are office staff — they sign in to the full dashboard and manage the business. Crew members are the people doing turnovers in the field; they use a separate phone app and only see the jobs assigned to them. They are two different account types, so adding a cleaner as a team member would give them far more access than they need. Add cleaners under Crew, and office staff under Team.',
+          'Team members are office staff. They sign in to the full dashboard and manage the business. Crew members are the people doing turnovers in the field; they use a separate phone app and only see the jobs assigned to them. They are two different account types, so adding a cleaner as a team member would give them far more access than they need. Add cleaners under Crew, and office staff under Team.',
       },
     ],
   },
@@ -693,7 +693,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing, and how is the price calculated?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $19/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $19/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150, so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
       },
       {
         id:       'billing-crew-seats',
@@ -711,7 +711,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-plan-change',
         question: 'What happens to my bill when I add or remove a property?',
         answer:
-          'There\'s no plan to switch — your bill simply reflects your current property count, computed the same way every time (see the property-count question above). What changes is WHEN it takes effect, and it depends on your billing interval. On monthly billing, an added or removed property is reflected starting your next invoice — nothing changes mid-cycle. On annual billing, added properties are held and only billed once you\'ve added a 5th property since your last renewal, at which point all 5 are prorated together for the remainder of your billing year; removed properties are credited at your next renewal. Either way, you never see a mid-cycle surprise charge.',
+          'There\'s no plan to switch. Your bill simply reflects your current property count, computed the same way every time (see the property-count question above). What changes is WHEN it takes effect, and it depends on your billing interval. On monthly billing, an added or removed property is reflected starting your next invoice, and nothing changes mid-cycle. On annual billing, added properties are held and only billed once you\'ve added a 5th property since your last renewal, at which point all 5 are prorated together for the remainder of your billing year; removed properties are credited at your next renewal. Either way, you never see a mid-cycle surprise charge.',
       },
       {
         id:       'billing-cancel',
@@ -729,25 +729,25 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'tech-browsers',
         question: 'Which browsers and devices are supported?',
         answer:
-          'The PM dashboard works in any modern browser — Chrome, Safari, Firefox, and Edge on desktop and mobile. The crew app is optimized for Safari on iOS and Chrome on Android. Keep your browser updated for the best experience.',
+          'The PM dashboard works in any modern browser: Chrome, Safari, Firefox, and Edge on desktop and mobile. The crew app is optimized for Safari on iOS and Chrome on Android. Keep your browser updated for the best experience.',
       },
       {
         id:       'tech-local-first',
         question: 'What does "local-first" mean for my data?',
         answer:
-          'FieldStay syncs your data to a local database on your device. Pages load instantly from local storage rather than waiting on a network round-trip. Changes you make are written locally first, then synced to the cloud in the background — so the app feels fast even on slow connections.',
+          'FieldStay syncs your data to a local database on your device. Pages load instantly from local storage rather than waiting on a network round-trip. Changes you make are written locally first, then synced to the cloud in the background, so the app feels fast even on slow connections.',
       },
       {
         id:       'tech-security',
         question: 'Is my data secure?',
         answer:
-          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS credentials — OAuth tokens for OwnerRez, Hospitable and Hostex, API keys for Hostaway and Lodgify — are stored in an encrypted vault, never in the application database.',
+          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation. No user can ever access another organization\'s data. PMS credentials (OAuth tokens for OwnerRez, Hospitable and Hostex, API keys for Hostaway and Lodgify) are stored in an encrypted vault, never in the application database.',
       },
       {
         id:       'tech-password',
         question: 'How do I reset my password?',
         answer:
-          'On the login page, click "Forgot password" and enter your email. You\'ll receive a reset link within a few minutes. Check your spam folder if it doesn\'t arrive — emails come from noreply@fieldstay.app.',
+          'On the login page, click "Forgot password" and enter your email. You\'ll receive a reset link within a few minutes. Check your spam folder if it doesn\'t arrive. Emails come from noreply@fieldstay.app.',
       },
     ],
   },
@@ -797,43 +797,43 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'inv-par-level',
         question: 'What is a par level and how do I set one?',
         answer:
-          'A par level is the minimum quantity of a supply item you want on hand before it needs restocking — e.g. 4 rolls of paper towels. Most items set themselves: FieldStay scales them to each property, so a 4-bathroom house gets more towels than a studio without you doing anything. To override one, click the par level at Inventory → [Property Name] and type the number you want. Your number is used as-is, and the item keeps scaling from it if the property changes later.',
+          'A par level is the minimum quantity of a supply item you want on hand before it needs restocking, e.g. 4 rolls of paper towels. Most items set themselves: FieldStay scales them to each property, so a 4-bathroom house gets more towels than a studio without you doing anything. To override one, click the par level at Inventory → [Property Name] and type the number you want. Your number is used as-is, and the item keeps scaling from it if the property changes later.',
       },
       {
         id:       'inv-smart-par',
         question: 'Why is the same item a different quantity at each property?',
         answer:
-          'Because most supply items scale with the property. Bathroom items (towels, bath mats, toiletries) scale with the bathroom count, bedroom items (hangers, spare linens) with the bedroom count, and guest consumables (coffee, dinnerware, glasses) with how many guests the property sleeps — each with a small safety buffer on top. So the same catalog item shows a different number at a 1-bathroom condo than at a 4-bathroom lodge. Items that do not vary by size — a plunger, a first aid kit — stay a fixed number everywhere.',
+          'Because most supply items scale with the property. Bathroom items (towels, bath mats, toiletries) scale with the bathroom count, bedroom items (hangers, spare linens) with the bedroom count, and guest consumables (coffee, dinnerware, glasses) with how many guests the property sleeps, each with a small safety buffer on top. So the same catalog item shows a different number at a 1-bathroom condo than at a 4-bathroom lodge. Items that do not vary by size, such as a plunger or a first aid kit, stay a fixed number everywhere.',
       },
       {
         id:       'inv-par-changed',
-        question: 'My par levels changed on their own — why?',
+        question: 'My par levels changed on their own. Why?',
         answer:
-          'Editing a property\'s bedrooms, bathrooms or max guests rescales every item that scales with it, within a few seconds. That is expected: it is the same recalculation that sizes a new property. Two things are never touched by it — an item you set yourself, which keeps scaling from your number, and any item marked as a fixed quantity. Once a property has enough inventory counts on record, FieldStay also starts using what that property actually goes through instead of the size estimate. If a number still looks wrong, ask the in-app support chat "why is my [item] par level what it is" and it will explain that specific item at that specific property.',
+          'Editing a property\'s bedrooms, bathrooms or max guests rescales every item that scales with it, within a few seconds. That is expected: it is the same recalculation that sizes a new property. Two things are never touched by it: an item you set yourself, which keeps scaling from your number, and any item marked as a fixed quantity. Once a property has enough inventory counts on record, FieldStay also starts using what that property actually goes through instead of the size estimate. If a number still looks wrong, ask the in-app support chat "why is my [item] par level what it is" and it will explain that specific item at that specific property.',
       },
       {
         id:       'inv-add-own-items',
         question: 'Can I add my own items, or items only some properties need?',
         answer:
-          'Yes. Every property starts from the FieldStay standard list, and you add anything else it needs — pool towels, fire pit supplies, a hot tub kit — at Inventory → [Property Name]. Items added from the catalog scale with property size the same way the standard ones do. You can also build your own template from scratch at Inventory → Templates if a group of properties needs a different list entirely.',
+          'Yes. Every property starts from the FieldStay standard list, and you add anything else it needs (pool towels, fire pit supplies, a hot tub kit) at Inventory → [Property Name]. Items added from the catalog scale with property size the same way the standard ones do. You can also build your own template from scratch at Inventory → Templates if a group of properties needs a different list entirely.',
       },
       {
         id:       'inv-kroger',
         question: 'How does the Kroger cart work?',
         answer:
-          'When crew inventory counts come in below par, FieldStay creates a purchase order automatically. If you\'ve connected Kroger, go to Inventory → Portfolio and click "Build Cart" to add every below-par item to your Kroger cart in the right quantities. You still review and check out yourself — building the cart never places the order on its own.',
+          'When crew inventory counts come in below par, FieldStay creates a purchase order automatically. If you\'ve connected Kroger, go to Inventory → Portfolio and click "Build Cart" to add every below-par item to your Kroger cart in the right quantities. You still review and check out yourself, and building the cart never places the order on its own.',
       },
       {
         id:       'inv-not-near-kroger',
-        question: 'There\'s no store called "Kroger" near my property — can I still use this?',
+        question: 'There\'s no store called "Kroger" near my property. Can I still use this?',
         answer:
-          'Almost certainly yes. Kroger owns dozens of regional grocery chains under different names — Ralphs, Fred Meyer, King Soopers, Smith\'s, Fry\'s, QFC, Harris Teeter, Mariano\'s, and more. FieldStay automatically connects to whichever Kroger-owned store is closest to your property, whatever it\'s branded locally.',
+          'Almost certainly yes. Kroger owns dozens of regional grocery chains under different names: Ralphs, Fred Meyer, King Soopers, Smith\'s, Fry\'s, QFC, Harris Teeter, Mariano\'s, and more. FieldStay automatically connects to whichever Kroger-owned store is closest to your property, whatever it\'s branded locally.',
       },
       {
         id:       'inv-template-change',
         question: 'If I edit an inventory template, does it update properties that already use it?',
         answer:
-          'No. Templates are a starting point, not a live link — once applied, that property\'s items are independent. Re-applying an edited template to the same property adds any items it does not have yet, but never changes the par levels already there, so a level you adjusted is safe from a re-apply.',
+          'No. Templates are a starting point, not a live link. Once applied, that property\'s items are independent. Re-applying an edited template to the same property adds any items it does not have yet, but never changes the par levels already there, so a level you adjusted is safe from a re-apply.',
       },
     ],
   },
@@ -845,13 +845,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'gb-what-is',
         question: 'What is the Guest Guidebook?',
         answer:
-          'A personalized, mobile-friendly page delivered to each guest with their door code, WiFi password, check-in instructions, house rules, and local recommendations. It requires no app download and is pre-populated from your PMS connection — review it at Guidebook → [Property Name] and toggle Published when ready.',
+          'A personalized, mobile-friendly page delivered to each guest with their door code, WiFi password, check-in instructions, house rules, and local recommendations. It requires no app download and is pre-populated from your PMS connection. Review it at Guidebook → [Property Name] and toggle Published when ready.',
       },
       {
         id:       'gb-sms-optin',
         question: 'How does the SMS door-code text work?',
         answer:
-          'Guests get a pre-arrival email with a prompt to receive their door code by text. They enter their number and explicitly consent before anything is sent — no guest is ever texted without opting in first. They can reply STOP at any time to stop all messages instantly.',
+          'Guests get a pre-arrival email with a prompt to receive their door code by text. They enter their number and explicitly consent before anything is sent, and no guest is ever texted without opting in first. They can reply STOP at any time to stop all messages instantly.',
       },
       {
         id:       'gb-repeat-guest',
@@ -863,13 +863,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'gb-sponsors',
         question: 'How do guidebook sponsors work?',
         answer:
-          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages, and every active sponsor takes $5/month off your FieldStay bill — from the first one, with no thresholds and no limit on how many you sign. The credit is capped only by your own plan cost: it can take your bill to zero, but it does not build a balance beyond that. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial), which is a separate, non-monetary milestone from the credit. Add one at Guidebook → Sponsors → Add Sponsor.',
+          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages, and every active sponsor takes $5/month off your FieldStay bill, from the first one, with no thresholds and no limit on how many you sign. The credit is capped only by your own plan cost: it can take your bill to zero, but it does not build a balance beyond that. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial), which is a separate, non-monetary milestone from the credit. Add one at Guidebook → Sponsors → Add Sponsor.',
       },
       {
         id:       'gb-sponsor-credit-timing',
         question: 'When does my sponsor credit show up, and why didn\'t it change this month?',
         answer:
-          'The credit is a line item on your next FieldStay invoice, applied automatically — no code to enter, nothing to request. It is calculated shortly before each renewal, so if you add or cancel a sponsor within about two days of your renewal date, the amount already worked out for that period stands and your new count applies from the following period. Nothing is lost: a sponsor signed just before renewal is credited on the next invoice instead. That short window is the only time your credit and your live sponsor count can disagree.',
+          'The credit is a line item on your next FieldStay invoice, applied automatically, no code to enter, nothing to request. It is calculated shortly before each renewal, so if you add or cancel a sponsor within about two days of your renewal date, the amount already worked out for that period stands and your new count applies from the following period. Nothing is lost: a sponsor signed just before renewal is credited on the next invoice instead. That short window is the only time your credit and your live sponsor count can disagree.',
       },
     ],
   },
@@ -887,7 +887,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'rg-post',
         question: 'Does RepuGuard post my response automatically?',
         answer:
-          'No — approving a draft doesn\'t submit it anywhere by itself. For OwnerRez reviews, clicking "Post to OwnerRez" opens the review on OwnerRez\'s site so you can paste your response there. For Hospitable, Hostex, and manually-added reviews, you post the response wherever the review actually lives, then click "Mark as Posted" in FieldStay so the status reflects reality.',
+          'No. Approving a draft doesn\'t submit it anywhere by itself. For OwnerRez reviews, clicking "Post to OwnerRez" opens the review on OwnerRez\'s site so you can paste your response there. For Hospitable, Hostex, and manually-added reviews, you post the response wherever the review actually lives, then click "Mark as Posted" in FieldStay so the status reflects reality.',
       },
       {
         id:       'rg-manual',
@@ -911,13 +911,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'wo-compliance',
         question: 'What happens if a vendor\'s insurance has expired?',
         answer:
-          'FieldStay checks compliance before every dispatch. A document expired 1–45 days puts the vendor in a Grace Period — you can acknowledge the risk and proceed, and it\'s logged. Expired 46+ days hard-blocks the vendor from being assigned until they update their documents.',
+          'FieldStay checks compliance before every dispatch. A document expired 1–45 days puts the vendor in a Grace Period. You can acknowledge the risk and proceed, and it\'s logged. Expired 46+ days hard-blocks the vendor from being assigned until they update their documents.',
       },
       {
         id:       'wo-payment',
         question: 'How do vendors get paid for completed work orders?',
         answer:
-          'Vendors connect a bank account through Stripe Connect (a one-time, 3–5 minute setup) — FieldStay sends this setup link when they\'re first assigned a work order. Once a vendor signs off on completed work, payment can be released directly to their account. Vendors who haven\'t finished Stripe setup can still be assigned and complete work, but payment is held until they do, or you can settle with them outside FieldStay.',
+          'Vendors connect a bank account through Stripe Connect (a one-time, 3–5 minute setup). FieldStay sends this setup link when they\'re first assigned a work order. Once a vendor signs off on completed work, payment can be released directly to their account. Vendors who haven\'t finished Stripe setup can still be assigned and complete work, but payment is held until they do, or you can settle with them outside FieldStay.',
       },
     ],
   },
@@ -929,7 +929,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'owner-what-they-see',
         question: 'What do property owners see in the Owner Portal?',
         answer:
-          'A read-only view of their property\'s revenue, expenses, and net income for any date range, accessed through a secure tokenized link — no FieldStay account required. They never see crew assignments, work order details, inventory, or any other operational data.',
+          'A read-only view of their property\'s revenue, expenses, and net income for any date range, accessed through a secure tokenized link, with no FieldStay account required. They never see crew assignments, work order details, inventory, or any other operational data.',
       },
       {
         id:       'owner-visibility',
@@ -941,7 +941,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'owner-share-revoke',
         question: 'How do I share or revoke an owner\'s portal access?',
         answer:
-          'Go to Owner Portal and click Copy Link next to the owner to share it. To cut off access, click Revoke Access on the same page — this is a separate, deliberate action from generating the link, so revoking and re-sharing are two distinct steps rather than one "regenerate" button.',
+          'Go to Owner Portal and click Copy Link next to the owner to share it. To cut off access, click Revoke Access on the same page. This is a separate, deliberate action from generating the link, so revoking and re-sharing are two distinct steps rather than one "regenerate" button.',
       },
     ],
   },
@@ -953,13 +953,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'asset-what-is',
         question: 'What is asset health tracking?',
         answer:
-          'Go to Assets to track big-ticket items per property — HVAC, water heaters, roofs, appliances — each with a 0–100 health score based on age and repair history. Scores update automatically as time passes and as work orders get logged against an asset. It\'s included on every plan at no extra cost.',
+          'Go to Assets to track big-ticket items per property (HVAC, water heaters, roofs, appliances) each with a 0–100 health score based on age and repair history. Scores update automatically as time passes and as work orders get logged against an asset. It\'s included on every plan at no extra cost.',
       },
       {
         id:       'asset-depreciation',
         question: 'Does FieldStay handle tax depreciation for assets?',
         answer:
-          'If you enter a purchase price and installation date on an asset, FieldStay generates an annual MACRS depreciation schedule using standard IRS tables, and flags Section 179-eligible assets. This is a planning aid, not tax advice — confirm your actual filing with your accountant.',
+          'If you enter a purchase price and installation date on an asset, FieldStay generates an annual MACRS depreciation schedule using standard IRS tables, and flags Section 179-eligible assets. This is a planning aid, not tax advice. Confirm your actual filing with your accountant.',
       },
     ],
   },
@@ -971,19 +971,19 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'inspections-what-are',
         question: 'What are inspections, and how are they different from a turnover checklist?',
         answer:
-          'Inspections are structured walk-throughs recorded against a fixed form — Safety & Risk Mitigation, Indoor Property & Inventory, and Outdoor Property & Grounds. A turnover checklist is an operational to-do list for one guest changeover and is disposable. An inspection is evidence: it is retained permanently, cannot be edited once completed, posts to the owner portal, and is meant to be shown to an insurer or a permitting authority as a multi-year record.',
+          'Inspections are structured walk-throughs recorded against a fixed form: Safety & Risk Mitigation, Indoor Property & Inventory, and Outdoor Property & Grounds. A turnover checklist is an operational to-do list for one guest changeover and is disposable. An inspection is evidence: it is retained permanently, cannot be edited once completed, posts to the owner portal, and is meant to be shown to an insurer or a permitting authority as a multi-year record.',
       },
       {
         id:       'inspections-schedule',
         question: 'How do I set how often inspections happen?',
         answer:
-          'You answer it once during onboarding — how often the Safety inspection runs (once or twice a year) and which month it starts in — and FieldStay applies that to every property, including ones you add later. Twice a year means the month you chose and the month six after it: March pairs with September, October with April. Indoor and Outdoor inspections are scheduled the way any other recurring maintenance is. You can change the cadence any time in Maintenance → Inspections.',
+          'You answer it once during onboarding: how often the Safety inspection runs (once or twice a year) and which month it starts in. FieldStay applies that to every property, including ones you add later. Twice a year means the month you chose and the month six after it: March pairs with September, October with April. Indoor and Outdoor inspections are scheduled the way any other recurring maintenance is. You can change the cadence any time in Maintenance → Inspections.',
       },
       {
         id:       'inspections-different-dates',
         question: 'Why is the same inspection due on different dates at different properties?',
         answer:
-          'Because FieldStay puts the walk on a day the property is empty. After a property\u2019s first completed inspection, the due date lands inside a gap between bookings in the target month — and every property has a different calendar, so the days differ even though the month is the same. It is also why a due date can move earlier as well as later. The first time a property is scheduled it is the 1st of the month, because there are no completed walks to schedule around yet.',
+          'Because FieldStay puts the walk on a day the property is empty. After a property\u2019s first completed inspection, the due date lands inside a gap between bookings in the target month, and every property has a different calendar, so the days differ even though the month is the same. It is also why a due date can move earlier as well as later. The first time a property is scheduled it is the 1st of the month, because there are no completed walks to schedule around yet.',
       },
       {
         id:       'inspections-overdue-email',
@@ -1001,19 +1001,19 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'inspections-failed-item',
         question: 'What happens when an inspection item fails?',
         answer:
-          'It becomes a work order, a purchase order, a notification, or a recorded fact — decided by the item itself. A loose handrail raises a work order; an expired detector goes on a purchase order; a lapsed permit notifies you without creating a job for anyone. Cleaning failures roll into one cleaning work order per walk rather than one each, and everything purchasable goes onto a single purchase order. A failed item needs a description, because that description becomes the work order\u2019s title.',
+          'It becomes a work order, a purchase order, a notification, or a recorded fact, decided by the item itself. A loose handrail raises a work order; an expired detector goes on a purchase order; a lapsed permit notifies you without creating a job for anyone. Cleaning failures roll into one cleaning work order per walk rather than one each, and everything purchasable goes onto a single purchase order. A failed item needs a description, because that description becomes the work order\u2019s title.',
       },
       {
         id:       'inspections-edit',
         question: 'Can I edit an inspection after completing it?',
         answer:
-          'No. A completed inspection is locked in the database, not just behind a disabled button. The value of the record is that it was not adjusted afterward — a history that can be edited later proves very little to an insurer or an owner. If something needs correcting, run a new inspection of the same form at that property; both stay in the history in date order, the later one superseding the earlier.',
+          'No. A completed inspection is locked in the database, not just behind a disabled button. The value of the record is that it was not adjusted afterward. A history that can be edited later proves very little to an insurer or an owner. If something needs correcting, run a new inspection of the same form at that property; both stay in the history in date order, the later one superseding the earlier.',
       },
       {
         id:       'inspections-owner-visibility',
         question: 'What do owners see about inspections?',
         answer:
-          'Completed inspections post to the owner portal on the day they are finished, including failed items and the work order or purchase order each one produced, with that record\u2019s current status. Scheduled and in-progress inspections are not shown — an unfinished form is not a record. Purely factual items, like noting that a property has no alarm system, are recorded but are not listed as findings, because they are not problems.',
+          'Completed inspections post to the owner portal on the day they are finished, including failed items and the work order or purchase order each one produced, with that record\u2019s current status. Scheduled and in-progress inspections are not shown, because an unfinished form is not a record. Purely factual items, like noting that a property has no alarm system, are recorded but are not listed as findings, because they are not problems.',
       },
     ],
   },

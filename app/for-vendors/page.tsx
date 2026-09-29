@@ -35,7 +35,7 @@ const CANONICAL = marketingUrl(PATH)
 
 const REFERRAL_SUBJECT = 'Have you looked at FieldStay?'
 const REFERRAL_BODY =
-  'Hey — I work with you on property maintenance, and the work orders you send through FieldStay ' +
+  'Hey, I work with you on property maintenance, and the work orders you send through FieldStay ' +
   'are the easiest ones I get: a link, no login, no app, and I get paid straight to my bank once ' +
   'the invoice is approved. If you\'re not already using it for everything, might be worth a look: ' +
   'https://fieldstay.app/for-vendors'
@@ -45,11 +45,11 @@ const REFERRAL_MAILTO =
 export const metadata: Metadata = {
   alternates: { canonical: CANONICAL },
   // Not "FieldStay for Vendors..." — the root layout's title template
-  // already appends " — FieldStay" to every page's own title.
-  title: 'For Vendors & Contractors — No Login Work Orders',
+  // already appends " | FieldStay" to every page's own title.
+  title: 'For Vendors & Contractors | No Login Work Orders',
   description:
     'Get short-term rental work orders and get paid without an app or a login. See how FieldStay works ' +
-    'for cleaners, maintenance techs, and vendors — and how to ask your property manager to switch.',
+    'for cleaners, maintenance techs, and vendors, and how to ask your property manager to switch.',
   keywords: [
     'no login work order app',
     'vendor portal short term rental',
@@ -105,11 +105,11 @@ export default function ForVendorsPage() {
             {
               num: '01',
               title: 'You get a link',
-              body: 'When a property manager assigns you a work order, you get an email with a secure link — property details, scope of work, and the authorized spending limit, all visible before you start.',
+              body: 'When a property manager assigns you a work order, you get an email with a secure link, and property details, scope of work, and the authorized spending limit, all visible before you start.',
             },
             {
               num: '02',
-              title: 'You open it — no account',
+              title: 'You open it, no account',
               body: 'The link works on its own. No password, no app to install, nothing to create. You can submit a quote first if one was requested, or go straight to the job.',
             },
             {
@@ -120,12 +120,12 @@ export default function ForVendorsPage() {
             {
               num: '04',
               title: 'You submit your invoice',
-              body: 'Before your first payout, you\'ll set up a Stripe Connect account — a one-time step so payment has somewhere to land. After that, submit an itemized invoice for the job.',
+              body: 'Before your first payout, you\'ll set up a Stripe Connect account, a one-time step so payment has somewhere to land. After that, submit an itemized invoice for the job.',
             },
             {
               num: '05',
               title: 'You get paid',
-              body: 'The property manager reviews and approves your invoice, and payment is sent via Stripe Connect directly to your bank account — the same payment infrastructure most modern platforms use.',
+              body: 'The property manager reviews and approves your invoice, and payment is sent via Stripe Connect directly to your bank account, the same payment infrastructure most modern platforms use.',
             },
           ].map((step) => (
             <div key={step.num} className="flex gap-5 items-start">
@@ -140,7 +140,7 @@ export default function ForVendorsPage() {
           ))}
         </div>
         <p className="text-xs text-[var(--mkt-muted)] text-center mt-10">
-          This work order and payment tooling runs on TradeSuite — the same infrastructure you may
+          This work order and payment tooling runs on TradeSuite, the same infrastructure you may
           already recognize from the &ldquo;powered by TradeSuite&rdquo; footer on a FieldStay dispatch email.
         </p>
       </section>
@@ -179,7 +179,7 @@ export default function ForVendorsPage() {
           Email your property manager about FieldStay
         </a>
         <p className="text-xs text-[var(--mkt-muted)] mt-4 max-w-md mx-auto">
-          Opens your email app with a message already written — edit it however you like before sending.
+          Opens your email app with a message already written. Edit it however you like before sending.
         </p>
       </section>
 

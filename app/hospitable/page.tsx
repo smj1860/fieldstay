@@ -98,7 +98,7 @@ export default function HospitablePage() {
       <div className="bg-gold-300">
         <div className="max-w-6xl mx-auto px-6 py-2.5 text-center">
           <p className="text-xs sm:text-sm font-semibold text-[#0a1628]">
-            🔒 Launch offer — the first 100 accounts to connect via Hospitable get a 2-year price lock on their plan.
+            🔒 Launch offer. The first 100 accounts to connect via Hospitable get a 2-year price lock on their plan.
           </p>
         </div>
       </div>
@@ -151,7 +151,7 @@ export default function HospitablePage() {
               </h1>
               <p className="text-white/52 text-lg leading-relaxed mb-8">
                 Connect your Hospitable account and every property, booking, and
-                teammate syncs in automatically — then FieldStay takes over the
+                teammate syncs in automatically, then FieldStay takes over the
                 field operations layer: offline-ready turnovers, crew
                 checklists, asset health tracking, capital planning, and a
                 vendor portal your contractors can use without ever creating
@@ -199,7 +199,7 @@ export default function HospitablePage() {
                   },
                   {
                     label: 'Bookings',
-                    body: 'Upcoming reservations sync with guest, dates, and channel — turnovers are generated automatically between them.',
+                    body: 'Upcoming reservations sync with guest, dates, and channel. Turnovers are generated automatically between them.',
                   },
                   {
                     label: 'Teammates → Crew',
@@ -224,7 +224,7 @@ export default function HospitablePage() {
                     </div>
                     <p className="text-sm text-white/65 leading-snug">
                       <span className="text-white font-semibold">{row.label}</span>
-                      {' — '}{row.body}
+                      {'. '}{row.body}
                     </p>
                   </div>
                 ))}
@@ -240,7 +240,7 @@ export default function HospitablePage() {
                 </span>
                 <p className="text-sm text-white/52">
                   <span className="text-white font-semibold">Read-only, always.</span>
-                  {' '}FieldStay never writes back to Hospitable — your account stays your system of record.
+                  {' '}FieldStay never writes back to Hospitable. Your account stays your system of record.
                 </p>
               </div>
             </div>
@@ -303,22 +303,22 @@ export default function HospitablePage() {
               {
                 num: '01',
                 title: 'No-Login Vendor Portal & Work Order Invoicing',
-                body: 'Dispatch a work order and your vendor gets a link — no login, no app to install. They submit their line-item invoice from their phone, you approve it with one click, and payment goes straight to their bank. No more chasing a text thread for a status update.',
+                body: 'Dispatch a work order and your vendor gets a link, no login, no app to install. They submit their line-item invoice from their phone, you approve it with one click, and payment goes straight to their bank. No more chasing a text thread for a status update.',
               },
               {
                 num: '02',
                 title: 'Asset Health Scores & CapEx Forecasting',
-                body: 'Every water heater, HVAC unit, and appliance gets a health score that updates daily based on age and expected lifespan. FieldStay rolls those scores into a 10-year capital plan automatically — so you catch a failing unit before it fails, not after a guest complains.',
+                body: 'Every water heater, HVAC unit, and appliance gets a health score that updates daily based on age and expected lifespan. FieldStay rolls those scores into a 10-year capital plan automatically, so you catch a failing unit before it fails, not after a guest complains.',
               },
               {
                 num: '03',
                 title: 'Automated Turnover Management',
-                body: 'Bookings from Hospitable automatically generate turnovers with crew assignments and offline-ready checklists the moment they land — no manual scheduling required.',
+                body: 'Bookings from Hospitable automatically generate turnovers with crew assignments and offline-ready checklists the moment they land, no manual scheduling required.',
               },
               {
                 num: '04',
-                title: 'RepuGuard — Reputation Management',
-                body: 'AI-generated review responses tuned to each guest\'s tone and context, with urgency scoring so nothing sits unanswered. Included in every FieldStay plan — no add-on, no extra cost.',
+                title: 'RepuGuard: Reputation Management',
+                body: 'AI-generated review responses tuned to each guest\'s tone and context, with urgency scoring so nothing sits unanswered. Included in every FieldStay plan, no add-on, no extra cost.',
                 highlight: true,
               },
             ].map(f => (
@@ -384,11 +384,11 @@ export default function HospitablePage() {
             Ready to connect?
           </h2>
           <p className="text-[#0a1628]/70 text-lg mb-3">
-            It takes about 2 minutes to connect — your properties and bookings show up right after.
+            It takes about 2 minutes to connect. Your properties and bookings show up right after.
             Cancel with one click if it doesn&apos;t save your team real time in the first week.
           </p>
           <p className="text-[#0a1628]/70 text-sm font-semibold mb-10">
-            🔒 First 100 accounts get a 2-year price lock — no extra steps, it&apos;s automatic.
+            🔒 First 100 accounts get a 2-year price lock, no extra steps, it&apos;s automatic.
           </p>
 
           <div className="max-w-sm mx-auto">

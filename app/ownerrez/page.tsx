@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   // appends " — FieldStay" to every page's own title, so a leading brand
   // name duplicated it with no search-intent keywords to show for the space.
   title: 'OwnerRez Turnover & Crew Management Software',
-  description: 'Connect your OwnerRez account for automated turnovers, crew management, inventory, and maintenance — free 14-day trial, no credit card required.',
+  description: 'Connect your OwnerRez account for automated turnovers, crew management, inventory, and maintenance. Free 14-day trial, no credit card required.',
   keywords: [
     'ownerrez integration software',
     'ownerrez turnover management',
@@ -114,7 +114,7 @@ export default function OwnerRezPage() {
               </h1>
               <p className="text-white/52 text-lg leading-relaxed mb-8">
                 FieldStay connects directly to your OwnerRez bookings to automate
-                everything your team handles on the ground — offline-ready turnover
+                everything your team handles on the ground, with offline-ready turnover
                 management, crew checklists, asset inventory with par-level alerts,
                 field maintenance scheduling, and built-in reputation management.
               </p>
@@ -162,7 +162,7 @@ export default function OwnerRezPage() {
                   },
                   {
                     label: 'Guest Details',
-                    body: 'Guest name and contact info sync automatically the moment a booking is created or updated — no manual entry per stay.',
+                    body: 'Guest name and contact info sync automatically the moment a booking is created or updated, no manual entry per stay.',
                   },
                   {
                     label: 'Turnovers',
@@ -183,7 +183,7 @@ export default function OwnerRezPage() {
                     </div>
                     <p className="text-sm text-white/65 leading-snug">
                       <span className="text-white font-semibold">{row.label}</span>
-                      {' — '}{row.body}
+                      {'. '}{row.body}
                     </p>
                   </div>
                 ))}
@@ -203,7 +203,7 @@ export default function OwnerRezPage() {
                 <p className="text-sm text-white/52">
                   <span className="text-white font-semibold">You post it, on your terms.</span>
                   {' '}FieldStay drafts the response and links you straight to
-                  your OwnerRez review — nothing goes out until you submit it
+                  your OwnerRez review, and nothing goes out until you submit it
                   yourself.
                 </p>
               </div>
@@ -272,12 +272,12 @@ export default function OwnerRezPage() {
               {
                 num: '01',
                 title: 'Automated Turnover Management',
-                body: 'Bookings from OwnerRez automatically generate turnovers with crew assignments and offline-ready checklists. No manual scheduling — the moment a booking lands, the turnover is queued.',
+                body: 'Bookings from OwnerRez automatically generate turnovers with crew assignments and offline-ready checklists. No manual scheduling. The moment a booking lands, the turnover is queued.',
               },
               {
                 num: '02',
                 title: 'No-Login Vendor Portal & Work Order Invoicing',
-                body: 'Dispatch a work order and your vendor gets a link — no login, no app to install. They submit their line-item invoice from their phone, you approve it with one click, and payment goes straight to their bank.',
+                body: 'Dispatch a work order and your vendor gets a link, no login, no app to install. They submit their line-item invoice from their phone, you approve it with one click, and payment goes straight to their bank.',
               },
               {
                 num: '03',
@@ -287,7 +287,7 @@ export default function OwnerRezPage() {
               {
                 num: '04',
                 title: 'Inventory & Maintenance',
-                body: 'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Schedule recurring maintenance — seasonal or routine — with vendor assignments built in.',
+                body: 'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Schedule recurring maintenance, seasonal or routine, with vendor assignments built in.',
               },
               {
                 num: '05',
@@ -296,8 +296,8 @@ export default function OwnerRezPage() {
               },
               {
                 num: '06',
-                title: 'RepuGuard — Reputation Management',
-                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — no add-on, no extra cost.',
+                title: 'RepuGuard: Reputation Management',
+                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan, no add-on, no extra cost.',
                 // Visual distinction: highlight this card subtly as a headline feature
                 highlight: true,
               },

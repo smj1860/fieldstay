@@ -25,19 +25,19 @@ export const OWNERREZ_PATH = '/ownerrez'
 export const MARKETING_FAQ = [
   {
     q: 'Does FieldStay replace OwnerRez?',
-    a: 'No — FieldStay is a field operations layer that works alongside OwnerRez. OwnerRez handles bookings, rates, and guest communication. FieldStay handles what happens on the ground: turnovers, crew assignments, inventory, maintenance, and owner reporting. They do different jobs and work better together.',
+    a: 'No. FieldStay is a field operations layer that works alongside OwnerRez. OwnerRez handles bookings, rates, and guest communication. FieldStay handles what happens on the ground: turnovers, crew assignments, inventory, maintenance, and owner reporting. They do different jobs and work better together.',
   },
   {
     q: 'How long does setup take?',
-    a: 'Connecting OwnerRez takes about 2 minutes via OAuth. Your properties and upcoming bookings typically sync within a few minutes — for larger portfolios, typically within 15 minutes. Most property managers complete full setup — crew invites, checklists, and inventory — in under an hour.',
+    a: 'Connecting OwnerRez takes about 2 minutes via OAuth. Your properties and upcoming bookings typically sync within a few minutes. For larger portfolios, typically within 15 minutes. Most property managers complete full setup (crew invites, checklists, and inventory) in under an hour.',
   },
   {
     q: 'What data syncs from OwnerRez?',
-    a: 'FieldStay syncs your properties and your full booking history — not just upcoming stays — on initial connection, so past bookings are already there for reporting from day one. Booking changes in OwnerRez — modifications, cancellations — update in FieldStay automatically via webhooks.',
+    a: 'FieldStay syncs your properties and your full booking history, not just upcoming stays, on initial connection, so past bookings are already there for reporting from day one. Booking changes in OwnerRez (modifications, cancellations) update in FieldStay automatically via webhooks.',
   },
   {
     q: 'How do my crew members access the app?',
-    a: 'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row. They receive a link, create a free account, and install the app to their phone home screen — no App Store required. Crew see only their assigned turnovers and checklists, nothing else.',
+    a: 'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row. They receive a link, create a free account, and install the app to their phone home screen, no App Store required. Crew see only their assigned turnovers and checklists, nothing else.',
   },
   // Shared verbatim with /hospitable and the homepage — see
   // lib/faq-content.ts's SHARED_LANDING_FAQ_TAIL header comment.
