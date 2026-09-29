@@ -30,7 +30,7 @@ export function ShoppingCartReadyEmail({
 
   return (
     <EmailLayout
-      preview={`Your Kroger restock cart is ready — ${matchedCount} item${matchedCount !== 1 ? 's' : ''} added`}
+      preview={`Your Kroger restock cart is ready, ${matchedCount} item${matchedCount !== 1 ? 's' : ''} added`}
       ctaLabel={cartData.cart_url ? 'Open Cart →' : undefined}
       ctaUrl={cartData.cart_url ?? undefined}
       footerNote={`Below-par inventory restock · ${new Date(cartData.built_at).toLocaleString()}`}
@@ -40,7 +40,7 @@ export function ShoppingCartReadyEmail({
       </Text>
 
       <Text style={{ fontSize: 14, color: '#374151', margin: '0 0 20px', lineHeight: 1.5 }}>
-        Hi {recipientName} — FieldStay finished building your below-par restock list.
+        Hi {recipientName}, FieldStay finished building your below-par restock list.
       </Text>
 
       {/* Status pill */}
@@ -95,7 +95,7 @@ export function ShoppingCartReadyEmail({
         <>
           <Hr style={{ borderColor: '#e2e8f0', margin: '4px 0 16px' }} />
           <Text style={{ fontSize: 13, fontWeight: 600, color: '#0a1628', margin: '0 0 10px' }}>
-            Items not found — search manually:
+            Items not found, search manually:
           </Text>
           {cartData.unmatched_items.map((name) => {
             const searchUrl = `https://www.kroger.com/search?query=${encodeURIComponent(name)}`

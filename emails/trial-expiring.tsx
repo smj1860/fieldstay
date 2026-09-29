@@ -62,7 +62,7 @@ export function TrialExpiringEmail({
       )}
 
       <Text style={body}>
-        After your trial ends your account pauses — your data is held
+        After your trial ends your account pauses, and your data is held
         for 30 days, so nothing is lost if you come back. But your crew
         will lose access and turnovers will stop generating.
       </Text>
@@ -71,7 +71,7 @@ export function TrialExpiringEmail({
         Questions about plans or pricing? Just reply to this email.
       </Text>
 
-      <Text style={signature}>— Stephen</Text>
+      <Text style={signature}>Stephen</Text>
     </EmailLayout>
   )
 }

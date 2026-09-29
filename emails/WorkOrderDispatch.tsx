@@ -47,7 +47,7 @@ export default function WorkOrderDispatchEmail({
     <Html>
       <Head/>
       <Preview>
-        Work Order {woNumber} — {propertyName} — Authorized up to {formattedNte}
+        Work Order {woNumber}, {propertyName}, authorized up to {formattedNte}
       </Preview>
       <Body style={body}>
 
@@ -151,7 +151,7 @@ export default function WorkOrderDispatchEmail({
           <Section>
             <Text style={accessNote}>
               🔑 Property access details (lockbox code, parking, and site notes)
-              are available on the secure work order page — tap the button above to view.
+              are available on the secure work order page. Tap the button above to view.
             </Text>
           </Section>
 

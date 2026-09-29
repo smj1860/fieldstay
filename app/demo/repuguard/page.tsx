@@ -4,7 +4,7 @@ import { demoSecretMatches, isDemoSurfaceEnabled } from '@/lib/demo/config'
 import { RepuGuardSandboxClient } from './repuguard-sandbox-client'
 
 export const metadata: Metadata = {
-  title: 'RepuGuard Sandbox — FieldStay',
+  title: 'RepuGuard Sandbox | FieldStay',
   // Belt and braces alongside the secret gate: this surface should never be
   // indexed even if the URL leaks.
   robots: { index: false, follow: false },

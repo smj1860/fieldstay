@@ -90,7 +90,7 @@ export default function DpaPage() {
             <p className="text-sm">
               The Controller is the FieldStay customer (the property management organization) that
               determines the purposes and means of Processing Personal Data entered into and managed
-              through the Service — including data about crew members, vendors, property owners, guests,
+              through the Service, including data about crew members, vendors, property owners, guests,
               and bookings (&ldquo;Controller Personal Data&rdquo;).
             </p>
             <p className="mt-3 text-sm">
@@ -172,8 +172,8 @@ export default function DpaPage() {
             <h3 className="text-base font-semibold text-gray-800 mt-4 mb-2">4.2 Confidentiality</h3>
             <p className="text-sm">
               FieldStay will ensure that personnel authorized to process Controller Personal Data are
-              subject to appropriate confidentiality obligations — whether by employment contract,
-              statutory duty, or equivalent binding obligation — and are informed of the confidential
+              subject to appropriate confidentiality obligations, whether by employment contract,
+              statutory duty, or equivalent binding obligation, and are informed of the confidential
               nature of the data.
             </p>
 
@@ -393,7 +393,7 @@ export default function DpaPage() {
               concern, contact:
             </p>
             <address className="not-italic mt-3 text-sm space-y-1">
-              <p><strong>{CONTROLLER_NAME}</strong> — Data Privacy</p>
+              <p><strong>{CONTROLLER_NAME}</strong>, Data Privacy</p>
               <p>
                 Email:{' '}
                 <a href={`mailto:${PRIVACY_EMAIL}`} className="underline">{PRIVACY_EMAIL}</a>

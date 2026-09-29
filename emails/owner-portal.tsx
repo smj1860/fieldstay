@@ -19,7 +19,7 @@ export function OwnerPortalEmail({ ownerName, orgName, propertyName, portalUrl }
     >
       <Text style={heading}>Your Owner Portal Is Ready</Text>
       <Text style={body}>
-        Hi {ownerName} — {orgName} has shared your property&apos;s financial
+        Hi {ownerName}, {orgName} has shared your property&apos;s financial
         dashboard with you.
       </Text>
       <Text style={body}>

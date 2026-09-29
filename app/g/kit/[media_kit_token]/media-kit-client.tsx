@@ -68,7 +68,7 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
           <Banner color={GREEN} text="Subscription started! Your listing will appear in the guidebook shortly." />
         )}
         {cancelled && (
-          <Banner color={MUTED} text="Checkout cancelled — you can try again anytime." />
+          <Banner color={MUTED} text="Checkout cancelled. You can try again anytime." />
         )}
         {error && <Banner color={RED} text={error} />}
 
@@ -100,8 +100,8 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
         <div className={styles.slotBand}>
           <div className={styles.slotTitle}>
             {isNamedSlot
-              ? `The ${copy.label} spot is open — and it's yours first.`
-              : 'One of only six local spots — and one is being held for you.'}
+              ? `The ${copy.label} spot is open, and it's yours first.`
+              : 'One of only six local spots, and one is being held for you.'}
           </div>
           <div className={styles.slotSub}>Four exclusive spots per guidebook. Once each one is taken, it&apos;s taken.</div>
           <div className={styles.slots}>
@@ -124,7 +124,7 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
           <div className={styles.big}>
             $15<small>/month</small>
           </div>
-          <p className={styles.mathP}>About 50¢ a day. Cancel anytime — no contract, no setup fee.</p>
+          <p className={styles.mathP}>About 50¢ a day. Cancel anytime, no contract, no setup fee.</p>
 
           {isActive ? (
             <Banner color={GREEN} text="This sponsorship is active. Thanks for supporting local guests!" />
@@ -134,7 +134,7 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
               disabled={isLoading}
               className={styles.cta}
             >
-              {isLoading ? 'Redirecting…' : `Claim the ${copy.label} spot — $15/month`}
+              {isLoading ? 'Redirecting…' : `Claim the ${copy.label} spot, $15/month`}
               <small>No contract · Cancel anytime</small>
             </button>
           )}

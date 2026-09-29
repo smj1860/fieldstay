@@ -37,7 +37,7 @@ export function WelcomeEmailV2({
 
       <Text style={body}>
         <strong>{orgName}</strong>{' '}is live on FieldStay. Your 14-day trial has full
-        access — turnovers, crew scheduling, inventory, maintenance, and owner
+        access to turnovers, crew scheduling, inventory, maintenance, and owner
         reporting, all running without you having to remember any of it.
       </Text>
 
@@ -47,7 +47,7 @@ export function WelcomeEmailV2({
           <Column>
             <Text style={stepTitle}>Connect your PMS</Text>
             <Text style={stepDesc}>
-              Bookings, checkouts, and turnovers sync automatically — no manual entry.{' '}
+              Bookings, checkouts, and turnovers sync automatically, no manual entry.{' '}
               <Link href={integrationsUrl} style={link}>Connect now →</Link>
             </Text>
           </Column>
@@ -68,10 +68,10 @@ export function WelcomeEmailV2({
       </Section>
 
       <Text style={{ ...body, marginTop: 16 }}>
-        Reply to this email any time — I read every one.
+        Reply to this email any time. I read every one.
       </Text>
 
-      <Text style={signature}>— Stephen</Text>
+      <Text style={signature}>Stephen</Text>
     </EmailLayout>
   )
 }

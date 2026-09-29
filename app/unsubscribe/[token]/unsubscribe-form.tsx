@@ -32,8 +32,8 @@ export function UnsubscribeForm({ token }: Readonly<{ token: string }>) {
               </h1>
               <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
                 You will no longer receive product and marketing emails from FieldStay.
-                You&rsquo;ll still get essential account messages — things like work-order
-                notifications, invites, and password resets — because those are required
+                You&rsquo;ll still get essential account messages, things like work-order
+                notifications, invites, and password resets, because those are required
                 to operate your account.
               </p>
             </>

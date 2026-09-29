@@ -128,7 +128,7 @@ export async function sendOwnerPortalEmail({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
-    subject: `Your owner portal for ${propertyName} is ready — FieldStay`,
+    subject: `Your owner portal for ${propertyName} is ready | FieldStay`,
     html,
   }))
 }
@@ -164,7 +164,7 @@ export async function sendGuestPreArrivalEmail({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
-    subject: `Get your door code by text — ${propertyName}`,
+    subject: `Get your door code by text: ${propertyName}`,
     html,
   }))
 
@@ -212,7 +212,7 @@ export async function sendGuidebookGracePeriodEmail({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
-    subject: `Action needed: your guidebook needs sponsors — FieldStay`,
+    subject: `Action needed: your guidebook needs sponsors | FieldStay`,
     html,
   }))
 }
@@ -242,8 +242,8 @@ export async function sendHospitablePriceLockEmail({
   })
 
   const subject = sequenceNumber !== null
-    ? `You're locked in, ${organizationName} — FieldStay + Hospitable launch`
-    : `Your plan's price-locked, ${organizationName} — thanks for connecting via Hospitable`
+    ? `You're locked in, ${organizationName} | FieldStay + Hospitable launch`
+    : `Your plan's price-locked, ${organizationName}. Thanks for connecting via Hospitable`
 
   return sendWithTimeout(() => resend.emails.send({
     from:    FROM,

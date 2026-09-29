@@ -48,7 +48,7 @@ export function ReengagementEmail({
         <Text style={body}>
           Since you connected your PMS, FieldStay has been watching for new
           reviews across your properties. <strong>{reviewCount}</strong>{' '}
-          {reviewNoun} came in this week — RepuGuard already has draft responses
+          {reviewNoun} came in this week, and RepuGuard already has draft responses
           ready for your approval.
         </Text>
 
@@ -58,12 +58,12 @@ export function ReengagementEmail({
             → Guests who see a fast, thoughtful response are more likely to book direct next time.
           </Text>
           <Text style={calloutItem}>
-            → A drafted response takes 30 seconds to approve — not 10 minutes to write.
+            → A drafted response takes 30 seconds to approve, not 10 minutes to write.
           </Text>
         </Section>
 
         <Text style={{ ...body, marginTop: 16 }}>
-          — Stephen
+          Stephen
         </Text>
       </EmailLayout>
     )
@@ -84,11 +84,11 @@ export function ReengagementEmail({
         postalAddress={postalAddress}
       >
         <Text style={heading}>One week in, {firstName}.</Text>
-        <Text style={subheading}>Your PMS is connected — here&apos;s what happens next.</Text>
+        <Text style={subheading}>Your PMS is connected. Here&apos;s what happens next.</Text>
 
         <Text style={body}>
           Since you connected your PMS, FieldStay has been watching for new
-          reviews across your properties. Nothing new came in this week — when
+          reviews across your properties. Nothing new came in this week, but when
           one does, RepuGuard will have a draft response waiting for your
           approval before you even see the notification.
         </Text>
@@ -99,12 +99,12 @@ export function ReengagementEmail({
             → Guests who see a fast, thoughtful response are more likely to book direct next time.
           </Text>
           <Text style={calloutItem}>
-            → A drafted response takes 30 seconds to approve — not 10 minutes to write.
+            → A drafted response takes 30 seconds to approve, not 10 minutes to write.
           </Text>
         </Section>
 
         <Text style={{ ...body, marginTop: 16 }}>
-          — Stephen
+          Stephen
         </Text>
       </EmailLayout>
     )
@@ -124,7 +124,7 @@ export function ReengagementEmail({
 
       <Text style={body}>
         <strong>{orgName}</strong>{' '}is set up on FieldStay, but your PMS isn&apos;t
-        connected yet — which means turnovers, bookings, and same-day flags
+        connected yet, which means turnovers, bookings, and same-day flags
         are still something you have to track by hand.
       </Text>
 
@@ -141,7 +141,7 @@ export function ReengagementEmail({
       </Text>
 
       <Text style={{ ...body, marginTop: 16 }}>
-        — Stephen
+        Stephen
       </Text>
     </EmailLayout>
   )

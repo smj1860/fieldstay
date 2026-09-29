@@ -12,7 +12,7 @@ interface Props {
 export function GuestPreArrivalEmail({ guestName, propertyName, optInUrl, guidebookUrl }: Props) {
   return (
     <EmailLayout
-      preview={`Get your door code by text — ${propertyName}`}
+      preview={`Get your door code by text: ${propertyName}`}
       ctaLabel="Text Me My Door Code →"
       ctaUrl={optInUrl}
       footerNote="Opting in lets us text your door code and helpful updates during your stay. Reply STOP at any time to opt out."
@@ -20,7 +20,7 @@ export function GuestPreArrivalEmail({ guestName, propertyName, optInUrl, guideb
       <Text style={heading}>Almost there, {guestName}!</Text>
       <Text style={body}>
         Your stay at <strong>{propertyName}</strong>{' '}is coming up. The fastest way
-        to get your door code is by text — tap the button below to opt in and
+        to get your door code is by text. Tap the button below to opt in and
         we&apos;ll send it straight to your phone before check-in.
       </Text>
       <Text style={body}>

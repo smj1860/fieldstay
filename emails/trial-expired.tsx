@@ -31,8 +31,8 @@ export function TrialExpiredEmail({
       <Text style={heading}>Your trial has ended, {firstName}.</Text>
 
       <Text style={body}>
-        Your FieldStay account is paused as of today. Your data —
-        properties, crew, checklists, inventory, and turnovers — is
+        Your FieldStay account is paused as of today. Your data,
+        properties, crew, checklists, inventory, and turnovers, is
         safely held until <strong>{dataExpiresDate}</strong>.
       </Text>
 
@@ -54,7 +54,7 @@ export function TrialExpiredEmail({
         right for your portfolio, just reply to this email.
       </Text>
 
-      <Text style={signature}>— Stephen</Text>
+      <Text style={signature}>Stephen</Text>
     </EmailLayout>
   )
 }

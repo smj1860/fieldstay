@@ -34,7 +34,7 @@ export function WorkOrderEmail({
     >
       <Text style={heading}>Work Order</Text>
       <Text style={body}>
-        Hi {vendorName} — you&apos;ve been assigned a work order at{' '}
+        Hi {vendorName}, you&apos;ve been assigned a work order at{' '}
         <strong>{propertyName}</strong>.
       </Text>
 

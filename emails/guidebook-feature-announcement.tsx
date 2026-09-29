@@ -40,7 +40,7 @@ export function GuidebookFeatureAnnouncementEmail({
         <meta name="supported-color-schemes" content="light" />
       </Head>
       <Preview>
-        Meet the guidebook your guests will actually use — and the local businesses that pay for it.
+        Meet the guidebook your guests will actually use, and the local businesses that pay for it.
       </Preview>
       <Body style={styles.body}>
 
@@ -58,7 +58,7 @@ export function GuidebookFeatureAnnouncementEmail({
               The Guidebook That<br />Knows What Time It Is
             </Heading>
             <Text style={styles.heroSubtext}>
-              Available {launchDate} — and it&apos;s already waiting in your dashboard.
+              Available {launchDate}, and it&apos;s already waiting in your dashboard.
             </Text>
           </Section>
 
@@ -71,7 +71,7 @@ export function GuidebookFeatureAnnouncementEmail({
             <Text style={styles.body1}>
               Picture this: your guest wakes up at 8 AM in your Blue Ridge cabin.
               They don&apos;t know the area. They&apos;re thinking about coffee. They pull up
-              your welcome guide — the PDF you spent three hours making last spring —
+              your welcome guide, the PDF you spent three hours making last spring,
               and it lists a breakfast spot that closed six months ago.
             </Text>
             <Text style={styles.body1}>
@@ -89,8 +89,8 @@ export function GuidebookFeatureAnnouncementEmail({
               It knows your property, too.
             </Heading>
             <Text style={styles.body1}>
-              Pick up to 3 amenities to feature per property — a hot tub, a fire
-              pit, kayaks on the dock — and write a quick note for each. FieldStay
+              Pick up to 3 amenities to feature per property (a hot tub, a fire
+              pit, kayaks on the dock) and write a quick note for each. FieldStay
               rotates them into the morning and evening messages alongside live
               weather and your sponsor recommendations, so guests hear about the
               right thing at the right moment without you lifting a finger after
@@ -104,7 +104,7 @@ export function GuidebookFeatureAnnouncementEmail({
                 <Text style={styles.smsLabel}>3:45 PM · Hot Tub detected at this property</Text>
                 <Text style={styles.smsText}>
                   The hot tub at Bear Hollow takes about 45 minutes to heat. Set
-                  it to 104° using the panel on the left side of the deck —
+                  it to 104° using the panel on the left side of the deck,
                   perfect timing if you want to be in by 6 PM. 🛁
                 </Text>
               </Section>
@@ -112,7 +112,7 @@ export function GuidebookFeatureAnnouncementEmail({
               <Section style={styles.smsBubble}>
                 <Text style={styles.smsLabel}>6:12 PM · Fire Pit + 68°F outside</Text>
                 <Text style={styles.smsText}>
-                  It&apos;s 68° tonight at Bear Hollow — perfect fire pit weather.
+                  It&apos;s 68° tonight at Bear Hollow, perfect fire pit weather.
                   Starter logs are on the back porch. Heading out for dinner
                   first? The Farmhouse Table is 1.1 miles away. 🔥
                 </Text>
@@ -122,7 +122,7 @@ export function GuidebookFeatureAnnouncementEmail({
 
             <Text style={styles.body1}>
               Write your own note for each featured amenity in Guidebook settings
-              and guests hear it in your words — the timing tip, the exact spot
+              and guests hear it in your words: the timing tip, the exact spot
               the logs are stashed, whatever you&apos;d actually tell someone in
               person. Don&apos;t write anything and FieldStay still sends a message
               on your behalf, featuring whichever amenities synced in from your
@@ -143,13 +143,13 @@ export function GuidebookFeatureAnnouncementEmail({
             <Text style={styles.body1}>
               The FieldStay Guidebook lives at a unique URL for each of your
               properties. Guests scan a QR code when they arrive, or tap a link
-              in their booking confirmation. What they see isn&apos;t a list — it&apos;s a
+              in their booking confirmation. What they see isn&apos;t a list. It&apos;s a
               curated, real-time snapshot of exactly what&apos;s relevant to them
               right now.
             </Text>
             <Text style={styles.body1}>
-              At 8 AM on a clear morning, they see your Morning Brew recommendation
-              — the coffee shop you handpicked, with the specific drink your guests
+              At 8 AM on a clear morning, they see your Morning Brew recommendation,
+              the coffee shop you handpicked, with the specific drink your guests
               keep raving about. By 6 PM, it shifts to your Dinner pick, with a
               featured dish front and center. On a rainy afternoon, the outdoor
               adventure spot disappears entirely and a cozy Rainy Day hideaway
@@ -199,8 +199,8 @@ export function GuidebookFeatureAnnouncementEmail({
 
             <Text style={styles.body1}>
               Every slot shows the business name, a short description, their
-              exclusive offer for your guests, and — this is the detail that
-              makes restaurants and coffee shops say yes immediately — a single
+              exclusive offer for your guests, and (this is the detail that
+              makes restaurants and coffee shops say yes immediately) a single
               featured item. &quot;Don&apos;t leave without trying the brown butter waffle.&quot;
               &quot;Ask for the seasonal old fashioned.&quot; That specificity is what
               separates this from a local directory.
@@ -214,14 +214,14 @@ export function GuidebookFeatureAnnouncementEmail({
             </Heading>
             <Text style={styles.body1}>
               Your guidebook has six sponsor slots. Each local business pays
-              $15 a month for a placement — the coffee shop, the restaurant,
+              $15 a month for a placement: the coffee shop, the restaurant,
               the outfitter, the spa. You recruit them using a media kit
               FieldStay generates automatically for you. They sign up directly.
               You never touch a dollar.
             </Text>
             <Text style={styles.body1}>
               When you have <strong>3 active sponsors</strong>, your guidebook
-              unlocks and goes live for every one of your properties —
+              unlocks and goes live for every one of your properties,
               completely free, for as long as those sponsors stay active.
               No monthly fee. No trial. No catch.
             </Text>
@@ -242,7 +242,7 @@ export function GuidebookFeatureAnnouncementEmail({
 
             <Text style={styles.body1}>
               At six sponsors that&apos;s $30 back off your FieldStay plan every
-              month — and a guest experience that no PDF or Google Doc can come
+              month, and a guest experience that no PDF or Google Doc can come
               close to.
             </Text>
 
@@ -260,7 +260,7 @@ export function GuidebookFeatureAnnouncementEmail({
                   <Text style={styles.stepTitle}>Open your Guidebook dashboard</Text>
                   <Text style={styles.stepDesc}>
                     You&apos;ll see your six sponsor slots ready to fill in. Add a local
-                    business to any slot — name, description, their offer for guests,
+                    business to any slot: name, description, their offer for guests,
                     and the one item you want to call out.
                   </Text>
                 </Column>
@@ -279,7 +279,7 @@ export function GuidebookFeatureAnnouncementEmail({
               <Row style={styles.stepRow}>
                 <Column style={styles.stepNumber}><Text style={styles.stepNum}>3</Text></Column>
                 <Column style={styles.stepBody}>
-                  <Text style={styles.stepTitle}>Hit 3 sponsors — your guidebook goes live</Text>
+                  <Text style={styles.stepTitle}>Hit 3 sponsors, your guidebook goes live</Text>
                   <Text style={styles.stepDesc}>
                     The moment your third sponsor activates, every one of your
                     properties gets a live, weather-aware, time-aware guidebook.

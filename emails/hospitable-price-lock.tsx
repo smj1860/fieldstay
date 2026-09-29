@@ -29,7 +29,7 @@ export function HospitablePriceLockEmail({
       footerNote={`You're receiving this because ${organizationName} connected FieldStay via Hospitable.`}
     >
       <Text style={eyebrow}>
-        {isFirst100 ? 'LAUNCH PROMO — FIRST 100' : 'LAUNCH PROMO'}
+        {isFirst100 ? 'LAUNCH PROMO: FIRST 100' : 'LAUNCH PROMO'}
       </Text>
       <Text style={heading}>
         {isFirst100
@@ -40,12 +40,12 @@ export function HospitablePriceLockEmail({
       {isFirst100 ? (
         <Text style={body}>
           You&apos;re customer #{sequenceNumber} of the first 100 property managers to
-          join FieldStay through our Hospitable integration launch — and that
+          join FieldStay through our Hospitable integration launch, and that
           comes with a thank-you from us.
         </Text>
       ) : (
         <Text style={body}>
-          Our first 100 launch spots went faster than we expected — genuinely,
+          Our first 100 launch spots went faster than we expected. Genuinely,
           thank you. We still wanted to do something for everyone who joined
           FieldStay through the Hospitable integration, so your plan is
           price-locked too.
@@ -60,7 +60,7 @@ export function HospitablePriceLockEmail({
         <Text style={highlightText}>
           No matter what our list price does during that time, your per-property
           rates stay exactly where they are today. (Your bill can still change if
-          you add or remove properties — this locks the RATE you pay, not a flat
+          you add or remove properties. This locks the RATE you pay, not a flat
           dollar amount, since FieldStay bills per property.)
         </Text>
       </Section>
@@ -71,10 +71,10 @@ export function HospitablePriceLockEmail({
       </Text>
 
       <Text style={signature}>
-        Thanks for being an early believer in FieldStay — reach out any time at
+        Thanks for being an early believer in FieldStay. Reach out any time at
         stephen@fieldstay.app if you ever need anything directly from me.
         <br />
-        — Stephen, Founder
+        Stephen, Founder
       </Text>
     </EmailLayout>
   )
