@@ -2386,7 +2386,15 @@ meta-rule, prose is for judgment calls only.
   RTT and is what a new device or `forceFullCrewResync()` pays.
 
   **Both halves are now fixed, and neither is a bigger ceiling** — same rule as
-  the report/export caps above. `pruneSettledChecklistItems()` sheds the
+  the report/export caps above. Re-measured on the same fixture after the
+  horizon shipped: **34,140 rows / 19.77MB / 61 round trips**, from 176,640 /
+  103.84MB / 276. That is the server payload of a RESYNC, not the resting cache
+  (the item purge is device-side and invisible to SQL), and it is pessimistic —
+  the horizon bounds the past only, so the remainder is dominated by a forward
+  book the fixture seeds at ~14 assignments a day. **The probe's crew reads must
+  keep mirroring `fetchAssignedTurnoverIds`**: they did not for one commit after
+  the horizon shipped, which would have gone on reporting 104MB for a query the
+  app no longer issued. `pruneSettledChecklistItems()` sheds the
   checklist items once the delta cursor has moved past them (100MB → the active
   turnovers only), and `CREW_SCOPE_HORIZON_DAYS` bounds the turnover and
   instance rows plus the resync that fetches them. See the crew Dexie section

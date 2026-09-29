@@ -120,8 +120,17 @@ reason that can expire.
   `turnovers!inner(checkout_datetime)` embed so the round trips shrink with the
   cache. The past only — a future turnover is always in scope — and a turnover
   with unsent work is retained regardless of age, because the dead-letter window
-  is a different clock from the horizon. Nothing on a crew device now grows with
-  tenure.
+  is a different clock from the horizon.
+
+  Re-measured on the same fixture afterwards: **34,140 rows / 19.77MB / 61
+  round trips**, down from 176,640 / 103.84MB / 276. Read that as a ratio
+  rather than an absolute. It is the server payload of a full resync, not what
+  the device holds — the item purge sheds settled checklists from the resting
+  cache after the pull, which no SQL probe can see. And it is pessimistic: the
+  horizon bounds the past only, so what remains is dominated by the forward
+  book, and the fixture hands one crew member 800 forward assignments across 57
+  days — roughly 14 a day, which no real cleaner carries. Nothing on a crew
+  device grows with tenure any more, which was the actual defect.
 
 - **The crew PWA's checklist pull.** `checklist_instance_items` has no
   `org_id` column in its policy at all — both branches resolve through
