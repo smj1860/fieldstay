@@ -92,14 +92,28 @@
 -- concern that put it here was a guess, the guess was wrong by an order of
 -- magnitude, and a measured 2.32MB closes it rather than leaving it open.
 --
--- The crew device is the finding. 100MB of that 104MB is checklist_instance_items
--- alone, and it scales with a crew member's TENURE rather than with anything
--- about the account today — nothing on the device removes a turnover, so the
--- number below only goes up. At the seeded rate (1,250 assignments a year for a
--- full-time cleaner on a 334-property account) the fixture is ~2.6 years of
--- work, and the 192MB ceiling arrives somewhere around year five. The report's
--- projected_ceiling_years column below prints that estimate from whatever was
--- actually measured rather than from this paragraph.
+-- The crew device was the finding, and the retention work that followed was
+-- measured back here on the SAME fixture once CREW_SCOPE_HORIZON_DAYS shipped:
+--
+--   crew device  34,140 rows  19.77MB   (10% of ceiling),  61 round trips
+--
+-- 81% fewer bytes and 78% fewer round trips, and — the point — no longer a
+-- function of tenure.
+--
+-- TWO THINGS THAT FIGURE IS NOT.
+--
+-- It is not what a device HOLDS. This probe measures the server payload of a
+-- full resync; pruneSettledChecklistItems() then sheds settled checklists from
+-- the resting cache, which is device state no SQL here can see. The resting
+-- size is smaller and its evidence is in unit/dexie/, not in this file.
+--
+-- It is not a realistic steady state either, and it is pessimistic rather than
+-- optimistic. The horizon bounds the PAST at 45 days and deliberately leaves
+-- the FUTURE unbounded, so what survives it is dominated by the forward book —
+-- and this fixture gives one crew member 800 forward assignments across 57
+-- days, about 14 a day, which no real cleaner carries. Read the RATIO as the
+-- result and treat the absolute as a ceiling, or re-seed the forward book at a
+-- rate you actually expect before quoting it.
 --
 -- ONE THING THE SEED UNDERSTATES. The fixture gives each property 8 turnovers
 -- per 67 days — one per 8 days. A real short-term rental in season turns over
@@ -247,6 +261,25 @@ DECLARE
   -- share them, or the measurement compares two different queries.
   FROM_TURNOVERS CONSTANT text := '  FROM turnovers t';
   ORG_ACTIVE     CONSTANT text := ' WHERE org_id = %L AND is_active';
+  -- The crew member's assignment scope, AS THE APP NOW ASKS FOR IT: filtered by
+  -- CREW_SCOPE_HORIZON_DAYS through a join on the turnover's checkout date.
+  --
+  -- This is the probe's whole point of contact with the code it measures, and
+  -- it drifted once already. The first version of this file predated the
+  -- horizon and kept the unbounded read after it shipped, so the probe would
+  -- have gone on reporting 104MB for a query the app had stopped issuing — a
+  -- measurement of nothing, which is the failure mode this file's own canary
+  -- exists to catch one level down.
+  --
+  -- 45 is CREW_SCOPE_HORIZON_DAYS in lib/dexie/sync/turnovers.ts, which is the
+  -- source of truth; this is a manual probe and nothing enforces the pairing,
+  -- so re-read it there before trusting a number out of here.
+  HORIZON_DAYS   CONSTANT int  := 45;
+  CREW_SCOPE     CONSTANT text :=
+    '(SELECT ta.turnover_id FROM turnover_assignments ta'
+    '   JOIN turnovers ht ON ht.id = ta.turnover_id'
+    '  WHERE ta.crew_member_id = %L'
+    '    AND ht.checkout_datetime >= now() - interval ''' || HORIZON_DAYS || ' days'')';
   -- The nested embed the two board reads share, spelled once.
   embed text := format(
     '(SELECT coalesce(json_agg(json_build_object('
@@ -316,7 +349,11 @@ BEGIN
   -- session cannot reach: on a PM plan the crew branch reports
   -- `(never executed)` because the org_id test satisfies the OR first.
   ('crew.1_assignment_scope', S_CREW, AS_CREW, CREW_LIMIT, format(
-    'SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L', v_crew)),
+    'SELECT ta.turnover_id FROM turnover_assignments ta'
+    '   JOIN turnovers ht ON ht.id = ta.turnover_id'
+    '  WHERE ta.crew_member_id = %L'
+    '    AND ht.checkout_datetime >= now() - interval '''
+    || HORIZON_DAYS || ' days''', v_crew)),
 
   ('crew.2_turnovers', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT t.id, t.property_id, t.org_id, t.prev_booking_id, t.checkout_datetime,'
@@ -326,18 +363,15 @@ BEGIN
     '       t.pending_checkout_datetime, t.pending_checkin_datetime,'
     '       t.dates_changed_at, t.dates_change_acknowledged_at, t.updated_at'
     || FROM_TURNOVERS ||
-    ' WHERE t.id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
-    v_crew)),
+    ' WHERE t.id IN ' || CREW_SCOPE, v_crew)),
 
   ('crew.3_checklist_instances', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT ci.* FROM checklist_instances ci'
-    ' WHERE ci.turnover_id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
-    v_crew)),
+    ' WHERE ci.turnover_id IN ' || CREW_SCOPE, v_crew)),
 
   ('crew.4_checklist_items', S_CREW, AS_CREW, CREW_LIMIT, format(
     'SELECT i.* FROM checklist_instance_items i'
-    ' WHERE i.turnover_id IN (SELECT turnover_id FROM turnover_assignments WHERE crew_member_id = %L)',
-    v_crew));
+    ' WHERE i.turnover_id IN ' || CREW_SCOPE, v_crew));
 
   UPDATE payload_queries SET chunked = true WHERE surface = S_CREW;
 END $$;
