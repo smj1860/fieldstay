@@ -82,14 +82,36 @@ Recorded because each was checked, so nobody re-derives them:
 
 ## 4. Things to watch, with the reason
 
-Neither is a defect today. Both are recorded because the reason they are fine
-is a reason that can expire.
+None is a defect today. Each is recorded because the reason it is fine is a
+reason that can expire.
 
-- **Board render time.** The database is not the constraint — the probed
-  reads run in 0.9-7 ms at this size. What grows is the payload: roughly
-  6,300 turnovers over the boards' 67-day window, server-rendered and
-  serialised to the client. If the account reports slow boards, that is where
-  to look, not at indexes.
+- **Board payload.** MEASURED 2026-09-29, and the earlier worry here was
+  wrong. `/turnovers` ships 5,682 rows / 2.32MB and `/ops` ships 2,005 rows /
+  0.71MB at 334 properties — roughly a tenth of the 24MB budget the probe
+  checks against. Even allowing for a real in-season turnover rate, which is
+  about 2.4x what the fixture seeds, `/turnovers` lands near 5.5MB. The boards
+  are not a scaling risk at this size and no window, virtualisation or
+  server-side aggregate is needed. Re-measure with
+  `pnpm run check:payload-volume` if the portfolio grows well past 334. See
+  `scripts/payload-volume-probe.sql`.
+
+- **The crew device cache — the one to plan for.** Same probe, same run: a
+  crew member's device holds 176,640 rows / 104MB after about 2.6 years on a
+  334-property account, and 100MB of that is `checklist_instance_items`. It
+  grows with that person's TENURE and nothing brings it back down —
+  `fetchAssignedTurnoverIds` has no date window, and `pruneLocalCache` derives
+  its live set FROM the cached turnovers, so a turnover only leaves the device
+  when the server unassigns it. At the seeded rate the 192MB ceiling arrives
+  around year five, which is inside the working life of the account. A full
+  resync also costs 276 sequential round trips today (~80 seconds at a phone's
+  300ms RTT), which is what a new device, a reinstall or
+  `forceFullCrewResync()` pays.
+
+  Nothing is broken today and no code change is required to onboard. What this
+  means for an Enterprise account is that a retention horizon on the crew
+  assignment scope should be designed before the account's third year, not
+  after a cleaner's phone starts evicting its own cache offline.
+
 - **The crew PWA's checklist pull.** `checklist_instance_items` has no
   `org_id` column in its policy at all — both branches resolve through
   `instance_id IN (subquery)` — so a crew member's read materialises their

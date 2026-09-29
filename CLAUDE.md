@@ -2310,6 +2310,35 @@ meta-rule, prose is for judgment calls only.
   choice is being made on a number that is three orders of magnitude wrong;
   it picks correctly today, but nothing about that is load-bearing.
 
+- **Payload volume is a separate question from plan shape, and it has its own
+  probe.** `scripts/payload-volume-probe.sql` (`pnpm run
+  check:payload-volume`, manual, never a CI gate) reuses the same
+  872-property fixture — now extracted to `scripts/probe-portfolio-seed.sql`
+  so both probes describe ONE platform — and measures rows and serialised
+  bytes per surface rather than milliseconds. A read can be index-perfect and
+  still ship more than a phone can parse; that is the failure the plan probe
+  is blind to by design.
+
+  Measured 2026-09-29: the PM boards are NOT the risk — `/turnovers` is
+  5,682 rows / 2.32MB and `/ops` is 2,005 / 0.71MB against a 24MB ceiling.
+  **The crew device cache is**: 176,640 rows / 104MB at ~2.6 years of one
+  crew member's tenure, 100MB of it `checklist_instance_items`, reaching the
+  192MB ceiling around year five. It grows with TENURE and never shrinks —
+  `fetchAssignedTurnoverIds` has no date window and `pruneLocalCache` derives
+  its live property set FROM the cached turnovers, so the turnovers are the
+  root of the retention graph and leave only on server-side unassignment. A
+  full resync is also 276 sequential round trips, which is ~80s at a phone's
+  RTT and is what a new device or `forceFullCrewResync()` pays. **The fix
+  when it comes is a retention horizon on the assignment scope, not a bigger
+  ceiling** — same rule as the report/export caps above.
+
+  Both probes plant a canary and both were fire-checked before being trusted:
+  the ceiling assertion must fire on an over-ceiling row AND on a surface that
+  failed to measure (NULL bytes), and must not fire on a control; the canary
+  must fire on an empty result set AND on a one-byte fixture. A probe at
+  "everything passes" because it is measuring nothing looks exactly like a
+  healthy platform.
+
 ### Code Quality
 
 - **A guardrail must scan CODE, not prose.** Most guardrails in
