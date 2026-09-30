@@ -20,7 +20,11 @@ export type { Json } from './database.generated'
 
 export type OrgPlan             = 'hosts' | 'starter' | 'growth' | 'pro' | 'portfolio' | 'enterprise' | 'platform'
 export type OrgPlanStatus       = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
-export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer'
+// 'finance' (20260930120000) is a bookkeeper: /billing and nothing else in the
+// nav. It passes no is_org_member() write array, and — see that migration's
+// header — it is an APPLICATION-surface scope, not a data-level one: RLS SELECT
+// is keyed on get_user_org_ids(), which does not look at role.
+export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer' | 'finance'
 export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'
 export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
 export type SyncStatus          = 'pending' | 'success' | 'error'

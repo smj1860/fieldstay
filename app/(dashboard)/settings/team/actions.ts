@@ -12,6 +12,21 @@ import { tryUnwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supaba
 import { reportError } from '@/lib/observability/report-error'
 const EmailSchema = z.string().email('Invalid email address.')
 
+/**
+ * The roles the invite form can hand out.
+ *
+ * 'admin' is what every invite was before this, hardcoded. 'finance' is a
+ * bookkeeper: /billing and nothing else in their nav (see migration
+ * 20260930120000). Deliberately NOT the whole member_role enum — 'owner' is
+ * not transferable through an invite, 'crew' is refused downstream by
+ * acceptOrgInvite() because a crew member must hold no organization_members
+ * row at all, and 'manager'/'viewer' have never had an invite path, so
+ * opening one for them is its own change with its own copy to write.
+ */
+const INVITABLE_ROLES = ['admin', 'finance'] as const
+export type InvitableRole = (typeof INVITABLE_ROLES)[number]
+const RoleSchema = z.enum(INVITABLE_ROLES)
+
 // H-3: check not already a member using a targeted lookup (not listUsers).
 // Supabase admin REST supports GET /auth/v1/admin/users?email=x for point
 // lookups. Split out of inviteTeamMember so its own nested "found a user ->
@@ -45,7 +60,8 @@ async function findAlreadyMemberError(
 }
 
 export async function inviteTeamMember(
-  email: string
+  email: string,
+  role: InvitableRole = 'admin',
 ): Promise<{ ok?: true; error?: string }> {
   try {
     const { user, membership } = await requireOrgMember()
@@ -71,6 +87,13 @@ export async function inviteTeamMember(
     const parsed = EmailSchema.safeParse(email.trim().toLowerCase())
     if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid email.' }
     const normalizedEmail = parsed.data
+
+    // Validated rather than trusted: this is a client-supplied value that
+    // becomes a member_role on a row, and the allowlist is what stops it
+    // being 'owner'.
+    const parsedRole = RoleSchema.safeParse(role)
+    if (!parsedRole.success) return { error: 'Pick a role for this teammate.' }
+    const inviteRole = parsedRole.data
 
     const admin = createServiceClient({ authorizedBy: membership })
 
@@ -102,7 +125,7 @@ export async function inviteTeamMember(
         org_id:     membership.org_id,
         invited_by: user.id,
         email:      normalizedEmail,
-        role:       'admin',
+        role:       inviteRole,
       })
       .select('token, id')
       .single()
@@ -137,7 +160,7 @@ export async function inviteTeamMember(
       action:     'team.member.invited',
       targetType: 'invite',
       targetId:   invite.id,
-      metadata:   { role: 'admin' },
+      metadata:   { role: inviteRole },
     })
 
     revalidatePath('/settings/team')

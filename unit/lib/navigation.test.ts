@@ -19,6 +19,30 @@ describe('getVisibleNavItems', () => {
     expect(items.some((i) => i.id === 'maintenance')).toBe(false)
   })
 
+  // ── The 'finance' role (migration 20260930120000) ────────────────────────
+  //
+  // A bookkeeper. The POINT of the role is what it does NOT see, so that is
+  // what is asserted: an over-broad grant here is invisible in the UI (the
+  // extra items just render) and is exactly the thing that makes the role
+  // pointless, since the whole reason it exists is not having to hand a
+  // bookkeeper an admin seat.
+  it('shows the finance role billing and help, and nothing else', () => {
+    const ids = getVisibleNavItems('finance').map((i) => i.id)
+    expect(ids.sort()).toEqual(['billing', 'help'])
+  })
+
+  it('does not show billing to a manager or a viewer', () => {
+    expect(getVisibleNavItems('manager').some((i) => i.id === 'billing')).toBe(false)
+    expect(getVisibleNavItems('viewer').some((i) => i.id === 'billing')).toBe(false)
+  })
+
+  it('keeps every operational page away from the finance role', () => {
+    const ids = new Set(getVisibleNavItems('finance').map((i) => i.id))
+    for (const id of ['ops', 'turnovers', 'properties', 'maintenance', 'crew-manage', 'settings']) {
+      expect(ids.has(id)).toBe(false)
+    }
+  })
+
   it('treats the owner role identically to admin', () => {
     const ownerItems = getVisibleNavItems('owner')
     const adminItems = getVisibleNavItems('admin')
@@ -66,7 +90,7 @@ describe('getVisibleNavItems', () => {
   })
 
   it('every declared role in ALL_NAV_ITEMS is a valid MemberRole', () => {
-    const validRoles: MemberRole[] = ['owner', 'admin', 'manager', 'crew', 'viewer']
+    const validRoles: MemberRole[] = ['owner', 'admin', 'manager', 'crew', 'viewer', 'finance']
     for (const item of ALL_NAV_ITEMS) {
       for (const role of item.roles) {
         expect(validRoles).toContain(role)

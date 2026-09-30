@@ -60,7 +60,7 @@ export default async function TeamPage() {
     id:        m.id as string,
     userId:    m.user_id as string,
     email:     memberEmails[m.user_id as string] ?? '',
-    role:      m.role as 'owner' | 'admin',
+    role:      m.role as 'owner' | 'admin' | 'finance',
     joinedAt:  m.created_at as string,
   }))
 
@@ -93,12 +93,12 @@ export default async function TeamPage() {
 
       <TeamClient
         currentUserId={user.id}
-        currentUserRole={membership.role as 'owner' | 'admin'}
+        currentUserRole={membership.role as 'owner' | 'admin' | 'finance'}
         members={memberRows}
         invites={(invites ?? []).map((i) => ({
           id:        i.id as string,
           email:     i.email as string,
-          role:      i.role as 'admin',
+          role:      i.role as 'owner' | 'admin' | 'finance',
           createdAt: i.created_at as string,
           expiresAt: i.expires_at as string,
         }))}
