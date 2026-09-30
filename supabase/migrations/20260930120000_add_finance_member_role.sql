@@ -1,0 +1,35 @@
+-- Adds the 'finance' entry to member_role: a bookkeeper or accountant who
+-- needs the subscription, its cost breakdown and the org's vendor invoices,
+-- and nothing else.
+--
+-- WHY A ROLE AND NOT A PERMISSION FLAG. Before this, /billing lived only
+-- inside /settings, which lib/navigation.ts gates to 'admin'. So the only way
+-- to let a bookkeeper see an invoice was to make them a full admin, which also
+-- hands them team management, every integration credential, the org's
+-- operational settings and account deletion. That is the same complaint
+-- Breezeway's reviewers make about its owner-only billing access, and we had
+-- our own version of it.
+--
+-- WHAT THIS DOES NOT DO, stated plainly because the boundary is narrower than
+-- the name suggests. RLS SELECT policies in this schema are keyed on
+-- get_user_org_ids(), which returns an org for ANY accepted membership row
+-- regardless of role — so a finance member can read the org's rows at the
+-- database level exactly as a 'viewer' can. What 'finance' scopes is the
+-- APPLICATION surface: which nav items resolve, which pages render, and which
+-- Server Actions accept the call. It is a smaller blast radius than 'admin',
+-- not a data-level partition, and a claim that it is the latter would be
+-- wrong. Narrowing the read surface per role would mean rewriting every
+-- SELECT policy in the schema and is deliberately out of scope here.
+--
+-- WRITES NEED NO CHANGE. Every write policy goes through
+-- is_org_member(org_id, ARRAY[...]) with an explicit role array, and no array
+-- anywhere names 'finance', so this label passes none of them. The 'owner'
+-- role still always passes, unchanged.
+--
+-- Same one-line shape as 20260808120000_add_hosts_plan.sql: ADD VALUE is
+-- permitted inside a migration's transaction as long as the new label is not
+-- USED in that same transaction, which it is not here. ADD VALUE appends to
+-- the enum's sort order, so member_role's label order stays insertion order
+-- and is not a privilege ladder. Nothing orders by role; don't start.
+
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'finance';

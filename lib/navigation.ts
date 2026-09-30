@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard, Building2, CalendarCheck, Package, Wrench, Mail,
   BarChart3, Settings, Users2, Briefcase, MessageSquare, ShieldCheck,
-  TrendingUp, LifeBuoy, BookOpen, Inbox, Star, LayoutTemplate,
+  TrendingUp, LifeBuoy, BookOpen, Inbox, Star, LayoutTemplate, CreditCard,
 } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 
@@ -56,12 +56,20 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { id: 'comms-log',        href: '/comms-log',        label: 'Comms Log',        icon: Mail,        roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms', keywords: ['sms', 'email', 'history'] },
   { id: 'owners',           href: '/owners',           label: 'Owner Portal',     icon: BarChart3,   roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms' },
   { id: 'guidebook',        href: '/guidebook',        label: 'Guidebook',        icon: BookOpen,    roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms' },
+  // Billing has its own route rather than living only as a tab inside
+  // /settings, and the reason is the 'finance' role: a bookkeeper needs the
+  // subscription and the org's vendor invoices without /settings' team
+  // management, integration credentials and account deletion coming with
+  // them. Admins keep the Billing tab in /settings too — same numbers, both
+  // from lib/stripe/brackets.ts, which is the single schedule either surface
+  // is allowed to derive from.
+  { id: 'billing',          href: '/billing',          label: 'Billing',         icon: CreditCard,   roles: ['admin', 'finance'],           tier: 'management', category: 'Settings' },
   { id: 'settings',         href: '/settings',         label: 'Settings',        icon: Settings,     roles: ['admin'],                      tier: 'management', category: 'Settings' },
 
   // ── Rendered as their own hardcoded blocks below the scrollable nav
   //    list in DashboardSidebar, not part of opsNav/mgmtNav — kept here
   //    so the command palette and mobile drawer still see them.
-  { id: 'help',          href: '/help',          label: 'Help & Support', icon: LifeBuoy, roles: ['admin', 'manager', 'viewer'], tier: 'management', category: 'Settings' },
+  { id: 'help',          href: '/help',          label: 'Help & Support', icon: LifeBuoy, roles: ['admin', 'manager', 'viewer', 'finance'], tier: 'management', category: 'Settings' },
   { id: 'support-inbox', href: '/support-inbox', label: 'Support Inbox', icon: Inbox,     roles: ['admin', 'manager', 'viewer'], tier: 'management', category: 'Settings', condition: 'staff' },
 ]
 

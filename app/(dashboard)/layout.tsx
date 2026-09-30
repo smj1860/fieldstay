@@ -76,6 +76,7 @@ export default async function DashboardLayout({
       const isExempt =
         pathname.startsWith('/setup')       ||
         pathname.startsWith('/settings')    ||
+        pathname.startsWith('/billing')     ||
         pathname.startsWith('/help')        ||
         pathname.startsWith('/billing-wall')
 
@@ -106,8 +107,15 @@ export default async function DashboardLayout({
   if (isBlocked) {
     const billingHeadersList = await headers()
     const billingPathname    = billingHeadersList.get('x-pathname') ?? ''
+    // /billing is exempt for the same reason /settings is, and it matters
+    // more: a 'finance' member has no /settings in their nav at all, so
+    // without this the one role whose job is to fix a lapsed subscription
+    // would be bounced to the wall with no way to reach the page that clears
+    // it. `startsWith('/billing')` covers '/billing-wall' too; both are
+    // listed anyway so removing either line cannot silently keep working.
     const isBillingExempt =
       billingPathname.startsWith('/settings')    ||
+      billingPathname.startsWith('/billing')     ||
       billingPathname.startsWith('/help')        ||
       billingPathname.startsWith('/billing-wall')
     if (!isBillingExempt) {

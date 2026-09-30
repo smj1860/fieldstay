@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { TeamClient }          from './team-client'
 import { buttonVariantClass }  from '@/components/ui/Button'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import type { MemberRole }     from '@/types/database'
 
 export const metadata: Metadata = { title: 'Team | FieldStay' }
 
@@ -60,7 +61,7 @@ export default async function TeamPage() {
     id:        m.id as string,
     userId:    m.user_id as string,
     email:     memberEmails[m.user_id as string] ?? '',
-    role:      m.role as 'owner' | 'admin',
+    role:      m.role as MemberRole,
     joinedAt:  m.created_at as string,
   }))
 
@@ -93,12 +94,12 @@ export default async function TeamPage() {
 
       <TeamClient
         currentUserId={user.id}
-        currentUserRole={membership.role as 'owner' | 'admin'}
+        currentUserRole={membership.role}
         members={memberRows}
         invites={(invites ?? []).map((i) => ({
           id:        i.id as string,
           email:     i.email as string,
-          role:      i.role as 'admin',
+          role:      i.role as MemberRole,
           createdAt: i.created_at as string,
           expiresAt: i.expires_at as string,
         }))}
