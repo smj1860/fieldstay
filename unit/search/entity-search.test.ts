@@ -70,7 +70,7 @@ describe('sanitizeSearchTerm', () => {
   it('truncates a paste rather than searching on it', () => {
     const term = sanitizeSearchTerm('x'.repeat(MAX_TERM_LENGTH + 50))
     expect(term).not.toBeNull()
-    expect(term!.length).toBe(MAX_TERM_LENGTH)
+    expect(term!).toHaveLength(MAX_TERM_LENGTH)
   })
 })
 

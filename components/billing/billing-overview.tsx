@@ -71,8 +71,16 @@ interface IntervalToggleProps {
 }
 
 function IntervalToggle({ interval, onChange }: Readonly<IntervalToggleProps>) {
+  // A native <fieldset> rather than a div with role="group": the ARIA role
+  // is not reliably conveyed on every device, and SonarQube's S6819 flags it
+  // for that reason. The legend carries the group's name for a screen reader
+  // without taking visual space, and Tailwind's preflight already strips a
+  // fieldset's default margin, padding and border, so it lays out as the div
+  // did. The aria-pressed buttons and the inset focus ring stay: the toggle
+  // in settings-tabs.tsx has neither, and this is the better of the two.
   return (
-    <div className="inline-flex rounded-lg border border-themed overflow-hidden" role="group" aria-label="Billing interval">
+    <fieldset className="inline-flex rounded-lg border border-themed overflow-hidden">
+      <legend className="sr-only">Billing interval</legend>
       {(['monthly', 'annual'] as const).map((option) => (
         <button
           key={option}
@@ -89,7 +97,7 @@ function IntervalToggle({ interval, onChange }: Readonly<IntervalToggleProps>) {
           {option === 'monthly' ? 'Monthly' : 'Annual'}
         </button>
       ))}
-    </div>
+    </fieldset>
   )
 }
 

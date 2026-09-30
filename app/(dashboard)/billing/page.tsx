@@ -22,7 +22,7 @@ export const metadata: Metadata = { title: 'Billing' }
  * from lib/stripe/brackets.ts, which is the one place the rate schedule is
  * allowed to live.
  */
-const VIEW_ROLES: readonly MemberRole[] = ['owner', 'admin', 'finance']
+const VIEW_ROLES: ReadonlySet<MemberRole> = new Set(['owner', 'admin', 'finance'])
 
 /**
  * Most recent vendor invoices, bounded.
@@ -54,7 +54,7 @@ export default async function BillingPage() {
   // A nav item that does not render is not an access control: /settings has
   // no page-level role gate today and a viewer who types the URL reaches it.
   // This page does gate, because it is the one a new role was added for.
-  if (!VIEW_ROLES.includes(membership.role)) redirect('/ops')
+  if (!VIEW_ROLES.has(membership.role)) redirect('/ops')
 
   const [
     { data: org, error: orgError },
