@@ -3,17 +3,37 @@
 import { useState, useTransition } from 'react'
 import { Loader2, UserMinus, MailX } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import type { MemberRole } from '@/types/database'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { inviteTeamMember, removeMember, revokeInvite, type InvitableRole } from './actions'
 
-/** Display label + badge tone per role this page can show. */
-const ROLE_META: Record<TeamRole, { label: string; tone: 'amber' | 'blue' | 'gold' }> = {
-  owner:   { label: 'Owner',   tone: 'amber' },
-  admin:   { label: 'Admin',   tone: 'blue'  },
-  finance: { label: 'Finance', tone: 'gold'  },
+/**
+ * Display label + badge tone for EVERY member_role, not just the ones this
+ * page can hand out.
+ *
+ * Totality is the point. The roster lists whatever rows the org actually has,
+ * and an org can hold a 'manager' or 'viewer' from before the invite form
+ * existed (or a 'crew' row written by another path). A partial map here reads
+ * `undefined.tone` and throws inside a client component, which takes the whole
+ * page to its error boundary rather than rendering one odd badge — so the
+ * failure is total and looks nothing like its cause. That shipped for one
+ * commit, hidden by a `role as 'owner' | 'admin' | 'finance'` cast in
+ * page.tsx that told TypeScript a lie about what the column contains, and it
+ * was caught by 30-role-separation.spec.ts's positive control. Keyed on
+ * MemberRole so adding an enum label fails the BUILD next time.
+ * unit/settings/team-role-meta.test.ts asserts the same thing against the
+ * union, since a Record can still be satisfied by a wrong-but-present entry.
+ */
+const ROLE_META: Record<MemberRole, { label: string; tone: 'amber' | 'blue' | 'gold' | 'purple' | 'slate' }> = {
+  owner:   { label: 'Owner',   tone: 'amber'  },
+  admin:   { label: 'Admin',   tone: 'blue'   },
+  finance: { label: 'Finance', tone: 'gold'   },
+  manager: { label: 'Manager', tone: 'purple' },
+  viewer:  { label: 'Viewer',  tone: 'slate'  },
+  crew:    { label: 'Crew',    tone: 'slate'  },
 }
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: InvitableRole; label: string; help: string }> = [
@@ -29,27 +49,27 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: InvitableRole; label: string; help: s
   },
 ]
 
-type TeamRole = 'owner' | 'admin' | 'finance'
+
 
 interface Member {
   id:       string
   userId:   string
   email:    string
-  role:     TeamRole
+  role:     MemberRole
   joinedAt: string
 }
 
 interface Invite {
   id:        string
   email:     string
-  role:      TeamRole
+  role:      MemberRole
   createdAt: string
   expiresAt: string
 }
 
 interface Props {
   currentUserId:   string
-  currentUserRole: TeamRole
+  currentUserRole: MemberRole
   members:         Member[]
   invites:         Invite[]
 }
