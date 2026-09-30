@@ -139,7 +139,8 @@ export default function BreezewayAlternativePage() {
 
         <p className="text-xs text-[var(--mkt-muted)] mt-4">
           FieldStay claims are verifiable against this product directly. Breezeway information reflects
-          Breezeway&apos;s public website and help documentation as checked on {RESEARCHED_ON}. A
+          Breezeway&apos;s public website and help documentation, checked on or after {RESEARCHED_ON}.
+          Rows are re-checked one at a time, so some carry a later date than others. A
           competitor&apos;s pricing and features can change at any time, so verify current details at{' '}
           <a
             href="https://www.breezeway.io/pricing"
