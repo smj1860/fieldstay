@@ -133,8 +133,19 @@ const outerContainer: React.CSSProperties = {
   boxShadow:    '0 1px 3px rgba(10,22,40,0.08), 0 8px 24px rgba(10,22,40,0.06)',
 }
 
+/**
+ * The brand blue, = Tailwind `brand-800` in tailwind.config.ts, the same fill
+ * the login page, the crew PWA chrome and the marketing dark bands use.
+ *
+ * It is NOT `#0a1628`, which this header used until 2026-10-01. That hex is
+ * `surface.base`, the DARK-THEME APP SURFACE, and at L* 8 it reads as black in
+ * an inbox rather than as a brand colour. Email cannot resolve a CSS variable,
+ * so the hex is literal here by necessity; keep it in step with `brand-800`.
+ */
+const BRAND_BLUE = '#102246'
+
 const header: React.CSSProperties = {
-  backgroundColor: '#0a1628',
+  backgroundColor: BRAND_BLUE,
   padding:         '32px 32px 26px',
   textAlign:       'center',
 }

@@ -339,6 +339,16 @@ export async function renderGuidebookFeatureAnnouncementEmail(
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
+/**
+ * The brand blue, = Tailwind `brand-800`, the same fill the login page and the
+ * crew PWA chrome use. The header, the hero it runs into and the credit panel
+ * share it, so they read as one band. Until 2026-10-01 those three were
+ * `#0f172a` (slate-900), which is near-black rather than a brand colour. The
+ * `color: '#0f172a'` entries below are TEXT on white and stay as they are.
+ * Email cannot resolve a CSS variable, so the hex is literal by necessity.
+ */
+const BRAND_BLUE = '#102246'
+
 const styles = {
   body: {
     backgroundColor: '#f0f0f0',
@@ -355,7 +365,7 @@ const styles = {
     boxShadow:     '0 2px 12px rgba(0,0,0,0.08)',
   },
   header: {
-    backgroundColor: '#0f172a',
+    backgroundColor: BRAND_BLUE,
     padding:         '28px 40px',
   },
   logo: {
@@ -373,7 +383,7 @@ const styles = {
     textTransform: 'uppercase' as const,
   },
   hero: {
-    backgroundColor: '#0f172a',
+    backgroundColor: BRAND_BLUE,
     padding:         '0 40px 48px',
     borderBottom:    '3px solid #FCD116',
   },
@@ -471,7 +481,7 @@ const styles = {
     margin:   '0',
   },
   creditBox: {
-    backgroundColor: '#0f172a',
+    backgroundColor: BRAND_BLUE,
     borderRadius:    '12px',
     padding:         '32px',
     margin:          '28px 0',

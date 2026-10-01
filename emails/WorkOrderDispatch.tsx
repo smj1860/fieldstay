@@ -19,7 +19,16 @@ interface WorkOrderDispatchEmailProps {
 }
 
 const GOLD      = '#FCD116'
-const NAVY      = '#0a1628'
+const NAVY      = '#0a1628'   // TEXT on white only, never a fill
+
+/**
+ * The brand blue for the header and footer bands, = Tailwind `brand-800`, the
+ * same fill the login page and the crew PWA chrome use. This template is the
+ * one email that does not go through EmailLayout, so it carries its own copy;
+ * keep the two in step. `NAVY` above is `surface.base` and reads as black in an
+ * inbox, which is why it is text-only now. Email cannot resolve a CSS variable.
+ */
+const BRAND_BLUE = '#102246'
 const GOLD_LINE = '#FCD116'   // the divider — was CHROME, now the same
                               // gold hairline used throughout the rest
                               // of FieldStay's design system
@@ -185,7 +194,7 @@ const body: React.CSSProperties = {
   padding: 0,
 }
 const header: React.CSSProperties = {
-  backgroundColor: NAVY,
+  backgroundColor: BRAND_BLUE,
   padding: '24px 0 20px',
 }
 const headerInner: React.CSSProperties = {
@@ -353,7 +362,7 @@ const accessNote: React.CSSProperties = {
   margin: 0,
 }
 const footer: React.CSSProperties = {
-  backgroundColor: NAVY,
+  backgroundColor: BRAND_BLUE,
   padding: '24px 0 28px',
   marginTop: 0,
 }
