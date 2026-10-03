@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { SiteHeader } from '@/components/landing/site-header'
+import { SiteFooter } from '@/components/landing/site-footer'
 
 // ============================================================================
 // /why-fieldstay — the founder letter.
@@ -217,6 +218,34 @@ function CreamPassage({ section }: Readonly<{ section: Section }>) {
 }
 
 /**
+ * The sign-off.
+ *
+ * The letter is first-person from its first sentence ("it is one I make with
+ * complete confidence") to its last ("I may ask what we could have done
+ * differently"), and until this was added nobody signed it, which is the one
+ * thing a page arguing for trust cannot leave out.
+ *
+ * The name and role are NOT new strings: they are the homepage founder note's,
+ * byte for byte, so the site signs itself one way rather than two. If that
+ * note's attribution changes, change it here in the same sitting.
+ */
+function Signature() {
+  return (
+    <p
+      style={{
+        fontFamily: SANS,
+        fontSize:   16,
+        color:      'var(--mkt-ed-on-ink-soft)',
+        margin:     'clamp(26px, 4vw, 36px) 0 0',
+      }}
+    >
+      <strong style={{ color: '#FFFFFF' }}>Stephen</strong>
+      {' \u00b7 Founder, Dadeville, Alabama'}
+    </p>
+  )
+}
+
+/**
  * The closing call to action, INSIDE the final navy window.
  *
  * It used to sit on the cream below the last panel, where the gold pill
@@ -297,12 +326,15 @@ export function WhyFieldStayContent() {
             if (section.tone === 'cream') return <CreamPassage key={key} section={section} />
             return (
               <InkWindow key={key} section={section}>
+                {i === lastIndex && <Signature />}
                 {i === lastIndex && <ClosingActions />}
               </InkWindow>
             )
           })}
         </div>
       </main>
+
+      <SiteFooter />
     </div>
   )
 }

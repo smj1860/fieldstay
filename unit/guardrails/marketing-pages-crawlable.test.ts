@@ -354,9 +354,21 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     // Checked against the homepage specifically, not "anywhere in the tree":
     // being linked only from a sibling page nothing else points at leaves the
     // whole cluster orphaned together, which is the state this found.
-    const homepage = readCode(
-      join(process.cwd(), 'components', 'landing', 'homepage-content.tsx'),
-    )
+    //
+    // TWO files, because the homepage's markup is no longer all in one. The
+    // footer that carries the link map moved to site-footer.tsx on 2026-10-03
+    // when /why-fieldstay became the second page to render one, and the header
+    // moved to site-header.tsx before it. Both are rendered BY the homepage, so
+    // what this measures is unchanged: the hrefs an anonymous crawler finds on
+    // the homepage. Scanning only homepage-content.tsx after that move reported
+    // all eight public pages as orphans while every one of them was linked.
+    const homepage = [
+      'homepage-content.tsx',
+      'site-footer.tsx',
+      'site-header.tsx',
+    ]
+      .map((f) => readCode(join(process.cwd(), 'components', 'landing', f)))
+      .join('\n')
 
     const unlinked = PUBLIC_MARKETING_PAGES
       .filter((r) => r !== '/')
@@ -365,7 +377,7 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     expect(
       unlinked,
       'public pages with no link from the homepage — add them to FOOTER_LINKS ' +
-      'in components/landing/homepage-content.tsx',
+      'in components/landing/site-footer.tsx',
     ).toEqual([])
   })
 

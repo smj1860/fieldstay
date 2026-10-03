@@ -148,6 +148,12 @@
      naming it changes nothing on screen and gives the next page somewhere to
      reach for instead of typing it again. */
   --mkt-ed-body:      #3D4A63;
+  /* Footer. A step DEEPER than --mkt-ed-ink so the footer reads as the end of
+     the page rather than as one more navy window, plus its two supporting
+     text values. Same hexes the homepage footer already used. */
+  --mkt-ed-ink-deep:       #0B1830;   /* = Tailwind brand-900 */
+  --mkt-ed-on-ink-soft:    #C9D2E6;   /* 11.66:1 on ink-deep */
+  --mkt-ed-on-ink-faint:   #8A96B2;   /* 5.97:1 on ink-deep, the copyright line */
 }
 
 

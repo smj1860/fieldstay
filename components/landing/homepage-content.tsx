@@ -7,6 +7,7 @@ import { Check, Wifi, MapPin, KeyRound } from 'lucide-react'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
 import FaqSection from '@/components/faq/FaqSection'
 import { SiteHeader } from '@/components/landing/site-header'
+import { SiteFooter } from '@/components/landing/site-footer'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 
@@ -23,10 +24,15 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // matching panel below so the homepage doesn't drift into showing a product
 // that no longer exists.
 //
-// FOOTER_LINKS, HOMEPAGE_ENTRY_FEATURES, the pricingTiers() call, FaqSection
-// and RepuGuardWrapper are UNCHANGED from the previous version of this file
-// -- see the comments on each for why they exist. Do not re-derive prices,
-// FAQ copy, or footer hrefs; they are the real Stripe- and SEO-backed values.
+// HOMEPAGE_ENTRY_FEATURES, the pricingTiers() call, FaqSection and
+// RepuGuardWrapper are UNCHANGED from the previous version of this file
+// -- see the comments on each for why they exist. Do not re-derive prices or
+// FAQ copy; they are the real Stripe- and SEO-backed values.
+//
+// FOOTER_LINKS moved to components/landing/site-footer.tsx with the footer
+// itself on 2026-10-03, when /why-fieldstay became the second page needing
+// one. Its "do not trim this list" note went with it, and that is still the
+// rule: every public page is linked from here on purpose.
 // ============================================================================
 
 // The homepage's own entry-tier bullets -- the only thing that legitimately
@@ -53,28 +59,6 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // and legal pages as "Discovered - currently not indexed" when this footer
 // carried only /login and /signup. Do not trim this list back down.
 //
-// Relative hrefs on purpose. These are same-host marketing pages, so they
-// resolve on whichever of the two aliases the visitor is on and inherit that
-// page's own apex canonical -- unlike a CTA into an authenticated flow, which
-// lib/marketing.ts requires to be absolute against APP_ORIGIN so the session
-// cookie lands on the right host.
-const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
-  { label: 'Pricing',       href: '/pricing'     },
-  { label: 'Why FieldStay', href: '/why-fieldstay' },
-  { label: 'STR Operations', href: '/short-term-rental-operations-software' },
-  { label: 'Turnover App',  href: '/strops'      },
-  { label: 'For Hosts',     href: '/hosts'       },
-  { label: 'Enterprise',    href: '/enterprise'  },
-  { label: 'For Vendors',   href: '/for-vendors' },
-  { label: 'OwnerRez',      href: '/ownerrez'    },
-  { label: 'Hospitable',    href: '/hospitable'  },
-  { label: 'vs Breezeway',  href: '/breezeway-alternative' },
-  { label: 'Privacy',       href: '/privacy'     },
-  { label: 'Terms',         href: '/terms'       },
-  { label: 'DPA',           href: '/dpa'         },
-  { label: 'Log In',        href: '/login'       },
-  { label: 'Sign Up',       href: '/signup'      },
-]
 
 const HOMEPAGE_ENTRY_FEATURES = [
   'iCal sync (Airbnb, VRBO)',
@@ -995,26 +979,7 @@ export function HomepageContent() {
         </Link>
       </section>
 
-      {/* ── Footer ───────────────────────────────────────────────────────── */}
-      <footer style={{ padding: 'clamp(40px, 8vw, 64px) clamp(20px, 5vw, 40px) clamp(28px, 6vw, 44px)', background: '#0B1830' }}>
-        <div className="flex flex-col gap-14">
-          <div className="flex flex-col lg:flex-row justify-between gap-10">
-            <div className="flex flex-col gap-3.5" style={{ maxWidth: 320 }}>
-              <span className="font-display font-bold text-2xl text-white">FieldStay</span>
-              <span className="text-[15px] leading-relaxed" style={{ color: '#C9D2E6' }}>Property operations for short-term rental managers. Made in Alabama.</span>
-              <a href="mailto:hello@fieldstay.app" className="text-[15px]" style={{ color: '#FCD116' }}>hello@fieldstay.app</a>
-            </div>
-            <div className="flex flex-wrap items-start gap-x-6 gap-y-3 text-[15px]" style={{ maxWidth: 640 }}>
-              {FOOTER_LINKS.map((l) => (
-                <Link key={l.label} href={l.href} className="transition-colors" style={{ color: 'rgba(201,210,230,0.7)' }}>
-                  {l.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-          <span className="text-xs" style={{ color: '#8A96B2' }}>&copy; {new Date().getFullYear()} Lake Martin Delivery LLC, d/b/a FieldStay</span>
-        </div>
-      </footer>
+      <SiteFooter />
 
     </div>
   )
