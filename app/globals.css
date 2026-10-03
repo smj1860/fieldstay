@@ -125,6 +125,45 @@
   --mkt-gold-hover:   #EAB800;   /* = gold-400 */
   --mkt-on-dark-soft:    rgba(255, 255, 255, 0.52);
   --mkt-on-dark-softer:  rgba(255, 255, 255, 0.58);
+
+  /* Editorial palette, from the 2026-09 homepage redesign (cream/navy/gold).
+     A SECOND marketing palette, not a replacement: --mkt-ink above is the
+     older pages' near-black, while --mkt-ed-ink is the brand navy the
+     editorial homepage sets type in. Theme-independent and on bare :root for
+     the same reason as the block above, so a prospect on a dark-mode phone
+     sees the same page. Values are the exact hexes homepage-content.tsx
+     already uses, so adopting them changes nothing on screen. */
+  --mkt-ed-bg:        #FAF7F0;   /* page cream */
+  --mkt-ed-bg-alt:    #F2ECDF;   /* panel cream, one step down */
+  --mkt-ed-ink:       #102246;   /* = Tailwind brand-800 */
+  --mkt-ed-rule:      #E2DACB;   /* hairline on cream */
+  --mkt-ed-muted:     #6B5B3A;   /* eyebrow / supporting text on cream */
+  /* Body text INSIDE a navy window. A warm off-white rather than the page
+     cream: 12.25:1 on --mkt-ed-ink, past AA with room to spare, and softer
+     than #FAF7F0's 14.66 over the long first-person passages /why-fieldstay
+     sets in these panels. */
+  --mkt-ed-on-ink:    #E8E3D7;
+  /* Running prose ON CREAM. 8.32:1 on --mkt-ed-bg. Not a new colour: this is
+     the exact hex homepage-content.tsx already hardcodes for its body copy, so
+     naming it changes nothing on screen and gives the next page somewhere to
+     reach for instead of typing it again. */
+  --mkt-ed-body:      #3D4A63;
+  /* Footer. A step DEEPER than --mkt-ed-ink so the footer reads as the end of
+     the page rather than as one more navy window, plus its two supporting
+     text values. Same hexes the homepage footer already used. */
+  --mkt-ed-ink-deep:       #0B1830;   /* = Tailwind brand-900 */
+  --mkt-ed-on-ink-soft:    #C9D2E6;   /* 11.66:1 on ink-deep */
+  --mkt-ed-on-ink-faint:   #8A96B2;   /* 5.97:1 on ink-deep, the copyright line */
+}
+
+
+/* The site menu's modal backdrop.
+   ::backdrop cannot be set from an inline style, and the drawer is a native
+   <dialog> opened with showModal(), so the browser owns this pseudo-element.
+   The value is the navy ink at 45%, written literally because this file is
+   where literal colours live; a component may not hardcode one. */
+.site-menu-dialog::backdrop {
+  background: rgba(16, 34, 70, 0.45);
 }
 
 

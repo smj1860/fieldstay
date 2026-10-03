@@ -130,6 +130,7 @@ const PRERENDERED_ROUTES = new Set([
   '/pricing',
   '/enterprise',
   '/for-vendors',
+  '/why-fieldstay',
   '/privacy',
   '/terms',
 ])
@@ -278,6 +279,15 @@ const BYPASS_ROUTES = [
   '/pricing',
   '/enterprise',
   '/for-vendors',
+
+  // The founder letter at /why-fieldstay, linked from the site menu on every
+  // marketing page that carries it. Same reasoning and same failure mode as
+  // every page above. BYPASS rather than PUBLIC for the reason the /dpa entry
+  // below spells out: a public route bounces an AUTHENTICATED visitor to /ops,
+  // and this is a page an existing customer may well re-read or forward to a
+  // colleague who is already signed in. It runs no auth check of its own, so
+  // nothing here needs a session either way.
+  '/why-fieldstay',
 
   // The category landing page — "short-term rental operations software".
   // Same reasoning and same failure mode as every marketing page above. It is
