@@ -58,7 +58,7 @@ const MENU_ITEMS: readonly MenuItem[] = [
   { label: 'Home',          href: '/'         },
   { label: 'About',         href: null        },
   { label: 'Why FieldStay', href: '/why-fieldstay' },
-  { label: 'Features',      href: null        },
+  { label: 'Features',      href: '/features' },
   { label: 'Pricing',       href: '/pricing'  },
   { label: 'Integrations',  href: null        },
 ]

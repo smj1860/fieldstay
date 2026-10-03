@@ -52,6 +52,7 @@ const PUBLIC_MARKETING_PAGES = [
   '/',
   '/pricing',
   '/why-fieldstay',
+  '/features',
   '/short-term-rental-operations-software',
   '/hosts',
   '/strops',

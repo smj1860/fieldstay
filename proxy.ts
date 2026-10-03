@@ -131,6 +131,7 @@ const PRERENDERED_ROUTES = new Set([
   '/enterprise',
   '/for-vendors',
   '/why-fieldstay',
+  '/features',
   '/privacy',
   '/terms',
 ])
@@ -288,6 +289,11 @@ const BYPASS_ROUTES = [
   // colleague who is already signed in. It runs no auth check of its own, so
   // nothing here needs a session either way.
   '/why-fieldstay',
+
+  // The features reference page. Same reasoning and same failure mode as
+  // every page above, and BYPASS for the same reason: an existing customer
+  // checking what a feature does should not be bounced to /ops.
+  '/features',
 
   // The category landing page — "short-term rental operations software".
   // Same reasoning and same failure mode as every marketing page above. It is
