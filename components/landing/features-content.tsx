@@ -25,6 +25,16 @@ import {
 // Resist giving every feature a mockup: each one is also a permanent promise
 // to keep it in step with the real surface it mirrors.
 //
+// Crew scheduling has THREE modes, not one, and the copy below names them with
+// the product's own words: Off, Suggest, Autopilot (organizations
+// .auto_assign_mode, settings-tabs.tsx, lib/inngest/functions/auto-assign-
+// turnover.ts). Autopilot really does insert the assignment with nobody in the
+// loop. An earlier draft of this page said assignment was "a suggestion you
+// approve, never an assignment made over your head", which was both wrong and
+// a worse sell than the truth. Vendors are NOT the same: vendor_auto_assign
+// _mode is only 'suggest' or 'disabled', with no autopilot, so do not imply
+// hands-off vendor dispatch in the maintenance section.
+//
 // Every figure here traces to a real constant. 157 catalog items and 24 asset
 // types were counted live on 2026-10-03. The par buffer and three-count
 // minimum come from lib/inventory/par-engine.ts. Nothing claims an hours-saved
@@ -173,9 +183,10 @@ export function FeaturesContent() {
             id="turnovers"
             kicker="Turnovers and crew"
             title="Every turnover in one place, sorted by what needs you."
-            body="Bookings arrive from your PMS and your calendars. FieldStay sorts the board by urgency, then suggests who should take each turnover and tells you why it picked them. You accept, or you do not. It is a suggestion you approve, never an assignment made over your head."
+            body="Bookings arrive from your PMS and your calendars, and the board sorts itself by urgency. Then you choose how much of the scheduling FieldStay does on its own. On Suggest it picks the best matched crew and shows you why, and you accept or change it. On Autopilot it assigns them and you never open the board at all. Off is a setting too, if you would rather do it yourself."
             points={[
-              'Suggested crew, with the reasoning shown',
+              'Suggest: the best matched crew, with the reasoning shown',
+              'Autopilot: assigned for you, hands off',
               'Same-day turnovers flagged before they bite',
               'One board across every property',
             ]}
