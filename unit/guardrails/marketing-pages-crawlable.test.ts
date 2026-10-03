@@ -51,6 +51,7 @@ import { readCode } from './scan'
 const PUBLIC_MARKETING_PAGES = [
   '/',
   '/pricing',
+  '/why-fieldstay',
   '/short-term-rental-operations-software',
   '/hosts',
   '/strops',

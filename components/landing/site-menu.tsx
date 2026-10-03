@@ -43,7 +43,7 @@ interface MenuItem {
 const MENU_ITEMS: readonly MenuItem[] = [
   { label: 'Home',          href: '/'         },
   { label: 'About',         href: null        },
-  { label: 'Why FieldStay', href: null        },
+  { label: 'Why FieldStay', href: '/why-fieldstay' },
   { label: 'Features',      href: null        },
   { label: 'Pricing',       href: '/pricing'  },
   { label: 'Integrations',  href: null        },
