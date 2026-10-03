@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react'
 import { Check, Wifi, MapPin, KeyRound } from 'lucide-react'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
 import FaqSection from '@/components/faq/FaqSection'
-import { SiteMenu } from '@/components/landing/site-menu'
+import { SiteHeader } from '@/components/landing/site-header'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 
@@ -723,29 +723,14 @@ export function HomepageContent() {
     <div className="min-h-screen" style={{ background: '#FAF7F0', color: '#14213D', fontFamily: 'var(--font-archivo), Arial, sans-serif' }}>
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 flex items-center justify-between" style={{ height: 84, padding: '0 clamp(20px, 5vw, 40px)', background: '#FAF7F0', borderBottom: '1px solid #E2DACB' }}>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <SiteMenu />
-          <span className="font-display font-bold" style={{ fontSize: 'clamp(22px, 4.5vw, 28px)', color: '#102246', letterSpacing: '-0.5px' }}>FieldStay</span>
-        </div>
-        <nav className="hidden md:flex items-center gap-9 text-[15px] font-medium">
-          <Link href="/strops" style={{ color: '#102246' }}>How it works</Link>
-          <Link href="#who" style={{ color: '#102246' }}>Who it&apos;s for</Link>
-          <Link href="/pricing" style={{ color: '#102246' }}>Pricing</Link>
-          <Link href="/breezeway-alternative" style={{ color: '#102246' }}>vs Breezeway</Link>
-        </nav>
-        <div className="flex items-center gap-3 sm:gap-5 text-[15px]">
-          {/* The four links above do NOT collapse into the hamburger below md:
-              they reappear at md: instead, and the header's job at narrow
-              widths stays brand + the two auth actions. <SiteMenu /> on the
-              left is a separate thing, the site map rather than this page's
-              conversion path, and it shows at every width. */}
-          <Link href="/login" className="hidden sm:inline font-medium" style={{ color: '#102246' }}>Log in</Link>
-          <Link href="/signup" className="font-semibold rounded-full whitespace-nowrap" style={{ background: '#102246', color: '#FFFFFF', padding: 'clamp(10px, 2.5vw, 13px) clamp(14px, 4vw, 22px)', fontSize: 'clamp(13px, 3.2vw, 15px)' }}>
-            Start free trial
-          </Link>
-        </div>
-      </header>
+      <SiteHeader
+        links={[
+          { label: 'How it works',  href: '/strops' },
+          { label: "Who it's for",  href: '#who' },
+          { label: 'Pricing',       href: '/pricing' },
+          { label: 'vs Breezeway',  href: '/breezeway-alternative' },
+        ]}
+      />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="flex flex-col lg:flex-row gap-10 lg:gap-16 items-center" style={{ padding: 'clamp(40px, 8vw, 72px) clamp(20px, 5vw, 40px) clamp(56px, 10vw, 96px)' }}>
