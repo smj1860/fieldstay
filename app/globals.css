@@ -125,6 +125,19 @@
   --mkt-gold-hover:   #EAB800;   /* = gold-400 */
   --mkt-on-dark-soft:    rgba(255, 255, 255, 0.52);
   --mkt-on-dark-softer:  rgba(255, 255, 255, 0.58);
+
+  /* Editorial palette, from the 2026-09 homepage redesign (cream/navy/gold).
+     A SECOND marketing palette, not a replacement: --mkt-ink above is the
+     older pages' near-black, while --mkt-ed-ink is the brand navy the
+     editorial homepage sets type in. Theme-independent and on bare :root for
+     the same reason as the block above, so a prospect on a dark-mode phone
+     sees the same page. Values are the exact hexes homepage-content.tsx
+     already uses, so adopting them changes nothing on screen. */
+  --mkt-ed-bg:        #FAF7F0;   /* page cream */
+  --mkt-ed-bg-alt:    #F2ECDF;   /* panel cream, one step down */
+  --mkt-ed-ink:       #102246;   /* = Tailwind brand-800 */
+  --mkt-ed-rule:      #E2DACB;   /* hairline on cream */
+  --mkt-ed-muted:     #6B5B3A;   /* eyebrow / supporting text on cream */
 }
 
 

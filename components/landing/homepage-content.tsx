@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react'
 import { Check, Wifi, MapPin, KeyRound } from 'lucide-react'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
 import FaqSection from '@/components/faq/FaqSection'
+import { SiteMenu } from '@/components/landing/site-menu'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 
@@ -723,7 +724,10 @@ export function HomepageContent() {
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 flex items-center justify-between" style={{ height: 84, padding: '0 clamp(20px, 5vw, 40px)', background: '#FAF7F0', borderBottom: '1px solid #E2DACB' }}>
-        <span className="font-display font-bold" style={{ fontSize: 'clamp(22px, 4.5vw, 28px)', color: '#102246', letterSpacing: '-0.5px' }}>FieldStay</span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <SiteMenu />
+          <span className="font-display font-bold" style={{ fontSize: 'clamp(22px, 4.5vw, 28px)', color: '#102246', letterSpacing: '-0.5px' }}>FieldStay</span>
+        </div>
         <nav className="hidden md:flex items-center gap-9 text-[15px] font-medium">
           <Link href="/strops" style={{ color: '#102246' }}>How it works</Link>
           <Link href="#who" style={{ color: '#102246' }}>Who it&apos;s for</Link>
@@ -731,10 +735,11 @@ export function HomepageContent() {
           <Link href="/breezeway-alternative" style={{ color: '#102246' }}>vs Breezeway</Link>
         </nav>
         <div className="flex items-center gap-3 sm:gap-5 text-[15px]">
-          {/* No hamburger menu / mobile nav drawer here on purpose — the
-              header's only job below md is brand + the two auth actions;
-              the four nav links reappear at md: instead of collapsing into
-              a drawer nobody asked for. Revisit if that becomes a problem. */}
+          {/* The four links above do NOT collapse into the hamburger below md:
+              they reappear at md: instead, and the header's job at narrow
+              widths stays brand + the two auth actions. <SiteMenu /> on the
+              left is a separate thing, the site map rather than this page's
+              conversion path, and it shows at every width. */}
           <Link href="/login" className="hidden sm:inline font-medium" style={{ color: '#102246' }}>Log in</Link>
           <Link href="/signup" className="font-semibold rounded-full whitespace-nowrap" style={{ background: '#102246', color: '#FFFFFF', padding: 'clamp(10px, 2.5vw, 13px) clamp(14px, 4vw, 22px)', fontSize: 'clamp(13px, 3.2vw, 15px)' }}>
             Start free trial
