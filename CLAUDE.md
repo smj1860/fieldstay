@@ -463,7 +463,8 @@ checklist_instance_items    — Has completed_at timestamp — used for duration
 
 ### Inventory
 ```
-inventory_catalog           — global seed catalog (115 items, 10 categories)
+inventory_catalog           — global seed catalog (157 items, 10 categories as of 2026-10-03;
+                              counted live, not from this file, which said 115)
                               categories: paper_goods|cleaning|kitchen|bath|laundry|
                               outdoor|bedroom_linens|maintenance_safety|guest_experience|
                               technology|bedroom|other
@@ -504,7 +505,8 @@ vendor_compliance_status    — VIEW. compliance_status:
 
 ### Asset Health
 ```
-asset_type_standards        — 21 asset types: lifespan ranges + replacement costs
+asset_type_standards        — 24 asset types: lifespan ranges + replacement costs
+                              (counted live 2026-10-03; this file said 21)
 property_assets             — asset ledger. Has health_score (0–100, cached),
                               macrs_class, placed_in_service_date, purchase_price,
                               warranty_expiry_date, is_active, replaced_by_asset_id
