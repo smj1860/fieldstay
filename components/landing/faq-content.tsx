@@ -4,7 +4,7 @@ import { SiteFooter } from '@/components/landing/site-footer'
 import { PUBLIC_FAQ } from '@/lib/faq-content'
 
 // ============================================================================
-// /faq — the public FAQ. Twelve questions, all of them PUBLIC_FAQ in
+// /faq — the public FAQ. Sixteen questions, all of them PUBLIC_FAQ in
 // lib/faq-content.ts, which selects them by id out of the same FAQ_CATEGORIES
 // the in-app help page renders. See that export's comment for why this is a
 // selection rather than a page-local copy; the short version is that a second
@@ -34,8 +34,11 @@ import { PUBLIC_FAQ } from '@/lib/faq-content'
 // Not alphabetical and not grouped under headings. Flat, in the order a
 // stranger's doubts actually arrive: what IS this next to the tools I already
 // pay for, then what will it cost, then what happens to my crew, then what
-// happens to my data. Twelve items is few enough that headings would be
-// scaffolding over a list you can already see the end of.
+// happens to my systems and my data. PUBLIC_FAQ_IDS carries those four groups
+// as comments; they are deliberately NOT rendered as headings, because every
+// entry is collapsed to one line and the whole list is visible at once, so
+// headings would be scaffolding over something you can already see the end of.
+// Revisit that if this ever passes roughly twenty.
 // ============================================================================
 
 const HEADER_LINKS = [
@@ -99,7 +102,7 @@ export function FaqContent() {
           Questions people actually ask.
         </h1>
         <p style={{ fontFamily: SERIF, fontSize: 'clamp(19px, 3vw, 24px)', lineHeight: 1.5, margin: '0 0 clamp(32px, 5vw, 48px)', maxWidth: '32em' }}>
-          The twelve that come up most, answered plainly. These are the same
+          The sixteen that come up most, answered plainly. These are the same
           answers our customers get inside the app.
         </p>
 

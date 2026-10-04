@@ -17,10 +17,10 @@ const sourceSerif4 = localFont({
 export const metadata: Metadata = {
   alternates: { canonical: marketingUrl('/faq') },
   title: 'FAQ',
-  description: 'What FieldStay costs, how it connects to your PMS, what your crew and your property owners can see, and how your data is handled. Twelve common questions, answered plainly.',
+  description: 'What FieldStay costs, whether there is a contract, how it connects to your PMS, what works offline, what data we store about your guests, and what your crew and property owners can see. Sixteen common questions, answered plainly.',
   openGraph: {
     title: 'FieldStay FAQ',
-    description: 'Pricing, PMS sync, crew access, owner reporting and data security. The twelve questions that come up most.',
+    description: 'Pricing and contracts, PMS sync, offline limits, guest data retention, crew and owner access. The questions that come up most.',
   },
 }
 
