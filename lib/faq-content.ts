@@ -465,9 +465,14 @@ export const STROPS_FAQ: readonly FaqItem[] = [
     id:       'strops-what-does-not-work',
     question: 'What does NOT work offline in FieldStay?',
     answer:
-      'Three things need a connection: requesting time off, scrolling back through message history ' +
-      '(sending a message queues offline fine), and the manager dashboard, which assumes a desk. Offline ' +
-      'support is built for the crew app on a phone at the property.',
+      // "assumes a connection", not "assumes a desk" (owner's call, 2026-10-04):
+      // a desk is an assumption about furniture, and what is actually true is
+      // that the dashboard is server-rendered. The opening also moved from
+      // "need a connection" to "are online only" so the sentence does not say
+      // connection twice. Shared with /strops, which renders the same answer.
+      'Three things are online only: requesting time off, scrolling back through message history ' +
+      '(sending a message queues offline fine), and the manager dashboard, which assumes a connection. ' +
+      'Offline support is built for the crew app on a phone at the property.',
   },
   {
     id:       'strops-do-cleaners-need-to',

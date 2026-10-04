@@ -48,18 +48,10 @@ import { SiteFooter } from '@/components/landing/site-footer'
 //
 // ── Still open, from the 2026-10-04 design review ────────────────────────
 //
-// The three CurrentBlocks have no <h2>. Their kickers are styled <span>s, so
-// the page's heading outline is h1 then "Future planned integrations." and
-// nothing else: a screen reader cannot jump to the PMS section, and the one
-// heading worth ranking for "does FieldStay work with Hostaway" is invisible
-// as structure. Both sibling pages pair a kicker with a real display heading
-// (see features-content.tsx's Copy), so the fix is to restore that pattern
-// here, not to invent one. Deliberately left for a separate pass because it
-// needs three headings written rather than a markup change.
-//
-// Also open, and lower value: the PMS block would be the natural one to put in
-// the ink treatment now that it is first, which would give the page an
-// alternation its three identical cream blocks currently lack.
+// The PMS block would be the natural one to put in the ink treatment now that
+// it is first, which would give the page an alternation its three cream blocks
+// currently lack. The `#planned` panel's markup is the thing to factor out for
+// it, rather than writing a second copy of that treatment inline.
 //
 // ── Keeping this page true ────────────────────────────────────────────────
 //
@@ -83,7 +75,16 @@ const SANS  = 'var(--font-archivo), Arial, sans-serif'
 
 interface Block {
   id: string
+  /** The small uppercase eyebrow. A category, not a heading. */
   kicker: string
+  /**
+   * The real <h2>. Written for search rather than for cleverness: the query
+   * this page has to win is some phrasing of "does FieldStay work with my
+   * property management system", so the heading says that in those words and
+   * stops. The kicker above it stays short so the two do not read as the same
+   * line twice.
+   */
+  title: string
   body: string
   /** Rendered as the name row under the copy. Text, never logos: see header. */
   names: readonly string[]
@@ -102,19 +103,22 @@ interface Block {
 const CURRENT: readonly Block[] = [
   {
     id: 'pms',
-    kicker: 'Property management systems',
+    kicker: 'Reservations',
+    title: 'Works with your property management system.',
     body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
     names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
   },
   {
     id: 'messaging',
     kicker: 'Email and messaging',
+    title: 'How we send email and text messages.',
     body: "All of our emails to client accounts are sent using Resend's email automation services. Our text messaging runs on Telnyx, for guidebook messages to guests who opt in and for the assignment and work order notices your crew and vendors receive.",
     names: ['Resend', 'Telnyx'],
   },
   {
     id: 'payments',
     kicker: 'Payments',
+    title: 'How payments and vendor payouts work.',
     body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
     names: ['Stripe', 'Stripe Connect'],
   },
@@ -163,10 +167,26 @@ function CurrentBlock({ block }: Readonly<{ block: Block }>) {
       >
         {block.kicker}
       </span>
+      {/* A REAL h2, not a styled span. The page used to label these blocks with
+          the kicker alone, which left the whole heading outline at h1 plus the
+          one h2 on the planned-integrations panel: a screen reader could not
+          jump to this section, the browser's own find-and-skim had nothing to
+          catch, and the heading most worth ranking for was invisible as
+          structure. Same treatment as features-content.tsx's Copy, so the two
+          pages read as one site. */}
+      <h2
+        className="font-display font-semibold"
+        style={{
+          fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em',
+          color: 'var(--mkt-ed-ink)', margin: '12px 0 14px',
+        }}
+      >
+        {block.title}
+      </h2>
       <p
         style={{
           fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6,
-          color: 'var(--mkt-ed-body)', margin: '12px 0 0', maxWidth: '40em',
+          color: 'var(--mkt-ed-body)', margin: 0, maxWidth: '40em',
         }}
       >
         {block.body}
