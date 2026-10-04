@@ -4,7 +4,7 @@ import { SiteFooter } from '@/components/landing/site-footer'
 import { PUBLIC_FAQ } from '@/lib/faq-content'
 
 // ============================================================================
-// /faq — the public FAQ. Sixteen questions, all of them PUBLIC_FAQ in
+// /faq — the public FAQ. Every question on it is PUBLIC_FAQ in
 // lib/faq-content.ts, which selects them by id out of the same FAQ_CATEGORIES
 // the in-app help page renders. See that export's comment for why this is a
 // selection rather than a page-local copy; the short version is that a second
@@ -99,11 +99,11 @@ export function FaqContent() {
           className="font-display font-semibold"
           style={{ fontSize: 'clamp(38px, 7vw, 62px)', lineHeight: 1.0, letterSpacing: '-0.03em', margin: '0 0 clamp(18px, 3vw, 26px)', maxWidth: '18ch' }}
         >
-          Questions people actually ask.
+          Questions people ask.
         </h1>
         <p style={{ fontFamily: SERIF, fontSize: 'clamp(19px, 3vw, 24px)', lineHeight: 1.5, margin: '0 0 clamp(32px, 5vw, 48px)', maxWidth: '32em' }}>
-          The sixteen that come up most, answered plainly. These are the same
-          answers our customers get inside the app.
+          These are some of the questions that we get asked the most, answered
+          honestly and plainly.
         </p>
 
         <div className="flex flex-col" style={{ gap: 12 }}>
@@ -112,37 +112,54 @@ export function FaqContent() {
           ))}
         </div>
 
+        {/* TWO offers, each with its own button, rather than one paragraph and
+            a button pair. Owner's copy and owner's structure: an email first,
+            because the heading promises an answer and a trial is not one, then
+            the trial as the alternative for someone who would rather just look.
+
+            Email is OUTLINED and the trial is FILLED. Both are real actions, so
+            both get a button, but two gold fills in one panel would leave the
+            eye nowhere to land. The outline is the same treatment the closing
+            CTA on /integrations uses, and gold on ink measures 10.66:1 as
+            text and as a border.
+
+            The old "See every feature" link is gone with the rewrite; /features
+            is still one tap away in the menu and the footer. */}
         <section
           className="rounded-[20px] sm:rounded-[28px]"
           style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)', marginTop: 'clamp(40px, 6vw, 64px)' }}
         >
           <h2
             className="font-display font-semibold"
-            style={{ fontSize: 'clamp(24px, 3.4vw, 34px)', lineHeight: 1.15, letterSpacing: '-0.02em', color: '#FFFFFF', margin: '0 0 12px' }}
+            style={{ fontSize: 'clamp(24px, 3.4vw, 34px)', lineHeight: 1.15, letterSpacing: '-0.02em', color: 'var(--mkt-ed-on-ink-strong)', margin: '0 0 12px' }}
           >
-            Still have a question?
+            Still have questions?
           </h2>
-          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 19px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: '0 0 26px', maxWidth: '44em' }}>
-            The trial is 14 days, needs no card, and gives you every feature. It is
-            usually a faster answer than we are.
+          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 19px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: '0 0 24px', maxWidth: '44em' }}>
+            We can&rsquo;t cover every question you might have with an FAQ so send us
+            an email with your questions, we are happy to answer them all.
           </p>
-          <div className="flex flex-col sm:flex-row sm:items-center" style={{ gap: 14 }}>
-            <Link
-              href="/signup"
-              className="rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
-              style={{ background: 'var(--mkt-gold)', color: 'var(--mkt-ed-ink)', padding: '17px 28px', fontSize: 16 }}
-            >
-              Start your free 14-day trial
-            </Link>
-            <Link
-              href="/features"
-              className="rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
-              style={{ color: 'var(--mkt-gold)', padding: '17px 10px', fontSize: 16 }}
-            >
-              See every feature
-            </Link>
-          </div>
+          <a
+            href="mailto:hello@fieldstay.app?subject=A%20question%20about%20FieldStay"
+            className="inline-block rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:border-[var(--mkt-gold-hover)] hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+            style={{ color: 'var(--mkt-gold)', border: '1px solid var(--mkt-gold)', padding: '16px 26px', fontSize: 16 }}
+          >
+            Email us
+          </a>
+
+          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 19px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: 'clamp(30px, 4vw, 40px) 0 24px', maxWidth: '44em' }}>
+            Rather find answers by trying it out for yourself? Start a 14 day free
+            trial today and experience it first hand.
+          </p>
+          <Link
+            href="/signup"
+            className="inline-block rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+            style={{ background: 'var(--mkt-gold)', color: 'var(--mkt-ed-ink)', padding: '17px 28px', fontSize: 16 }}
+          >
+            Start 14-day Trial
+          </Link>
         </section>
+
       </main>
 
       <SiteFooter />
