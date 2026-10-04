@@ -148,13 +148,11 @@ export function ParLevelChart() {
       <figcaption
         style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--mkt-ed-on-ink-soft)', marginTop: 18, maxWidth: '62ch' }}
       >
-        Bath towels per turnover at one property. Use climbs from about 6 in
-        March to a peak above 12 in July, then falls back below 7 by October,
-        and the par level follows it: holding at 8, stepping to 12 in July,
-        easing to 9. Nobody edited a par level. Three real counts moved it, and
-        the purchase order that went out that week ordered for 12 rather than 8.
-        The gold line sits above actual use because the engine adds a 20 percent
-        buffer. Illustrative figures, real behaviour.
+        Bath towels per turnover at one property, climbing from about 6 in
+        March to a peak above 12 in July and back below 7 by October. The par
+        level follows it on its own, from 8 up to 12 and down to 9, and the
+        purchase order that July ordered for 12. Illustrative figures, real
+        behaviour.
       </figcaption>
     </figure>
   )
