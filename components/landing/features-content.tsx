@@ -36,9 +36,19 @@ import {
 // catalog items, 24 asset types, $19, five dollars a sponsor) and every one
 // of those traces to a real constant. Process detail is not.
 //
+// ── INTEGRATIONS ARE NOT ON THIS PAGE, BY DECISION ────────────────────────
+//
+// There was an Integrations section here, and a "Works with" strip of nine
+// platform names under the hero. Both are gone: integrations get their own
+// page (/integrations, not built as of 2026-10-04), and a list of the same
+// names in two places is a second thing to keep true every time a connector
+// ships or changes. Do not put either back. What SHOULD land here once that
+// page exists is one line pointing at it, which is why there is no link yet
+// rather than a link to a 404.
+//
 // DENSITY IS THE DESIGN for the VISUALS, which are what carries the page now
 // that the prose is short. Three heavy desktop mockups, two phone-shaped
-// ones, one chart, and two sections with no visual at all. A page where every
+// ones, one chart, and one section with no visual at all. A page where every
 // section weighs the same has no hierarchy and the reader stops partway down.
 // Resist giving every feature a mockup: each one is also a permanent promise
 // to keep it in step with the real surface it mirrors.
@@ -67,11 +77,6 @@ const HEADER_LINKS = [
 
 const SERIF = 'var(--font-source-serif), Georgia, serif'
 const SANS  = 'var(--font-archivo), Arial, sans-serif'
-
-/** Booking platforms and systems shown in the credibility strip. */
-const WORKS_WITH = [
-  'Airbnb', 'VRBO', 'OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'Stripe', 'Kroger',
-] as const
 
 interface SectionProps {
   id: string
@@ -153,16 +158,6 @@ export function FeaturesContent() {
           the crew and vendors you invite.
         </p>
 
-        {/* Borrowed credibility before any claim of our own. */}
-        <div style={{ borderTop: '1px solid var(--mkt-ed-rule)', borderBottom: '1px solid var(--mkt-ed-rule)', padding: '18px 0', margin: 'clamp(28px, 5vw, 44px) 0 clamp(8px, 2vw, 16px)' }}>
-          <div className="flex flex-wrap items-center" style={{ gap: '10px 22px' }}>
-            <span className="text-xs font-bold uppercase" style={{ letterSpacing: '0.14em', color: 'var(--mkt-ed-muted)' }}>Works with</span>
-            {WORKS_WITH.map((n) => (
-              <span key={n} style={{ fontSize: 15, fontWeight: 600, color: 'var(--mkt-ed-body)' }}>{n}</span>
-            ))}
-          </div>
-        </div>
-
         <div className="flex flex-col" style={{ gap: 'clamp(28px, 5vw, 48px)' }}>
           <CreamSection
             id="turnovers"
@@ -234,13 +229,6 @@ export function FeaturesContent() {
               <GuestGuidebookMockup />
             </div>
           </CreamSection>
-
-          <InkSection
-            id="integrations"
-            kicker="Integrations"
-            title="Connect what you already run."
-            body="Five property management systems connect directly: OwnerRez, Hospitable, Hostex, Hostaway and Lodgify. Properties and bookings sync in, and anything without a direct connection comes in by calendar from Airbnb, VRBO, Booking.com or your own site. Stripe handles your subscription and pays your vendors from inside a work order."
-          />
         </div>
 
         <section
