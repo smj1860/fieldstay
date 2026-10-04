@@ -33,6 +33,7 @@ export const PAGES: ReadonlyArray<{
   { path: '/',                      priority: 1.0, changeFreq: 'weekly'  },
   { path: '/pricing',               priority: 0.9, changeFreq: 'monthly' },
   { path: '/why-fieldstay',         priority: 0.9, changeFreq: 'monthly' },
+  { path: '/features',              priority: 0.9, changeFreq: 'monthly' },
   { path: '/strops',                priority: 0.9, changeFreq: 'monthly' },
   { path: '/short-term-rental-operations-software',
                                     priority: 0.9, changeFreq: 'monthly' },

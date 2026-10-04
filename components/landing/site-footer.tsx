@@ -23,6 +23,7 @@ import Link from 'next/link'
 export const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'Pricing',        href: '/pricing'      },
   { label: 'Why FieldStay',  href: '/why-fieldstay' },
+  { label: 'Features',       href: '/features'      },
   { label: 'STR Operations', href: '/short-term-rental-operations-software' },
   { label: 'Turnover App',   href: '/strops'       },
   { label: 'For Hosts',      href: '/hosts'        },

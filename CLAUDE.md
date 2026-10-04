@@ -333,6 +333,30 @@ it. Every "starting at $X" claim across `/strops`, `/hosts`, `/ownerrez`,
 "flat" — the graduated model has no flat rate for a range, only a true
 minimum.
 
+### Planned: vendor Autopilot (2026-10-04)
+
+Crew scheduling has three modes (`organizations.auto_assign_mode`: Off,
+Suggest, Autopilot) and `autopilot` really does insert the assignment with no
+human in the loop. **Vendors have two.** `vendor_auto_assign_mode` is
+CHECK-constrained to `('suggest', 'disabled')`, and
+`lib/inngest/functions/auto-assign-vendor.ts` only ever writes
+`suggested_vendor_ids` / `suggestion_reasoning` / `suggestion_status`, never
+`assigned_vendor_id`.
+
+The owner intends vendors to match crew. Until it ships, the asymmetry is a
+GAP rather than a decision, and `/features` must not advertise hands-off
+vendor dispatch by the scorer. The planned-work note at the top of
+`auto-assign-vendor.ts` is the detailed version.
+
+**Do not confuse this with the automatic vendor dispatch that already
+exists.** A maintenance schedule with `auto_create_wo` and an
+`assigned_vendor_id` creates the work order, attaches that vendor and
+notifies them, with nobody in the loop. That is the vendor a PM chose for a
+recurring job, not the scorer choosing the best one, and it is a different
+mechanism in a different file.
+
+---
+
 ### Known follow-up, not done in this rebuild
 
 The Hospitable launch promo's price-lock (`lib/inngest/functions/promo-
@@ -463,7 +487,8 @@ checklist_instance_items    — Has completed_at timestamp — used for duration
 
 ### Inventory
 ```
-inventory_catalog           — global seed catalog (115 items, 10 categories)
+inventory_catalog           — global seed catalog (157 items, 10 categories as of 2026-10-03;
+                              counted live, not from this file, which said 115)
                               categories: paper_goods|cleaning|kitchen|bath|laundry|
                               outdoor|bedroom_linens|maintenance_safety|guest_experience|
                               technology|bedroom|other
@@ -504,7 +529,8 @@ vendor_compliance_status    — VIEW. compliance_status:
 
 ### Asset Health
 ```
-asset_type_standards        — 21 asset types: lifespan ranges + replacement costs
+asset_type_standards        — 24 asset types: lifespan ranges + replacement costs
+                              (counted live 2026-10-03; this file said 21)
 property_assets             — asset ledger. Has health_score (0–100, cached),
                               macrs_class, placed_in_service_date, purchase_price,
                               warranty_expiry_date, is_active, replaced_by_asset_id
