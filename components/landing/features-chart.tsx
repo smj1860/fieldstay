@@ -120,23 +120,41 @@ function ChartSvg({ layout }: Readonly<{ layout: Layout }>) {
   )
 }
 
-const DESCRIPTION =
-  'A chart of bath towels used per turnover from March to October. Actual use rises from about 6 in March to a peak above 12 in July, then falls back below 7 by October. The par level holds at 8, steps up to 12 in July after three counts, then eases to 9 in October, tracking actual use without anyone editing it.'
-
+/**
+ * THE TEXT ALTERNATIVE IS THE VISIBLE CAPTION, not a hidden aria-label, and
+ * the SVGs are aria-hidden decoration.
+ *
+ * The first version put `role="img"` plus an aria-label on the <figure>. That
+ * role makes an element's DESCENDANTS presentational, and the <figcaption> is
+ * a descendant: a screen reader got the terse label and never the sentence
+ * explaining what the chart proves, which is the part worth having. SonarQube
+ * flagged the role; the hidden caption was the real defect under it.
+ *
+ * Its suggested fix, an <img alt>, is wrong for this chart specifically. These
+ * are inline SVGs coloured from CSS custom properties, and var(--mkt-gold)
+ * does not resolve inside an <img>. Dropping the role is the fix.
+ *
+ * So the caption now carries the SHAPE as well as the mechanism, which makes
+ * it a complete alternative for someone who cannot see the lines, and a better
+ * one than an aria-label for everyone else: it is visible, indexable, and
+ * cannot silently rot the way an attribute nobody reads can.
+ */
 export function ParLevelChart() {
   return (
-    <figure style={{ margin: 0 }} role="img" aria-label={DESCRIPTION}>
+    <figure style={{ margin: 0 }}>
       <div className="hidden sm:block"><ChartSvg layout={WIDE} /></div>
       <div className="sm:hidden"><ChartSvg layout={NARROW} /></div>
 
       <figcaption
         style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--mkt-ed-on-ink-soft)', marginTop: 18, maxWidth: '62ch' }}
       >
-        Bath towels per turnover at one property. Nobody edited a par level.
-        Three real counts moved it in July, and the purchase order that went out
-        that week ordered for 12 rather than 8. The gold line sits above actual
-        use because the engine adds a 20 percent buffer. Illustrative figures,
-        real behaviour.
+        Bath towels per turnover at one property. Use climbs from about 6 in
+        March to a peak above 12 in July, then falls back below 7 by October,
+        and the par level follows it: holding at 8, stepping to 12 in July,
+        easing to 9. Nobody edited a par level. Three real counts moved it, and
+        the purchase order that went out that week ordered for 12 rather than 8.
+        The gold line sits above actual use because the engine adds a 20 percent
+        buffer. Illustrative figures, real behaviour.
       </figcaption>
     </figure>
   )
