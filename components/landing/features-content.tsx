@@ -33,7 +33,11 @@ import {
 // approve, never an assignment made over your head", which was both wrong and
 // a worse sell than the truth. Vendors are NOT the same: vendor_auto_assign
 // _mode is only 'suggest' or 'disabled', with no autopilot, so do not imply
-// hands-off vendor dispatch in the maintenance section.
+// hands-off vendor dispatch by the scorer in the maintenance section.
+// PLANNED, not shipped: the owner intends vendors to gain Autopilot too
+// (2026-10-04). Add the claim here when the code can back it, not before, and
+// see the planned-work note at the top of lib/inngest/functions/
+// auto-assign-vendor.ts for what shipping it actually involves.
 //
 // Every figure here traces to a real constant. 157 catalog items and 24 asset
 // types were counted live on 2026-10-03. The par buffer and three-count

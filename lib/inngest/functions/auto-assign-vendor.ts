@@ -6,6 +6,34 @@ import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
 import type { Enums } from '@/types/database'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 
+// ── PLANNED: vendor Autopilot (owner's decision, 2026-10-04) ───────────────
+//
+// Crew scheduling has three modes (organizations.auto_assign_mode: Off,
+// Suggest, Autopilot) and vendors today have two: vendor_auto_assign_mode is
+// CHECK-constrained to ('suggest', 'disabled'), and this function only ever
+// writes suggested_vendor_ids / suggestion_reasoning / suggestion_status. It
+// never writes assigned_vendor_id.
+//
+// The owner intends vendors to match crew. Until that ships, three things:
+//
+//   1. The ABSENCE is not a settled design decision any more. An earlier
+//      comment below called it deliberate; it is now simply not built.
+//   2. /features must NOT advertise hands-off vendor dispatch by the scorer.
+//      It currently does not, and components/landing/features-content.tsx
+//      carries a matching note. Check both when this lands.
+//   3. There IS already automatic vendor dispatch by another route, and it is
+//      not this one: a maintenance schedule with auto_create_wo and an
+//      assigned_vendor_id creates the work order, attaches that vendor and
+//      notifies them, with nobody in the loop. That is "the vendor you chose
+//      for this recurring job", not "the scorer picked the best vendor". Do
+//      not conflate the two when describing either.
+//
+// Building it is more than an enum value. The CHECK constraint widens, this
+// function needs an assign branch, settings needs a third option, and someone
+// has to decide whether a scorer may commit money-spending work with no human
+// review the way it may commit a cleaner. Compliance is already handled, since
+// hard_blocked vendors never enter the candidate pool.
+
 // Compliance nudges the score down instead of a second hard filter layered on
 // top of hard_blocked exclusion — grace_period vendors already had their
 // documents expire (worse than merely expiring soon), so they're penalized
@@ -118,8 +146,9 @@ export const autoAssignVendor = inngest.createFunction(
 
       // Familiarity: has this vendor done a work order at this property before?
       // Both scoring reads report rather than throw: this function produces a
-      // SUGGESTION a PM accepts or overrides (there is deliberately no
-      // autopilot mode for vendors), so a degraded score is absorbed by the
+      // SUGGESTION a PM accepts or overrides (there is no autopilot mode for
+      // vendors YET, see the planned-work note at the top of this file), so a
+      // degraded score is absorbed by the
       // human and failing the run outright would be worse than a weaker
       // suggestion. Discarded entirely, though, a failed read silently
       // removed a whole scoring signal — which is precisely what makes
