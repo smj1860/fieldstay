@@ -46,12 +46,25 @@ import { SiteFooter } from '@/components/landing/site-footer'
 // while the other four are plain text. Everything is text, which is also the
 // safer trademark posture.
 //
-// ── Still open, from the 2026-10-04 design review ────────────────────────
+// ── The ink treatment lives in ONE place ─────────────────────────────────
 //
-// The PMS block would be the natural one to put in the ink treatment now that
-// it is first, which would give the page an alternation its three cream blocks
-// currently lack. The `#planned` panel's markup is the thing to factor out for
-// it, rather than writing a second copy of that treatment inline.
+// InkPanel. Three surfaces use it: the PMS block, the planned-integrations
+// panel and the closing CTA. It was written inline twice before the third
+// wanted it, which is the point at which a radius or a padding quietly stops
+// matching across the page.
+//
+// The white used for a heading on those panels is now
+// --mkt-ed-on-ink-strong (15.68:1 on ink) rather than a hardcoded #FFFFFF,
+// which this file carried two of. /features and /why-fieldstay still hardcode
+// it in their own ink headings and should move onto that token.
+//
+// Still open, and the lowest-value thing left: the pills on the two remaining
+// cream blocks have a border measuring 1.30:1 against the page, so the row
+// reads as loose text rather than as a roster. It is not an AA failure (the
+// pill TEXT is 13.32:1 and these are non-interactive labels, not controls),
+// and it stopped mattering much once the names worth scanning moved onto ink
+// at 10.66:1. Raising that border to --mkt-ed-muted is the fix if it ever
+// looks weak.
 //
 // ── Keeping this page true ────────────────────────────────────────────────
 //
@@ -88,6 +101,22 @@ interface Block {
   body: string
   /** Rendered as the name row under the copy. Text, never logos: see header. */
   names: readonly string[]
+  /**
+   * 'ink' is the EMPHASIS treatment, and exactly one current block gets it.
+   *
+   * All three were cream, at the same width and weight, which is the flat
+   * hierarchy features-content.tsx's header warns about in its own words: a
+   * page where every section weighs the same has no hierarchy and the reader
+   * stops partway down. Both sibling editorial pages alternate; this one did
+   * not. Giving it to the PMS block puts the question the page exists to
+   * answer in the treatment that carries, and it fixes the pills at the same
+   * time, since gold-on-ink is 10.66:1 where the cream pill's own border
+   * against the page is 1.30:1 and effectively invisible.
+   *
+   * Keep this to ONE. Two ink blocks out of three inverts the problem rather
+   * than solving it.
+   */
+  tone: 'ink' | 'cream'
 }
 
 /**
@@ -107,6 +136,7 @@ const CURRENT: readonly Block[] = [
     title: 'Works with your property management system.',
     body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
     names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
+    tone: 'ink',
   },
   {
     id: 'messaging',
@@ -114,6 +144,7 @@ const CURRENT: readonly Block[] = [
     title: 'How we send email and text messages.',
     body: "All of our emails to client accounts are sent using Resend's email automation services. Our text messaging runs on Telnyx, for guidebook messages to guests who opt in and for the assignment and work order notices your crew and vendors receive.",
     names: ['Resend', 'Telnyx'],
+    tone: 'cream',
   },
   {
     id: 'payments',
@@ -121,6 +152,7 @@ const CURRENT: readonly Block[] = [
     title: 'How payments and vendor payouts work.',
     body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
     names: ['Stripe', 'Stripe Connect'],
+    tone: 'cream',
   },
 ]
 
@@ -155,15 +187,18 @@ function Names({ names, tone }: Readonly<{ names: readonly string[]; tone: 'ink'
   )
 }
 
-function CurrentBlock({ block }: Readonly<{ block: Block }>) {
+/**
+ * The copy stack, shared by both shells. One component rather than a tone
+ * branch inside each shell, so a change to the heading or the measure cannot
+ * land on the cream blocks and miss the ink one.
+ */
+function BlockCopy({ block }: Readonly<{ block: Block }>) {
+  const ink = block.tone === 'ink'
   return (
-    <section
-      id={block.id}
-      style={{ borderTop: '1px solid var(--mkt-ed-rule)', padding: 'clamp(28px, 4.5vw, 44px) 0 clamp(6px, 1.5vw, 12px)' }}
-    >
+    <>
       <span
         className="text-xs font-bold uppercase"
-        style={{ letterSpacing: '0.14em', color: 'var(--mkt-ed-muted)', fontFamily: SANS }}
+        style={{ letterSpacing: '0.14em', color: ink ? 'var(--mkt-gold)' : 'var(--mkt-ed-muted)', fontFamily: SANS }}
       >
         {block.kicker}
       </span>
@@ -178,7 +213,7 @@ function CurrentBlock({ block }: Readonly<{ block: Block }>) {
         className="font-display font-semibold"
         style={{
           fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em',
-          color: 'var(--mkt-ed-ink)', margin: '12px 0 14px',
+          color: ink ? 'var(--mkt-ed-on-ink-strong)' : 'var(--mkt-ed-ink)', margin: '12px 0 14px',
         }}
       >
         {block.title}
@@ -186,12 +221,50 @@ function CurrentBlock({ block }: Readonly<{ block: Block }>) {
       <p
         style={{
           fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6,
-          color: 'var(--mkt-ed-body)', margin: 0, maxWidth: '40em',
+          color: ink ? 'var(--mkt-ed-on-ink)' : 'var(--mkt-ed-body)', margin: 0, maxWidth: '40em',
         }}
       >
         {block.body}
       </p>
-      <Names names={block.names} tone="cream" />
+      <Names names={block.names} tone={block.tone} />
+    </>
+  )
+}
+
+/**
+ * The ink panel. ONE definition, used by the emphasis block, the planned
+ * panel and the closing CTA, which is the whole reason this exists: the
+ * treatment was written inline twice before a third surface wanted it, and a
+ * fourth copy is how the radius or the padding silently stops matching.
+ */
+function InkPanel({ id, children }: Readonly<{ id?: string; children: React.ReactNode }>) {
+  return (
+    <section
+      id={id}
+      className="rounded-[20px] sm:rounded-[28px]"
+      style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)' }}
+    >
+      {children}
+    </section>
+  )
+}
+
+function CurrentBlock({ block }: Readonly<{ block: Block }>) {
+  if (block.tone === 'ink') {
+    // No hairline and its own margin: the panel's edge is the separation, and
+    // a rule running into a rounded corner reads as a mistake.
+    return (
+      <div style={{ margin: 'clamp(28px, 4.5vw, 44px) 0' }}>
+        <InkPanel id={block.id}><BlockCopy block={block} /></InkPanel>
+      </div>
+    )
+  }
+  return (
+    <section
+      id={block.id}
+      style={{ borderTop: '1px solid var(--mkt-ed-rule)', padding: 'clamp(28px, 4.5vw, 44px) 0 clamp(6px, 1.5vw, 12px)' }}
+    >
+      <BlockCopy block={block} />
     </section>
   )
 }
@@ -216,14 +289,11 @@ export function IntegrationsContent() {
           <CurrentBlock key={b.id} block={b} />
         ))}
 
-        <section
-          id="planned"
-          className="rounded-[20px] sm:rounded-[28px]"
-          style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)', marginTop: 'clamp(36px, 6vw, 60px)' }}
-        >
+        <div style={{ marginTop: 'clamp(36px, 6vw, 60px)' }}>
+        <InkPanel id="planned">
           <h2
             className="font-display font-semibold"
-            style={{ fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em', color: '#FFFFFF', margin: '0 0 14px' }}
+            style={{ fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em', color: 'var(--mkt-ed-on-ink-strong)', margin: '0 0 14px' }}
           >
             Future planned integrations.
           </h2>
@@ -240,7 +310,8 @@ export function IntegrationsContent() {
             Coming soon
           </span>
           <Names names={COMING_SOON} tone="ink" />
-        </section>
+        </InkPanel>
+        </div>
 
         {/* NAVY, not cream, and that is a contrast fix rather than a rhythm
             choice. The gold fill on --mkt-gold against the page cream measures
@@ -257,10 +328,8 @@ export function IntegrationsContent() {
             real hit target while staying visibly secondary. The two sibling
             pages use bare gold text here, so this is a deliberate half-step
             ahead of them, worth rolling back to them if it reads well. */}
-        <section
-          className="rounded-[20px] sm:rounded-[28px]"
-          style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)', marginTop: 'clamp(36px, 6vw, 60px)' }}
-        >
+        <div style={{ marginTop: 'clamp(36px, 6vw, 60px)' }}>
+        <InkPanel>
           <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: '0 0 22px', maxWidth: '38em' }}>
             Running something that is not on this list? Your calendars will still come
             in by iCal, and{' '}
@@ -293,7 +362,8 @@ export function IntegrationsContent() {
               See every feature
             </Link>
           </div>
-        </section>
+        </InkPanel>
+        </div>
       </main>
 
       <SiteFooter />
