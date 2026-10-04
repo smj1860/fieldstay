@@ -46,6 +46,21 @@ import { SiteFooter } from '@/components/landing/site-footer'
 // while the other four are plain text. Everything is text, which is also the
 // safer trademark posture.
 //
+// ── Still open, from the 2026-10-04 design review ────────────────────────
+//
+// The three CurrentBlocks have no <h2>. Their kickers are styled <span>s, so
+// the page's heading outline is h1 then "Future planned integrations." and
+// nothing else: a screen reader cannot jump to the PMS section, and the one
+// heading worth ranking for "does FieldStay work with Hostaway" is invisible
+// as structure. Both sibling pages pair a kicker with a real display heading
+// (see features-content.tsx's Copy), so the fix is to restore that pattern
+// here, not to invent one. Deliberately left for a separate pass because it
+// needs three headings written rather than a markup change.
+//
+// Also open, and lower value: the PMS block would be the natural one to put in
+// the ink treatment now that it is first, which would give the page an
+// alternation its three identical cream blocks currently lack.
+//
 // ── Keeping this page true ────────────────────────────────────────────────
 //
 // The five live ids are PMS_PROVIDER_IDS in lib/integrations/registry.ts, and
@@ -74,12 +89,22 @@ interface Block {
   names: readonly string[]
 }
 
+/**
+ * PMS FIRST, and the order is the argument.
+ *
+ * This was payments, messaging, PMS, which put "does it connect to the system
+ * I already run" below two paragraphs about our card processor and our mail
+ * vendor. Nobody evaluates FieldStay on which payment provider it uses: Stripe
+ * and Resend are infrastructure disclosures a sceptic checks second, where the
+ * PMS block is the question the page exists to answer, and it also carries the
+ * guest-payment-details claim and six of the eight names.
+ */
 const CURRENT: readonly Block[] = [
   {
-    id: 'payments',
-    kicker: 'Payments',
-    body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
-    names: ['Stripe', 'Stripe Connect'],
+    id: 'pms',
+    kicker: 'Property management systems',
+    body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
+    names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
   },
   {
     id: 'messaging',
@@ -88,10 +113,10 @@ const CURRENT: readonly Block[] = [
     names: ['Resend', 'Telnyx'],
   },
   {
-    id: 'pms',
-    kicker: 'Property management systems',
-    body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
-    names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
+    id: 'payments',
+    kicker: 'Payments',
+    body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
+    names: ['Stripe', 'Stripe Connect'],
   },
 ]
 
@@ -197,23 +222,53 @@ export function IntegrationsContent() {
           <Names names={COMING_SOON} tone="ink" />
         </section>
 
-        <section style={{ borderTop: '1px solid var(--mkt-ed-rule)', marginTop: 'clamp(36px, 6vw, 60px)', paddingTop: 'clamp(28px, 4.5vw, 44px)' }}>
-          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6, color: 'var(--mkt-ed-body)', margin: '0 0 22px', maxWidth: '38em' }}>
+        {/* NAVY, not cream, and that is a contrast fix rather than a rhythm
+            choice. The gold fill on --mkt-gold against the page cream measures
+            1.38:1, so the button's own edge was below the 3:1 WCAG 1.4.11 asks
+            of a control boundary: the LABEL was legible and the thing did not
+            read as a button. The identical fill on --mkt-ed-ink is 10.66:1,
+            which is why /features and /why-fieldstay both put this pair inside
+            an ink panel. This page was the only one to try it on cream.
+
+            "See every feature" is OUTLINED rather than filled or bare. A
+            second filled gold button competes with the trial CTA for the one
+            click that matters; bare muted text on cream, which is what this
+            was, reads as disabled. A gold border gives it a real edge and a
+            real hit target while staying visibly secondary. The two sibling
+            pages use bare gold text here, so this is a deliberate half-step
+            ahead of them, worth rolling back to them if it reads well. */}
+        <section
+          className="rounded-[20px] sm:rounded-[28px]"
+          style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)', marginTop: 'clamp(36px, 6vw, 60px)' }}
+        >
+          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: '0 0 22px', maxWidth: '38em' }}>
             Running something that is not on this list? Your calendars will still come
-            in by iCal, and we would like to hear which system you use.
+            in by iCal, and{' '}
+            {/* The invitation now has a mechanism. It previously said we would
+                like to hear which system you use and then offered a trial
+                button, so the only contact route was the address in the
+                footer. Same address as the footer deliberately: one inbox. */}
+            <a
+              href="mailto:hello@fieldstay.app?subject=PMS%20integration%20request"
+              className="underline rounded-sm transition-colors hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+              style={{ color: 'var(--mkt-gold)', fontWeight: 600, textUnderlineOffset: 3 }}
+            >
+              we would like to hear which system you use
+            </a>
+            .
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center" style={{ gap: 14 }}>
             <Link
               href="/signup"
-              className="rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-bg)] focus-visible:ring-[var(--mkt-gold)]"
+              className="rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
               style={{ background: 'var(--mkt-gold)', color: 'var(--mkt-ed-ink)', padding: '17px 28px', fontSize: 16 }}
             >
               Start your free 14-day trial
             </Link>
             <Link
               href="/features"
-              className="rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:text-[var(--mkt-ed-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-bg)] focus-visible:ring-[var(--mkt-gold)]"
-              style={{ color: 'var(--mkt-ed-muted)', padding: '17px 10px', fontSize: 16 }}
+              className="rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:border-[var(--mkt-gold-hover)] hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+              style={{ color: 'var(--mkt-gold)', border: '1px solid var(--mkt-gold)', padding: '16px 26px', fontSize: 16 }}
             >
               See every feature
             </Link>
