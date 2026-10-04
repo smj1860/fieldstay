@@ -25,6 +25,7 @@ export const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'Why FieldStay',  href: '/why-fieldstay' },
   { label: 'Features',       href: '/features'      },
   { label: 'Integrations',   href: '/integrations'  },
+  { label: 'FAQ',            href: '/faq'           },
   { label: 'STR Operations', href: '/short-term-rental-operations-software' },
   { label: 'Turnover App',   href: '/strops'       },
   { label: 'For Hosts',      href: '/hosts'        },

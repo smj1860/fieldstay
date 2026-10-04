@@ -1024,3 +1024,93 @@ export const FAQ_FLAT: (FaqItem & { categoryLabel: string })[] =
   FAQ_CATEGORIES.flatMap((cat) =>
     cat.items.map((item) => ({ ...item, categoryLabel: cat.label }))
   )
+
+// ============================================================================
+// PUBLIC_FAQ — the twelve questions rendered on /faq, for a stranger.
+//
+// ── Why this is a SELECTION and not a copy ────────────────────────────────
+//
+// Everything above is written for a reader who is SIGNED IN: the in-app help
+// page is the primary consumer, so an answer is free to say "Settings →
+// Billing" and be helpful. A public FAQ has the opposite reader, who has no
+// account and no Settings to go to, and this file's own header comment gives
+// the reason not to solve that by pasting edited copies here: one definition
+// means a correction lands everywhere instead of leaving two stale copies
+// behind.
+//
+// So PUBLIC_FAQ names ids and resolves them against FAQ_FLAT at module load.
+// Correct an answer in FAQ_CATEGORIES and /faq changes with it. pickPublic()
+// THROWS on an unknown id rather than filtering it out, because the failure
+// being guarded is a RENAME: a silent filter would drop a question off the
+// public page and nothing would say so.
+//
+// ── The one override, and why only one ───────────────────────────────────
+//
+// Eleven of the twelve are already written in a way a stranger can read, which
+// is why they were chosen. `billing-property-count` is the exception and could
+// not be dropped: it is the single most-asked pre-purchase question. Its
+// in-app version closes with "See Settings → Billing for an itemized
+// breakdown", which is unreachable advice for someone deciding whether to sign
+// up, so the public answer ends by pointing at /pricing instead. The rest of
+// that answer, which is where the actual rate schedule is, stays shared.
+//
+// ── What does NOT belong here ────────────────────────────────────────────
+//
+// Anything procedural ("Go to Settings → Integrations and click Connect"),
+// anything diagnostic ("My properties didn't appear", "My par levels changed
+// on their own"), and anything about one account's state. Those are support
+// answers and the in-app help page is where they work. Enforced by
+// unit/guardrails/public-faq-is-generic.test.ts, which fails on an in-app
+// navigation string or a first-person-possessive question stem, so this rule
+// is checked rather than remembered.
+// ============================================================================
+
+/** Ids drawn verbatim from FAQ_CATEGORIES, in the order /faq renders them. */
+const PUBLIC_FAQ_IDS = [
+  'billing-property-count',   // overridden below
+  'billing-crew-seats',
+  'billing-trial',
+  'crew-pwa',
+  'crew-offline',
+  'crew-permissions',
+  'team-vs-crew',
+  'or-historical',
+  'owner-what-they-see',
+  'wo-compliance',
+  'tech-security',
+] as const
+
+/**
+ * Public phrasings that deliberately differ from the in-app answer. Keyed by
+ * id so the override sits beside the thing it overrides rather than in a
+ * second list that can fall out of step with PUBLIC_FAQ_IDS.
+ */
+const PUBLIC_FAQ_OVERRIDES: Readonly<Record<string, string>> = {
+  'billing-property-count':
+    'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $19/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150, so adding one more property never causes a big jump, it just adds that property’s own rate. The pricing page has a calculator that itemizes any property count.',
+}
+
+function pickPublic(id: string): FaqItem {
+  const item = FAQ_FLAT.find((f) => f.id === id)
+  if (!item) {
+    throw new Error(
+      `PUBLIC_FAQ references unknown FAQ id "${id}". It was renamed or removed ` +
+      'from FAQ_CATEGORIES. Fix the id here rather than deleting the entry, or ' +
+      '/faq silently loses a question.',
+    )
+  }
+  const override = PUBLIC_FAQ_OVERRIDES[id]
+  return override ? { ...item, answer: override } : item
+}
+
+/**
+ * The /faq page's content.
+ *
+ * Opens with the positioning question, because "does this replace my PMS" is
+ * what a stranger wonders before anything else, and that one already exists as
+ * a marketing answer (HOSTS_REPLACES_PMS_FAQ) rather than an in-app one.
+ */
+export const PUBLIC_FAQ: readonly FaqItem[] = [
+  { id: 'replaces-pms', ...HOSTS_REPLACES_PMS_FAQ },
+  ...PUBLIC_FAQ_IDS.map(pickPublic),
+]
