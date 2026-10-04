@@ -62,6 +62,7 @@ const MENU_ITEMS: readonly MenuItem[] = [
   { label: 'Features',      href: '/features' },
   { label: 'Pricing',       href: '/pricing'  },
   { label: 'Integrations',  href: '/integrations' },
+  { label: 'FAQ',           href: '/faq'      },
 ]
 
 const rowStyle: React.CSSProperties = {

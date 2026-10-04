@@ -154,6 +154,13 @@
   --mkt-ed-ink-deep:       #0B1830;   /* = Tailwind brand-900 */
   --mkt-ed-on-ink-soft:    #C9D2E6;   /* 11.66:1 on ink-deep */
   --mkt-ed-on-ink-faint:   #8A96B2;   /* 5.97:1 on ink-deep, the copyright line */
+  /* Display HEADINGS on an ink panel, where --mkt-ed-on-ink is the softer
+     RUNNING-PROSE colour. 15.68:1 on --mkt-ed-ink. A token rather than the
+     #FFFFFF these panels were hardcoding: the editorial pages now have three
+     ink surfaces between them and a raw hex in a component is exactly what the
+     colour rule exists to stop. /features and /why-fieldstay still hardcode it
+     in their own ink headings and should move onto this. */
+  --mkt-ed-on-ink-strong:  #FFFFFF;
 }
 
 

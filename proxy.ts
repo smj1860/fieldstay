@@ -133,6 +133,7 @@ const PRERENDERED_ROUTES = new Set([
   '/why-fieldstay',
   '/features',
   '/integrations',
+  '/faq',
   '/privacy',
   '/terms',
 ])
@@ -301,6 +302,12 @@ const BYPASS_ROUTES = [
   // I just switched to" is a question an existing, signed-in customer asks at
   // least as often as a prospect does, and PUBLIC would bounce them to /ops.
   '/integrations',
+
+  // The public FAQ. BYPASS is not a close call here: its twelve answers are
+  // SELECTED out of the same pool the in-app help page renders, so a customer
+  // who finds one of them in a search result is the expected reader, not an
+  // edge case, and PUBLIC would redirect them to /ops instead of the answer.
+  '/faq',
 
   // The category landing page — "short-term rental operations software".
   // Same reasoning and same failure mode as every marketing page above. It is

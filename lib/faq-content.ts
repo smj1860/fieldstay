@@ -465,9 +465,14 @@ export const STROPS_FAQ: readonly FaqItem[] = [
     id:       'strops-what-does-not-work',
     question: 'What does NOT work offline in FieldStay?',
     answer:
-      'Three things need a connection: requesting time off, scrolling back through message history ' +
-      '(sending a message queues offline fine), and the manager dashboard, which assumes a desk. Offline ' +
-      'support is built for the crew app on a phone at the property.',
+      // "assumes a connection", not "assumes a desk" (owner's call, 2026-10-04):
+      // a desk is an assumption about furniture, and what is actually true is
+      // that the dashboard is server-rendered. The opening also moved from
+      // "need a connection" to "are online only" so the sentence does not say
+      // connection twice. Shared with /strops, which renders the same answer.
+      'Three things are online only: requesting time off, scrolling back through message history ' +
+      '(sending a message queues offline fine), and the manager dashboard, which assumes a connection. ' +
+      'Offline support is built for the crew app on a phone at the property.',
   },
   {
     id:       'strops-do-cleaners-need-to',
@@ -719,6 +724,21 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         answer:
           'Go to Settings → Billing → Manage Subscription and click Cancel. You retain full access until the end of your current billing period. Your data is preserved for 30 days after cancellation.',
       },
+      {
+        // Written for BOTH readers, so /faq needs no override. Every figure
+        // traces to lib/stripe/brackets.ts: MAX_SELF_SERVE_PROPERTIES is 150
+        // and ANNUAL_MULTIPLIER is 10, which is where "ten months for twelve"
+        // comes from. "No contract, no penalty" is already an established
+        // site-wide claim (app/why-fieldstay metadata, the Breezeway
+        // comparison), so this answer states the same thing in one place a
+        // reader can find it. The 150 exception is named because above the
+        // self-serve ceiling it genuinely IS a negotiated contract, and a flat
+        // "no contracts" would be false for the largest portfolios.
+        id:       'billing-contract',
+        question: 'Do I have to sign a contract or commit to a year?',
+        answer:
+          'No. Self-serve accounts, which is 1 to 150 properties, are month to month with no contract, no setup fee and no minimum term, and you can cancel from your own billing settings without talking to anyone. Annual billing exists because it costs less, ten months for twelve, not because a year is required. Portfolios above 150 properties are the one exception: those are Enterprise agreements negotiated directly.',
+      },
     ],
   },
   {
@@ -742,6 +762,33 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         question: 'Is my data secure?',
         answer:
           'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation. No user can ever access another organization\'s data. PMS credentials (OAuth tokens for OwnerRez, Hospitable and Hostex, API keys for Hostaway and Lodgify) are stored in an encrypted vault, never in the application database.',
+      },
+      {
+        // Written for BOTH readers, so /faq needs no override. Verified against
+        // the live schema and lib/inngest/functions/cron/guest-pii-retention
+        // .ts on 2026-10-04:
+        //   - stored from the PMS: bookings.guest_name / guest_email /
+        //     checkin_date / checkout_date, plus actual_total_amount, which is
+        //     what booking-events.ts posts as the owner P&L's revenue line
+        //   - NOT stored: no card / last4 / payment_method / billing_address /
+        //     bank field exists anywhere in the schema or in any provider
+        //     mapper, which is the same claim /integrations makes
+        //   - cleared on a schedule: the retention cron nulls guest_name,
+        //     guest_email and raw_ical_data and deletes the Vault door-code
+        //     secret once organizations.guest_pii_retention_days has passed
+        //     since checkout_date, DEFAULT 730
+        //   - the booking row itself is KEPT, deliberately: occupancy and
+        //     revenue history outlive the guest's identity
+        //
+        // Deliberately NOT claiming the window is adjustable. It is DISPLAYED
+        // on settings/privacy but there is no update path anywhere in app/ or
+        // lib/ (unlike comms_log_retention_days, which has a selector and an
+        // action), so "you can shorten it" would be a false product claim. If
+        // a setter ships, this answer can say so.
+        id:       'tech-guest-data',
+        question: 'What data does FieldStay store about my guests?',
+        answer:
+          'A guest\u2019s name, email and stay dates come across from your PMS, which is what lets a turnover be scheduled and a guidebook be addressed, along with the booking total, which the owner profit and loss reports as revenue. We never receive or store payment details: no card numbers, no payment methods, no billing addresses. Guest name and email are then cleared automatically once your retention window has passed since checkout, two years by default and shown in your privacy settings, while the booking itself is kept so your occupancy and revenue history stays intact.',
       },
       {
         id:       'tech-password',
@@ -1024,3 +1071,129 @@ export const FAQ_FLAT: (FaqItem & { categoryLabel: string })[] =
   FAQ_CATEGORIES.flatMap((cat) =>
     cat.items.map((item) => ({ ...item, categoryLabel: cat.label }))
   )
+
+// ============================================================================
+// PUBLIC_FAQ — the questions rendered on /faq, for a stranger.
+//
+// ── Why this is a SELECTION and not a copy ────────────────────────────────
+//
+// Everything above is written for a reader who is SIGNED IN: the in-app help
+// page is the primary consumer, so an answer is free to say "Settings →
+// Billing" and be helpful. A public FAQ has the opposite reader, who has no
+// account and no Settings to go to, and this file's own header comment gives
+// the reason not to solve that by pasting edited copies here: one definition
+// means a correction lands everywhere instead of leaving two stale copies
+// behind.
+//
+// So PUBLIC_FAQ names ids and resolves them against FAQ_FLAT at module load.
+// Correct an answer in FAQ_CATEGORIES and /faq changes with it. pickPublic()
+// THROWS on an unknown id rather than filtering it out, because the failure
+// being guarded is a RENAME: a silent filter would drop a question off the
+// public page and nothing would say so.
+//
+// ── The one override, and why only one ───────────────────────────────────
+//
+// All but one are already written in a way a stranger can read, which is why
+// they were chosen. `billing-property-count` is the exception and could
+// not be dropped: it is the single most-asked pre-purchase question. Its
+// in-app version closes with "See Settings → Billing for an itemized
+// breakdown", which is unreachable advice for someone deciding whether to sign
+// up, so the public answer ends by pointing at /pricing instead. The rest of
+// that answer, which is where the actual rate schedule is, stays shared.
+//
+// ── What does NOT belong here ────────────────────────────────────────────
+//
+// Anything procedural ("Go to Settings → Integrations and click Connect"),
+// anything diagnostic ("My properties didn't appear", "My par levels changed
+// on their own"), and anything about one account's state. Those are support
+// answers and the in-app help page is where they work. Enforced by
+// unit/guardrails/public-faq-is-generic.test.ts, which fails on an in-app
+// navigation string or a first-person-possessive question stem, so this rule
+// is checked rather than remembered.
+// ============================================================================
+
+/**
+ * The pool PUBLIC_FAQ resolves against: FAQ_CATEGORIES, plus STROPS_FAQ.
+ *
+ * STROPS_FAQ is included because the offline answers on /strops are the best
+ * ones that exist and they are not duplicated in FAQ_CATEGORIES. Two of them
+ * do a job no in-app answer does: `strops-what-does-not-work` names the three
+ * things that genuinely need a connection, and a stated limit is worth more to
+ * a sceptic than another paragraph of reassurance.
+ *
+ * BREEZEWAY_FAQ is deliberately NOT in the pool. Its answers are written as
+ * comparisons and name a competitor in the answer text, which belongs on the
+ * page making the comparison and not on a neutral FAQ.
+ *
+ * The two arrays are checked for colliding ids at module load. They are
+ * maintained independently, nothing structural stops a new FAQ_CATEGORIES
+ * entry picking a name STROPS_FAQ already uses, and a collision would resolve
+ * to whichever came first with no symptom but the wrong answer on /faq.
+ */
+const PUBLIC_FAQ_POOL: readonly FaqItem[] = [...FAQ_FLAT, ...STROPS_FAQ]
+
+const poolIds = PUBLIC_FAQ_POOL.map((f) => f.id)
+const collidingIds = poolIds.filter((id, i) => poolIds.indexOf(id) !== i)
+if (collidingIds.length > 0) {
+  throw new Error(
+    `FAQ id collision between FAQ_CATEGORIES and STROPS_FAQ: ${collidingIds.join(', ')}. ` +
+    'Rename one of them, or PUBLIC_FAQ silently resolves to whichever is declared first.',
+  )
+}
+
+/** Ids drawn verbatim from the pool, in the order /faq renders them. */
+const PUBLIC_FAQ_IDS = [
+  // What is this, next to what I already pay for.
+  'billing-property-count',   // overridden below
+  'billing-crew-seats',
+  'billing-trial',
+  'billing-contract',
+  // What happens to my crew.
+  'crew-pwa',
+  'crew-offline',
+  'strops-what-does-not-work',
+  'crew-permissions',
+  'team-vs-crew',
+  // What happens to my systems and my data.
+  'or-historical',
+  'owner-what-they-see',
+  'wo-compliance',
+  'tech-local-first',
+  'tech-guest-data',
+  'tech-security',
+] as const
+
+/**
+ * Public phrasings that deliberately differ from the in-app answer. Keyed by
+ * id so the override sits beside the thing it overrides rather than in a
+ * second list that can fall out of step with PUBLIC_FAQ_IDS.
+ */
+const PUBLIC_FAQ_OVERRIDES: Readonly<Record<string, string>> = {
+  'billing-property-count':
+    'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $19/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150, so adding one more property never causes a big jump, it just adds that property’s own rate. The pricing page has a calculator that itemizes any property count.',
+}
+
+function pickPublic(id: string): FaqItem {
+  const item = PUBLIC_FAQ_POOL.find((f) => f.id === id)
+  if (!item) {
+    throw new Error(
+      `PUBLIC_FAQ references unknown FAQ id "${id}". It was renamed or removed ` +
+      'from FAQ_CATEGORIES or STROPS_FAQ. Fix the id here rather than deleting ' +
+      'the entry, or /faq silently loses a question.',
+    )
+  }
+  const override = PUBLIC_FAQ_OVERRIDES[id]
+  return override ? { ...item, answer: override } : item
+}
+
+/**
+ * The /faq page's content.
+ *
+ * Opens with the positioning question, because "does this replace my PMS" is
+ * what a stranger wonders before anything else, and that one already exists as
+ * a marketing answer (HOSTS_REPLACES_PMS_FAQ) rather than an in-app one.
+ */
+export const PUBLIC_FAQ: readonly FaqItem[] = [
+  { id: 'replaces-pms', ...HOSTS_REPLACES_PMS_FAQ },
+  ...PUBLIC_FAQ_IDS.map(pickPublic),
+]

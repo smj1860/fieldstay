@@ -46,6 +46,26 @@ import { SiteFooter } from '@/components/landing/site-footer'
 // while the other four are plain text. Everything is text, which is also the
 // safer trademark posture.
 //
+// ── The ink treatment lives in ONE place ─────────────────────────────────
+//
+// InkPanel. Three surfaces use it: the PMS block, the planned-integrations
+// panel and the closing CTA. It was written inline twice before the third
+// wanted it, which is the point at which a radius or a padding quietly stops
+// matching across the page.
+//
+// The white used for a heading on those panels is now
+// --mkt-ed-on-ink-strong (15.68:1 on ink) rather than a hardcoded #FFFFFF,
+// which this file carried two of. /features and /why-fieldstay still hardcode
+// it in their own ink headings and should move onto that token.
+//
+// Still open, and the lowest-value thing left: the pills on the two remaining
+// cream blocks have a border measuring 1.30:1 against the page, so the row
+// reads as loose text rather than as a roster. It is not an AA failure (the
+// pill TEXT is 13.32:1 and these are non-interactive labels, not controls),
+// and it stopped mattering much once the names worth scanning moved onto ink
+// at 10.66:1. Raising that border to --mkt-ed-muted is the fix if it ever
+// looks weak.
+//
 // ── Keeping this page true ────────────────────────────────────────────────
 //
 // The five live ids are PMS_PROVIDER_IDS in lib/integrations/registry.ts, and
@@ -68,30 +88,71 @@ const SANS  = 'var(--font-archivo), Arial, sans-serif'
 
 interface Block {
   id: string
+  /** The small uppercase eyebrow. A category, not a heading. */
   kicker: string
+  /**
+   * The real <h2>. Written for search rather than for cleverness: the query
+   * this page has to win is some phrasing of "does FieldStay work with my
+   * property management system", so the heading says that in those words and
+   * stops. The kicker above it stays short so the two do not read as the same
+   * line twice.
+   */
+  title: string
   body: string
   /** Rendered as the name row under the copy. Text, never logos: see header. */
   names: readonly string[]
+  /**
+   * 'ink' is the EMPHASIS treatment, and exactly one current block gets it.
+   *
+   * All three were cream, at the same width and weight, which is the flat
+   * hierarchy features-content.tsx's header warns about in its own words: a
+   * page where every section weighs the same has no hierarchy and the reader
+   * stops partway down. Both sibling editorial pages alternate; this one did
+   * not. Giving it to the PMS block puts the question the page exists to
+   * answer in the treatment that carries, and it fixes the pills at the same
+   * time, since gold-on-ink is 10.66:1 where the cream pill's own border
+   * against the page is 1.30:1 and effectively invisible.
+   *
+   * Keep this to ONE. Two ink blocks out of three inverts the problem rather
+   * than solving it.
+   */
+  tone: 'ink' | 'cream'
 }
 
+/**
+ * PMS FIRST, and the order is the argument.
+ *
+ * This was payments, messaging, PMS, which put "does it connect to the system
+ * I already run" below two paragraphs about our card processor and our mail
+ * vendor. Nobody evaluates FieldStay on which payment provider it uses: Stripe
+ * and Resend are infrastructure disclosures a sceptic checks second, where the
+ * PMS block is the question the page exists to answer, and it also carries the
+ * guest-payment-details claim and six of the eight names.
+ */
 const CURRENT: readonly Block[] = [
   {
-    id: 'payments',
-    kicker: 'Payments',
-    body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
-    names: ['Stripe', 'Stripe Connect'],
+    id: 'pms',
+    kicker: 'Reservations',
+    title: 'Works with your property management system.',
+    body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
+    names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
+    tone: 'ink',
   },
   {
     id: 'messaging',
     kicker: 'Email and messaging',
+    title: 'How we send email and text messages.',
     body: "All of our emails to client accounts are sent using Resend's email automation services. Our text messaging runs on Telnyx, for guidebook messages to guests who opt in and for the assignment and work order notices your crew and vendors receive.",
     names: ['Resend', 'Telnyx'],
+    tone: 'cream',
   },
   {
-    id: 'pms',
-    kicker: 'Property management systems',
-    body: 'FieldStay currently connects to five PMS platforms as well as iCal to pull reservations for our core turnover feature. Additional information is also synced from PMS platforms for our other features. We never receive or store guest payment details: no card numbers, no payment methods, no billing addresses.',
-    names: ['OwnerRez', 'Hospitable', 'Hostex', 'Hostaway', 'Lodgify', 'iCal'],
+    id: 'payments',
+    kicker: 'Payments',
+    title: 'How payments and vendor payouts work.',
+    body: 'FieldStay uses Stripe to process payments for all plan subscriptions. We use Stripe Connect for all vendor invoice payments.',
+    names: ['Stripe', 'Stripe Connect'],
+    tone: 'cream',
   },
 ]
 
@@ -126,27 +187,84 @@ function Names({ names, tone }: Readonly<{ names: readonly string[]; tone: 'ink'
   )
 }
 
+/**
+ * The copy stack, shared by both shells. One component rather than a tone
+ * branch inside each shell, so a change to the heading or the measure cannot
+ * land on the cream blocks and miss the ink one.
+ */
+function BlockCopy({ block }: Readonly<{ block: Block }>) {
+  const ink = block.tone === 'ink'
+  return (
+    <>
+      <span
+        className="text-xs font-bold uppercase"
+        style={{ letterSpacing: '0.14em', color: ink ? 'var(--mkt-gold)' : 'var(--mkt-ed-muted)', fontFamily: SANS }}
+      >
+        {block.kicker}
+      </span>
+      {/* A REAL h2, not a styled span. The page used to label these blocks with
+          the kicker alone, which left the whole heading outline at h1 plus the
+          one h2 on the planned-integrations panel: a screen reader could not
+          jump to this section, the browser's own find-and-skim had nothing to
+          catch, and the heading most worth ranking for was invisible as
+          structure. Same treatment as features-content.tsx's Copy, so the two
+          pages read as one site. */}
+      <h2
+        className="font-display font-semibold"
+        style={{
+          fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em',
+          color: ink ? 'var(--mkt-ed-on-ink-strong)' : 'var(--mkt-ed-ink)', margin: '12px 0 14px',
+        }}
+      >
+        {block.title}
+      </h2>
+      <p
+        style={{
+          fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6,
+          color: ink ? 'var(--mkt-ed-on-ink)' : 'var(--mkt-ed-body)', margin: 0, maxWidth: '40em',
+        }}
+      >
+        {block.body}
+      </p>
+      <Names names={block.names} tone={block.tone} />
+    </>
+  )
+}
+
+/**
+ * The ink panel. ONE definition, used by the emphasis block, the planned
+ * panel and the closing CTA, which is the whole reason this exists: the
+ * treatment was written inline twice before a third surface wanted it, and a
+ * fourth copy is how the radius or the padding silently stops matching.
+ */
+function InkPanel({ id, children }: Readonly<{ id?: string; children: React.ReactNode }>) {
+  return (
+    <section
+      id={id}
+      className="rounded-[20px] sm:rounded-[28px]"
+      style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)' }}
+    >
+      {children}
+    </section>
+  )
+}
+
 function CurrentBlock({ block }: Readonly<{ block: Block }>) {
+  if (block.tone === 'ink') {
+    // No hairline and its own margin: the panel's edge is the separation, and
+    // a rule running into a rounded corner reads as a mistake.
+    return (
+      <div style={{ margin: 'clamp(28px, 4.5vw, 44px) 0' }}>
+        <InkPanel id={block.id}><BlockCopy block={block} /></InkPanel>
+      </div>
+    )
+  }
   return (
     <section
       id={block.id}
       style={{ borderTop: '1px solid var(--mkt-ed-rule)', padding: 'clamp(28px, 4.5vw, 44px) 0 clamp(6px, 1.5vw, 12px)' }}
     >
-      <span
-        className="text-xs font-bold uppercase"
-        style={{ letterSpacing: '0.14em', color: 'var(--mkt-ed-muted)', fontFamily: SANS }}
-      >
-        {block.kicker}
-      </span>
-      <p
-        style={{
-          fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6,
-          color: 'var(--mkt-ed-body)', margin: '12px 0 0', maxWidth: '40em',
-        }}
-      >
-        {block.body}
-      </p>
-      <Names names={block.names} tone="cream" />
+      <BlockCopy block={block} />
     </section>
   )
 }
@@ -171,14 +289,11 @@ export function IntegrationsContent() {
           <CurrentBlock key={b.id} block={b} />
         ))}
 
-        <section
-          id="planned"
-          className="rounded-[20px] sm:rounded-[28px]"
-          style={{ background: 'var(--mkt-ed-ink)', padding: 'clamp(30px, 6vw, 52px) clamp(18px, 4.5vw, 52px)', marginTop: 'clamp(36px, 6vw, 60px)' }}
-        >
+        <div style={{ marginTop: 'clamp(36px, 6vw, 60px)' }}>
+        <InkPanel id="planned">
           <h2
             className="font-display font-semibold"
-            style={{ fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em', color: '#FFFFFF', margin: '0 0 14px' }}
+            style={{ fontSize: 'clamp(25px, 3.6vw, 36px)', lineHeight: 1.12, letterSpacing: '-0.02em', color: 'var(--mkt-ed-on-ink-strong)', margin: '0 0 14px' }}
           >
             Future planned integrations.
           </h2>
@@ -195,30 +310,60 @@ export function IntegrationsContent() {
             Coming soon
           </span>
           <Names names={COMING_SOON} tone="ink" />
-        </section>
+        </InkPanel>
+        </div>
 
-        <section style={{ borderTop: '1px solid var(--mkt-ed-rule)', marginTop: 'clamp(36px, 6vw, 60px)', paddingTop: 'clamp(28px, 4.5vw, 44px)' }}>
-          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6, color: 'var(--mkt-ed-body)', margin: '0 0 22px', maxWidth: '38em' }}>
+        {/* NAVY, not cream, and that is a contrast fix rather than a rhythm
+            choice. The gold fill on --mkt-gold against the page cream measures
+            1.38:1, so the button's own edge was below the 3:1 WCAG 1.4.11 asks
+            of a control boundary: the LABEL was legible and the thing did not
+            read as a button. The identical fill on --mkt-ed-ink is 10.66:1,
+            which is why /features and /why-fieldstay both put this pair inside
+            an ink panel. This page was the only one to try it on cream.
+
+            "See every feature" is OUTLINED rather than filled or bare. A
+            second filled gold button competes with the trial CTA for the one
+            click that matters; bare muted text on cream, which is what this
+            was, reads as disabled. A gold border gives it a real edge and a
+            real hit target while staying visibly secondary. The two sibling
+            pages use bare gold text here, so this is a deliberate half-step
+            ahead of them, worth rolling back to them if it reads well. */}
+        <div style={{ marginTop: 'clamp(36px, 6vw, 60px)' }}>
+        <InkPanel>
+          <p style={{ fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 20px)', lineHeight: 1.6, color: 'var(--mkt-ed-on-ink)', margin: '0 0 22px', maxWidth: '38em' }}>
             Running something that is not on this list? Your calendars will still come
-            in by iCal, and we would like to hear which system you use.
+            in by iCal, and{' '}
+            {/* The invitation now has a mechanism. It previously said we would
+                like to hear which system you use and then offered a trial
+                button, so the only contact route was the address in the
+                footer. Same address as the footer deliberately: one inbox. */}
+            <a
+              href="mailto:hello@fieldstay.app?subject=PMS%20integration%20request"
+              className="underline rounded-sm transition-colors hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+              style={{ color: 'var(--mkt-gold)', fontWeight: 600, textUnderlineOffset: 3 }}
+            >
+              we would like to hear which system you use
+            </a>
+            .
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center" style={{ gap: 14 }}>
             <Link
               href="/signup"
-              className="rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-bg)] focus-visible:ring-[var(--mkt-gold)]"
+              className="rounded-full text-center font-bold w-full sm:w-auto transition-colors hover:bg-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
               style={{ background: 'var(--mkt-gold)', color: 'var(--mkt-ed-ink)', padding: '17px 28px', fontSize: 16 }}
             >
               Start your free 14-day trial
             </Link>
             <Link
               href="/features"
-              className="rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:text-[var(--mkt-ed-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-bg)] focus-visible:ring-[var(--mkt-gold)]"
-              style={{ color: 'var(--mkt-ed-muted)', padding: '17px 10px', fontSize: 16 }}
+              className="rounded-full text-center font-semibold w-full sm:w-auto transition-colors hover:border-[var(--mkt-gold-hover)] hover:text-[var(--mkt-gold-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-ink)] focus-visible:ring-[var(--mkt-gold)]"
+              style={{ color: 'var(--mkt-gold)', border: '1px solid var(--mkt-gold)', padding: '16px 26px', fontSize: 16 }}
             >
               See every feature
             </Link>
           </div>
-        </section>
+        </InkPanel>
+        </div>
       </main>
 
       <SiteFooter />
