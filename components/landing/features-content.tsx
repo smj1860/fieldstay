@@ -40,11 +40,10 @@ import {
 //
 // There was an Integrations section here, and a "Works with" strip of nine
 // platform names under the hero. Both are gone: integrations get their own
-// page (/integrations, not built as of 2026-10-04), and a list of the same
-// names in two places is a second thing to keep true every time a connector
-// ships or changes. Do not put either back. What SHOULD land here once that
-// page exists is one line pointing at it, which is why there is no link yet
-// rather than a link to a 404.
+// page (/integrations), and a list of the same names in two places is a second
+// thing to keep true every time a connector ships or changes. Do not put
+// either back. The one line pointing at that page, below the last feature, is
+// what replaces them, and it carries no platform names for the same reason.
 //
 // DENSITY IS THE DESIGN for the VISUALS, which are what carries the page now
 // that the prose is short. Three heavy desktop mockups, two phone-shaped
@@ -230,6 +229,23 @@ export function FeaturesContent() {
             </div>
           </CreamSection>
         </div>
+
+        <p
+          style={{
+            fontFamily: SERIF, fontSize: 'clamp(17px, 2.3vw, 19px)', lineHeight: 1.6,
+            color: 'var(--mkt-ed-body)', margin: 'clamp(30px, 5vw, 46px) 0 0', maxWidth: '40em',
+          }}
+        >
+          Your reservations come in from your PMS or your calendars.{' '}
+          <Link
+            href="/integrations"
+            className="underline transition-colors hover:text-[var(--mkt-ed-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mkt-ed-bg)] focus-visible:ring-[var(--mkt-gold)] rounded-sm"
+            style={{ color: 'var(--mkt-ed-ink)', fontWeight: 600, textDecorationColor: 'var(--mkt-gold)', textUnderlineOffset: 3 }}
+          >
+            See everything FieldStay connects to
+          </Link>
+          .
+        </p>
 
         <section
           className="rounded-[20px] sm:rounded-[28px]"

@@ -132,6 +132,7 @@ const PRERENDERED_ROUTES = new Set([
   '/for-vendors',
   '/why-fieldstay',
   '/features',
+  '/integrations',
   '/privacy',
   '/terms',
 ])
@@ -294,6 +295,12 @@ const BYPASS_ROUTES = [
   // every page above, and BYPASS for the same reason: an existing customer
   // checking what a feature does should not be bounced to /ops.
   '/features',
+
+  // The integrations roster, linked from the site menu and from /features.
+  // Same reasoning and same BYPASS choice: "does FieldStay connect to the PMS
+  // I just switched to" is a question an existing, signed-in customer asks at
+  // least as often as a prospect does, and PUBLIC would bounce them to /ops.
+  '/integrations',
 
   // The category landing page — "short-term rental operations software".
   // Same reasoning and same failure mode as every marketing page above. It is

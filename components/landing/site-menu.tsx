@@ -15,9 +15,10 @@ import { Menu, X } from 'lucide-react'
 // homepage-content.tsx used to say there was no drawer on purpose, which was
 // true of a mobile-collapse drawer and is not true of this.
 //
-// ── Why four items are not links ───────────────────────────────────────────
+// ── Why an item is sometimes not a link ───────────────────────────────────
 //
-// About, Why FieldStay, Features and Integrations are not built. They are
+// About is the last row still unbuilt (Why FieldStay, Features and
+// Integrations have all shipped since). An unbuilt row is
 // listed with a visible "Soon" marker rather than linked, because a menu entry
 // that 404s costs more trust than one that says it is coming, and because a
 // link to a stub page would be indexed by Google as a real, empty page. Each
@@ -60,7 +61,7 @@ const MENU_ITEMS: readonly MenuItem[] = [
   { label: 'Why FieldStay', href: '/why-fieldstay' },
   { label: 'Features',      href: '/features' },
   { label: 'Pricing',       href: '/pricing'  },
-  { label: 'Integrations',  href: null        },
+  { label: 'Integrations',  href: '/integrations' },
 ]
 
 const rowStyle: React.CSSProperties = {
