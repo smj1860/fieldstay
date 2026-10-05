@@ -5,30 +5,25 @@ import { SiteFooter } from '@/components/landing/site-footer'
 // ============================================================================
 // /about — who builds FieldStay. The owner's copy, verbatim.
 //
-// ── ⚠ THIS PAGE CONTRADICTS TWO LIVE PAGES, AND THAT IS NOT YET RESOLVED ──
+// ── Two founders, one of whom writes the code ────────────────────────────
 //
-// This page says FieldStay is "built by two people", Stephen and Bryan, out of
-// Camp Hill. The site already says, in copy a prospect reads in the same
-// session:
+// This page says FieldStay is built by two people. The founder letter and the
+// homepage note are first-person singular and signed by Stephen alone, which
+// looked like a contradiction and is not: Stephen writes all of the code and
+// the design, Bryan runs sales, marketing and the business side. So "the
+// person who built it" is literally true, and the letter being in one voice is
+// correct, because one person wrote it.
 //
-//   why-fieldstay-content.tsx:91  "You get the person who built it, because
-//                                  that is the only person here."
-//   why-fieldstay-content.tsx     signed "Stephen · Founder, Dadeville, Alabama"
-//   homepage-content.tsx          the founder note, first-person singular
-//                                 throughout ("I spent my career", "I built
-//                                 FieldStay"), signed the same way
-//   app/why-fieldstay/page.tsx    metadata, twice: "the person who built it"
+// Exactly ONE sentence was actually false, and it was removed from
+// why-fieldstay-content.tsx on 2026-10-05: "You get the person who built it,
+// because that is the only person here." The clause before it survives
+// untouched, since there is still no support tier to be bounced through. The
+// rest of that letter is deliberately unchanged, and rewriting it into
+// first-person plural would be wrong rather than merely unnecessary.
 //
-// The headcount conflict is the sharp one: "the only person here" and "two
-// people" cannot both be true, and it sits on the page whose entire argument
-// is that this company tells you the truth about itself. The town differs too,
-// Camp Hill against Dadeville.
-//
-// This was raised with the owner rather than fixed here, because the founder
-// letter and the homepage note are his personal voice and his signature, and
-// rewriting a first-person letter into first-person plural is his call and not
-// a copy edit. Until he decides, /about is the page that is out of step with
-// the other two, not the other way round.
+// STILL OPEN: the town. This page says Camp Hill; the letter and the homepage
+// note are both signed "Dadeville, Alabama". Those are different places and
+// all three have to agree.
 //
 // ── Structure ────────────────────────────────────────────────────────────
 //
