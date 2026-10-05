@@ -107,6 +107,78 @@ export default function PricingPage() {
         </p>
       </section>
 
+      {/* ── What is not in the price ───────────────────────────────────
+          Facts only, drawn from /why-fieldstay's "What it costs to find out"
+          section and deliberately much shorter than it. That page argues the
+          REASONING; a reader on /pricing has already decided they want the
+          numbers, so this states them and links back rather than repeating the
+          case. Nothing on /why-fieldstay changed.
+
+          Every figure traces to a constant: ANNUAL_MULTIPLIER = 10 in
+          lib/stripe/brackets.ts is what "twelve months for the price of ten"
+          means, and CREDIT_PER_SPONSOR_CENTS = 500 in
+          lib/guidebook/sponsor-economics.ts is the $5. "Up to the whole bill"
+          is accurate rather than enthusiastic: resolvePlanCredit() caps the
+          credit at the plan cost, so sponsors can zero an invoice and cannot
+          pay the customer. Do not restate the per-property tiers here, the
+          calculator above is the authority on those.
+
+          Palette note: this page is the OLDER --mkt-* landing treatment
+          (bg-white, --mkt-ink, --mkt-border), NOT the --mkt-ed-* editorial one
+          used by /why-fieldstay, /features and /about. Matching the page it
+          sits on matters more than matching the page it came from. */}
+      <section className="max-w-5xl mx-auto px-6 pb-16">
+        <div className="rounded-2xl border border-[var(--mkt-border)] bg-[var(--mkt-surface)] p-8 sm:p-10">
+          <h2 className="text-2xl sm:text-3xl font-bold font-display text-[var(--mkt-ink)]">
+            What is not in the price
+          </h2>
+
+          <dl className="mt-7 grid gap-7 sm:grid-cols-2">
+            <div>
+              <dt className="font-semibold text-[var(--mkt-ink)]">No contract</dt>
+              <dd className="mt-1.5 text-[15px] leading-relaxed text-[var(--mkt-muted-strong)]">
+                You never have to sign one. Pay month to month, or annually for twelve
+                months at the price of ten, and cancel whenever you want.
+              </dd>
+            </div>
+
+            <div>
+              <dt className="font-semibold text-[var(--mkt-ink)]">No fees on top</dt>
+              <dd className="mt-1.5 text-[15px] leading-relaxed text-[var(--mkt-muted-strong)]">
+                There is no setup fee, no onboarding fee, and no per user charge. Invite
+                your cleaners, your maintenance and lawncare crews and your vendors, it
+                costs you nothing extra.
+              </dd>
+            </div>
+
+            <div>
+              <dt className="font-semibold text-[var(--mkt-ink)]">Every feature, every plan</dt>
+              <dd className="mt-1.5 text-[15px] leading-relaxed text-[var(--mkt-muted-strong)]">
+                Owner reports, maintenance scheduling and CapEx planning are not behind a
+                bigger plan. There is one rate and it is the same for everyone.
+              </dd>
+            </div>
+
+            <div>
+              <dt className="font-semibold text-[var(--mkt-ink)]">Your guidebook can pay the bill</dt>
+              <dd className="mt-1.5 text-[15px] leading-relaxed text-[var(--mkt-muted-strong)]">
+                Local businesses can sponsor a slot in your guest guidebook, and each one
+                paying monthly takes $5 a month off your bill. Enough sponsors and the
+                credit covers the whole thing.
+              </dd>
+            </div>
+          </dl>
+
+          <p className="mt-8 text-[15px] text-[var(--mkt-muted-strong)]">
+            Why it is priced this way, in more detail,{' '}
+            <Link href="/why-fieldstay" className="font-semibold text-[var(--mkt-ink)] underline decoration-[var(--mkt-gold)] underline-offset-4 hover:text-[var(--mkt-ink-hover)]">
+              is written up here
+            </Link>
+            .
+          </p>
+        </div>
+      </section>
+
       <MarketingCtaBand
         title="See your own number, not a sales call."
         subtitle="Connect your PMS and FieldStay builds your turnover schedule from your existing bookings. Fourteen days free, no credit card."
