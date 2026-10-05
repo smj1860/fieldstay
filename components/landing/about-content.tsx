@@ -21,9 +21,10 @@ import { SiteFooter } from '@/components/landing/site-footer'
 // rest of that letter is deliberately unchanged, and rewriting it into
 // first-person plural would be wrong rather than merely unnecessary.
 //
-// STILL OPEN: the town. This page says Camp Hill; the letter and the homepage
-// note are both signed "Dadeville, Alabama". Those are different places and
-// all three have to agree.
+// The town is Dadeville (owner, 2026-10-05). The draft of this page said Camp
+// Hill, which is a different town from the "Dadeville, Alabama" the founder
+// letter and the homepage note are both signed with. All three now agree, and
+// a change to any one of them is a change to all three.
 //
 // ── Structure ────────────────────────────────────────────────────────────
 //
@@ -76,7 +77,7 @@ const SECTIONS: readonly Section[] = [
     title: 'Where we are',
     tone: 'cream',
     paragraphs: [
-      'We operate FieldStay out of Camp Hill, Alabama, just 15 minutes away from Auburn University and 10 minutes from Lake Martin. Definitely rural. Our location is part of why the crew app and the vendor portal are built offline first. Out here, cell service is not a given, and we built for the places where it drops because that is where we live and where some of the best vacation places in the country happen to be as well.',
+      'We operate FieldStay out of Dadeville, Alabama, just 15 minutes away from Auburn University and 10 minutes from Lake Martin. Definitely rural. Our location is part of why the crew app and the vendor portal are built offline first. Out here, cell service is not a given, and we built for the places where it drops because that is where we live and where some of the best vacation places in the country happen to be as well.',
     ],
   },
   {
