@@ -17,13 +17,14 @@ import { Menu, X } from 'lucide-react'
 //
 // ── Why an item is sometimes not a link ───────────────────────────────────
 //
-// About is the last row still unbuilt (Why FieldStay, Features and
-// Integrations have all shipped since). An unbuilt row is
-// listed with a visible "Soon" marker rather than linked, because a menu entry
-// that 404s costs more trust than one that says it is coming, and because a
-// link to a stub page would be indexed by Google as a real, empty page. Each
-// becomes a link by giving it an `href` below and nothing else, so building
-// the page and wiring the menu stay one step apart rather than two.
+// Every row is now a real page: Why FieldStay, Features, Integrations, FAQ and
+// About have all shipped. The affordance stays because the next addition will
+// need it. An unbuilt row is listed with a visible "Soon" marker rather than
+// linked, because a menu entry that 404s costs more trust than one that says
+// it is coming, and because a link to a stub page would be indexed by Google
+// as a real, empty page. A row becomes a link by giving it an `href` below and
+// nothing else, so building the page and wiring the menu stay one step apart
+// rather than two. SoonBadge is kept for that reason and is unused today.
 //
 // ── Why a native <dialog>, and not role="dialog" ───────────────────────────
 //
@@ -57,7 +58,7 @@ interface MenuItem {
 
 const MENU_ITEMS: readonly MenuItem[] = [
   { label: 'Home',          href: '/'         },
-  { label: 'About',         href: null        },
+  { label: 'About',         href: '/about'    },
   { label: 'Why FieldStay', href: '/why-fieldstay' },
   { label: 'Features',      href: '/features' },
   { label: 'Pricing',       href: '/pricing'  },
