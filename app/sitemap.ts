@@ -32,6 +32,7 @@ export const PAGES: ReadonlyArray<{
 }> = [
   { path: '/',                      priority: 1.0, changeFreq: 'weekly'  },
   { path: '/pricing',               priority: 0.9, changeFreq: 'monthly' },
+  { path: '/about',                 priority: 0.7, changeFreq: 'monthly' },
   { path: '/why-fieldstay',         priority: 0.9, changeFreq: 'monthly' },
   { path: '/features',              priority: 0.9, changeFreq: 'monthly' },
   { path: '/integrations',          priority: 0.8, changeFreq: 'monthly' },

@@ -134,6 +134,7 @@ const PRERENDERED_ROUTES = new Set([
   '/features',
   '/integrations',
   '/faq',
+  '/about',
   '/privacy',
   '/terms',
 ])
@@ -302,6 +303,11 @@ const BYPASS_ROUTES = [
   // I just switched to" is a question an existing, signed-in customer asks at
   // least as often as a prospect does, and PUBLIC would bounce them to /ops.
   '/integrations',
+
+  // Who builds FieldStay. BYPASS for the same reason as every page above:
+  // "who are these people" is a question a signed-in customer asks as readily
+  // as a prospect, and PUBLIC would bounce them to /ops.
+  '/about',
 
   // The public FAQ. BYPASS is not a close call here: its twelve answers are
   // SELECTED out of the same pool the in-app help page renders, so a customer

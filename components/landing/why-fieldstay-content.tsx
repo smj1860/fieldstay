@@ -88,7 +88,14 @@ const SECTIONS: readonly Section[] = [
     tone: 'cream',
     paragraphs: [
       'When you ask for something, it goes to the person who can build it, and it gets built. There is no roadmap committee and no quarter to wait for.',
-      'When something breaks, you are not bounced around until somebody finds the right person. There is nobody to bounce you to. You get the person who built it, because that is the only person here.',
+      // "because that is the only person here" was removed 2026-10-05, when /about
+      // introduced Bryan as a co-founder. Everything else in this paragraph is
+      // still literally true and is deliberately untouched: Stephen writes all
+      // of the code, so you DO get the person who built it, and there is still
+      // no support tier to be bounced through. Only the headcount claim was
+      // false, so only the headcount claim went. The rest is the owner's
+      // prose, and the rule at the top of this file still applies to it.
+      'When something breaks, you are not bounced around until somebody finds the right person. There is nobody to bounce you to. You get the person who built it.',
       'I will not always be able to say that. Right now it is true, and while it is true you get the benefit of it.',
     ],
   },

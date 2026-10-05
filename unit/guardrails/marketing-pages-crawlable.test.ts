@@ -55,6 +55,7 @@ const PUBLIC_MARKETING_PAGES = [
   '/features',
   '/integrations',
   '/faq',
+  '/about',
   '/short-term-rental-operations-software',
   '/hosts',
   '/strops',
