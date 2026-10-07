@@ -37,6 +37,7 @@ export default async function PropertiesPage() {
   const [
     { data: properties, error: propertiesError },
     { count: ownerPortalTokenCount },
+    { count: archivedPropertyCount },
     openWOs,
     unassignedTOs,
     erroredFeeds,
@@ -52,6 +53,14 @@ export default async function PropertiesPage() {
       .from('owner_portal_tokens')
       .select('id, property_owners!inner(org_id)', { count: 'exact', head: true })
       .eq('property_owners.org_id', membership.org_id),
+
+    // head+count, so this ships no rows and cannot be truncated by max_rows.
+    // Only drives whether the "n archived" link renders at all.
+    supabase
+      .from('properties')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id)
+      .eq('is_active', false),
 
     fetchAllRows<PropertyIdRow>(
       (rangeFrom, rangeTo) => supabase
@@ -131,6 +140,17 @@ export default async function PropertiesPage() {
           <p className="page-subtitle">
             {properties?.length ?? 0} of {membership.org.max_properties} properties
           </p>
+          {/* Only rendered when there is something to restore, so the link is
+              not a dead end on a fresh org. head+count ships no rows. */}
+          {(archivedPropertyCount ?? 0) > 0 && (
+            <Link
+              href="/properties/archived"
+              className="text-sm hover:underline"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              {archivedPropertyCount} archived
+            </Link>
+          )}
         </div>
         {atLimit ? (
           <span className={buttonVariantClass('secondary') + ' opacity-60 cursor-not-allowed text-xs'}>

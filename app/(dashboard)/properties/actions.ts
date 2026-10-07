@@ -1285,7 +1285,7 @@ export async function bulkImportAssets(
   }
 }
 
-// ── Archive ──────────────────────────────────────────────────
+// ── Archive and unarchive ────────────────────────────────────
 
 export async function archiveProperty(propertyId: string): Promise<void> {
   try {
@@ -1331,5 +1331,80 @@ export async function archiveProperty(propertyId: string): Promise<void> {
     console.error('[archiveProperty]', err)
     reportError(err, { site: 'serverAction.properties.archiveProperty' })
     throw new Error('Failed to archive property. Please try again.')
+  }
+}
+
+/**
+ * Put an archived property back into service.
+ *
+ * The counterpart to archiveProperty, added because that one's own confirm
+ * dialog said the archive "can be undone only by an admin working directly in
+ * the database", which made a misclick into a support ticket.
+ *
+ * THE PLAN LIMIT IS ENFORCED IN THE DATABASE, NOT HERE. The
+ * enforce_property_plan_limit trigger (20260730600000) fires on
+ * `UPDATE OF is_active`, and its "already counted" early return is keyed on
+ * OLD.is_active IS TRUE, so a false->true flip is checked against
+ * organizations.max_properties with the same FOR UPDATE row lock a creation
+ * gets. That is deliberate and is why unarchiving cannot be used to walk past
+ * the ceiling: the check below is only for the friendlier message, exactly as
+ * createProperty's is.
+ *
+ * BILLING follows on its own. cron-billing-property-reconciliation counts
+ * is_active = true once a day, so an unarchived property is back on the billed
+ * quantity within 24 hours. Nothing here needs to touch Stripe, and the UI
+ * says so rather than letting it be a surprise.
+ */
+export async function unarchiveProperty(
+  propertyId: string,
+): Promise<{ success: true } | { error: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
+
+    const { data: restored, error } = await supabase
+      .from('properties')
+      .update({ is_active: true })
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      // 23514 is the check_violation the plan-limit trigger raises. Same code
+      // and same handling as createProperty, so an org at its ceiling gets the
+      // real reason instead of "operation failed".
+      if (error.code === '23514' && error.message.includes('Property limit reached')) {
+        return {
+          error: `Your plan allows up to ${membership.org.max_properties} active properties. ` +
+                 'Archive another property first, or contact us to raise the limit.',
+        }
+      }
+      console.error('[unarchiveProperty]', error)
+      reportError(error, { site: 'serverAction.properties.unarchiveProperty.update', orgId: membership.org_id })
+      return { error: 'Failed to restore property. Please try again.' }
+    }
+
+    // 0 rows with no error = RLS denied it, same failure mode archiveProperty
+    // documents. Without this the caller would report success.
+    if (!restored) {
+      console.warn('[unarchiveProperty] update matched 0 rows', { propertyId })
+      return { error: 'Property not found, or you do not have permission to restore it.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.unarchived',
+      targetType: 'property',
+      targetId:   propertyId,
+    })
+
+    revalidatePath('/properties')
+    revalidatePath('/properties/archived')
+    return { success: true }
+  } catch (err) {
+    console.error('[unarchiveProperty]', err)
+    reportError(err, { site: 'serverAction.properties.unarchiveProperty' })
+    return { error: 'Failed to restore property. Please try again.' }
   }
 }

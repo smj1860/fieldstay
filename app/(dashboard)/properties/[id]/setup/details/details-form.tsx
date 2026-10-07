@@ -279,8 +279,8 @@ export function DetailsForm({
           <div className="space-y-4">
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
               {property.name} will be removed from the active properties list and excluded from
-              automated jobs. This can be undone only by an admin working directly in the database.
-              Are you sure you want to continue?
+              automated jobs. It also stops counting toward your bill, within 24 hours.
+              You can restore it later from Properties, under Archived.
             </p>
           </div>
         </Dialog>

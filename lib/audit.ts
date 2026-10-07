@@ -31,6 +31,7 @@ export type AuditAction =
   | 'property.created'
   | 'property.updated'
   | 'property.archived'
+  | 'property.unarchived'
   | 'work_order.created'
   | 'work_order.cancelled'
   | 'work_order.cost.logged'
