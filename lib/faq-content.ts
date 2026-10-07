@@ -719,6 +719,19 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
           'There\'s no plan to switch. Your bill simply reflects your current property count, computed the same way every time (see the property-count question above). What changes is WHEN it takes effect, and it depends on your billing interval. On monthly billing, an added or removed property is reflected starting your next invoice, and nothing changes mid-cycle. On annual billing, added properties are held and only billed once you\'ve added a 5th property since your last renewal, at which point all 5 are prorated together for the remainder of your billing year; removed properties are credited at your next renewal. Either way, you never see a mid-cycle surprise charge.',
       },
       {
+        // The TIMING question, which billing-plan-change does not answer: that
+        // one says WHEN a change lands on an invoice, this one says how long
+        // before the subscription even knows. cron-billing-property-
+        // reconciliation runs daily at 5am CT and counts is_active = true, so
+        // "within 24 hours" is the reconciliation window, not the invoice.
+        // Deliberately scoped to MONTHLY. Annual has its own answer, because
+        // on annual the money question is the credit rather than the timing.
+        id:       'billing-archive-timing',
+        question: 'I archived a property. How soon does my bill change?',
+        answer:
+          'Within 24 hours. FieldStay checks your subscription against your active property count once a day, so an archived property is off your billed count by the next morning at the latest, and there is nothing to click. On monthly billing the lower amount then shows up on your next invoice: nothing is charged or credited part way through the month you are already in.',
+      },
+      {
         id:       'billing-cancel',
         question: 'How do I cancel my subscription?',
         answer:
