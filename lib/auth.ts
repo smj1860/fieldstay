@@ -179,15 +179,40 @@ export async function requireOrgMember(): Promise<
  * existing try/catch blocks in mutating actions already convert this into
  * a generic { error } result the same way they handle any other failure.
  */
+/**
+ * Roles that stand in for 'manager', and ONLY for 'manager'.
+ *
+ * ⚠ THE SQL MIRROR OF THIS LIVES IN is_org_member() (migration
+ * 20261008120100) AND THE TWO MUST AGREE. This guards the Server Action; that
+ * guards the database. A role that passes one and not the other produces
+ * either a request the app accepts and the database then silently writes
+ * nothing for, or a refusal the data would have allowed.
+ * unit/guardrails/ops-role-equivalence.test.ts asserts they name the same set.
+ *
+ * Keyed on 'manager' rather than a blanket pass because this codebase already
+ * draws the line the owner asked for: requireOrgRole(['admin','manager']) is
+ * operational work (61 call sites), requireOrgRole(['admin']) is settings,
+ * team and billing (13 call sites). Inheriting that line means an admin-only
+ * action stays admin-only for these roles without being touched, so "everything
+ * except billing" needed no per-call-site edits at all.
+ */
+export const OPS_EQUIVALENT_ROLES: readonly MemberRole[] = ['operations', 'maintenance']
+
+/** The role an OPS_EQUIVALENT_ROLES member stands in for. */
+const OPS_STAND_IN_FOR: MemberRole = 'manager'
+
 export async function requireOrgRole(allowedRoles: MemberRole[]) {
   const result = await requireOrgMember()
   const { role } = result.membership
 
-  if (role !== 'owner' && !allowedRoles.includes(role)) {
-    throw new Error('You do not have permission to perform this action.')
+  if (role === 'owner' || allowedRoles.includes(role)) return result
+
+  // Ops roles pass exactly where 'manager' was already accepted.
+  if (OPS_EQUIVALENT_ROLES.includes(role) && allowedRoles.includes(OPS_STAND_IN_FOR)) {
+    return result
   }
 
-  return result
+  throw new Error('You do not have permission to perform this action.')
 }
 
 /**

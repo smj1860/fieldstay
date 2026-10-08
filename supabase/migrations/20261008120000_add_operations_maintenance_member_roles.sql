@@ -1,0 +1,42 @@
+-- Adds 'operations' and 'maintenance' to member_role: two team-member roles
+-- that do the operational work of the business and are kept out of billing,
+-- team management and the org's settings.
+--
+-- Same one-line shape and the same reasoning as
+-- 20260930120000_add_finance_member_role.sql, which added 'finance'. ADD VALUE
+-- is permitted inside a migration's transaction as long as the new label is not
+-- USED in that same transaction, which it is not here. ADD VALUE appends to the
+-- enum's sort order, so member_role's label order stays insertion order and is
+-- not a privilege ladder. Nothing orders by role; don't start.
+--
+-- ⚠ 'maintenance' ALSO EXISTS IN crew_role, AND MEANS SOMETHING DIFFERENT.
+--
+--   crew_role   = cleaning | landscaping | maintenance | general
+--   member_role = admin | manager | crew | viewer | owner | finance
+--                 | operations | maintenance        <- this migration
+--
+-- member_role 'maintenance' is a TEAM MEMBER who runs maintenance from the
+-- dashboard. crew_role 'maintenance' is a FIELD WORKER who performs it. They
+-- are separate enums and TypeScript keeps them apart, but they read alike in a
+-- role picker and in a permission check, so never infer one from the other and
+-- never write a helper that takes "a maintenance role" without saying which.
+-- The owner chose this label knowing the collision; enum labels are permanent,
+-- so it is recorded here rather than left to be rediscovered.
+--
+-- WHAT THIS DOES NOT DO. Like 'finance', this scopes the APPLICATION surface,
+-- not the data. RLS SELECT policies key on get_user_org_ids(), which returns an
+-- org for ANY accepted membership regardless of role, so these roles can read
+-- the org's rows at the database level exactly as 'viewer' can. What they
+-- cannot do is reach /billing or /settings, or call the Server Actions those
+-- surfaces own. It is a smaller blast radius than 'admin', not a data-level
+-- partition, and claiming the latter would be wrong.
+--
+-- WRITES ARE A REAL CHANGE, and that is where this differs from 'finance'.
+-- 'finance' names no write policy anywhere, so it passes none of them. These
+-- two must write, and 134 live policies across 56 tables call
+-- is_org_member(org_id, ARRAY[...]) with an explicit role list. Rather than
+-- rewrite 134 policies, the equivalence lives in is_org_member itself — see
+-- the next migration.
+
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'operations';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'maintenance';
