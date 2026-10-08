@@ -17,13 +17,15 @@ const EmailSchema = z.string().email('Invalid email address.')
  *
  * 'admin' is what every invite was before this, hardcoded. 'finance' is a
  * bookkeeper: /billing and nothing else in their nav (see migration
- * 20260930120000). Deliberately NOT the whole member_role enum — 'owner' is
+ * 20260930120000). 'operations' and 'maintenance' are the inverse: all the
+ * operational work and none of the billing, integrations or team management
+ * (20261008120000). Deliberately NOT the whole member_role enum — 'owner' is
  * not transferable through an invite, 'crew' is refused downstream by
  * acceptOrgInvite() because a crew member must hold no organization_members
  * row at all, and 'manager'/'viewer' have never had an invite path, so
  * opening one for them is its own change with its own copy to write.
  */
-const INVITABLE_ROLES = ['admin', 'finance'] as const
+const INVITABLE_ROLES = ['admin', 'operations', 'maintenance', 'finance'] as const
 export type InvitableRole = (typeof INVITABLE_ROLES)[number]
 const RoleSchema = z.enum(INVITABLE_ROLES)
 

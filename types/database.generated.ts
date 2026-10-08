@@ -7270,10 +7270,7 @@ export type Database = {
         Returns: undefined
       }
       property_defaults_report: { Args: never; Returns: Json }
-      prospect_apply_import_updates: {
-        Args: { p_rows: Json }
-        Returns: number
-      }
+      prospect_apply_import_updates: { Args: { p_rows: Json }; Returns: number }
       prospect_apply_pms_normalization: {
         Args: { p_rows: Json }
         Returns: number
@@ -7282,10 +7279,7 @@ export type Database = {
         Args: { p_contact_id: string }
         Returns: undefined
       }
-      prospect_undo_import: {
-        Args: { p_import_id: string }
-        Returns: number
-      }
+      prospect_undo_import: { Args: { p_import_id: string }; Returns: number }
       purge_expired_audit_events: { Args: never; Returns: Json }
       purge_org_table_batch: {
         Args: { p_batch_size?: number; p_org_id: string; p_table_name: string }
@@ -7571,6 +7565,8 @@ export type Database = {
         | "viewer"
         | "owner"
         | "finance"
+        | "operations"
+        | "maintenance"
       org_plan:
         | "starter"
         | "growth"
@@ -7907,7 +7903,16 @@ export const Constants = {
         "other",
       ],
       macrs_class: ["5_year", "15_year", "27_5_year", "39_year", "section_179"],
-      member_role: ["admin", "manager", "crew", "viewer", "owner", "finance"],
+      member_role: [
+        "admin",
+        "manager",
+        "crew",
+        "viewer",
+        "owner",
+        "finance",
+        "operations",
+        "maintenance",
+      ],
       org_plan: [
         "starter",
         "growth",

@@ -34,6 +34,11 @@ const ROLE_META: Record<MemberRole, { label: string; tone: 'amber' | 'blue' | 'g
   manager: { label: 'Manager', tone: 'purple' },
   viewer:  { label: 'Viewer',  tone: 'slate'  },
   crew:    { label: 'Crew',    tone: 'slate'  },
+  // Labelled for the dashboard reader, who is a team member rather than a
+  // field worker. "Maintenance" here is member_role 'maintenance', NOT
+  // crew_role 'maintenance' — see types/database.ts.
+  operations:  { label: 'Operations',  tone: 'purple' },
+  maintenance: { label: 'Maintenance', tone: 'purple' },
 }
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: InvitableRole; label: string; help: string }> = [
@@ -41,6 +46,16 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: InvitableRole; label: string; help: s
     value: 'admin',
     label: 'Admin',
     help:  'Full operational access, plus billing, integrations and team management.',
+  },
+  {
+    value: 'operations',
+    label: 'Operations',
+    help:  'Everything operational: properties, turnovers, crew, vendors, inventory and reporting. No billing, integrations or team management.',
+  },
+  {
+    value: 'maintenance',
+    label: 'Maintenance',
+    help:  'The same operational access as Operations. Use whichever title fits the person. No billing, integrations or team management.',
   },
   {
     value: 'finance',

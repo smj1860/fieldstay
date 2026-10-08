@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ALL_NAV_ITEMS, getVisibleNavItems } from '@/lib/navigation'
-import type { MemberRole } from '@/types/database'
+import { Constants } from '@/types/database.generated'
 
 describe('getVisibleNavItems', () => {
   it('returns only items whose roles include the given role', () => {
@@ -90,7 +90,14 @@ describe('getVisibleNavItems', () => {
   })
 
   it('every declared role in ALL_NAV_ITEMS is a valid MemberRole', () => {
-    const validRoles: MemberRole[] = ['owner', 'admin', 'manager', 'crew', 'viewer', 'finance']
+    // Derived from the generated enum, not hand-typed. The hand-typed version
+    // went stale the first time a role was added (20261008120000 added
+    // 'operations' and 'maintenance') and failed on a correct nav change, which
+    // is the wrong direction for a test to fail in: it reported a problem with
+    // the code when the problem was with the list. Constants.public.Enums comes
+    // from types/database.generated.ts, which is regenerated from the live
+    // schema, so this cannot drift again.
+    const validRoles: readonly string[] = Constants.public.Enums.member_role
     for (const item of ALL_NAV_ITEMS) {
       for (const role of item.roles) {
         expect(validRoles).toContain(role)

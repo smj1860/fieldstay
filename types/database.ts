@@ -24,7 +24,18 @@ export type OrgPlanStatus       = 'trialing' | 'active' | 'past_due' | 'cancelle
 // nav. It passes no is_org_member() write array, and — see that migration's
 // header — it is an APPLICATION-surface scope, not a data-level one: RLS SELECT
 // is keyed on get_user_org_ids(), which does not look at role.
-export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer' | 'finance'
+//
+// 'operations' and 'maintenance' (20261008120000) are the inverse of 'finance':
+// the operational work of the business, and no billing, team management or
+// settings. They DO write, so is_org_member() was taught to accept them
+// wherever 'manager' is accepted (20261008120100) rather than adding two labels
+// to 134 policy arrays. lib/auth.ts's OPS_EQUIVALENT_ROLES mirrors that.
+//
+// ⚠ member_role 'maintenance' is NOT crew_role 'maintenance'. This one is a
+// team member who runs maintenance from the dashboard; that one is a field
+// worker who performs it. Separate enums, same word; never infer one from the
+// other. See the migration header.
+export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer' | 'finance' | 'operations' | 'maintenance'
 export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'
 export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
 export type SyncStatus          = 'pending' | 'success' | 'error'

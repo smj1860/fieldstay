@@ -308,7 +308,15 @@ export function CreateWorkOrderModal({
                   name="title"
                   type="text"
                   required
-                  placeholder="e.g. Fix leaking faucet in master bath"
+                  // Two examples on purpose, and the second one is the point.
+                  // A work order is ALSO how you hand your own crew a one-off
+                  // job that has nothing to do with a repair and does not
+                  // belong to a turnover: a seasonal project, a deep clean, a
+                  // property staged for an owner visit. The single
+                  // repair-shaped example this used to carry was the only
+                  // thing in the product telling a PM otherwise, and it was
+                  // winning.
+                  placeholder="e.g. Fix leaking faucet in master bath, or pressure wash the deck before Memorial Day"
                 />
               </div>
 
@@ -478,12 +486,24 @@ export function CreateWorkOrderModal({
             </div>
 
           {assignMode === 'crew' ? (
-            <select name="assigned_crew_member_id" className="input">
-              <option value="">Select crew member…</option>
-              {crewMembers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}{c.role ? `: ${c.role}` : ''}</option>
-              ))}
-            </select>
+            <>
+              <select name="assigned_crew_member_id" className="input">
+                <option value="">Select crew member…</option>
+                {crewMembers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}{c.role ? `: ${c.role}` : ''}</option>
+                ))}
+              </select>
+              {/* The use case, stated where the decision is made. Everything
+                  this describes already worked: the crew sync pulls by
+                  assigned_crew_member_id, the crew home surfaces it, and
+                  completion is an offline outbox mutation. What was missing
+                  was anything telling a PM they could use it this way. */}
+              <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                Use this for a one-off job for your own crew. It does not have to be a
+                repair, and it is not tied to a turnover. It shows up in their crew app
+                with the turnovers they are assigned.
+              </p>
+            </>
           ) : (
             <>
 
