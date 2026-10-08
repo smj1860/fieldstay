@@ -133,8 +133,11 @@ export function SpecialProjectModal({
         </div>
 
         <div>
+          {/* Both halves are elements, with the gap carried by the hint's own
+              ml-1. Bare text followed by an inline element across a line break
+              reads as a lost space, which is what sonarjs flags it as. */}
           <label htmlFor="sp-category" className="label">
-            Category
+            <span>Category</span>
             <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
               Change it if one of these fits better
             </span>
