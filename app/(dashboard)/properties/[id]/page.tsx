@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { DoorCodeReveal } from './door-code-reveal'
+import { SpecialProjectButton } from './special-project-modal'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
@@ -53,6 +54,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: catalogItems, error: catalogItemsError },
     { data: invoiceRows, error: invoiceError },
     { data: stayRows, error: stayError },
+    { data: crewRows, error: crewError },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -140,6 +142,18 @@ export default async function PropertyDetailPage({ params }: Props) {
     supabase.rpc('derive_property_stay_lengths', {
       p_org_id: property.org_id, p_property_ids: [property.id],
     }),
+
+    // Assignees for the Special Project modal. Org-scoped rather than
+    // property-scoped on purpose: crew_members carries no property column, and
+    // a PM handing out a one-off job is not restricted to whoever happens to
+    // be on this property's turnovers.
+    supabase
+      .from('crew_members')
+      .select('id, name, role')
+      .eq('org_id', property.org_id)
+      .eq('is_active', true)
+      .order('name')
+      .limit(500),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
@@ -148,6 +162,12 @@ export default async function PropertyDetailPage({ params }: Props) {
 
   if (invoiceError) {
     console.error('[PropertyDetailPage] invoice history fetch failed:', invoiceError.message)
+  }
+
+  // Losing the crew list costs the Special Project modal its assignee options,
+  // not the page. It still creates the work order unassigned.
+  if (crewError) {
+    console.error('[PropertyDetailPage] crew fetch failed:', crewError.message)
   }
 
   // A display-only aggregate: log it, but never fail the page over it.
@@ -310,11 +330,18 @@ export default async function PropertyDetailPage({ params }: Props) {
       <Card className="mb-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-primary-themed">Maintenance</h3>
-          <Link href={`/maintenance?property=${property.id}`}
-                className="text-xs hover:underline"
-                style={{ color: 'var(--accent-blue)' }}>
-            View all →
-          </Link>
+          <div className="flex items-center gap-3">
+            <SpecialProjectButton
+              propertyId={property.id}
+              propertyName={property.name}
+              crewMembers={crewRows ?? []}
+            />
+            <Link href={`/maintenance?property=${property.id}`}
+                  className="text-xs hover:underline"
+                  style={{ color: 'var(--accent-blue)' }}>
+              View all →
+            </Link>
+          </div>
         </div>
 
         {/* YTD spend summary */}

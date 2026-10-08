@@ -991,7 +991,19 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'wo-special-project',
         question: 'Can I use a work order for a one-off project that is not a repair?',
         answer:
-          'Yes, and that is what it is for. Create a work order, assign it to one of your crew members instead of a vendor, and it lands in their crew app with the turnovers they are already assigned. Nothing about it has to be a repair and it does not have to belong to a turnover, so a seasonal project, a deep clean of the garage, or staging a property before an owner visit all work the same way. Give it a completed-by date if it matters, and they can finish it on their phone with no signal the way they finish anything else.',
+          'Yes, and that is what it is for. Create a work order, assign it to one of your crew members instead of a vendor, and it lands in their crew app with the turnovers they are already assigned. Nothing about it has to be a repair and it does not have to belong to a turnover, so a seasonal project, a deep clean of the garage, or staging a property before an owner visit all work the same way. Give it a completed-by date if it matters, and they can finish it on their phone with no signal the way they finish anything else. There is a shortcut for exactly this on the property page: open a property and click New Special Project on the Maintenance card.',
+      },
+      {
+        id:       'wo-special-project-where',
+        question: 'Where do I create a special project for my crew?',
+        answer:
+          'Open the property, find the Maintenance card, and click New Special Project. It is a short form: what needs doing, who you are assigning it to, an optional needed-by date, a priority, a category that defaults to General, and notes. The property is already filled in and there is no vendor option, because a special project is work for your own crew. If the job needs an outside contractor, use Maintenance then New Work Order instead. What you get either way is a work order, so it carries a work order number, it shows up on the property and on the Maintenance board, the crew member completes it in the crew app the same way, and the cost posts to the owner ledger like any other.',
+      },
+      {
+        id:       'wo-special-project-assignment',
+        question: 'Does FieldStay pick the crew member for a special project?',
+        answer:
+          'No, you pick, every time. The crew scorer suggests people for turnovers, where it has a checkout time, a drive distance and a reliability history to weigh. Work orders are not scored that way, and nothing in FieldStay assigns one to a crew member on its own. There is one case where a work order arrives with a crew member suggested on it: a cleaning job created from a failed inspection, where FieldStay suggests whoever last cleaned that property, and even that is a suggestion you accept or override rather than an assignment. Leaving the assignee blank is fine. The project waits on the Maintenance board until you give it to someone.',
       },
       {
         id:       'wo-compliance',
