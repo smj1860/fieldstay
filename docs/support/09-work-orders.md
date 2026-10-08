@@ -42,6 +42,35 @@ A work order does not have to be a repair, and it does not have to belong to a t
 
 Create it the same way as any other work order, choose **Internal Crew** on the assignee toggle, and pick the person. It appears in their crew app alongside their turnovers, and they complete it there, offline if they have no signal. Give it a Completed By date if the timing matters.
 
+---
+
+## Special Projects (from the property page)
+
+There is a shortcut for this on the property itself. Open a property, find the **Maintenance** card, and click **New Special Project**.
+
+It asks five things and nothing else:
+
+- **What needs doing** — the title, e.g. "Pressure wash the deck before Memorial Day"
+- **Assign to** — one of your crew members, or leave it unassigned for now
+- **Needed by** — optional date
+- **Priority** — Low, Medium, High, or Urgent
+- **Category** — defaults to General, and you can change it if one of the others fits better
+- **Notes** — access, supplies, anything they need to know
+
+The property is already filled in, and there is no vendor option: a special project is work for your own crew. For a job that needs an outside contractor, use **Maintenance → New Work Order** instead.
+
+**A special project is a work order.** The shorter form is the only difference. It gets a work order number, it shows up on this property and on the Maintenance board, the crew member completes it in the crew app the same way, and its cost posts to the owner ledger like any other. So you can find it, reassign it, cancel it, or attach photos to it wherever you would do that for a work order.
+
+## Does FieldStay pick the crew member for a special project?
+
+No. You pick, every time.
+
+FieldStay's crew scorer suggests people for **turnovers**, where it has a checkout time, a drive distance and a reliability history to weigh. Work orders are not scored that way, and nothing in FieldStay assigns a work order to a crew member on its own.
+
+There is one place a work order arrives with a crew member suggested on it: a cleaning job created automatically from a failed inspection, where FieldStay suggests whoever last cleaned that property. That is a suggestion you accept or override on the Maintenance board, not an assignment. A special project you create yourself never carries one.
+
+Leaving **Assign to** blank is a normal thing to do. The project is created unassigned and waits on the Maintenance board until you give it to someone.
+
 ## The Vendor Dispatch Email
 
 When you assign a vendor, FieldStay sends them a dispatch email containing:
