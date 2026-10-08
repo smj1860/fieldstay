@@ -978,7 +978,20 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'wo-create',
         question: 'How do I create and assign a work order?',
         answer:
-          'Go to Maintenance → New Work Order, fill in the property, description, priority, and an optional Not-To-Exceed amount, then choose Assign Vendor (dispatches an email with a secure portal link) or Assign Crew (appears in their crew app alongside turnovers).',
+          'Go to Maintenance → New Work Order, fill in the property, description, priority, and an optional Not-To-Exceed amount, then choose Assign Vendor (dispatches an email with a secure portal link) or Assign Crew (appears in their crew app alongside turnovers). A work order does not have to be a repair: see the question below about one-off projects.',
+      },
+      {
+        // The use case nobody was told about. Everything this describes already
+        // worked before this answer existed: lib/dexie/sync/work-orders.ts
+        // pulls by assigned_crew_member_id, app/crew/page.tsx surfaces it, and
+        // completion is a crew_work_orders:PATCH outbox mutation with a
+        // dead-letter affordance. The gap was that "work order" lives under
+        // Maintenance and reads as a repair, so a PM with a one-off project
+        // never thought to look. Copy, not capability.
+        id:       'wo-special-project',
+        question: 'Can I use a work order for a one-off project that is not a repair?',
+        answer:
+          'Yes, and that is what it is for. Create a work order, assign it to one of your crew members instead of a vendor, and it lands in their crew app with the turnovers they are already assigned. Nothing about it has to be a repair and it does not have to belong to a turnover, so a seasonal project, a deep clean of the garage, or staging a property before an owner visit all work the same way. Give it a completed-by date if it matters, and they can finish it on their phone with no signal the way they finish anything else.',
       },
       {
         id:       'wo-compliance',

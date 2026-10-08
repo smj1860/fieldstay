@@ -32,6 +32,16 @@ Use Assign Vendor for licensed contractors, trades, or specialized work. Use Ass
 
 ---
 
+## One-Off Projects for Your Own Crew
+
+A work order does not have to be a repair, and it does not have to belong to a turnover. Assigning one to a crew member instead of a vendor is how you hand your own people a one-off job:
+
+- A seasonal project: pressure wash the deck before Memorial Day, blow out the irrigation before the first freeze.
+- A deep clean that is not part of a changeover: the garage, the grill, the inside of the oven.
+- Prep work: staging a property before an owner visit or a photographer.
+
+Create it the same way as any other work order, choose **Internal Crew** on the assignee toggle, and pick the person. It appears in their crew app alongside their turnovers, and they complete it there, offline if they have no signal. Give it a Completed By date if the timing matters.
+
 ## The Vendor Dispatch Email
 
 When you assign a vendor, FieldStay sends them a dispatch email containing:
