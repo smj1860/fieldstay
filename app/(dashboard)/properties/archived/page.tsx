@@ -43,14 +43,23 @@ export default async function ArchivedPropertiesPage() {
   // not consume capacity, so this set grows with TIME rather than with the
   // 150-property ceiling. An explicit limit keeps it off PostgREST's silent
   // max_rows truncation, and 500 is far past any realistic archive.
+  // Awaited into a variable first, then unwrapped, which is the shape every
+  // other page uses (see vendors/page.tsx). Not cosmetic: the
+  // fieldstay-supabase-discarded-result chokepoint reads
+  // `unwrapList(await supabase…)` as an awaited PostgREST builder whose result
+  // goes nowhere, and fails the build at --error even though the helper is
+  // right there. One statement per concern also keeps the context object off
+  // the end of a ten-line argument.
+  const archivedRes = await supabase
+    .from('properties')
+    .select('id, name, address, city, state')
+    .eq('org_id', membership.org_id)
+    .eq('is_active', false)
+    .order('name')
+    .limit(500)
+
   const properties = unwrapList<ArchivedProperty>(
-    await supabase
-      .from('properties')
-      .select('id, name, address, city, state')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', false)
-      .order('name')
-      .limit(500),
+    archivedRes,
     { site: 'page.properties.archived', orgId: membership.org_id },
   )
 
