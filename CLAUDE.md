@@ -293,9 +293,22 @@ property count, since checkout only sets it once.
 - **Monthly**: any change, either direction, is applied immediately with
   `proration_behavior: 'none'` — takes effect on the next natural invoice,
   no charge or credit now. Simple because renewals are frequent.
-- **Annual, a decrease**: applied immediately too, also `'none'` — no rush
-  to credit, but the stored quantity must be corrected now so the NEXT
-  renewal bills the right number.
+- **Annual, a decrease**: applied immediately with `'create_prorations'`, so
+  the unused portion of what was already paid for the removed properties lands
+  as a credit on the UPCOMING invoice, which on an annual subscription is the
+  renewal. No money moves on the day and it is not a refund; a credit larger
+  than the renewal is carried as Stripe customer balance. This was `'none'`
+  until 2026-10-07, which corrected the quantity and credited nothing, while
+  `docs/support/16-pricing-and-plans.md` had always told customers "Removed
+  properties are credited at your next renewal" — the code was the wrong half.
+  Changed with owner approval, which is the design re-review this section
+  requires.
+  **The Stripe idempotency key had to change with it.** It was keyed on the
+  TARGET quantity plus the proration mode; once the decrease also used
+  `'create_prorations'`, a decrease TO 8 and a later threshold flush UP TO 8
+  produced an identical key, and inside Stripe's ~24h idempotency window the
+  second call would replay the first response and leave the org billed for the
+  older count. It is now keyed on the transition (`from->to`).
 - **Annual, an increase**: HELD rather than applied per property. Stripe's
   own subscription item `quantity` IS the held baseline — comparing it
   against the live count gives exactly how many properties have been added

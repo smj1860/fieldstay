@@ -20,9 +20,14 @@ import { reportError }         from '@/lib/observability/report-error'
 //   that "wait for it" is never a long wait.
 //
 //   ANNUAL: a DECREASE is applied immediately with `proration_behavior:
-//   'none'` too (same reasoning — no rush to credit something that only
-//   matters at next renewal, but the stored quantity must be corrected now so
-//   renewal bills the right number). An INCREASE is held rather than applied
+//   'create_prorations'`, so the unused portion of what was already paid for
+//   the removed properties becomes a credit on the UPCOMING invoice, which on
+//   an annual subscription is the renewal. No money moves today and this is
+//   not a refund; an excess credit is carried as Stripe customer balance.
+//   (This was 'none' until 2026-10-07, which corrected the quantity and
+//   credited nothing, while the support docs had always promised the credit.
+//   Owner-approved; CLAUDE.md's locked rules were updated with it.)
+//   An INCREASE is held rather than applied
 //   per property: Stripe's subscription item `quantity` field IS the "held"
 //   baseline (no separate DB column needed — comparing today's live count
 //   against Stripe's current quantity gives exactly the ADDITIONS pending
@@ -203,15 +208,24 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
 
       const interval = subscription.items.data[0]?.price?.recurring?.interval ?? 'month'
 
-      // Derived from the TARGET state, not a random value: a duplicate call
-      // that recomputes the identical target quantity collides on the same
-      // key and is a true no-op at Stripe's own layer, even if the per-org
-      // concurrency key above were ever bypassed (a second dispatcher retry
-      // queuing a second event, a manual re-trigger). proration_behavior is
-      // folded in because 'none' vs 'create_prorations' are genuinely
-      // different operations even at the same target quantity.
+      // Derived from the TRANSITION, not just the target. A duplicate call that
+      // recomputes the identical move collides on the same key and is a true
+      // no-op at Stripe's own layer, even if the per-org concurrency key above
+      // were ever bypassed (a second dispatcher retry queuing a second event, a
+      // manual re-trigger).
+      //
+      // `billedQuantity` is in the key, and that is NOT cosmetic. This key was
+      // once `:${currentCount}:${proration}`, which was safe only while the
+      // annual DECREASE used 'none' and nothing else shared a target with the
+      // increase flush. Once the decrease moved to 'create_prorations'
+      // (2026-10-07) a decrease TO 8 and a later flush UP TO 8 produced a
+      // byte-identical key, and Stripe's idempotency window is roughly 24
+      // hours: 10 -> 8 (credit), then 8 -> 3, then 3 -> 8 would silently
+      // replay the first response and leave the org billed for 3 while running
+      // 8. Keying on `from->to` makes a genuine retry collide and two different
+      // moves not.
       const idempotencyKeyFor = (proration: 'none' | 'create_prorations') =>
-        `billing-reconcile:${orgId}:${subscriptionId}:${currentCount}:${proration}`
+        `billing-reconcile:${orgId}:${subscriptionId}:${billedQuantity}->${currentCount}:${proration}`
 
       if (interval !== 'year') {
         // Monthly: any direction, deferred to the next natural invoice.
@@ -222,14 +236,49 @@ export const reconcilePropertyCountForOrg = inngest.createFunction(
         return
       }
 
-      // Annual, and a DECREASE: apply now (no charge implied — 'none' just
-      // means "credit nothing today"), so the quantity is correct by the time
-      // the next renewal bills it.
+      // Annual, and a DECREASE: apply now WITH a proration credit.
+      //
+      // This was 'none' until 2026-10-07, which corrected the quantity and
+      // created nothing else: an org that dropped a property in month three had
+      // already paid for nine unused months of it and never saw that money
+      // again. docs/support/16-pricing-and-plans.md had been telling customers
+      // "Removed properties are credited at your next renewal" the whole time,
+      // so the code was the half that was wrong.
+      //
+      // 'create_prorations' puts a negative line item on the UPCOMING invoice,
+      // which on an annual subscription is the renewal, so the credit lands
+      // exactly where the docs say it does. It is not a refund and no money
+      // leaves today; if the credit ends up larger than the renewal, Stripe
+      // carries the remainder as customer balance.
+      //
+      // Owner-approved change to a rule CLAUDE.md marks as locked. The
+      // Billing section there was updated in the same commit.
       if (currentCount < billedQuantity) {
         await stripe.subscriptions.update(subscriptionId, {
           items:              [{ id: item.id, quantity: currentCount }],
-          proration_behavior: 'none',
-        }, { idempotencyKey: idempotencyKeyFor('none') })
+          proration_behavior: 'create_prorations',
+        }, { idempotencyKey: idempotencyKeyFor('create_prorations') })
+
+        await logAuditEvent({
+          orgId,
+          action:   'billing.subscription.quantity_prorated',
+          metadata: { previousQuantity: billedQuantity, newQuantity: currentCount, direction: 'decrease' },
+        })
+
+        await createPmNotification(supabase, {
+          orgId,
+          type:     'billing_quantity_updated',
+          title:    `Your subscription now reflects ${currentCount} properties`,
+          subtitle:
+            `You removed ${billedQuantity - currentCount} since your last renewal. The unused part of ` +
+            'what you already paid for them becomes a credit against your next renewal.',
+          href:      '/settings?tab=billing',
+          severity:  'green',
+          // Keyed on the transition for the same reason the Stripe key is:
+          // a retry of this exact move must not insert a second notification,
+          // and a later different move must still be able to.
+          dedupeKey: `billing-quantity-credit-${orgId}-${billedQuantity}-${currentCount}`,
+        })
         return
       }
 

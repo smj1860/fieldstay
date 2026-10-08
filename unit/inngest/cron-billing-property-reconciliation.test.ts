@@ -235,7 +235,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 6 }],
         proration_behavior: 'none',
-      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:6:none' })
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:4->6:none' })
     })
 
     it('applies a DECREASE with proration_behavior none too', async () => {
@@ -251,7 +251,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 2 }],
         proration_behavior: 'none',
-      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:2:none' })
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:4->2:none' })
     })
 
     it('never fires the annual proration notification', async () => {
@@ -270,7 +270,10 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
   })
 
   describe('annual billing', () => {
-    it('applies a DECREASE immediately with proration_behavior none', async () => {
+    it('applies a DECREASE immediately WITH create_prorations, so the unused time credits the renewal', async () => {
+      // Was 'none' until 2026-10-07, which corrected the quantity and credited
+      // nothing while the support docs promised a credit. See the decrease
+      // branch's comment for the whole story.
       const supabase = makeSupabase({
         organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
         properties:    [{ data: null, error: null, count: 3 }],
@@ -282,8 +285,46 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
 
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: 3 }],
-        proration_behavior: 'none',
-      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:3:none' })
+        proration_behavior: 'create_prorations',
+      }, { idempotencyKey: 'billing-reconcile:org_1:sub_1:4->3:create_prorations' })
+    })
+
+    it('keys a decrease TO n differently from a flush UP TO n, so the two cannot collide at Stripe', async () => {
+      // THE REGRESSION THIS EXISTS FOR. The key used to be
+      // `:${currentCount}:${proration}`, which was unambiguous only while the
+      // decrease used 'none'. Once both directions used 'create_prorations', a
+      // decrease to 8 and a later flush up to 8 produced a byte-identical key,
+      // and inside Stripe's ~24h idempotency window the second call replays the
+      // first response: the org would run 8 properties billed for 3. Keying on
+      // the transition is what separates them, so assert they DIFFER rather
+      // than asserting either literal.
+      const decrease = makeSupabase({
+        organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
+        properties:    [{ data: null, error: null, count: 8 }],
+      })
+      ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>)
+        .mockResolvedValue(makeSubscription({ quantity: 10, interval: 'year' }))
+      await run('org_1', decrease)
+
+      const increase = makeSupabase({
+        organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
+        properties:    [{ data: null, error: null, count: 8 }],
+      })
+      ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>)
+        .mockResolvedValue(makeSubscription({ quantity: 3, interval: 'year' }))
+      await run('org_1', increase)
+
+      const calls = (stripe.subscriptions.update as ReturnType<typeof vi.fn>).mock.calls
+      expect(calls).toHaveLength(2)
+
+      const [downOpts, upOpts] = [calls[0][2], calls[1][2]]
+      // Both land on quantity 8 with the same proration mode, which is exactly
+      // the condition that used to collide.
+      expect(calls[0][1].items[0].quantity).toBe(8)
+      expect(calls[1][1].items[0].quantity).toBe(8)
+      expect(calls[0][1].proration_behavior).toBe('create_prorations')
+      expect(calls[1][1].proration_behavior).toBe('create_prorations')
+      expect(downOpts.idempotencyKey).not.toBe(upOpts.idempotencyKey)
     })
 
     it('HOLDS an increase below the addition threshold — no Stripe call at all', async () => {
@@ -316,7 +357,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: newQuantity }],
         proration_behavior: 'create_prorations',
-      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${newQuantity}:create_prorations` })
+      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${billedQuantity}->${newQuantity}:create_prorations` })
       expect(logAuditEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           orgId:  'org_1',
@@ -348,7 +389,7 @@ describe('reconcilePropertyCountForOrg — per-org handler', () => {
       expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', {
         items:              [{ id: 'si_1', quantity: newQuantity }],
         proration_behavior: 'create_prorations',
-      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${newQuantity}:create_prorations` })
+      }, { idempotencyKey: `billing-reconcile:org_1:sub_1:${billedQuantity}->${newQuantity}:create_prorations` })
     })
 
     it('is naturally idempotent: re-running after a successful flush is a no-op (Stripe already reflects it)', async () => {

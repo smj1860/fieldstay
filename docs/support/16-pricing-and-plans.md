@@ -81,7 +81,10 @@ Credits apply automatically each billing cycle based on your active sponsor coun
 There's no plan cap to hit and no "upgrade" button — add a property and your bill will reflect it, automatically, at exactly that property's rate on the schedule above. When it actually shows up on an invoice depends on your billing interval:
 
 - **Monthly billing**: an added or removed property is reflected starting your NEXT invoice. Nothing changes mid-cycle, and there's nothing to click.
-- **Annual billing**: added properties are held rather than billed individually as you add them. Once you've added a 5th property since your last renewal, all 5 are prorated together for the remainder of your billing year in one adjustment — not backdated, starting from that day forward. Removed properties are credited at your next renewal.
+- **How fast does it register?** FieldStay checks your subscription against your active property count once a day, so a property you archive is off your billed count within 24 hours at the latest. You do not need to tell us, and there is no button to press.
+- **Annual billing**: added properties are held rather than billed individually as you add them. Once you've added a 5th property since your last renewal, all 5 are prorated together for the remainder of your billing year in one adjustment — not backdated, starting from that day forward. Removed properties are credited at your next renewal: the unused part of what you already paid for them comes off that invoice.
+
+  Worked example. You pay $580 a year for 4 properties and you archive one 3 months in. That property was $13 a month and 9 months of it are unused, so a $117 credit is applied to your renewal. The renewal is the price of what you actually have, 3 properties at $450, minus the $117, so $333. A credit larger than the renewal is not lost; the remainder stays on your account and comes off the year after. No money is refunded to your card on the day you archive.
 
 Self-serve billing covers up to 150 properties. Beyond that, contact hello@fieldstay.app.
 
