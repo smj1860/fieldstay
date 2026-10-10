@@ -163,6 +163,30 @@ interface BookingPairWindow {
   checkinDT:     Date
   windowMinutes: number
   priority:      PriorityLevel
+  isSameDay:     boolean
+}
+
+/**
+ * A same-day flip is a checkout and the next check-in on the same calendar
+ * date, as defined by the column comment on turnovers.is_same_day_turnover
+ * (20260605221229). The comparison is on the bookings' own DATE values,
+ * which are already property-local, so no timezone conversion is involved.
+ *
+ * This flag was read in two places (the same_day_premium_pct markup in
+ * turnover-events.ts post-cleaning-fee-expense, and the +1 crew
+ * recommendation in auto-assign-turnover.ts) but nothing ever wrote it, so
+ * every flip was billed and staffed as an ordinary turn.
+ *
+ * Only a PAIR can be a same-day flip: a standalone turnover has no known
+ * next booking, so it is always false until upgraded.
+ */
+export function isSameDayFlip(
+  outgoing: Pick<BookingRow, 'checkout_date'>,
+  incoming: Pick<BookingRow, 'checkin_date'>,
+): boolean {
+  const out = outgoing.checkout_date?.slice(0, 10)
+  const inc = incoming.checkin_date?.slice(0, 10)
+  return Boolean(out) && out === inc
 }
 
 /**
@@ -193,7 +217,13 @@ function resolvePairWindow(
   if (checkinDT <= checkoutDT) return null
 
   const windowMinutes = Math.round((checkinDT.getTime() - checkoutDT.getTime()) / 60_000)
-  return { checkoutDT, checkinDT, windowMinutes, priority: priorityForWindow(windowMinutes) }
+  return {
+    checkoutDT,
+    checkinDT,
+    windowMinutes,
+    priority:  priorityForWindow(windowMinutes),
+    isSameDay: isSameDayFlip(outgoing, incoming),
+  }
 }
 
 /**
@@ -421,19 +451,21 @@ async function upgradeStandaloneToPair(
     checkinDT:          Date
     windowMinutes:      number
     priority:           PriorityLevel
+    isSameDay:          boolean
   }
 ): Promise<void> {
-  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
+  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority, isSameDay } = params
 
   const { error } = await supabase
     .from('turnovers')
     .update({
-      booking_id:         incomingBookingId,
-      prev_booking_id:    outgoingBookingId,
-      checkout_datetime:  checkoutDT.toISOString(),
-      checkin_datetime:   checkinDT.toISOString(),
-      window_minutes:     windowMinutes,
+      booking_id:           incomingBookingId,
+      prev_booking_id:      outgoingBookingId,
+      checkout_datetime:    checkoutDT.toISOString(),
+      checkin_datetime:     checkinDT.toISOString(),
+      window_minutes:       windowMinutes,
       priority,
+      is_same_day_turnover: isSameDay,
     })
     .eq('booking_id',      outgoingBookingId)
     .is('prev_booking_id', null)
@@ -491,12 +523,13 @@ async function insertPairTurnover(
     checkinDT:             Date
     windowMinutes:         number
     priority:              PriorityLevel
+    isSameDay:             boolean
     checklistTemplateId:   string | null
   }
 ): Promise<string | null> {
   const {
     orgId, propertyId, outgoingBookingId, incomingBookingId,
-    checkoutDT, checkinDT, windowMinutes, priority, checklistTemplateId,
+    checkoutDT, checkinDT, windowMinutes, priority, isSameDay, checklistTemplateId,
   } = params
 
   const { data: turnover, error } = await supabase
@@ -509,6 +542,7 @@ async function insertPairTurnover(
       checkout_datetime:     checkoutDT.toISOString(),
       checkin_datetime:      checkinDT.toISOString(),
       window_minutes:        windowMinutes,
+      is_same_day_turnover:  isSameDay,
       status:                'pending_assignment',
       priority,
       auto_generated:        true,
@@ -561,13 +595,14 @@ async function refreshExistingPairDates(
     checkinDT: Date
     windowMinutes: number
     priority: PriorityLevel
+    isSameDay: boolean
   }
 ): Promise<void> {
-  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
+  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority, isSameDay } = params
 
   const { data: existing, error: fetchErr } = await supabase
     .from('turnovers')
-    .select('id, status, checkout_datetime, checkin_datetime')
+    .select('id, status, checkout_datetime, checkin_datetime, is_same_day_turnover')
     .eq('property_id', propertyId)
     .eq('booking_id', incomingBookingId)
     .eq('prev_booking_id', outgoingBookingId)
@@ -583,47 +618,109 @@ async function refreshExistingPairDates(
 
   const newCheckoutIso = checkoutDT.toISOString()
   const newCheckinIso  = checkinDT.toISOString()
-  if (existing.checkout_datetime === newCheckoutIso && existing.checkin_datetime === newCheckinIso) {
+  const datesUnchanged = existing.checkout_datetime === newCheckoutIso && existing.checkin_datetime === newCheckinIso
+  const flagUnchanged  = existing.is_same_day_turnover === isSameDay
+  if (datesUnchanged && flagUnchanged) {
     return // genuinely unchanged — don't touch dates_changed_at over a no-op
   }
 
   if (existing.status === 'pending_assignment' || existing.status === 'assigned') {
-    const { error } = await supabase
-      .from('turnovers')
-      .update({
-        checkout_datetime: newCheckoutIso,
-        checkin_datetime:  newCheckinIso,
-        window_minutes:    windowMinutes,
-        priority,
-      })
-      .eq('id', existing.id)
-    if (error) {
-      console.error('[generator] pair date-refresh update failed', { propertyId, turnoverId: existing.id, msg: error.message })
-    } else {
-      console.log('[generator] refreshed turnover dates for changed booking pair', { propertyId, turnoverId: existing.id })
-    }
+    await applyPairDates(supabase, existing.id, propertyId, {
+      checkout_datetime:    newCheckoutIso,
+      checkin_datetime:     newCheckinIso,
+      window_minutes:       windowMinutes,
+      priority,
+      is_same_day_turnover: isSameDay,
+    })
+    return
+  }
+
+  // An in-progress turnover whose dates are unchanged but whose flag is stale
+  // (a row created before the flag was written at all) gets the flag alone.
+  // Its dates are untouched and the "checkout time changed" banner is NOT
+  // re-armed — nothing about the crew's window moved. When the dates DID
+  // change, the flag is deliberately left alone below: the new dates are only
+  // staged, not applied, and the flag must describe the window being worked.
+  if (existing.status === 'in_progress' && datesUnchanged) {
+    await refreshSameDayFlagOnly(supabase, existing.id, propertyId, isSameDay)
     return
   }
 
   if (existing.status === 'in_progress') {
-    const { error } = await supabase
-      .from('turnovers')
-      .update({
-        pending_checkout_datetime:    newCheckoutIso,
-        pending_checkin_datetime:     newCheckinIso,
-        dates_changed_at:             new Date().toISOString(),
-        dates_change_acknowledged_at: null, // re-arm the banner even if a prior change was already acknowledged
-      })
-      .eq('id', existing.id)
-    if (error) {
-      console.error('[generator] pair pending-date-stage failed', { propertyId, turnoverId: existing.id, msg: error.message })
-    } else {
-      console.log('[generator] staged pending date change for in-progress turnover', { propertyId, turnoverId: existing.id })
-    }
+    await stagePendingPairDates(supabase, existing.id, propertyId, newCheckoutIso, newCheckinIso)
     return
   }
 
   // completed / cancelled — historical record, never touched.
+}
+
+/**
+ * The three writes refreshExistingPairDates can make, one named function each.
+ *
+ * Extracted rather than left inline: each is an `await` plus an `if (error)`
+ * log, and four of those nested inside the status branches put that function
+ * at cognitive complexity 17 against a ceiling of 15. The branching that
+ * decides WHICH write happens is the part worth reading there; the logging
+ * shape is identical in all three and carries no decision.
+ */
+async function applyPairDates(
+  supabase:   DBClient,
+  turnoverId: string,
+  propertyId: string,
+  fields: {
+    checkout_datetime:    string
+    checkin_datetime:     string
+    window_minutes:       number
+    priority:             PriorityLevel
+    is_same_day_turnover: boolean
+  },
+): Promise<void> {
+  const { error } = await supabase.from('turnovers').update(fields).eq('id', turnoverId)
+  if (error) {
+    console.error('[generator] pair date-refresh update failed', { propertyId, turnoverId, msg: error.message })
+    return
+  }
+  console.log('[generator] refreshed turnover dates for changed booking pair', { propertyId, turnoverId })
+}
+
+/** The flag alone, for an in-progress turnover whose window did not move. */
+async function refreshSameDayFlagOnly(
+  supabase:   DBClient,
+  turnoverId: string,
+  propertyId: string,
+  isSameDay:  boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ is_same_day_turnover: isSameDay })
+    .eq('id', turnoverId)
+  if (error) {
+    console.error('[generator] same-day flag refresh failed', { propertyId, turnoverId, msg: error.message })
+  }
+}
+
+/** Staged, not applied: the crew is mid-job, so the banner asks them first. */
+async function stagePendingPairDates(
+  supabase:       DBClient,
+  turnoverId:     string,
+  propertyId:     string,
+  newCheckoutIso: string,
+  newCheckinIso:  string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('turnovers')
+    .update({
+      pending_checkout_datetime:    newCheckoutIso,
+      pending_checkin_datetime:     newCheckinIso,
+      dates_changed_at:             new Date().toISOString(),
+      dates_change_acknowledged_at: null, // re-arm the banner even if a prior change was already acknowledged
+    })
+    .eq('id', turnoverId)
+  if (error) {
+    console.error('[generator] pair pending-date-stage failed', { propertyId, turnoverId, msg: error.message })
+    return
+  }
+  console.log('[generator] staged pending date change for in-progress turnover', { propertyId, turnoverId })
 }
 
 export async function snapshotChecklist(
