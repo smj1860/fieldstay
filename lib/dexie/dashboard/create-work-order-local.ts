@@ -101,7 +101,10 @@ export async function createWorkOrderLocal(
           asset_id:                input.assetId,
           assigned_crew_member_id: input.assignedCrewMemberId,
           vendor_id:               input.vendorId,
-          scheduled_date:          input.scheduledDate,
+          // The PM's deadline. Named for what it means since the date split
+          // (20261011120000); the sync route still accepts the old
+          // scheduled_date key for mutations queued before this shipped.
+          needed_by_date:          input.scheduledDate,
         },
       },
       // The optimistic row, inside the same transaction. Shaped as the server
@@ -149,7 +152,7 @@ function optimisticRow(
     vendor_id:               input.vendorId,
     assigned_crew_member_id: input.assignedCrewMemberId,
     asset_id:                input.assetId,
-    scheduled_date:          input.scheduledDate,
+    needed_by_date:          input.scheduledDate,
     wo_number:               null,
     created_at:              now,
     updated_at:              now,

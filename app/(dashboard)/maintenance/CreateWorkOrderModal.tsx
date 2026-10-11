@@ -145,7 +145,7 @@ export function CreateWorkOrderModal({
       assetId:              text('asset_id'),
       assignedCrewMemberId: assignMode === 'crew' ? text('assigned_crew_member_id') : null,
       vendorId:             assignMode === 'vendor' ? text('vendor_id') : null,
-      scheduledDate:        text('scheduled_date'),
+      scheduledDate:        text('needed_by_date'),
     })
     setQueueing(false)
     if (!result.ok) {
@@ -408,13 +408,18 @@ export function CreateWorkOrderModal({
                 </div>
               </div>
 
-              {/* Scheduled date + NTE */}
+              {/* Needed-by date + NTE */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="wo-date" className="label">Completed By Date</label>
-                  <Input id="wo-date" name="scheduled_date" type="date" />
+                  <label htmlFor="wo-date" className="label">
+                    Needed by
+                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                      Defaults to the next guest check-in
+                    </span>
+                  </label>
+                  <Input id="wo-date" name="needed_by_date" type="date" />
                   <label htmlFor="wo-time" className="label mt-3">
-                    Scheduled time
+                    Hard time limit
                     <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Optional, use for same-day flip vendor windows
                     </span>

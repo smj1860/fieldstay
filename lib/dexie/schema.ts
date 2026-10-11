@@ -219,7 +219,13 @@ export interface CrewWorkOrderRow {
   description:             string | null
   status:                  string
   priority:                string
-  scheduled_date:          string | null
+  /**
+   * The PM's deadline, and the vendor's confirmed appointment, since the date
+   * split (20261011120000). A crew-assigned work order has no vendor, so it
+   * carries only the first; both may be null.
+   */
+  needed_by_date:          string | null
+  vendor_scheduled_at:     string | null
   wo_number:               string | null
   created_at:              string
 }

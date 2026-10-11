@@ -24,6 +24,7 @@ import {
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
+import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -46,7 +47,9 @@ interface WorkOrderRow {
   category: string | null
   priority: PriorityLevel
   status: WoStatus
-  scheduled_date: string | null
+  needed_by_date: string | null
+  vendor_scheduled_at: string | null
+  vendor_scheduled_window: string | null
   completed_date: string | null
   estimated_cost: number | null
   nte_amount: number | null
@@ -121,7 +124,9 @@ function cachedWorkOrderToRow(
     category:                  cached.category ?? null,
     priority:                  cached.priority,
     status:                    cached.status,
-    scheduled_date:            cached.scheduled_date ?? null,
+    needed_by_date:            cached.needed_by_date ?? null,
+    vendor_scheduled_at:       cached.vendor_scheduled_at ?? null,
+    vendor_scheduled_window:   cached.vendor_scheduled_window ?? null,
     completed_date:            cached.completed_date ?? null,
     estimated_cost:            cached.estimated_cost ?? null,
     nte_amount:                cached.nte_amount ?? null,
@@ -258,7 +263,9 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
     priority:               wo.priority,
     status:                 wo.status,
     source:                 '',
-    scheduled_date:         wo.scheduled_date,
+    needed_by_date:         wo.needed_by_date,
+    vendor_scheduled_at:    wo.vendor_scheduled_at,
+    vendor_scheduled_window: wo.vendor_scheduled_window,
     completed_date:         wo.completed_date,
     estimated_cost:         wo.estimated_cost,
     nte_amount:             wo.nte_amount,
@@ -409,6 +416,45 @@ function firstResolvableName(
   return undefined
 }
 
+/**
+ * A work order's date, labelled for which of the two it is.
+ *
+ * Since the date split (20261011120000) a work order carries a vendor-confirmed
+ * appointment, the PM's deadline, or neither. Rendering both the same way is
+ * what made the old single column ambiguous in the first place, so a deadline
+ * is prefixed "By" and an appointment is shown bare. Shared by the live board
+ * card and the archived list rather than written twice, so the two cannot drift
+ * into labelling the same work order differently.
+ */
+function WoDateChip({
+  wo,
+  withIcon = false,
+  asParagraph = false,
+}: Readonly<{
+  wo: { needed_by_date: string | null; vendor_scheduled_at: string | null }
+  withIcon?: boolean
+  asParagraph?: boolean
+}>) {
+  const resolved = workOrderDisplayDate(wo)
+  if (!resolved) return null
+
+  const prefix = resolved.kind === 'deadline' ? 'By ' : ''
+  const label  = `${prefix}${formatDate(resolved.value)}`
+
+  if (asParagraph) {
+    return (
+      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-1">
+      {withIcon && <Calendar className="w-3 h-3" />}
+      {label}
+    </span>
+  )
+}
+
 function WorkOrderCard({
   wo,
   vendors,
@@ -499,12 +545,7 @@ function WorkOrderCard({
                 {wo.status === 'completed' && wo.completed_by_name && ` (${wo.completed_by_name})`}
               </span>
             )}
-            {wo.scheduled_date && (
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {formatDate(wo.scheduled_date)}
-              </span>
-            )}
+            <WoDateChip wo={wo} withIcon />
             {(wo.nte_amount != null || wo.estimated_cost != null) && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
@@ -1423,7 +1464,7 @@ export function MaintenanceBoard({
       {/* Calendar View */}
       {viewMode === 'calendar' && (
         <MaintenanceCalendar
-          workOrders={allWorkOrders.filter(wo => wo.scheduled_date)}
+          workOrders={allWorkOrders.filter(wo => workOrderDisplayDay(wo) !== null)}
           schedules={schedules}
         />
       )}
@@ -1551,13 +1592,7 @@ export function MaintenanceBoard({
                             {wo.completed_by_name && ` (${wo.completed_by_name})`}
                           </p>
                         )}
-                        {wo.scheduled_date && (
-                          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                            {new Date(wo.scheduled_date).toLocaleDateString('en-US', {
-                              month: 'short', day: 'numeric',
-                            })}
-                          </p>
-                        )}
+                        <WoDateChip wo={wo} asParagraph />
                       </button>
                     )
                   })}

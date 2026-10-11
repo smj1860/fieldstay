@@ -36,6 +36,7 @@ import {
 } from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
+import { resolveNeededByDate } from '@/lib/work-orders/needed-by'
 
 // A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
 // success for a change that never happened. Every write below whose WHERE
@@ -175,8 +176,7 @@ function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
     category:                categoryInput ? (WoCategorySchema.safeParse(categoryInput).data ?? null) : null,
     vendor_id:               formText(formData, 'vendor_id'),
     assigned_crew_member_id: formText(formData, 'assigned_crew_member_id'),
-    scheduled_date:          formText(formData, 'scheduled_date'),
-    scheduled_time:          formText(formData, 'scheduled_time'),
+    needed_by_date:          formText(formData, 'needed_by_date'),
     estimated_cost:          formNumber(formData, 'estimated_cost'),
     nte_amount:              formNumber(formData, 'nte_amount'),
     asset_id:                formText(formData, 'asset_id'),
@@ -200,7 +200,7 @@ async function resolveCreationWarning(
   usePortal: boolean,
 ): Promise<string | undefined> {
   const timeOff = await checkCrewTimeOffWarning(
-    supabase, orgId, input.assigned_crew_member_id, input.scheduled_date,
+    supabase, orgId, input.assigned_crew_member_id, input.needed_by_date,
   )
   if (timeOff) return timeOff
 
@@ -253,7 +253,17 @@ export async function createWorkOrder(
     const valid = await validateWorkOrderCreate(supabase, membership.org_id, input)
     if (!valid.ok) return { error: valid.error }
 
-    const { payload, usePortal } = buildWorkOrderInsert(input, membership.org_id)
+    // The deadline defaults to the property's next guest arrival when the PM
+    // left it blank. Resolved HERE rather than inside buildWorkOrderInsert,
+    // which is pure and synchronous and is worth keeping that way.
+    const neededBy = await resolveNeededByDate(
+      supabase, membership.org_id, input.property_id, input.needed_by_date,
+    )
+
+    const { payload, usePortal } = buildWorkOrderInsert(
+      { ...input, needed_by_date: neededBy.date },
+      membership.org_id,
+    )
 
     const { data: wo, error } = await supabase
       .from('work_orders')
@@ -283,7 +293,12 @@ export async function createWorkOrder(
       assignedCrewMemberId: input.assigned_crew_member_id,
     })
 
-    const warning = await resolveCreationWarning(supabase, membership.org_id, input, usePortal)
+    // The RESOLVED needed-by, not the raw form value: the crew-time-off check
+    // reads that date, and a PM who left it blank still gets a warning when the
+    // derived next-check-in date falls on their assignee's day off.
+    const warning = await resolveCreationWarning(
+      supabase, membership.org_id, { ...input, needed_by_date: neededBy.date }, usePortal,
+    )
 
     await logAuditEvent({
       orgId:      membership.org_id,

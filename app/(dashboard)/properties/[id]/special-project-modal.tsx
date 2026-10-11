@@ -119,7 +119,7 @@ export function SpecialProjectModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="sp-date" className="label">Needed by</label>
-            <Input id="sp-date" name="scheduled_date" type="date" />
+            <Input id="sp-date" name="needed_by_date" type="date" />
           </div>
           <div>
             <label htmlFor="sp-priority" className="label">Priority</label>

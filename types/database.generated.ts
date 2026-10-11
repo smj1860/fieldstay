@@ -6677,6 +6677,7 @@ export type Database = {
           id: string
           invoice_reference: string | null
           lockbox_code: string | null
+          needed_by_date: string | null
           nte_amount: number | null
           org_id: string
           parking_notes: string | null
@@ -6709,6 +6710,8 @@ export type Database = {
           vendor_id: string | null
           vendor_rating: number | null
           vendor_rating_notes: string | null
+          vendor_scheduled_at: string | null
+          vendor_scheduled_window: string | null
           wo_number: string | null
         }
         Insert: {
@@ -6732,6 +6735,7 @@ export type Database = {
           id?: string
           invoice_reference?: string | null
           lockbox_code?: string | null
+          needed_by_date?: string | null
           nte_amount?: number | null
           org_id: string
           parking_notes?: string | null
@@ -6764,6 +6768,8 @@ export type Database = {
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
+          vendor_scheduled_at?: string | null
+          vendor_scheduled_window?: string | null
           wo_number?: string | null
         }
         Update: {
@@ -6787,6 +6793,7 @@ export type Database = {
           id?: string
           invoice_reference?: string | null
           lockbox_code?: string | null
+          needed_by_date?: string | null
           nte_amount?: number | null
           org_id?: string
           parking_notes?: string | null
@@ -6819,6 +6826,8 @@ export type Database = {
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
+          vendor_scheduled_at?: string | null
+          vendor_scheduled_window?: string | null
           wo_number?: string | null
         }
         Relationships: [

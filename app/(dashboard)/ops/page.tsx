@@ -115,10 +115,15 @@ export default async function OpsSnapshotPage() {
 
     supabase
       .from('work_orders')
-      .select('id, title, property_id, priority, status, scheduled_date')
+      .select('id, title, property_id, priority, status, needed_by_date, vendor_scheduled_at')
       .eq('org_id', membership.org_id)
       .in('status', ['pending', 'assigned', 'in_progress'])
-      .order('scheduled_date', { ascending: true })
+      // The vendor's confirmed appointment is the stronger signal, so it leads;
+      // needed_by_date breaks the tie for work nobody has committed to yet.
+      // PostgREST cannot order by a COALESCE, so this is two ordered keys
+      // rather than one expression.
+      .order('vendor_scheduled_at', { ascending: true, nullsFirst: false })
+      .order('needed_by_date', { ascending: true, nullsFirst: false })
       .limit(8),
 
     // The below-par KPI used to be .limit(200) with no .order(), filtered in

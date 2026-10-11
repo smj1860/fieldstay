@@ -11,6 +11,7 @@ import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { useCrewT, formatActiveAssignments } from '@/lib/crew/i18n'
 import { distanceMiles }                 from '@/lib/geocoding'
+import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 import { Dialog }                        from '@/components/ui/Dialog'
 import { LanguageToggle }                from './_components/language-toggle'
@@ -146,6 +147,10 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
   const translate = useCrewT()
   const fullAddress = [property?.address, property?.city, property?.state]
     .filter(Boolean).join(', ')
+  // A vendor-confirmed appointment outranks the PM's deadline, and the two get
+  // different labels — "Scheduled" on an unconfirmed date would assert a
+  // commitment nobody made.
+  const displayDate = workOrderDisplayDate(wo)
 
   return (
     <Link
@@ -179,9 +184,10 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
         )}>
           {crewStatusLabel(wo.status, translate)}
         </span>
-        {wo.scheduled_date && (
+        {displayDate && (
           <span className="text-xs text-muted-themed">
-            {translate('scheduledPrefix')} {new Date(wo.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {translate(displayDate.kind === 'appointment' ? 'scheduledPrefix' : 'neededByPrefix')}{' '}
+            {new Date(displayDate.value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </span>
         )}
       </div>
@@ -326,14 +332,18 @@ export default function CrewDashboardPage() {
     (t) => new Date(t.checkout_datetime).toDateString() !== todayStr
   )
 
-  // Work orders split by scheduled_date: today (or overdue) vs upcoming.
-  // WOs with no scheduled date land at the bottom of the Upcoming column.
-  const todayWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
-    (wo) => wo.scheduled_date != null && wo.scheduled_date <= today
-  )
-  const upcomingWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
-    (wo) => wo.scheduled_date == null || wo.scheduled_date > today
-  )
+  // Work orders split on whichever date they carry — the vendor's confirmed
+  // appointment if there is one, else the PM's deadline (workOrderDisplayDay).
+  // An undated WO lands at the bottom of Upcoming rather than reading as
+  // overdue, which is what a `null <= today` comparison would have made it.
+  const todayWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter((wo) => {
+    const day = workOrderDisplayDay(wo)
+    return day !== null && day <= today
+  })
+  const upcomingWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter((wo) => {
+    const day = workOrderDisplayDay(wo)
+    return day === null || day > today
+  })
 
   const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
 

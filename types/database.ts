@@ -57,6 +57,7 @@ export type ParSmartGroup       = 'bathroom_essential' | 'bedroom_essential' | '
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type VendorScheduledWindow = 'morning' | 'afternoon' | 'evening' | 'all_day' | 'exact'
 export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection'
 // Inspections (docs/INSPECTIONS_SPEC.md phase 1).
 export type InspectionResult       = 'pass' | 'fail' | 'na'
@@ -1059,8 +1060,29 @@ export interface WorkOrder {
   source_inspection_id:        string | null
   source_turnover_id:          string | null
   asset_id:                    string | null
+  /**
+   * DEPRECATED 2026-10-11 (20261011120000). Overloaded: read as a PM deadline by
+   * the vendor on-time metric and as a vendor appointment by the calendar, the
+   * crew today/upcoming split and the dispatch email. Use `needed_by_date` or
+   * `vendor_scheduled_at`. Retained rather than renamed because PostgREST select
+   * strings are untyped literals — see the migration's header.
+   */
   scheduled_date:              string | null
+  /** DEPRECATED 2026-10-11. Use `vendor_scheduled_at` + `vendor_scheduled_window`. */
   scheduled_time:              string | null
+  /**
+   * The date the PM needs the work completed BY — a deadline, never an
+   * appointment. Defaults at create time to the property's next booking check-in.
+   * What vendor on-time % measures against.
+   */
+  needed_by_date:              string | null
+  /**
+   * When the vendor is actually coming. The vendor writes it on accept; a PM may
+   * override. Null means no appointment is confirmed yet.
+   */
+  vendor_scheduled_at:         string | null
+  /** Qualifies `vendor_scheduled_at`. Trades commit to a window, not a minute. */
+  vendor_scheduled_window:     VendorScheduledWindow | null
   completed_date:              string | null
   estimated_cost:              number | null
   nte_amount:                  number | null

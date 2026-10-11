@@ -50,7 +50,7 @@ interface CrewTravelSummary {
   minutes:   number
   available: boolean
 }
-interface WorkOrder   { id: string; title: string; property_id: string; priority: string; status: string; scheduled_date: string | null }
+interface WorkOrder   { id: string; title: string; property_id: string; priority: string; status: string; needed_by_date: string | null; vendor_scheduled_at: string | null }
 interface LowStockItem { id: string; name: string; property_id: string; current_quantity: number; par_level: number }
 
 interface KPIs {

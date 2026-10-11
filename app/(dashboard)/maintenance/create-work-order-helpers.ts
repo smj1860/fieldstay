@@ -32,8 +32,11 @@ export interface WorkOrderFormInput {
   category:                WoCategory | null
   vendor_id:               string | null
   assigned_crew_member_id: string | null
-  scheduled_date:          string | null
-  scheduled_time:          string | null
+  /**
+   * The PM's deadline. Null here means "derive it" — resolveNeededByDate()
+   * fills it from the property's next booking check-in before the insert.
+   */
+  needed_by_date:          string | null
   estimated_cost:          number | null
   nte_amount:              number | null
   asset_id:                string | null
@@ -347,8 +350,11 @@ export function buildWorkOrderInsert(input: WorkOrderFormInput, orgId: string) {
       priority:                input.priority,
       status:                  resolveWorkOrderStatus(input.request_quotes, input.vendor_id),
       source:                  'manual' as const,
-      scheduled_date:          input.scheduled_date,
-      scheduled_time:          input.scheduled_time,
+      // needed_by_date, not scheduled_date: the deprecated column conflated a
+      // PM deadline with a vendor appointment, and this form has only ever
+      // asked for the former. vendor_scheduled_at stays null until a vendor
+      // accepts and names a date (spec Phase B2).
+      needed_by_date:          input.needed_by_date,
       estimated_cost:          input.estimated_cost,
       nte_amount:              input.nte_amount,
       portal_enabled:          usePortal,

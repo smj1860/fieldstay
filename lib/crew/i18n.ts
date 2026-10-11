@@ -57,6 +57,11 @@ const CREW_DICT = {
   statusInProgress: { en: 'In Progress', es: 'En progreso' },
   woBadge:          { en: 'WO', es: 'OT' },
   scheduledPrefix:  { en: 'Scheduled', es: 'Programado' },
+  // Since the work-order date split (20261011120000) a crew work order can
+  // carry a vendor's confirmed appointment OR the PM's deadline, and the two
+  // mean different things to whoever reads the card. "Scheduled Oct 14" on a
+  // date nobody has confirmed reads as a commitment that does not exist.
+  neededByPrefix:   { en: 'Needed by', es: 'Para el' },
   propertyFallback: { en: 'Property', es: 'Propiedad' },
 
   assetsBack:                 { en: 'Back', es: 'Atrás' },

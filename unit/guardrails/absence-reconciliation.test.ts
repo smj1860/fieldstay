@@ -86,7 +86,7 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: "The second pass over the same candidates, after the retain guard has pulled back anything with unsent work. Inherits the protection above — it is a filter over a list already derived from a fetch that fails loud — and adds one of its own: an empty result here returns before any bulkDelete, so the degenerate case is a no-op rather than a mass removal. This is the line that actually deletes the turnover, its checklist instances and its items together, which is why the guard sits between the two rather than after.",
   },
-  'lib/dexie/sync/work-orders.ts:177': {
+  'lib/dexie/sync/work-orders.ts:200': {
     protection: 'fetch-fails-loud',
     why: 'Drops cached work orders outside the crew member\'s current set. Both deltaPull and idSnapshot return NULL on failure and resolveDeltaPull propagates it, so [] means genuinely none assigned.',
   },
@@ -386,7 +386,7 @@ describe('guardrail: reconciling by absence must survive an empty fetch', () => 
     // permanently-passing no-op.
     const known = findReconcilers()
     expect(known).toContain('lib/inngest/functions/hospitable/teammate-sync-handler.ts:156')
-    expect(known).toContain('lib/dexie/sync/work-orders.ts:177')   // accumulator shape
+    expect(known).toContain('lib/dexie/sync/work-orders.ts:200')   // accumulator shape
     expect(known.length).toBeGreaterThanOrEqual(5)
 
     // The clear-and-replace scan needs its own, for the same reason: it was

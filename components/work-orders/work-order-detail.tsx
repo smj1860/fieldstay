@@ -14,6 +14,7 @@ import { CancelConfirmDialog } from './CancelConfirmDialog'
 import { VendorDispatchDialog } from './VendorDispatchDialog'
 import { VendorRatingPanel } from './VendorRatingPanel'
 import { getWorkOrderPhotoUrls } from '@/app/(dashboard)/maintenance/actions'
+import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -42,7 +43,9 @@ export interface WorkOrderDetailData {
   priority:                PriorityLevel
   status:                  WoStatus
   source:                  string
-  scheduled_date:          string | null
+  needed_by_date:          string | null
+  vendor_scheduled_at:     string | null
+  vendor_scheduled_window: string | null
   completed_date:          string | null
   estimated_cost:          number | null
   nte_amount:              number | null
@@ -328,6 +331,8 @@ function DocumentHeader({
 // ── Property / vendor / schedule grid ─────────────────────────
 
 function InfoGrid({ wo }: Readonly<{ wo: WorkOrderDetailData }>) {
+  const detailDate = workOrderDisplayDate(wo)
+
   return (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
@@ -394,10 +399,17 @@ function InfoGrid({ wo }: Readonly<{ wo: WorkOrderDetailData }>) {
                 <Calendar className="w-4 h-4 flex-shrink-0"
                           style={{ color: 'var(--accent-gold)' }} />
                 <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  {wo.scheduled_date ? (
-                    <>Due: <span className="font-medium">{fmtDate(wo.scheduled_date)}</span></>
+                  {/* Two distinct facts since the date split: a vendor who has
+                      confirmed an appointment, and a PM deadline nobody has
+                      committed to yet. Labelled separately so the panel never
+                      shows an unconfirmed date as a scheduled visit. */}
+                  {detailDate ? (
+                    <>
+                      {detailDate.kind === 'appointment' ? 'Vendor scheduled: ' : 'Needed by: '}
+                      <span className="font-medium">{fmtDate(detailDate.value)}</span>
+                    </>
                   ) : (
-                    <span style={{ color: 'var(--text-muted)' }}>No due date set</span>
+                    <span style={{ color: 'var(--text-muted)' }}>No date set</span>
                   )}
                 </p>
               </div>
