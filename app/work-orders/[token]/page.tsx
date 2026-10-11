@@ -40,6 +40,7 @@ export default async function VendorPortalPage({
       vendorChargesEnabled={data.vendorChargesEnabled}
       principalKind={data.principal.kind}
       technicianGrants={data.technicianGrants}
+      access={data.access}
     />
   )
 }

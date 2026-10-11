@@ -45,6 +45,14 @@ export interface WorkOrderFormInput {
    * (vendor_scheduled_window) covers the case.
    */
   scheduled_time:          string | null
+  /**
+   * Per-job entry notes, shown to the vendor only after they accept. NOT the
+   * door code: that lives Vault-encrypted on the property and is read through
+   * read_property_door_code, so there is one code rather than two to keep in
+   * step. See lib/work-orders/access.ts.
+   */
+  access_notes:            string | null
+  parking_notes:           string | null
   estimated_cost:          number | null
   nte_amount:              number | null
   asset_id:                string | null
@@ -364,6 +372,8 @@ export function buildWorkOrderInsert(input: WorkOrderFormInput, orgId: string) {
       // accepts and names a date (spec Phase B2).
       needed_by_date:          input.needed_by_date,
       scheduled_time:          input.scheduled_time,
+      access_notes:            input.access_notes,
+      parking_notes:           input.parking_notes,
       estimated_cost:          input.estimated_cost,
       nte_amount:              input.nte_amount,
       portal_enabled:          usePortal,

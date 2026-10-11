@@ -444,6 +444,47 @@ export function CreateWorkOrderModal({
                 </div>
               </div>
 
+              {/* Getting in. NOT a place for the door code: that lives on the
+                  property, Vault-encrypted, and is revealed in the vendor
+                  portal once they accept. These are the per-job notes that go
+                  with it. */}
+              <div>
+                <label htmlFor="wo-access-notes" className="label">
+                  Access notes
+                  <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Optional, shown after the vendor accepts
+                  </span>
+                </label>
+                <textarea
+                  id="wo-access-notes"
+                  name="access_notes"
+                  rows={2}
+                  maxLength={500}
+                  className="input"
+                  placeholder="Lockbox is on the back gate, not the front door"
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  The property door code is sent automatically. Set it once under
+                  the property&apos;s details.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="wo-parking-notes" className="label">
+                  Parking
+                  <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Optional
+                  </span>
+                </label>
+                <Input
+                  id="wo-parking-notes"
+                  name="parking_notes"
+                  type="text"
+                  maxLength={200}
+                  placeholder="Use the driveway, street parking is permit only"
+                />
+              </div>
+
               {/* Assignment mode */}
               <div>
                 {/* Labels a group of mode buttons, not a single control. */}

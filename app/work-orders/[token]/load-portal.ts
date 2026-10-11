@@ -9,6 +9,7 @@ import {
   type PortalPrincipal,
 } from '@/lib/work-orders/portal-token'
 import { listTechnicianGrants, touchGrant } from '@/lib/work-orders/tech-grants'
+import { revealAccessForPortal, type AccessReveal } from '@/lib/work-orders/access'
 import type { VendorProgress } from '@/lib/work-orders/vendor-progress'
 import type { GrantRow } from './vendor-response-panels'
 
@@ -51,6 +52,15 @@ export interface PortalPageData {
   vendorConnectToken:   string
   vendorChargesEnabled: boolean
   technicianGrants:     GrantRow[]
+  /**
+   * How to get in, or why it is not shown yet.
+   *
+   * Resolved HERE rather than in the portal, because the gate has to be
+   * server-side: a component that renders the code behind a condition still
+   * receives it in the serialised payload, where it is readable from the page
+   * source. Unaccepted work orders never carry a code into the render at all.
+   */
+  access:               AccessReveal
 }
 
 /**
@@ -105,6 +115,7 @@ export async function loadPortalPage(token: string): Promise<PortalLoad> {
     .from('work_orders')
     .select(`
       asset_id, description, estimated_cost, priority,
+      access_notes, parking_notes,
       properties ( name, address, city, state, zip ),
       vendors ( stripe_connect_token, stripe_connect_charges_enabled )
     `)
@@ -126,6 +137,20 @@ export async function loadPortalPage(token: string): Promise<PortalLoad> {
   if (principal.kind === 'technician' && principal.grantId) {
     await touchGrant(supabase, principal.grantId, workOrder.org_id)
   }
+
+  // Gated on acceptance, and the RPC is not called until it opens.
+  const access = await revealAccessForPortal(
+    supabase,
+    {
+      workOrderId:      workOrder.id,
+      orgId:            workOrder.org_id,
+      propertyId:       workOrder.property_id,
+      vendorAcceptedAt: workOrder.vendor_accepted_at,
+      accessNotes:      extras.access_notes ?? null,
+      parkingNotes:     extras.parking_notes ?? null,
+    },
+    principal,
+  )
 
   // Vendor only. A technician must not be able to enumerate the other people
   // on the job, and `listTechnicianGrants` is what the panel renders from.
@@ -161,6 +186,7 @@ export async function loadPortalPage(token: string): Promise<PortalLoad> {
     vendorConnectToken:   vendor?.stripe_connect_token ?? '',
     vendorChargesEnabled: vendor?.stripe_connect_charges_enabled ?? false,
     technicianGrants,
+    access,
     },
   }
 }

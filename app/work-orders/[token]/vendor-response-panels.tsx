@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  CalendarCheck, XCircle, Clock, Send, Copy, Check, Trash2, Loader2, AlertTriangle,
+  CalendarCheck, XCircle, Clock, Send, Copy, Check, Trash2, Loader2, AlertTriangle, KeyRound,
 } from 'lucide-react'
 import {
   VENDOR_PROGRESS_DROPDOWN,
@@ -15,6 +15,18 @@ import {
   type VendorDeclineReason,
 } from '@/lib/work-orders/vendor-progress'
 import type { VendorScheduledWindow } from '@/types/database'
+
+/**
+ * The portal's view of the access gate.
+ *
+ * Structurally identical to `AccessReveal` in `lib/work-orders/access.ts`, but
+ * declared here rather than imported: that module is `'use server'`-only and
+ * importing it into a client component would pull the Supabase client and the
+ * audit logger across the boundary.
+ */
+export type AccessRevealView =
+  | { revealed: true;  details: { doorCode: string | null; accessNotes: string | null; parkingNotes: string | null } }
+  | { revealed: false; reason: 'not_accepted' | 'nothing_on_file' }
 
 /**
  * The vendor's answer to a dispatch, their progress while the job runs, and
@@ -403,6 +415,85 @@ export function ProgressPanel({
           ? <><Loader2 style={{ width: 16, height: 16 }} /> Sending</>
           : <><Clock style={{ width: 16, height: 16 }} /> Update status</>}
       </button>
+    </div>
+  )
+}
+
+// ── Getting in ──────────────────────────────────────────────────────────────
+
+/**
+ * How to get into the property, once this vendor has accepted the job.
+ *
+ * The gate is upstream in `lib/work-orders/access.ts` and the code is simply
+ * absent from this component's props until it opens, so there is nothing here
+ * to defeat by reading the page source.
+ *
+ * Before acceptance this says so rather than rendering nothing: a vendor
+ * deciding whether to take a job needs to know the access details exist and
+ * when they arrive, and silence reads as "there are none".
+ */
+export function AccessPanel({ access }: Readonly<{ access: AccessRevealView }>) {
+  if (!access.revealed) {
+    return (
+      <div style={sectionStyle('plain')}>
+        <p style={{
+          fontSize: 13, color: PALETTE.textMuted, lineHeight: 1.55, margin: 0,
+          display: 'flex', alignItems: 'flex-start', gap: 8,
+        }}>
+          <KeyRound style={{ width: 15, height: 15, flexShrink: 0, marginTop: 2 }} />
+          {access.reason === 'not_accepted'
+            ? 'Entry details for this property appear here once you accept the job.'
+            : 'The property manager has not recorded entry details for this property. Contact them before you go.'}
+        </p>
+      </div>
+    )
+  }
+
+  const { doorCode, accessNotes, parkingNotes } = access.details
+
+  return (
+    <div style={sectionStyle('plain')}>
+      <p style={{
+        fontSize: 13, fontWeight: 700, color: PALETTE.text, margin: '0 0 10px',
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        <KeyRound style={{ width: 15, height: 15 }} /> Getting in
+      </p>
+
+      {doorCode && (
+        <div style={{
+          backgroundColor: PALETTE.white, border: `1px solid ${PALETTE.border}`,
+          borderRadius: 8, padding: '12px 14px', marginBottom: accessNotes || parkingNotes ? 10 : 0,
+        }}>
+          <p style={{
+            fontSize: 10, fontWeight: 600, color: PALETTE.textFaint,
+            textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px',
+          }}>
+            Door code
+          </p>
+          {/* Monospace and spaced: this gets read off a screen while standing
+              at a keypad, often in sunlight, so 0 and O have to differ. */}
+          <p style={{
+            fontSize: 22, fontWeight: 700, color: PALETTE.ink, margin: 0,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            letterSpacing: '0.12em',
+          }}>
+            {doorCode}
+          </p>
+        </div>
+      )}
+
+      {accessNotes && (
+        <p style={{ fontSize: 13, color: PALETTE.text, lineHeight: 1.55, margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>
+          {accessNotes}
+        </p>
+      )}
+
+      {parkingNotes && (
+        <p style={{ fontSize: 12, color: PALETTE.textMuted, lineHeight: 1.55, margin: 0, whiteSpace: 'pre-wrap' }}>
+          Parking: {parkingNotes}
+        </p>
+      )}
     </div>
   )
 }

@@ -21,7 +21,9 @@ import {
   AcceptDeclinePanel,
   ProgressPanel,
   TechnicianPanel,
+  AccessPanel,
   type GrantRow,
+  type AccessRevealView,
 } from './vendor-response-panels'
 import {
   queueVendorPhotoUpload,
@@ -452,6 +454,7 @@ export function VendorPortal({
   vendorChargesEnabled,
   principalKind = 'vendor',
   technicianGrants = [],
+  access = { revealed: false, reason: 'not_accepted' },
 }: {
   token:                string
   workOrder:            WorkOrderInfo
@@ -467,6 +470,12 @@ export function VendorPortal({
   principalKind?:       'vendor' | 'technician'
   /** The live technician links on this work order. Vendor view only. */
   technicianGrants?:    GrantRow[]
+  /**
+   * How to get in, resolved server-side. The door code is simply absent from
+   * this prop until the vendor has accepted, so the gate cannot be defeated by
+   * reading the page source.
+   */
+  access?:              AccessRevealView
 }) {
   const [notes,       setNotes]       = useState('')
   const [technicianName, setTechnicianName] = useState('')
@@ -796,6 +805,8 @@ export function VendorPortal({
           nteAmount={workOrder.nte_amount}
         />
       )}
+
+      <AccessPanel access={access} />
 
       {/* Vendor only: a forwarded link must not be able to mint further ones. */}
       {principalKind === 'vendor' && (

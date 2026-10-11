@@ -179,6 +179,8 @@ function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
     assigned_crew_member_id: formText(formData, 'assigned_crew_member_id'),
     needed_by_date:          formText(formData, 'needed_by_date'),
     scheduled_time:          formText(formData, 'scheduled_time'),
+    access_notes:            formText(formData, 'access_notes'),
+    parking_notes:           formText(formData, 'parking_notes'),
     estimated_cost:          formNumber(formData, 'estimated_cost'),
     nte_amount:              formNumber(formData, 'nte_amount'),
     asset_id:                formText(formData, 'asset_id'),

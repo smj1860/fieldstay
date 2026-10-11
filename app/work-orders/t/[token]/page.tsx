@@ -71,6 +71,7 @@ export default async function TechnicianWorkOrderPage({
       vendorChargesEnabled={data.vendorChargesEnabled}
       principalKind="technician"
       technicianGrants={[]}
+      access={data.access}
     />
   )
 }
