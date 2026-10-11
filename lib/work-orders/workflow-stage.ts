@@ -85,7 +85,13 @@ export interface StageInput {
   status:              WoStatus
   vendor_id:           string | null
   assigned_crew_member_id?: string | null
-  vendor_progress?:    VendorProgress | string | null
+  /**
+   * Not `| string`: that arm widened the union back to plain string and lost
+   * every bit of checking the eleven literals buy. The column is a real
+   * Postgres enum, and `check-type-drift.mjs`'s ENUM_MAP is what keeps a new
+   * label from reaching here without the union moving with it.
+   */
+  vendor_progress?:    VendorProgress | null
   vendor_scheduled_at?: string | null
   /**
    * Whether a vendor has submitted a quote that nobody has approved or
@@ -106,7 +112,7 @@ export function workflowStage(wo: StageInput): WorkflowStage {
   // quote outranks whatever lifecycle state the work order is nominally in.
   if (wo.hasQuoteAwaitingApproval) return 'quote_approval'
 
-  const progress = wo.vendor_progress as VendorProgress | null | undefined
+  const progress = wo.vendor_progress
   if (progress && blocksOnPm(progress)) return 'vendor_blocked'
 
   if (wo.status === 'quote_requested') return 'awaiting_quote'

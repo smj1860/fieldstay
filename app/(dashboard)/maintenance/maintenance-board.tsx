@@ -21,7 +21,7 @@ import {
   acceptVendorSuggestion, dismissVendorSuggestion,
   acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor, VendorScheduledWindow, VendorProgress } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
@@ -40,7 +40,6 @@ import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
-import type { VendorScheduledWindow } from '@/types/database'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -57,6 +56,15 @@ interface WorkOrderRow {
   needed_by_date: string | null
   vendor_scheduled_at: string | null
   vendor_scheduled_window: VendorScheduledWindow | null
+  // The vendor-written progress axis. Without it every row falls through to
+  // the status-only branches of the stage ladder and the board can never show
+  // vendor_blocked, scheduled or in_progress, which is most of what the
+  // grouping exists to surface. Declared as the union rather than narrowed at
+  // the boundary like vendor_scheduled_window above, because this one IS a
+  // real Postgres enum: the column cannot hold a label outside the type, and
+  // check-type-drift.mjs now fails if a migration adds one without the TS
+  // union moving with it.
+  vendor_progress: VendorProgress | null
   completed_date: string | null
   estimated_cost: number | null
   nte_amount: number | null
@@ -134,6 +142,7 @@ function cachedWorkOrderToRow(
     needed_by_date:            cached.needed_by_date ?? null,
     vendor_scheduled_at:       cached.vendor_scheduled_at ?? null,
     vendor_scheduled_window:   cached.vendor_scheduled_window ?? null,
+    vendor_progress:           cached.vendor_progress ?? null,
     completed_date:            cached.completed_date ?? null,
     estimated_cost:            cached.estimated_cost ?? null,
     nte_amount:                cached.nte_amount ?? null,

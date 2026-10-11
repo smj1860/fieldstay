@@ -108,7 +108,7 @@ export default async function MaintenancePage() {
       .select(`
         id, property_id, vendor_id, assigned_crew_member_id,
         wo_number, title, description, category, priority, status, source,
-        needed_by_date, vendor_scheduled_at, vendor_scheduled_window, completed_date,
+        needed_by_date, vendor_scheduled_at, vendor_scheduled_window, vendor_progress, completed_date,
         estimated_cost, nte_amount, actual_cost,
         access_notes, completion_notes, completed_by_name, invoice_reference,
         portal_enabled, completion_token,
