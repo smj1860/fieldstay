@@ -120,7 +120,8 @@ async function insertMaintenanceWorkOrder(
       status:             'pending',
       source:             'maintenance_schedule',
       source_schedule_id: schedule.id,
-      scheduled_date:     schedule.next_due_date,
+      // A deadline, not an appointment: nothing has been booked with anyone.
+      needed_by_date:     schedule.next_due_date,
       estimated_cost:     schedule.estimated_cost,
       portal_enabled:     vendor?.portal_enabled ?? false,
     })
@@ -160,7 +161,7 @@ export async function createMaintenanceWorkOrder(
     .from('work_orders')
     .select('id')
     .eq('source_schedule_id', schedule.id)
-    .eq('scheduled_date', schedule.next_due_date!)
+    .eq('needed_by_date', schedule.next_due_date!)
     .eq('source', 'maintenance_schedule')
     .maybeSingle()
 
@@ -302,20 +303,20 @@ export async function loadExistingDueDatePairs(
 ): Promise<Set<string>> {
   if (!schedules.length) return new Set()
 
-  const rows = await fetchAllRows<{ source_schedule_id: string; scheduled_date: string }>(
+  const rows = await fetchAllRows<{ source_schedule_id: string; needed_by_date: string }>(
     (from, to) => supabase
       .from('work_orders')
-      .select('source_schedule_id, scheduled_date')
+      .select('source_schedule_id, needed_by_date')
       .eq('org_id', orgId)
       .eq('source', 'maintenance_schedule')
       .in('source_schedule_id', schedules.map((s) => s.id))
-      .in('scheduled_date',     Array.from(new Set(schedules.map((s) => s.next_due_date!))))
+      .in('needed_by_date',     Array.from(new Set(schedules.map((s) => s.next_due_date!))))
       .order('id', { ascending: true })
       .range(from, to),
     { label: 'work_orders(overdue-existing)' },
   )
 
-  return new Set(rows.map((r) => dueKey(r.source_schedule_id, r.scheduled_date)))
+  return new Set(rows.map((r) => dueKey(r.source_schedule_id, r.needed_by_date)))
 }
 
 /**
@@ -389,7 +390,7 @@ function overdueWorkOrderRow(schedule: OverdueScheduleRow, daysLate: number, due
     status:             'pending' as const,
     source:             'maintenance_schedule' as const,
     source_schedule_id: schedule.id,
-    scheduled_date:     schedule.next_due_date,
+    needed_by_date:     schedule.next_due_date,
     estimated_cost:     schedule.estimated_cost,
     portal_enabled:     false,
   }

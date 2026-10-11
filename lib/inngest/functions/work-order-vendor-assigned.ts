@@ -30,7 +30,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         supabase
           .from('work_orders')
           .select(`
-            id, wo_number, title, description, nte_amount, scheduled_date,
+            id, wo_number, title, description, nte_amount, needed_by_date,
             scheduled_time, portal_enabled,
             status, org_id, property_id, vendor_id, asset_id
           `)
@@ -267,13 +267,16 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         const e164 = normalizePhoneToE164(vendorPhone!)
         if (!e164) return { skipped: true, reason: 'invalid-phone' }
 
+        // needed_by_date: at dispatch nobody has accepted, so the only time
+        // fact available is the PM's hard limit (scheduled_time, deprecated
+        // but still the one timezone-safe representation) against the deadline.
         let vendorWindow: string | undefined
-        if (wo.scheduled_time && wo.scheduled_date) {
+        if (wo.scheduled_time && wo.needed_by_date) {
           const { formatPropertyTime } = await import('@/lib/utils/timezone')
           const propTz = property?.timezone ?? 'America/New_York'
           vendorWindow = formatPropertyTime(
             wo.scheduled_time.slice(0, 5),
-            wo.scheduled_date,
+            wo.needed_by_date,
             propTz,
             'long'
           )

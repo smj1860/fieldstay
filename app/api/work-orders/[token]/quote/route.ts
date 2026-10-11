@@ -152,7 +152,7 @@ export async function GET(
     .select(`
       id, status, quote_token_expires_at,
       work_orders (
-        id, title, description, scheduled_date, estimated_cost,
+        id, title, description, needed_by_date, estimated_cost,
         properties (name, city, state)
       )
     `)

@@ -178,6 +178,7 @@ function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
     vendor_id:               formText(formData, 'vendor_id'),
     assigned_crew_member_id: formText(formData, 'assigned_crew_member_id'),
     needed_by_date:          formText(formData, 'needed_by_date'),
+    scheduled_time:          formText(formData, 'scheduled_time'),
     estimated_cost:          formNumber(formData, 'estimated_cost'),
     nte_amount:              formNumber(formData, 'nte_amount'),
     asset_id:                formText(formData, 'asset_id'),
@@ -1041,7 +1042,7 @@ export async function createWorkOrderFromSchedule(
       .from('work_orders')
       .select('id')
       .eq('source_schedule_id', scheduleId)
-      .eq('scheduled_date', scheduledDate)
+      .eq('needed_by_date', scheduledDate)
       .not('status', 'in', '("completed","cancelled")')
       .maybeSingle()
 
@@ -1082,7 +1083,11 @@ export async function createWorkOrderFromSchedule(
         status:             WoStatusSchema.parse(vendorId ? 'assigned' : 'pending'),
         source:             'maintenance_schedule',
         source_schedule_id: schedule.id,
-        scheduled_date:     scheduledDate,
+        // The schedule's due date is a DEADLINE, so needed_by_date. Written
+        // together with the idempotency read below, which keys on the same
+        // column: splitting them would break the dedupe and have the cron
+        // create a duplicate work order every run.
+        needed_by_date:     scheduledDate,
         estimated_cost:     schedule.estimated_cost,
         portal_enabled:     !!vendorId,
         completion_token:   vendorId ? completion_token : null,
@@ -2357,7 +2362,7 @@ export async function fetchArchivedWorkOrders() {
       .select(`
         id, property_id, vendor_id, assigned_crew_member_id,
         wo_number, title, description, category, priority, status, source,
-        scheduled_date, completed_date,
+        needed_by_date, vendor_scheduled_at, vendor_scheduled_window, completed_date,
         estimated_cost, nte_amount, actual_cost,
         access_notes, completion_notes, completed_by_name, invoice_reference,
         portal_enabled, completion_token,

@@ -589,7 +589,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     expect(inserts[0]!.args[0]).toHaveLength(3)
     expect(inserts[0]!.args[0]).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ source_schedule_id: 'sched_a', priority: 'urgent', status: 'pending', scheduled_date: '2026-07-10' }),
+        expect.objectContaining({ source_schedule_id: 'sched_a', priority: 'urgent', status: 'pending', needed_by_date: '2026-07-10' }),
       ]),
     )
     expect(logAuditEvents).toHaveBeenCalledWith(
@@ -611,7 +611,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       ],
       work_orders: [
         { data: [], error: null },   // no open WOs (sched_a's is completed)
-        { data: [{ source_schedule_id: 'sched_a', scheduled_date: '2026-07-10' }], error: null },
+        { data: [{ source_schedule_id: 'sched_a', needed_by_date: '2026-07-10' }], error: null },
         { data: [{ id: 'wo_b', source_schedule_id: 'sched_b' }], error: null },
       ],
       ...baseTables(),
@@ -648,7 +648,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
         { data: [], error: null },                                  // no open WOs
         { data: [], error: null },                                  // pre-check: nothing exists yet
         { data: null, error: { code: '23505', message: 'duplicate key' } },  // sched_a lost the race
-        { data: [{ source_schedule_id: 'sched_a', scheduled_date: '2026-07-10' }], error: null },  // re-read
+        { data: [{ source_schedule_id: 'sched_a', needed_by_date: '2026-07-10' }], error: null },  // re-read
         { data: [{ id: 'wo_b', source_schedule_id: 'sched_b' }], error: null },                    // survivor
       ],
       ...baseTables(),

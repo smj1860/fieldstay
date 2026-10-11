@@ -24,7 +24,7 @@ export default async function VendorPortalPage({
     .from('work_orders')
     .select(`
       id, org_id, asset_id, title, description, status, portal_enabled,
-      scheduled_date, estimated_cost, completion_token_expires_at,
+      needed_by_date, vendor_scheduled_at, estimated_cost, completion_token_expires_at,
       wo_number, category, priority, nte_amount,
       properties ( name, address, city, state, zip ),
       vendors (
@@ -64,7 +64,8 @@ export default async function VendorPortalPage({
         title:          workOrder.title,
         description:    workOrder.description ?? null,
         status:         workOrder.status as string,
-        scheduled_date: workOrder.scheduled_date ?? null,
+        needed_by_date:      workOrder.needed_by_date ?? null,
+        vendor_scheduled_at: workOrder.vendor_scheduled_at ?? null,
         estimated_cost: workOrder.estimated_cost ?? null,
         wo_number:      workOrder.wo_number ?? null,
         category:       workOrder.category ?? null,

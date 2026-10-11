@@ -66,7 +66,7 @@ export async function loadDispatchContext(
       id, title, description, wo_number, nte_amount,
       completion_token, asset_id,
       vendor_id,
-      scheduled_date, scheduled_time,
+      needed_by_date, vendor_scheduled_at, vendor_scheduled_window, scheduled_time,
       vendors ( name, email, phone ),
       properties ( name, address, timezone )
     `)
@@ -92,14 +92,20 @@ export async function loadDispatchContext(
   const vendor   = unwrapJoin(wo.vendors)
   const property = unwrapJoin(wo.properties)
 
-  // Build vendor window string for same-day flip dispatch
+  // Build vendor window string for same-day flip dispatch.
+  //
+  // needed_by_date, not vendor_scheduled_at: at DISPATCH time no vendor has
+  // accepted anything, so there is no appointment to render. What the PM may
+  // have set is a hard time limit (scheduled_time, deprecated but still the
+  // only timezone-safe representation until the vendor names their own window
+  // on accept), and the date it pairs with is the deadline.
   let vendorWindow: string | undefined
-  if (wo.scheduled_time && wo.scheduled_date) {
+  if (wo.scheduled_time && wo.needed_by_date) {
     const propTz = property?.timezone ?? 'America/New_York'
     const { formatPropertyTime } = await import('@/lib/utils/timezone')
     vendorWindow = formatPropertyTime(
       wo.scheduled_time.slice(0, 5),
-      wo.scheduled_date,
+      wo.needed_by_date,
       propTz,
       'long'
     )

@@ -194,6 +194,8 @@ function parseBody(body: unknown): ParsedBody {
       // such replay — a write that succeeds with a field missing, which is
       // the exact failure the upload-payload guardrail exists for.
       needed_by_date:          optionalId(r.needed_by_date) ?? optionalId(r.scheduled_date),
+      // Not captured by the offline create form, which has no time field.
+      scheduled_time:          null,
       estimated_cost:          optionalNumber(r.estimated_cost),
       nte_amount:              optionalNumber(r.nte_amount),
       asset_id:                optionalId(r.asset_id),

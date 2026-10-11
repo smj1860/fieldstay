@@ -18,6 +18,7 @@ import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/databa
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { STAY_LENGTH_MIN_BOOKINGS } from '@/lib/inventory/par-engine'
+import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
 
 const INVOICE_STATUSES = ['pending_payment', 'paid', 'cancelled'] as const
 
@@ -78,7 +79,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     // Last 10 WOs for this property (open + completed)
     supabase
       .from('work_orders')
-      .select('id, title, status, priority, scheduled_date, completed_date, actual_cost, estimated_cost, vendor_id, vendors(name)')
+      .select('id, title, status, priority, needed_by_date, vendor_scheduled_at, completed_date, actual_cost, estimated_cost, vendor_id, vendors(name)')
       .eq('property_id', property.id)
       .not('status', 'eq', 'cancelled')
       .order('created_at', { ascending: false })
@@ -370,7 +371,10 @@ export default async function PropertyDetailPage({ params }: Props) {
             <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">Open</p>
             <div className="space-y-2">
               {openWOs.map((wo) => {
-                const isOverdue = wo.scheduled_date && wo.scheduled_date < today && wo.status !== 'completed'
+                // Overdue is measured against the PM's DEADLINE, not the
+                // vendor's appointment: a vendor booked for next week is
+                // not late, but a job needed yesterday is.
+                const isOverdue = wo.needed_by_date && wo.needed_by_date < today && wo.status !== 'completed'
                 return (
                   <Link key={wo.id} href={`/maintenance/${wo.id}`}
                         className="flex items-center justify-between p-3 rounded-lg border border-themed hover:bg-raised-themed transition-colors">
@@ -381,8 +385,8 @@ export default async function PropertyDetailPage({ params }: Props) {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                       {isOverdue && <span className="text-xs font-medium" style={{ color: 'var(--accent-red)' }}>Overdue</span>}
-                      {wo.scheduled_date && !isOverdue && (
-                        <span className="text-xs text-muted-themed">{formatDate(wo.scheduled_date)}</span>
+                      {workOrderDisplayDate(wo) && !isOverdue && (
+                        <span className="text-xs text-muted-themed">{formatDate(workOrderDisplayDate(wo)!.value)}</span>
                       )}
                     </div>
                   </Link>

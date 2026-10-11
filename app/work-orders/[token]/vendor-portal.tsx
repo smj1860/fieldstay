@@ -15,6 +15,7 @@ import {
 import { getVendorWoDb } from '@/lib/dexie/vendorWoSchema'
 import type { VendorWoMutationRow, VendorPendingPhotoRow } from '@/lib/dexie/vendorWoSchema'
 import { getVendorPendingPhotoBlob } from '@/lib/dexie/vendorPhotoQueue'
+import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
 import {
   queueVendorPhotoUpload,
   retryVendorPhotoUpload,
@@ -27,7 +28,10 @@ interface WorkOrderInfo {
   title:          string
   description:    string | null
   status?:        string
-  scheduled_date: string | null
+  /** The PM's deadline. */
+  needed_by_date: string | null
+  /** The appointment, once this vendor has accepted and named a date. */
+  vendor_scheduled_at: string | null
   estimated_cost: number | null
   wo_number:      string | null
   category:       string | null
@@ -104,6 +108,35 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * The appointment this vendor confirmed, else the PM's deadline.
+ *
+ * Labelled separately, and that is the point: "Scheduled" on a date nobody has
+ * agreed to asserts a commitment that does not exist, which is the confusion
+ * the work-order date split exists to end. A date-only deadline is parsed at
+ * noon so a timezone west of UTC cannot render it as the previous day.
+ */
+function WODateLine({ workOrder }: Readonly<{ workOrder: WorkOrderInfo }>) {
+  const resolved = workOrderDisplayDate(workOrder)
+  if (!resolved) return null
+
+  const stamp = resolved.kind === 'appointment'
+    ? new Date(resolved.value)
+    : new Date(`${resolved.value}T12:00:00`)
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-accent-500">
+      <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+      <span>
+        {resolved.kind === 'appointment' ? 'You are booked for ' : 'Needed by '}
+        {stamp.toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        })}
+      </span>
+    </div>
+  )
+}
+
 function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: PropertyInfo | null }) {
   const categoryLabel  = workOrder.category ? (CATEGORY_LABELS[workOrder.category] ?? workOrder.category) : null
   const priorityStyle  = workOrder.priority ? (PRIORITY_STYLES[workOrder.priority] ?? PRIORITY_STYLES.low) : null
@@ -163,18 +196,7 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
           </div>
         )}
 
-        {/* Scheduled date */}
-        {workOrder.scheduled_date && (
-          <div className="flex items-center gap-2 text-xs text-accent-500">
-            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>
-              Scheduled:{' '}
-              {new Date(workOrder.scheduled_date + 'T12:00:00').toLocaleDateString('en-US', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-              })}
-            </span>
-          </div>
-        )}
+        <WODateLine workOrder={workOrder} />
 
         {/* NTE amount */}
         {workOrder.nte_amount != null && (

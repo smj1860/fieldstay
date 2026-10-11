@@ -248,7 +248,13 @@ export type FieldStayEvents = {
       work_order_id: string
       property_id: string
       org_id: string
-      scheduled_date: string
+      /**
+       * The PM's deadline, which is what "overdue" is measured against.
+       * Renamed from scheduled_date with the date split (20261011120000):
+       * the vendor's appointment is a different fact and being booked for
+       * next week does not make a vendor late.
+       */
+      needed_by_date: string
       days_overdue: number
     }
   }

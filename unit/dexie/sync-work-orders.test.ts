@@ -14,7 +14,7 @@ import type { DexieSupabaseClient } from '@/lib/dexie/sync/types'
 const WO1 = {
   id: 'wo1', org_id: 'org1', property_id: 'p1', assigned_crew_member_id: 'crew1',
   title: 'Fix faucet', description: null, status: 'assigned', priority: 'medium',
-  scheduled_date: null, wo_number: 'WO-001', created_at: '2026-07-20T00:00:00Z',
+  needed_by_date: null, wo_number: 'WO-001', created_at: '2026-07-20T00:00:00Z',
   updated_at: '2026-07-24T10:00:00.000Z',
 }
 

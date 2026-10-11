@@ -16,7 +16,7 @@ export default async function QuotePortalPage({ params }: Props) {
     .select(`
       id, status, quote_token_expires_at,
       work_orders (
-        id, title, description, scheduled_date, estimated_cost,
+        id, title, description, needed_by_date, estimated_cost,
         wo_number, category, priority, nte_amount,
         properties (name, address, city, state, zip)
       )
@@ -49,7 +49,10 @@ export default async function QuotePortalPage({ params }: Props) {
         id:             wo?.id ?? '',
         title:          wo?.title ?? '',
         description:    wo?.description ?? null,
-        scheduled_date: wo?.scheduled_date ?? null,
+        needed_by_date: wo?.needed_by_date ?? null,
+        // Always null on the quote surface: a vendor being asked to price a
+        // job has not been booked for it, so there is no appointment to show.
+        vendor_scheduled_at: null,
         estimated_cost: wo?.estimated_cost ?? null,
         wo_number:      (wo as { wo_number?: string | null } | null)?.wo_number ?? null,
         category:       (wo as { category?: string | null } | null)?.category ?? null,

@@ -374,7 +374,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   //
   // A silent failure here is permanent, not transient. next_due_date stays
   // put, so tomorrow the schedule looks due again, and the auto-create step's
-  // (source_schedule_id, scheduled_date) unique constraint rejects the
+  // (source_schedule_id, needed_by_date) unique constraint rejects the
   // duplicate as an expected race — so the schedule stops producing work
   // orders for this occurrence AND every future one, while the cron reports a
   // clean run every day.
@@ -464,7 +464,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
         // cover the aging and auto-WO passes.
         { data: [], error: null },
         { data: [], error: null },                    // aging scan — none
-        { data: [{ source_schedule_id: 'sched_1', scheduled_date: '2026-07-22' }], error: null }, // batched idempotency read finds one
+        { data: [{ source_schedule_id: 'sched_1', needed_by_date: '2026-07-22' }], error: null }, // batched idempotency read finds one
       ],
       maintenance_schedules: [
         {
@@ -515,7 +515,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
         // cover the aging and auto-WO passes.
         { data: [], error: null },
         { data: [], error: null },  // aging scan — none
-        { data: stuck.map((s) => ({ source_schedule_id: s.id, scheduled_date: '2026-05-01' })), error: null },
+        { data: stuck.map((s) => ({ source_schedule_id: s.id, needed_by_date: '2026-05-01' })), error: null },
       ],
       maintenance_schedules: [{ data: stuck, error: null }],
     })
@@ -547,7 +547,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
         // cover the aging and auto-WO passes.
         { data: [], error: null },
         { data: [], error: null },
-        { data: [{ source_schedule_id: 'sched_done', scheduled_date: '2026-07-22' }], error: null },
+        { data: [{ source_schedule_id: 'sched_done', needed_by_date: '2026-07-22' }], error: null },
         { data: { id: 'wo_new' }, error: null },
       ],
       maintenance_schedules: [{ data: schedules, error: null }],

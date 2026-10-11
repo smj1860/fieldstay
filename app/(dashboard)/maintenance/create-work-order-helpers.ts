@@ -37,6 +37,14 @@ export interface WorkOrderFormInput {
    * fills it from the property's next booking check-in before the insert.
    */
   needed_by_date:          string | null
+  /**
+   * The PM's optional HARD TIME LIMIT, for a same-day flip. Deprecated as a
+   * column but still live, and still the only timezone-safe representation of
+   * one: it is rendered against the property's own zone when the dispatch
+   * email and SMS are built. Retires once the vendor accept flow's own window
+   * (vendor_scheduled_window) covers the case.
+   */
+  scheduled_time:          string | null
   estimated_cost:          number | null
   nte_amount:              number | null
   asset_id:                string | null
@@ -355,6 +363,7 @@ export function buildWorkOrderInsert(input: WorkOrderFormInput, orgId: string) {
       // asked for the former. vendor_scheduled_at stays null until a vendor
       // accepts and names a date (spec Phase B2).
       needed_by_date:          input.needed_by_date,
+      scheduled_time:          input.scheduled_time,
       estimated_cost:          input.estimated_cost,
       nte_amount:              input.nte_amount,
       portal_enabled:          usePortal,

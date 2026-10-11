@@ -178,7 +178,7 @@ describe('handleWorkOrderCreated', () => {
         },
         error: null,
       },
-      work_orders: { data: { scheduled_date: null }, error: null },
+      work_orders: { data: { needed_by_date: null }, error: null },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(loadDispatchContext as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -213,7 +213,7 @@ describe('handleWorkOrderCreated', () => {
       },
       organization_members: { data: [], error: null },
       organizations:         { data: { name: 'Lakehouse Properties' }, error: null },
-      work_orders:           { data: { scheduled_date: null }, error: null },
+      work_orders:           { data: { needed_by_date: null }, error: null },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(loadDispatchContext as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -246,7 +246,7 @@ describe('handleWorkOrderCreated', () => {
 
   it('schedules and sends a work-order/overdue event when the WO is still open past the threshold', async () => {
     const supabase = makeSupabase({
-      work_orders: { data: { scheduled_date: '2026-07-01', status: 'assigned' }, error: null },
+      work_orders: { data: { needed_by_date: '2026-07-01', status: 'assigned' }, error: null },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     const step = makeStep()
@@ -268,7 +268,7 @@ describe('handleWorkOrderCreated', () => {
         work_order_id:  'wo_5',
         property_id:    'prop_1',
         org_id:         'org_1',
-        scheduled_date: '2026-07-01',
+        needed_by_date: '2026-07-01',
         days_overdue:   3,
       },
     })
@@ -276,7 +276,7 @@ describe('handleWorkOrderCreated', () => {
 
   it('does not schedule an overdue event when the WO is already completed by the check date', async () => {
     const supabase = makeSupabase({
-      work_orders: { data: { scheduled_date: '2026-07-01', status: 'completed' }, error: null },
+      work_orders: { data: { needed_by_date: '2026-07-01', status: 'completed' }, error: null },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     const step = makeStep()
@@ -372,7 +372,7 @@ describe('handleWorkOrderOverdue', () => {
     const supabase = makeSupabase({
       work_orders: {
         data: {
-          id: 'wo_1', title: 'Fix AC', status: 'assigned', scheduled_date: '2026-07-01',
+          id: 'wo_1', title: 'Fix AC', status: 'assigned', needed_by_date: '2026-07-01',
           vendors: [{ name: 'Ace HVAC' }], properties: [{ name: 'The Lakehouse' }],
         },
         error: null,
@@ -382,7 +382,7 @@ describe('handleWorkOrderOverdue', () => {
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
 
     await invokeHandler(handleWorkOrderOverdue, {
-      event: { data: { work_order_id: 'wo_1', org_id: 'org_1', property_id: 'prop_1', scheduled_date: '2026-07-01', days_overdue: 3 } },
+      event: { data: { work_order_id: 'wo_1', org_id: 'org_1', property_id: 'prop_1', needed_by_date: '2026-07-01', days_overdue: 3 } },
       step:  makeStep(),
     })
 
@@ -398,14 +398,14 @@ describe('handleWorkOrderOverdue', () => {
   it('skips the alert entirely when the work order is already completed', async () => {
     const supabase = makeSupabase({
       work_orders: {
-        data: { id: 'wo_2', title: 'Fix AC', status: 'completed', scheduled_date: '2026-07-01', vendors: null, properties: null },
+        data: { id: 'wo_2', title: 'Fix AC', status: 'completed', needed_by_date: '2026-07-01', vendors: null, properties: null },
         error: null,
       },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     await invokeHandler(handleWorkOrderOverdue, {
-      event: { data: { work_order_id: 'wo_2', org_id: 'org_1', property_id: 'prop_1', scheduled_date: '2026-07-01', days_overdue: 3 } },
+      event: { data: { work_order_id: 'wo_2', org_id: 'org_1', property_id: 'prop_1', needed_by_date: '2026-07-01', days_overdue: 3 } },
       step:  makeStep(),
     })
 
@@ -416,7 +416,7 @@ describe('handleWorkOrderOverdue', () => {
   it('logs a warning and skips the email when there is no PM email on file', async () => {
     const supabase = makeSupabase({
       work_orders: {
-        data: { id: 'wo_3', title: 'Fix AC', status: 'assigned', scheduled_date: '2026-07-01', vendors: null, properties: null },
+        data: { id: 'wo_3', title: 'Fix AC', status: 'assigned', needed_by_date: '2026-07-01', vendors: null, properties: null },
         error: null,
       },
     })
@@ -425,7 +425,7 @@ describe('handleWorkOrderOverdue', () => {
     const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() }
 
     await invokeHandler(handleWorkOrderOverdue, {
-      event: { data: { work_order_id: 'wo_3', org_id: 'org_1', property_id: 'prop_1', scheduled_date: '2026-07-01', days_overdue: 3 } },
+      event: { data: { work_order_id: 'wo_3', org_id: 'org_1', property_id: 'prop_1', needed_by_date: '2026-07-01', days_overdue: 3 } },
       step:  makeStep(),
       logger,
     })
@@ -440,7 +440,7 @@ describe('handleWorkOrderQuoteRequested', () => {
     id: 'qr_1', quote_token: 'tok_1', status: 'pending',
     work_orders: [{
       id: 'wo_1', title: 'Fix Sink', description: 'Leaky faucet', wo_number: 'WO-5',
-      category: 'plumbing', priority: 'high', scheduled_date: '2026-08-01',
+      category: 'plumbing', priority: 'high', needed_by_date: '2026-08-01',
       estimated_cost: 100, nte_amount: 150,
       properties: [{ name: 'The Lakehouse', address: '1 Lake Dr', city: 'Austin', state: 'TX', zip: '78701' }],
     }],

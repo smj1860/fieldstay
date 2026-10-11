@@ -586,7 +586,7 @@ export const workOrderOpsOrg = inngest.createFunction(
             status:             'pending',
             source:             'maintenance_schedule',
             source_schedule_id: schedule.id,
-            scheduled_date:     schedule.next_due_date,
+            needed_by_date:     schedule.next_due_date,
             estimated_cost:     schedule.estimated_cost,
             portal_enabled:     false,
           })

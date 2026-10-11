@@ -11,7 +11,7 @@ export interface WorkOrderEmailProps {
   description:      string | null
   wo_category:      string | null
   priority_level:   string | null
-  scheduled_date:   string | null
+  needed_by_date:   string | null
   nte_amount:       number | null
   property_name:    string
   address_line1:    string | null
@@ -61,7 +61,7 @@ export function WorkOrderVendorEmail({
   description,
   wo_category,
   priority_level,
-  scheduled_date,
+  needed_by_date,
   nte_amount,
   property_name,
   address_line1,
@@ -154,10 +154,10 @@ export function WorkOrderVendorEmail({
       <Row style={{ marginBottom: 20 }}>
         <Column style={{ width: '50%', paddingRight: 8 }}>
           <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
-            Scheduled Date
+            Needed By
           </Text>
           <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, margin: 0 }}>
-            {formatDate(scheduled_date)}
+            {formatDate(needed_by_date)}
           </Text>
         </Column>
         {nte_amount !== null && (

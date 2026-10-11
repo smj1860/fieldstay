@@ -283,7 +283,7 @@ describe('getWorkOrderStatus', () => {
       work_orders: [{
         data: [{
           wo_number: 'WO-1', title: 'Fix HVAC', status: 'in_progress', priority: 'high',
-          scheduled_date: '2026-08-01', completed_date: null, nte_amount: 500, actual_cost: null,
+          needed_by_date: '2026-08-01', completed_date: null, nte_amount: 500, actual_cost: null,
           vendor_dispatch_email: 'vendor@example.com', assigned_crew_member_id: null,
           properties: [{ name: 'Lakeside Lodge' }], vendors: [{ name: 'Cool Air Co' }],
         }],
@@ -312,7 +312,7 @@ describe('getWorkOrderStatus', () => {
       work_orders: [{
         data: [{
           wo_number: 'WO-2', title: 'Replace lockbox', status: 'assigned', priority: 'low',
-          scheduled_date: null, completed_date: null, nte_amount: null, actual_cost: null,
+          needed_by_date: null, completed_date: null, nte_amount: null, actual_cost: null,
           vendor_dispatch_email: null, assigned_crew_member_id: 'crew_1',
           properties: [{ name: 'Mountain Cabin' }], vendors: null,
         }],
@@ -337,7 +337,7 @@ describe('getWorkOrderStatus', () => {
       work_orders: [{
         data: [{
           wo_number: 'WO-3', title: 'Inspect roof', status: 'pending', priority: 'medium',
-          scheduled_date: null, completed_date: null, nte_amount: null, actual_cost: null,
+          needed_by_date: null, completed_date: null, nte_amount: null, actual_cost: null,
           vendor_dispatch_email: null, assigned_crew_member_id: null,
           properties: [{ name: 'Ridge House' }], vendors: null,
         }],
