@@ -10,6 +10,41 @@ decision is still open it says so rather than inventing one.
 
 ---
 
+## Migration status
+
+| Migration | E2E (`syhthijeqlnltufdawyb`) | Production (`vpmznjktllhmmbfnxuvk`) |
+|---|---|---|
+| `20261011120000_split_work_order_dates` | applied 2026-10-11 | **applied 2026-10-11** |
+| `20261011130000_vendor_progress_and_tech_grants` | applied 2026-10-11 | **applied 2026-10-11** |
+
+Both commits introducing these say "NOT YET APPLIED TO PRODUCTION" in their
+messages. That was true when written and is no longer; a commit message cannot
+be corrected after the fact, so this table is the current record.
+
+Applied through the Supabase MCP, which records the ledger row at the WALL CLOCK
+rather than the filename prefix. Both rows were reconciled to their filename
+versions immediately after, per CLAUDE.md. Verified afterwards:
+
+- ledger parity 470/470 in **both** directions on production, which is the
+  hard gate (`scripts/migration-ledger-baseline.json`'s production entry is
+  empty by design)
+- the Phase A backfill set `needed_by_date` on 276/276 work orders with zero
+  mismatches against `scheduled_date`; `vendor_scheduled_at` and
+  `vendor_progress` are NULL on every row, which is correct — no vendor has
+  confirmed anything yet, and inventing a value would have made every
+  historical work order read as scheduled
+- both enums carry their labels in declared order
+- `vendor_technicians` and `work_order_access_grants`: RLS enabled, **zero**
+  policies, and **zero** `anon`/`authenticated` grants, so there is nothing for
+  a stray policy to permit
+- every FK column on both new tables has a covering index (DB invariant check 3)
+- `generate_typescript_types` against production is **byte-identical** to the
+  committed `types/database.generated.ts` generated from E2E, so the two
+  projects are in genuine lockstep and the project-skew class that makes
+  `check-type-drift.mjs` fail as a types problem is closed
+
+---
+
 ## Build order and dependencies
 
 ```
