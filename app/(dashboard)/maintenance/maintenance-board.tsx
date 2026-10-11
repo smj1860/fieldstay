@@ -25,6 +25,12 @@ import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, Schedul
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
+import {
+  groupByWorkflowStage,
+  compareWorkflowOrder,
+  stageNeedsPmAction,
+  type WorkflowStage,
+} from '@/lib/work-orders/workflow-stage'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -414,6 +420,41 @@ function firstResolvableName(
     if (name) return name
   }
   return undefined
+}
+
+/**
+ * A stage section heading on the list view.
+ *
+ * The stages waiting on the PM are accented and the rest are muted, so the
+ * part of the board that is a to-do list is distinguishable at a glance from
+ * the part that is a status report. Gold rather than red: this is work to do,
+ * not an alarm, and the board already spends red on urgent priority.
+ */
+function StageHeading({
+  stage,
+  label,
+  count,
+}: Readonly<{ stage: WorkflowStage; label: string; count: number }>) {
+  const needsAction = stageNeedsPmAction(stage)
+  const color = needsAction ? 'var(--accent-gold)' : 'var(--text-muted)'
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <h3
+        className="text-xs font-semibold uppercase tracking-wide"
+        style={{ color }}
+      >
+        {label}
+      </h3>
+      <span
+        className="text-xs font-medium px-2 py-0.5 rounded-full"
+        style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)' }}
+      >
+        {count}
+      </span>
+      <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+    </div>
+  )
 }
 
 /**
@@ -1132,6 +1173,7 @@ export function MaintenanceBoard({
   crewMembers = [],
   propertyAssets = [],
   vendorCompliance = [],
+  quoteApprovalWorkOrderIds = [],
   inspectionForms = [],
   orgMembers = [],
   orgId = '',
@@ -1145,6 +1187,15 @@ export function MaintenanceBoard({
   crewMembers?:     CrewMemberOption[]
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
+  /**
+   * Work orders a vendor has priced and nobody has approved or declined.
+   * Lives in `quote_requests`, so it arrives as ids beside the rows.
+   *
+   * Defaults to empty, which is what the offline Dexie path gets: the cache
+   * holds no quote rows, so those work orders simply are not hoisted rather
+   * than the board failing to render at all.
+   */
+  quoteApprovalWorkOrderIds?: string[]
   /** §7's pickers, only reached from the schedule form. */
   inspectionForms?: InspectionFormOption[]
   orgMembers?:      OrgMemberOption[]
@@ -1294,6 +1345,32 @@ export function MaintenanceBoard({
     if (filterPriority !== 'all' && wo.priority !== filterPriority) return false
     return true
   })
+
+  const quoteApprovalIds = useMemo(
+    () => new Set(quoteApprovalWorkOrderIds),
+    [quoteApprovalWorkOrderIds],
+  )
+
+  /**
+   * The list view, grouped by where each work order sits in the workflow, with
+   * the stages waiting on the PM first and "a vendor quote needs your
+   * approval" at the very top.
+   *
+   * Grouped rather than merely sorted, because a sort alone leaves the PM
+   * guessing where one stage ends and the next begins. Empty stages are
+   * dropped by groupByWorkflowStage, so nobody scans past an empty
+   * "Quote needs your approval" band to reach their actual work.
+   *
+   * The quote signal is attached HERE rather than stored on the row: it lives
+   * in quote_requests, and the only thing the ladder needs from it is a
+   * boolean.
+   */
+  const stageGroups = useMemo(
+    () => groupByWorkflowStage(
+      filtered.map((wo) => ({ ...wo, hasQuoteAwaitingApproval: quoteApprovalIds.has(wo.id) })),
+    ),
+    [filtered, quoteApprovalIds],
+  )
 
   // Stats
   const openCount    = effectiveWorkOrders.filter((w) => w.status !== 'completed' && w.status !== 'cancelled').length
@@ -1508,17 +1585,28 @@ export function MaintenanceBoard({
               </label>
             </div>
           )}
-          <div className="space-y-3">
-            {filtered.map((wo) => (
-              <WorkOrderCard
-                key={wo.id}
-                wo={wo}
-                vendors={vendors}
-                crewMembers={crewMembers}
-                onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
-                isSelected={selectedIds.has(wo.id)}
-                onToggle={() => toggleSelect(wo.id)}
-              />
+          <div className="space-y-6">
+            {stageGroups.map((group) => (
+              <div key={group.stage}>
+                <StageHeading
+                  stage={group.stage}
+                  label={group.label}
+                  count={group.workOrders.length}
+                />
+                <div className="space-y-3">
+                  {group.workOrders.map((wo) => (
+                    <WorkOrderCard
+                      key={wo.id}
+                      wo={wo}
+                      vendors={vendors}
+                      crewMembers={crewMembers}
+                      onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
+                      isSelected={selectedIds.has(wo.id)}
+                      onToggle={() => toggleSelect(wo.id)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -1528,7 +1616,14 @@ export function MaintenanceBoard({
       {viewMode === 'kanban' && (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {KANBAN_COLUMNS.map((col) => {
-            const colWOs = filtered.filter((wo) => wo.status === col.key)
+            // Kanban is grouped by STATUS, so the stage ladder cannot regroup
+            // it. Sorting by the same comparator still applies the ladder
+            // WITHIN a column, which is what puts a work order whose quote is
+            // waiting at the top of its column rather than buried in it.
+            const colWOs = filtered
+              .filter((wo) => wo.status === col.key)
+              .map((wo) => ({ ...wo, hasQuoteAwaitingApproval: quoteApprovalIds.has(wo.id) }))
+              .sort(compareWorkflowOrder)
             return (
               <div key={col.key} className="flex-shrink-0 w-72">
                 <div

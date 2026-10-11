@@ -36,6 +36,15 @@ const WO_CATEGORY_OPTIONS = [
 const MAX_BOARD_ROWS = 20_000
 
 /**
+ * Ceiling on the "a vendor quote is waiting on you" lookup.
+ *
+ * Generous for what it bounds: a quote leaves `submitted` as soon as the PM
+ * approves or declines it, so a four-figure backlog would mean thousands of
+ * undecided quotes, which is a different problem than a truncated read.
+ */
+const MAX_PENDING_QUOTES = 2_000
+
+/**
  * Three reads on this board were bounded with a fixed `.limit()` sized for the
  * 50-property target this product was originally sold to. Every one of those
  * ceilings is BELOW what a large portfolio actually holds:
@@ -78,10 +87,12 @@ export default async function MaintenancePage() {
 
   let workOrders, schedules, propertyAssets
   let propertiesResult, vendorsResult, crewMembersResult,
-      vendorComplianceResult, inspectionFormsResult, orgMembersResult
+      vendorComplianceResult, inspectionFormsResult, orgMembersResult,
+      pendingQuotesResult
   try {
     ;[
     workOrders,
+    pendingQuotesResult,
     propertiesResult,
     vendorsResult,
     schedules,
@@ -131,6 +142,25 @@ export default async function MaintenancePage() {
       // than `.limit(2000)`: that cap was sized for the 50-property target and
       // a large portfolio carries more open work than that.
       .range(from, to)),
+
+    // Which open work orders have a vendor quote nobody has decided on yet.
+    //
+    // A SEPARATE read rather than an embed on the work-order query above. An
+    // embed would attach quote rows to every one of the org's open work orders
+    // on a DRAINED read; this returns only the quotes that are actually
+    // waiting, which is a small set by nature (a quote stops being 'submitted'
+    // the moment the PM approves or declines it).
+    //
+    // Bounded by .limit() rather than drained on purpose: past the ceiling the
+    // board's top section is already longer than anyone will work through, and
+    // the consequence of truncation is a work order ranked lower than it
+    // deserved, not a missing one.
+    supabase
+      .from('quote_requests')
+      .select('work_order_id')
+      .eq('org_id', membership.org_id)
+      .eq('status', 'submitted')
+      .limit(MAX_PENDING_QUOTES),
 
     supabase
       .from('properties')
@@ -257,6 +287,7 @@ export default async function MaintenancePage() {
     ['properties', propertiesResult], ['vendors', vendorsResult],
     ['crew_members', crewMembersResult],
     ['vendor_compliance_status', vendorComplianceResult],
+    ['quote_requests(submitted)', pendingQuotesResult],
     ['inspection_forms', inspectionFormsResult], ['organization_members', orgMembersResult],
   ] as const
   for (const [name, result] of results) {
@@ -270,6 +301,13 @@ export default async function MaintenancePage() {
   const vendorCompliance = (vendorComplianceResult.data ?? []).filter(
     (r): r is VendorComplianceRow => r.vendor_id !== null && r.compliance_status !== null
   )
+
+  // The work orders a vendor has priced and nobody has decided on. Passed as
+  // ids rather than rows: the board only needs to know WHICH work orders are
+  // waiting, and the quote itself is already rendered on /maintenance/[id].
+  const quoteApprovalWorkOrderIds = (pendingQuotesResult.data ?? [])
+    .map((q) => q.work_order_id)
+    .filter((id): id is string => typeof id === 'string')
 
   // A member with neither a name nor an email cannot be shown in a picker, so
   // it is dropped rather than rendered as a blank option somebody might select.
@@ -299,6 +337,7 @@ export default async function MaintenancePage() {
         crewMembers={crewMembersResult.data ?? []}
         propertyAssets={propertyAssets ?? []}
         vendorCompliance={vendorCompliance}
+        quoteApprovalWorkOrderIds={quoteApprovalWorkOrderIds}
         inspectionForms={(inspectionFormsResult.data ?? []) as InspectionFormOption[]}
         orgMembers={orgMembers}
         orgId={membership.org_id}
