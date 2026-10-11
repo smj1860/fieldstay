@@ -37,6 +37,7 @@ import {
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
 import { resolveNeededByDate } from '@/lib/work-orders/needed-by'
+import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 
 // A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
 // success for a change that never happened. Every write below whose WHERE
@@ -1185,7 +1186,13 @@ export async function bulkAssignVendor(
     // reported success, having already told the PM the vendor was assigned.
     const { data: assignedRows, error } = await supabase
       .from('work_orders')
-      .update({ vendor_id: vendorId, assigned_crew_member_id: null })
+      .update({
+        vendor_id:               vendorId,
+        assigned_crew_member_id: null,
+        // Same reasoning as the single-dispatch path: the clock starts on the
+        // unconditional vendor write, so a re-assignment restarts it.
+        ...vendorDispatchFields(),
+      })
       .in('id', workOrderIds)
       .eq('org_id', membership.org_id)
       .select('id')
@@ -1340,7 +1347,9 @@ async function writeAcceptedSuggestion(
   supabase:    SupabaseClient,
   orgId:       string,
   workOrderId: string,
-  assignee:    Record<string, string>,
+  // `string | null`, since the vendor path spreads vendorDispatchFields() in
+  // here and those fields clear the previous vendor's response.
+  assignee:    Record<string, string | null>,
   site:        string,
 ): Promise<{ error: string } | { ok: true }> {
   const { data: accepted, error } = await supabase
@@ -1425,7 +1434,8 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
     }
 
     const written = await writeAcceptedSuggestion(
-      supabase, membership.org_id, workOrderId, { vendor_id: vendorId }, site,
+      supabase, membership.org_id, workOrderId,
+      { vendor_id: vendorId, ...vendorDispatchFields() }, site,
     )
     if ('error' in written) return written
 

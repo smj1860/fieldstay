@@ -1,5 +1,6 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
+import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 import { NonRetriableError }    from 'inngest'
 import { render }               from '@react-email/render'
 import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
@@ -146,6 +147,11 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           portal_enabled:              true,
           status:                      'assigned',
           vendor_id:                   vendorId,
+          // The fourth dispatch path, and it needs the clock started for the
+          // same reason as the three server-action ones: the dispatch-silence
+          // timer reads vendor_dispatched_at plus a null vendor_progress, and
+          // a vendor notified from here would otherwise never be chased.
+          ...vendorDispatchFields(),
         })
         .eq('id', workOrderId)
         .eq('org_id', orgId)
