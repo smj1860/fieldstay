@@ -6274,6 +6274,64 @@ export type Database = {
           },
         ]
       }
+      vendor_technicians: {
+        Row: {
+          created_at: string
+          first_seen_at: string
+          id: string
+          label: string
+          last_used_at: string | null
+          org_id: string
+          phone_e164: string | null
+          use_count: number
+          vendor_id: string
+        }
+        Insert: {
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          label: string
+          last_used_at?: string | null
+          org_id: string
+          phone_e164?: string | null
+          use_count?: number
+          vendor_id: string
+        }
+        Update: {
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          org_id?: string
+          phone_e164?: string | null
+          use_count?: number
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_technicians_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_technicians_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_compliance_status"
+            referencedColumns: ["vendor_id"]
+          },
+          {
+            foreignKeyName: "vendor_technicians_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendors: {
         Row: {
           address: string | null
@@ -6409,6 +6467,84 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: true
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_order_access_grants: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          label: string | null
+          last_used_at: string | null
+          org_id: string
+          revoked_at: string | null
+          technician_id: string | null
+          token: string
+          vendor_id: string
+          work_order_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          org_id: string
+          revoked_at?: string | null
+          technician_id?: string | null
+          token: string
+          vendor_id: string
+          work_order_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          org_id?: string
+          revoked_at?: string | null
+          technician_id?: string | null
+          token?: string
+          vendor_id?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_access_grants_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_access_grants_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_technicians"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_access_grants_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_compliance_status"
+            referencedColumns: ["vendor_id"]
+          },
+          {
+            foreignKeyName: "work_order_access_grants_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_access_grants_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -6704,10 +6840,19 @@ export type Database = {
           suggestion_status: string | null
           title: string
           updated_at: string
+          vendor_accepted_at: string | null
           vendor_acknowledged_at: string | null
           vendor_acknowledged_by: string | null
+          vendor_decline_reason:
+            | Database["public"]["Enums"]["vendor_decline_reason"]
+            | null
+          vendor_declined_at: string | null
           vendor_dispatch_email: string | null
+          vendor_dispatched_at: string | null
           vendor_id: string | null
+          vendor_progress: Database["public"]["Enums"]["vendor_progress"] | null
+          vendor_progress_at: string | null
+          vendor_progress_note: string | null
           vendor_rating: number | null
           vendor_rating_notes: string | null
           vendor_scheduled_at: string | null
@@ -6762,10 +6907,21 @@ export type Database = {
           suggestion_status?: string | null
           title: string
           updated_at?: string
+          vendor_accepted_at?: string | null
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_decline_reason?:
+            | Database["public"]["Enums"]["vendor_decline_reason"]
+            | null
+          vendor_declined_at?: string | null
           vendor_dispatch_email?: string | null
+          vendor_dispatched_at?: string | null
           vendor_id?: string | null
+          vendor_progress?:
+            | Database["public"]["Enums"]["vendor_progress"]
+            | null
+          vendor_progress_at?: string | null
+          vendor_progress_note?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
           vendor_scheduled_at?: string | null
@@ -6820,10 +6976,21 @@ export type Database = {
           suggestion_status?: string | null
           title?: string
           updated_at?: string
+          vendor_accepted_at?: string | null
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_decline_reason?:
+            | Database["public"]["Enums"]["vendor_decline_reason"]
+            | null
+          vendor_declined_at?: string | null
           vendor_dispatch_email?: string | null
+          vendor_dispatched_at?: string | null
           vendor_id?: string | null
+          vendor_progress?:
+            | Database["public"]["Enums"]["vendor_progress"]
+            | null
+          vendor_progress_at?: string | null
+          vendor_progress_note?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
           vendor_scheduled_at?: string | null
@@ -7651,6 +7818,25 @@ export type Database = {
         | "supplies"
         | "other"
       txn_type: "revenue" | "expense"
+      vendor_decline_reason:
+        | "no_capacity"
+        | "outside_service_area"
+        | "not_my_trade"
+        | "price_below_minimum"
+        | "cannot_access_property"
+        | "other"
+      vendor_progress:
+        | "declined"
+        | "cancelled_by_vendor"
+        | "appointment_scheduled"
+        | "on_the_way"
+        | "tech_on_site"
+        | "awaiting_access"
+        | "hold_pm_approval"
+        | "parts_ordered"
+        | "repair_in_progress"
+        | "return_visit_scheduled"
+        | "job_completed"
       vendor_specialty:
         | "plumbing"
         | "electrical"
@@ -8007,6 +8193,27 @@ export const Constants = {
         "other",
       ],
       txn_type: ["revenue", "expense"],
+      vendor_decline_reason: [
+        "no_capacity",
+        "outside_service_area",
+        "not_my_trade",
+        "price_below_minimum",
+        "cannot_access_property",
+        "other",
+      ],
+      vendor_progress: [
+        "declined",
+        "cancelled_by_vendor",
+        "appointment_scheduled",
+        "on_the_way",
+        "tech_on_site",
+        "awaiting_access",
+        "hold_pm_approval",
+        "parts_ordered",
+        "repair_in_progress",
+        "return_visit_scheduled",
+        "job_completed",
+      ],
       vendor_specialty: [
         "plumbing",
         "electrical",
