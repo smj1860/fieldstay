@@ -4,12 +4,15 @@ import { getAnthropicClient } from './anthropic-client'
 import { retrieveContext } from './retrieve'
 import type { SupportCategory, SupportMessage, SupportResponse } from './types'
 import { ACCOUNT_TOOLS, callAccountTool } from './account-tools'
+import { createTierMessage, type ModelTier } from '@/lib/ai/models'
 
-const MODEL_BY_CATEGORY: Record<SupportCategory, string> = {
-  faq:              'claude-haiku-4-5-20251001',
-  technical:        'claude-sonnet-4-6',
-  account_specific: 'claude-sonnet-4-6',
+const TIER_BY_CATEGORY: Record<SupportCategory, ModelTier> = {
+  faq:              'fast',
+  technical:        'smart',
+  account_specific: 'smart',
 }
+
+const SITE = 'lib.support.respond'
 
 const ESCALATION_TOOL = {
   name:        'submit_response',
@@ -46,13 +49,13 @@ export async function generateResponse(params: {
   history:  SupportMessage[]
   orgId:    string
 }): Promise<SupportResponse> {
-  const model        = MODEL_BY_CATEGORY[params.category]
+  const tier         = TIER_BY_CATEGORY[params.category]
   const context      = await retrieveContext(params.message)
   const systemPrompt = buildSystemPrompt(params.category, context)
 
   if (params.category === 'account_specific') {
     return generateAccountSpecificResponse({
-      model,
+      tier,
       systemPrompt,
       message: params.message,
       history: params.history,
@@ -60,8 +63,7 @@ export async function generateResponse(params: {
     })
   }
 
-  const res = await getAnthropicClient().messages.create({
-    model,
+  const { message: res, model } = await createTierMessage(getAnthropicClient(), tier, {
     max_tokens:  800,
     system:      systemPrompt,
     tools:       [ESCALATION_TOOL],
@@ -70,7 +72,7 @@ export async function generateResponse(params: {
       ...params.history.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user' as const, content: params.message },
     ],
-  })
+  }, SITE)
 
   const toolUse = res.content.find(
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
@@ -117,7 +119,7 @@ async function runToolRound(
 }
 
 async function generateAccountSpecificResponse(params: {
-  model:        string
+  tier:         ModelTier
   systemPrompt: string
   message:      string
   history:      SupportMessage[]
@@ -128,26 +130,26 @@ async function generateAccountSpecificResponse(params: {
     { role: 'user' as const, content: params.message },
   ]
 
-  let res = await getAnthropicClient().messages.create({
-    model:      params.model,
+  let { message: res, model } = await createTierMessage(getAnthropicClient(), params.tier, {
     max_tokens: 800,
     system:     params.systemPrompt,
     tools:      ACCOUNT_TOOLS,
     messages,
-  })
+  }, SITE)
 
   // Tool-use loop — handle up to 3 rounds of tool calls before forcing a final answer
   let rounds = 0
   while (res.stop_reason === 'tool_use' && rounds < 3) {
     await runToolRound(res, params.orgId, messages)
 
-    res = await getAnthropicClient().messages.create({
-      model:      params.model,
+    const next = await createTierMessage(getAnthropicClient(), params.tier, {
       max_tokens: 800,
       system:     params.systemPrompt,
       tools:      ACCOUNT_TOOLS,
       messages,
-    })
+    }, SITE)
+    res   = next.message
+    model = next.model
 
     rounds++
   }
@@ -158,14 +160,15 @@ async function generateAccountSpecificResponse(params: {
     await runToolRound(res, params.orgId, messages)
   }
 
-  const finalRes = await getAnthropicClient().messages.create({
-    model:       params.model,
+  const final = await createTierMessage(getAnthropicClient(), params.tier, {
     max_tokens:  800,
     system:      params.systemPrompt,
     tools:       [ESCALATION_TOOL],
     tool_choice: { type: 'tool', name: 'submit_response' },
     messages,
-  })
+  }, SITE)
+  const finalRes = final.message
+  model = final.model
 
   const toolUse = finalRes.content.find(
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
@@ -174,7 +177,7 @@ async function generateAccountSpecificResponse(params: {
 
   return {
     content:          result?.response ?? "I wasn't able to generate a response — please try rephrasing.",
-    modelUsed:        params.model,
+    modelUsed:        model,
     needsEscalation:  result?.needs_escalation ?? false,
     escalationReason: result?.escalation_reason ?? '',
   }

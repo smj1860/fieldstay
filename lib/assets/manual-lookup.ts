@@ -20,18 +20,17 @@
 // manual/support page, reject resellers/forums), not something that needs
 // Sonnet-level reasoning. Same "unconfirmed until a live run proves it"
 // caveat applies doubly here: if Haiku's picks turn out unreliable (wrong
-// domain, picks a reseller despite the instruction), bump MODEL back to a
-// Sonnet tier — this is a single-line change, not a redesign.
+// domain, picks a reseller despite the instruction), move this call from the
+// 'fast' tier to 'smart' (see lib/ai/models.ts) — a one-word change.
 // ============================================================
 
 import Anthropic from '@anthropic-ai/sdk'
 import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
 
+import { createTierMessage } from '@/lib/ai/models'
 import { reportError } from '@/lib/observability/report-error'
 import { safeFetch } from '@/lib/security/url-guard'
-
-const MODEL ='claude-haiku-4-5-20251001'
 
 export interface ManualLookupResult {
   sourceUrl: string | null
@@ -46,8 +45,7 @@ export async function findManualUrl(
   try {
     const client = new Anthropic()
 
-    const message = await client.messages.create({
-      model:      MODEL,
+    const { message } = await createTierMessage(client, 'fast', {
       max_tokens: 1024,
       tools: [
         { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
@@ -65,7 +63,7 @@ export async function findManualUrl(
             `reply with exactly: NONE`,
         },
       ],
-    })
+    }, 'lib.assets.manual-lookup.findManualUrl')
 
     const url = extractUrlFromResponse(message)
     if (!url) return { sourceUrl: null, foundVia: null }

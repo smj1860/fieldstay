@@ -1,6 +1,8 @@
 import 'server-only'
 import Anthropic from '@anthropic-ai/sdk'
 
+import { createTierMessage } from '@/lib/ai/models'
+
 /**
  * Shared Claude vision call for data-plate OCR — used by the synchronous PM
  * "Scan Data Plate" route (app/api/assets/scan-data-plate/route.ts) and the
@@ -33,8 +35,7 @@ const EMPTY_RESULT: ScanResult = {
 export async function scanDataPlateImage(imageBase64: string, mediaType: ScanMediaType): Promise<ScanResult> {
   const client = new Anthropic()
 
-  const message = await client.messages.create({
-    model:      'claude-sonnet-4-6',
+  const { message } = await createTierMessage(client, 'smart', {
     max_tokens: 512,
     system:     'You return only valid JSON. No markdown, no explanation, no code fences.',
     messages: [{
@@ -74,9 +75,12 @@ Return ONLY this JSON (no markdown):
         },
       ],
     }],
-  })
+  }, 'lib.assets.scan-data-plate')
 
-  const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}'
+  // First TEXT block, not content[0]: newer models can lead with a non-text
+  // block (e.g. thinking), which made content[0] parse as '{}'.
+  const textBlock = message.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+  const text = textBlock ? textBlock.text.trim() : '{}'
 
   try {
     return JSON.parse(text) as ScanResult

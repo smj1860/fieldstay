@@ -44,7 +44,7 @@
     "prospects:sync-strscout": "tsx scripts/prospecting/sync-str-prospects.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.133.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@sentry/nextjs": "^10.65.0",

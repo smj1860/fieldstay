@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 
+import { adaptParamsForModel, createTierMessage, type TierMessageParams } from '@/lib/ai/models'
+
 export const REPUGUARD_SYSTEM_PROMPT = `# ROLE AND CORE OBJECTIVE
 You are the automated guest relations engine for FieldStay, an elite operational platform for professional short-term rental operators. Your core objective is to analyze incoming guest reviews and draft context-aware, highly personalized, and professional responses.
 
@@ -97,13 +99,17 @@ export async function generateReviewResponse(input: ReviewInput): Promise<Genera
   if (internalNotes) userMessageParts.push(`internal_notes: ${internalNotes}`)
 
   const client = new Anthropic()
-  const model  = process.env.REPUGUARD_MODEL ?? 'claude-sonnet-5'
-  const message = await client.messages.create({
-    model,
+  const params: TierMessageParams = {
     max_tokens: 1000,
     system:     REPUGUARD_SYSTEM_PROMPT,
     messages:   [{ role: 'user', content: userMessageParts.join('\n') }],
-  })
+  }
+  // REPUGUARD_MODEL still wins when set, so RepuGuard can be pinned apart from
+  // the other 'smart' jobs. Unset, it follows the 'smart' tier (lib/ai/models.ts).
+  const override = process.env.REPUGUARD_MODEL?.trim()
+  const message  = override
+    ? await client.messages.create(adaptParamsForModel(override, params))
+    : (await createTierMessage(client, 'smart', params, 'lib.repuguard.generate-response')).message
 
   const rawText = message.content
     .filter(block => block.type === 'text')

@@ -12,6 +12,7 @@ import {
 import { getValidKrogerToken }             from '@/lib/integrations/providers/kroger-token'
 import { reportError }                     from '@/lib/observability/report-error'
 import { ANTHROPIC_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { adaptParamsForModel, modelFor }    from '@/lib/ai/models'
 import { RateLimitError }                  from '@/lib/integrations/types'
 import { rateLimitRetry }                 from '@/lib/inngest/retry-after'
 import { NonRetriableError }               from 'inngest'
@@ -298,6 +299,10 @@ export const buildShoppingCart = inngest.createFunction(
       // A fetch() with no AbortSignal has no timeout at all: a hung Anthropic
       // request would burn this step's entire execution budget and take the
       // cart build down with it, three retries in a row.
+      // Model from the 'smart' tier (lib/ai/models.ts). This call used to
+      // hardcode claude-sonnet-4-20250514, which Anthropic retired: every
+      // request 404'd and normalisation silently fell back for every cart.
+      const normalizeModel = modelFor('smart')
       let res: Response
       try {
         res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -308,8 +313,7 @@ export const buildShoppingCart = inngest.createFunction(
           'x-api-key':         process.env.ANTHROPIC_API_KEY!,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-          model:      'claude-sonnet-4-20250514',
+        body: JSON.stringify(adaptParamsForModel(normalizeModel, {
           max_tokens: 1024,
           system:     'You return only valid JSON. No markdown. No explanation.',
           messages: [{
@@ -328,7 +332,7 @@ Return ONLY a JSON object: { "original_name": "search_query" }
 Items:
 ${JSON.stringify(itemsForNormalization, null, 2)}`,
           }],
-        }),
+        })),
         })
       } catch (err) {
         if (!isTimeoutError(err)) throw err
@@ -339,7 +343,16 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         return fallbackNames()
       }
 
-      if (!res.ok) return fallbackNames()
+      if (!res.ok) {
+        // Was a bare fallback, which is how a retired model id went unnoticed.
+        // The fallback is still right for the cart; the failure must be seen.
+        reportError(new Error(`Anthropic normalize call failed: HTTP ${res.status}`), {
+          site:  'inngest.build-shopping-cart.normalize_item_names_http',
+          orgId: org_id,
+          extra: { status: res.status, model: normalizeModel },
+        })
+        return fallbackNames()
+      }
 
       const data = await res.json()
       const text = (data.content as { type: string; text: string }[])

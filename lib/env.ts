@@ -317,7 +317,12 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   LODGIFY_WEBHOOKS_ENABLED:  { tier: 'optional', schema: boolString, why: 'registers inbound webhooks on the PM Lodgify account; off until the webhook contract is verified' },
   TOMORROW_IO_API_KEY:       { tier: 'optional', schema: nonEmpty, why: 'weather signals for contextual guest SMS; throws when called unset' },
   ANTHROPIC_API_KEY:         { tier: 'optional', schema: prefixed('sk-ant-'), why: 'data-plate OCR and RepuGuard generation' },
-  REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },
+  REPUGUARD_MODEL:           { tier: 'optional', schema: prefixed('claude-'), why: 'pins RepuGuard to a model id; unset, it follows AI_MODEL_SMART' },
+  // Model ids per tier — see lib/ai/models.ts. Unset falls back to the tier
+  // default there. prefixed('claude-') so a typo'd or pasted-wrong value fails
+  // the boot check instead of 404ing on the first support message.
+  AI_MODEL_FAST:             { tier: 'optional', schema: prefixed('claude-'), why: 'model for the fast tier (support routing, FAQ answers, manual lookup)' },
+  AI_MODEL_SMART:            { tier: 'optional', schema: prefixed('claude-'), why: 'model for the smart tier (account/technical support, data-plate OCR, cart normalisation, RepuGuard)' },
   OPENAI_API_KEY:            { tier: 'optional', schema: nonEmpty, why: 'support-bot knowledge base embeddings' },
 
   // Thumbtack Request Flow Widget scaffolding — see lib/integrations/thumbtack.ts.
