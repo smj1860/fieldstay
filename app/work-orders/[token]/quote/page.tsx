@@ -50,9 +50,13 @@ export default async function QuotePortalPage({ params }: Props) {
         title:          wo?.title ?? '',
         description:    wo?.description ?? null,
         needed_by_date: wo?.needed_by_date ?? null,
-        // Always null on the quote surface: a vendor being asked to price a
-        // job has not been booked for it, so there is no appointment to show.
+        // All null on the quote surface: a vendor being asked to PRICE a job
+        // has not accepted it, so there is no appointment and no progress to
+        // show. The accept flow starts after a quote is approved and the work
+        // order is dispatched.
         vendor_scheduled_at: null,
+        vendor_progress:     null,
+        vendor_accepted_at:  null,
         estimated_cost: wo?.estimated_cost ?? null,
         wo_number:      (wo as { wo_number?: string | null } | null)?.wo_number ?? null,
         category:       (wo as { category?: string | null } | null)?.category ?? null,

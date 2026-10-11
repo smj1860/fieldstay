@@ -16,6 +16,13 @@ import { getVendorWoDb } from '@/lib/dexie/vendorWoSchema'
 import type { VendorWoMutationRow, VendorPendingPhotoRow } from '@/lib/dexie/vendorWoSchema'
 import { getVendorPendingPhotoBlob } from '@/lib/dexie/vendorPhotoQueue'
 import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
+import type { VendorProgress } from '@/lib/work-orders/vendor-progress'
+import {
+  AcceptDeclinePanel,
+  ProgressPanel,
+  TechnicianPanel,
+  type GrantRow,
+} from './vendor-response-panels'
 import {
   queueVendorPhotoUpload,
   retryVendorPhotoUpload,
@@ -32,6 +39,9 @@ interface WorkOrderInfo {
   needed_by_date: string | null
   /** The appointment, once this vendor has accepted and named a date. */
   vendor_scheduled_at: string | null
+  /** Null means dispatched with no answer yet, which is what gates the accept panel. */
+  vendor_progress:     VendorProgress | null
+  vendor_accepted_at:  string | null
   estimated_cost: number | null
   wo_number:      string | null
   category:       string | null
@@ -440,6 +450,8 @@ export function VendorPortal({
   expired,
   vendorConnectToken,
   vendorChargesEnabled,
+  principalKind = 'vendor',
+  technicianGrants = [],
 }: {
   token:                string
   workOrder:            WorkOrderInfo
@@ -447,6 +459,14 @@ export function VendorPortal({
   expired:              boolean
   vendorConnectToken:   string
   vendorChargesEnabled: boolean
+  /**
+   * Whether the holder of this link is the VENDOR or a technician they
+   * forwarded it to. Only the vendor may mint or revoke technician links, so a
+   * forwarded link cannot chain onward.
+   */
+  principalKind?:       'vendor' | 'technician'
+  /** The live technician links on this work order. Vendor view only. */
+  technicianGrants?:    GrantRow[]
 }) {
   const [notes,       setNotes]       = useState('')
   const [technicianName, setTechnicianName] = useState('')
@@ -754,9 +774,33 @@ export function VendorPortal({
   }
 
   // ── State: Line items form ───────────────────────────────────────────────
+  //
+  // The response panels sit ABOVE the completion form, because accepting is
+  // what comes first in the job and because an unanswered dispatch is the
+  // thing the PM is waiting on. A vendor who has not accepted can still
+  // complete the work order (nothing blocks the form below), so this never
+  // traps somebody who just did the job and wants to invoice for it.
+  const awaitingResponse = !workOrder.vendor_accepted_at && !workOrder.vendor_progress
+
   return shell(
     <>
       <WOInfo workOrder={workOrder} property={property} />
+
+      {awaitingResponse ? (
+        <AcceptDeclinePanel token={token} neededByDate={workOrder.needed_by_date} />
+      ) : (
+        <ProgressPanel
+          token={token}
+          current={workOrder.vendor_progress}
+          scheduledAt={workOrder.vendor_scheduled_at}
+          nteAmount={workOrder.nte_amount}
+        />
+      )}
+
+      {/* Vendor only: a forwarded link must not be able to mint further ones. */}
+      {principalKind === 'vendor' && (
+        <TechnicianPanel token={token} grants={technicianGrants} />
+      )}
 
       {error && (
         <div style={{

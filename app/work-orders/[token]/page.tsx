@@ -1,13 +1,18 @@
-import { unwrap } from '@/lib/supabase/unwrap'
-import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { VendorPortal } from './vendor-portal'
-import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
-import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { loadPortalPage } from './load-portal'
+import { ExpiredPortal } from './expired-portal'
 
-export const metadata: Metadata = { title: 'Complete Work Order | FieldStay' }
+export const metadata: Metadata = { title: 'Work Order | FieldStay' }
 
+/**
+ * The VENDOR's own link, from the dispatch email.
+ *
+ * Everything below the token lives in `loadPortalPage`, shared with the
+ * technician page at `/work-orders/t/[token]` so the same screen is not built
+ * from two query shapes.
+ */
 export default async function VendorPortalPage({
   params,
 }: {
@@ -15,68 +20,26 @@ export default async function VendorPortalPage({
 }) {
   const { token } = await params
 
-  // Use service client — no session cookie available for vendor
-  const supabase = createServiceClient({ publicSurface: 'work-orders--token-' })
+  const load = await loadPortalPage(token)
+  if (load.kind === 'not_found') notFound()
 
-  // A failed read fell into notFound(), telling the vendor their work-order
-  // link is dead when it is not.
-  const workOrderRes = await supabase
-    .from('work_orders')
-    .select(`
-      id, org_id, asset_id, title, description, status, portal_enabled,
-      needed_by_date, vendor_scheduled_at, estimated_cost, completion_token_expires_at,
-      wo_number, category, priority, nte_amount,
-      properties ( name, address, city, state, zip ),
-      vendors (
-        name,
-        email,
-        stripe_connect_token,
-        stripe_connect_charges_enabled
-      )
-    `)
-    .eq('completion_token', token)
-    .eq('portal_enabled', true)
-    .maybeSingle()
+  // Expiry keeps the portal's own "Link Expired, contact the property manager"
+  // screen rather than becoming a 404. The work order itself is not loaded in
+  // that case, so this passes the minimum the shell needs to render it.
+  if (load.kind === 'expired') return <ExpiredPortal />
 
-  const workOrder = unwrap(workOrderRes, { site: 'page.work-orders.token' })
-  if (!workOrder) notFound()
-
-  const manualUrl = await getManualUrlForAsset(
-    supabase,
-    workOrder.org_id,
-    (workOrder as { asset_id?: string | null }).asset_id ?? null
-  )
-
-  // Check expiry
-  const expired =
-    workOrder.completion_token_expires_at &&
-    new Date(workOrder.completion_token_expires_at) < new Date()
-
-  const property = unwrapJoin(workOrder.properties)
-
-  const vendor = unwrapJoin(workOrder.vendors)
+  const { data } = load
 
   return (
     <VendorPortal
       token={token}
-      workOrder={{
-        id:             workOrder.id,
-        title:          workOrder.title,
-        description:    workOrder.description ?? null,
-        status:         workOrder.status as string,
-        needed_by_date:      workOrder.needed_by_date ?? null,
-        vendor_scheduled_at: workOrder.vendor_scheduled_at ?? null,
-        estimated_cost: workOrder.estimated_cost ?? null,
-        wo_number:      workOrder.wo_number ?? null,
-        category:       workOrder.category ?? null,
-        priority:       workOrder.priority ?? null,
-        nte_amount:     (workOrder as { nte_amount?: number | null }).nte_amount ?? null,
-        manual_url:     manualUrl,
-      }}
-      property={property ?? null}
-      expired={!!expired}
-      vendorConnectToken={vendor?.stripe_connect_token ?? ''}
-      vendorChargesEnabled={vendor?.stripe_connect_charges_enabled ?? false}
+      workOrder={data.workOrder}
+      property={data.property}
+      expired={data.expired}
+      vendorConnectToken={data.vendorConnectToken}
+      vendorChargesEnabled={data.vendorChargesEnabled}
+      principalKind={data.principal.kind}
+      technicianGrants={data.technicianGrants}
     />
   )
 }
