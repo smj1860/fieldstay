@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
-import { createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification, createPmNotifications } from '@/lib/inngest/helpers'
 import { isVendorHardBlocked } from '@/lib/vendors/compliance'
 import type { Enums } from '@/types/database'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -12,6 +12,23 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { dueKey, loadExistingDueDatePairs } from './maintenance-schedules-helpers'
 
 const AGING_DAYS = 7
+
+/**
+ * The DISPATCH-SILENCE thresholds, in hours.
+ *
+ * Separate from AGING_DAYS above, and keyed on a different column, because the
+ * aging escalation reads `updated_at`: any note, photo or line item resets it,
+ * so a dispatched work order could sit unanswered for a week, and a vendor who
+ * documents progress pushes their own clock further out. This check reads
+ * `vendor_dispatched_at` plus a NULL `vendor_progress` instead, so nothing the
+ * PM or the vendor does to the row can reset it. Only an actual answer clears
+ * it, because accepting or declining writes `vendor_progress`.
+ *
+ * 24h nudges the PM. 72h also asks the scorer for an alternative, because by
+ * then the question is no longer "did they see it" but "who else can go".
+ */
+const DISPATCH_SILENT_NUDGE_HOURS   = 24
+const DISPATCH_SILENT_REROUTE_HOURS = 72
 
 interface AutoWoSchedule {
   id: string; name: string; org_id: string; property_id: string
@@ -187,6 +204,8 @@ export const dailyWorkOrderOps = inngest.createFunction(
     const orgIds = await step.run('find-orgs-with-work', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
 
+      const silentCutoff = new Date(nowMs - DISPATCH_SILENT_NUDGE_HOURS * 3_600_000).toISOString()
+
       const [agingOrgs, scheduleOrgs] = await Promise.all([
         fetchDistinctOrgIds(
           (from, to) => supabase
@@ -212,7 +231,31 @@ export const dailyWorkOrderOps = inngest.createFunction(
         ),
       ])
 
-      return Array.from(new Set([...agingOrgs, ...scheduleOrgs]))
+      // Orgs holding a dispatch nobody has answered. `vendor_progress IS NULL`
+      // is the "no answer yet" test: accepting or declining both write it, so
+      // this set empties itself the moment the vendor responds.
+      //
+      // SEQUENTIAL, not folded into the Promise.all above, because it is the
+      // SECOND paginated scan of work_orders. Running two of those at once
+      // doubles this dispatcher's peak connection usage against the largest
+      // table in the schema, and connection usage under fan-out is exactly
+      // what the concurrency caps on this function exist to hold down. One
+      // extra round trip, once a day, is the cheaper side of that trade.
+      const silentOrgs = await fetchDistinctOrgIds(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('org_id')
+          .not('vendor_id', 'is', null)
+          .is('vendor_progress', null)
+          .not('vendor_dispatched_at', 'is', null)
+          .lt('vendor_dispatched_at', silentCutoff)
+          .in('status', ['pending', 'assigned', 'quote_requested'])
+          .order('org_id', { ascending: true })
+          .range(from, to),
+        { label: 'work_orders(dispatch-silent).org_id' }
+      )
+
+      return Array.from(new Set([...agingOrgs, ...scheduleOrgs, ...silentOrgs]))
     })
 
     logger.info(`Work order ops: dispatching ${orgIds.length} org(s)`)
@@ -267,6 +310,103 @@ export const workOrderOpsOrg = inngest.createFunction(
     const nowMs = event.data.now_ms
     const today = new Date(nowMs)
     const todayStr = today.toISOString().split('T')[0]!
+
+    // Runs BEFORE the aging escalation below. The two passes are independent
+    // (one reads vendor_dispatched_at, the other writes priority), so the order
+    // is a free choice, and putting the read-only pass first keeps its scan off
+    // the row locks the escalation's bulk UPDATE takes.
+    // ── Dispatch silence ─────────────────────────────────────────────────────
+    //
+    // A work order sent to a vendor who has neither accepted nor declined.
+    // Keyed on vendor_dispatched_at and a NULL vendor_progress rather than on
+    // updated_at, so nothing anybody does to the row resets the clock — only
+    // an actual answer does, because accepting and declining both write
+    // vendor_progress. See the constants' comment for why the aging
+    // escalation above cannot serve this purpose.
+    const silent = await step.run('find-silent-dispatches', async () => {
+      const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
+      const nudgeCutoff = new Date(nowMs - DISPATCH_SILENT_NUDGE_HOURS * 3_600_000).toISOString()
+
+      const rows = await fetchAllRows<{
+        id: string; wo_number: string | null; title: string; property_id: string
+        category: Enums<'wo_category'> | null
+        vendor_dispatched_at: string
+        vendors: { name: string } | { name: string }[] | null
+      }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('id, wo_number, title, property_id, category, vendor_dispatched_at, vendors(name)')
+          .eq('org_id', orgId)
+          .not('vendor_id', 'is', null)
+          .is('vendor_progress', null)
+          .not('vendor_dispatched_at', 'is', null)
+          .lt('vendor_dispatched_at', nudgeCutoff)
+          .in('status', ['pending', 'assigned', 'quote_requested'])
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `work_orders(dispatch-silent)[org=${orgId}]` }
+      )
+
+      const rerouteCutoffMs = nowMs - DISPATCH_SILENT_REROUTE_HOURS * 3_600_000
+
+      return rows.map((wo) => ({
+        id:          wo.id,
+        label:       wo.wo_number ?? wo.title,
+        propertyId:  wo.property_id,
+        category:    wo.category,
+        vendorName:  unwrapJoin(wo.vendors)?.name ?? 'The vendor',
+        hoursSilent: Math.floor((nowMs - new Date(wo.vendor_dispatched_at).getTime()) / 3_600_000),
+        reroute:     new Date(wo.vendor_dispatched_at).getTime() < rerouteCutoffMs,
+      }))
+    })
+
+    if (silent.length) {
+      await step.run('notify-silent-dispatches', async () => {
+        const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
+
+        // Batched, and dedupe-keyed on the work order plus the THRESHOLD
+        // crossed, so the 24h nudge fires once and the 72h one fires once more
+        // rather than the same alert every day the vendor stays quiet.
+        await createPmNotifications(supabase, silent.map((wo) => ({
+          orgId:    orgId,
+          type:     'work_order.dispatch_silent',
+          title:    wo.reroute
+            ? `${wo.vendorName} still has not answered`
+            : `${wo.vendorName} has not answered yet`,
+          subtitle: `${wo.label}: no response after ${wo.hoursSilent} hours.`
+                  + (wo.reroute ? ' A suggested alternative is on the work order.' : ''),
+          href:     `/maintenance/${wo.id}`,
+          severity: wo.reroute ? 'red' as const : 'amber' as const,
+          dedupeKey: `dispatch_silent:${wo.id}:${wo.reroute ? '72h' : '24h'}`,
+        })))
+      })
+
+      // Past the reroute threshold, ask the EXISTING scorer for an alternative.
+      // A suggestion only: nothing here reassigns the work order, for the same
+      // reason the decline handler does not — vendors are suggest-only until
+      // the planned vendor-Autopilot work lands, and an unattended cron is the
+      // last place to cross that line.
+      //
+      // At the function's TOP LEVEL, not inside the step above: step tooling
+      // nested in a step callback unwinds the request to schedule the inner op
+      // and leaves the enclosing step unresolved, replaying the notification
+      // insert on the next pass.
+      const toReroute = silent.filter((wo) => wo.reroute && wo.category !== null)
+      if (toReroute.length) {
+        await step.sendEvent(
+          'request-alternatives-for-silent-dispatches',
+          toReroute.map((wo) => ({
+            name: 'work-order/vendor-suggestion.requested' as const,
+            data: {
+              work_order_id: wo.id,
+              property_id:   wo.propertyId,
+              org_id:        orgId,
+              category:      wo.category!,
+            },
+          })),
+        )
+      }
+    }
 
     // ── 7.1: WO Aging Escalation (batched) ───────────────────────────────────
     const escalated = await step.run('escalate-aging-work-orders', async () => {
@@ -525,6 +665,7 @@ export const workOrderOpsOrg = inngest.createFunction(
     return {
       org_id:             orgId,
       aging_escalated:    escalated.length,
+      dispatch_silent:    silent.length,
       auto_wos_attempted: pendingSchedules.length,
     }
   }
