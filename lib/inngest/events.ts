@@ -7,7 +7,7 @@
  *
  * Naming convention: "domain/action"
  */
-import type { Enums } from '@/types/database'
+import type { Enums, VendorDeclineReason } from '@/types/database'
 
 
 export type FieldStayEvents = {
@@ -199,6 +199,41 @@ export type FieldStayEvents = {
     }
   }
 
+  /**
+   * A vendor (or a technician holding a forwarded grant) declined a dispatched
+   * work order, or cancelled one they had already accepted.
+   *
+   * The handler records the decline against the vendor, notifies the PM with
+   * the reason, and then fires `work-order/vendor-suggestion.requested` so the
+   * EXISTING scorer in auto-assign-vendor.ts proposes the next best vendor. It
+   * deliberately does NOT auto-dispatch: `vendor_auto_assign_mode` is
+   * CHECK-constrained to ('suggest','disabled') and auto-assign-vendor never
+   * writes `assigned_vendor_id`. That asymmetry with crew autopilot is a
+   * documented GAP awaiting the planned vendor-Autopilot work, not a decision
+   * to be quietly reversed by a decline handler.
+   */
+  'work-order/vendor-declined': {
+    data: {
+      work_order_id: string
+      property_id:   string
+      org_id:        string
+      /** The vendor who declined. Already cleared off the work order by now. */
+      vendor_id:     string
+      reason:        VendorDeclineReason
+      /** The vendor's own words, already length-bounded at the route. */
+      note:          string | null
+      /** Needed to re-run the scorer; null when the WO has no category. */
+      category:      Enums<'wo_category'> | null
+      /**
+       * `after_accepting` is a cancellation, not a refusal. It costs the PM
+       * more (they believed the job was booked) and reads differently in the
+       * notification, so the two are distinguished here rather than inferred
+       * from timestamps downstream.
+       */
+      stage:         'on_dispatch' | 'after_accepting'
+    }
+  }
+
   'work-order/completed': {
     data: {
       work_order_id: string
@@ -213,7 +248,13 @@ export type FieldStayEvents = {
       work_order_id: string
       property_id: string
       org_id: string
-      scheduled_date: string
+      /**
+       * The PM's deadline, which is what "overdue" is measured against.
+       * Renamed from scheduled_date with the date split (20261011120000):
+       * the vendor's appointment is a different fact and being booked for
+       * next week does not make a vendor late.
+       */
+      needed_by_date: string
       days_overdue: number
     }
   }

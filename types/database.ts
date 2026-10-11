@@ -57,6 +57,19 @@ export type ParSmartGroup       = 'bathroom_essential' | 'bedroom_essential' | '
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type VendorScheduledWindow = 'morning' | 'afternoon' | 'evening' | 'all_day' | 'exact'
+/**
+ * The vendor-written progress axis (20261011130000). A SECOND axis, never more
+ * `WoStatus` values: sixteen hardcoded open-status filter lists read that enum,
+ * and a seventh value drops a work order out of all of them with no symptom.
+ * `lib/work-orders/vendor-progress.ts` owns the mapping between the two.
+ */
+export type VendorProgress      = 'declined' | 'cancelled_by_vendor' | 'appointment_scheduled'
+                                | 'on_the_way' | 'tech_on_site' | 'awaiting_access'
+                                | 'hold_pm_approval' | 'parts_ordered' | 'repair_in_progress'
+                                | 'return_visit_scheduled' | 'job_completed'
+export type VendorDeclineReason = 'no_capacity' | 'outside_service_area' | 'not_my_trade'
+                                | 'price_below_minimum' | 'cannot_access_property' | 'other'
 export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection'
 // Inspections (docs/INSPECTIONS_SPEC.md phase 1).
 export type InspectionResult       = 'pass' | 'fail' | 'na'
@@ -1059,8 +1072,46 @@ export interface WorkOrder {
   source_inspection_id:        string | null
   source_turnover_id:          string | null
   asset_id:                    string | null
+  /**
+   * DEPRECATED 2026-10-11 (20261011120000). Overloaded: read as a PM deadline by
+   * the vendor on-time metric and as a vendor appointment by the calendar, the
+   * crew today/upcoming split and the dispatch email. Use `needed_by_date` or
+   * `vendor_scheduled_at`. Retained rather than renamed because PostgREST select
+   * strings are untyped literals — see the migration's header.
+   */
   scheduled_date:              string | null
+  /** DEPRECATED 2026-10-11. Use `vendor_scheduled_at` + `vendor_scheduled_window`. */
   scheduled_time:              string | null
+  /**
+   * The date the PM needs the work completed BY — a deadline, never an
+   * appointment. Defaults at create time to the property's next booking check-in.
+   * What vendor on-time % measures against.
+   */
+  needed_by_date:              string | null
+  /**
+   * When the vendor is actually coming. The vendor writes it on accept; a PM may
+   * override. Null means no appointment is confirmed yet.
+   */
+  vendor_scheduled_at:         string | null
+  /** Qualifies `vendor_scheduled_at`. Trades commit to a window, not a minute. */
+  vendor_scheduled_window:     VendorScheduledWindow | null
+  /**
+   * NULL on an assigned work order means dispatched with no response yet,
+   * which is what the dispatch-silence timer keys on.
+   */
+  vendor_progress:             VendorProgress | null
+  vendor_progress_at:          string | null
+  vendor_progress_note:        string | null
+  vendor_accepted_at:          string | null
+  vendor_declined_at:          string | null
+  vendor_decline_reason:       VendorDeclineReason | null
+  /**
+   * When the work order was sent to a vendor. The dispatch-silence timer reads
+   * THIS plus a null `vendor_progress`, deliberately not `updated_at` — the
+   * 7-day aging escalation keys on `updated_at`, so any note or photo resets it
+   * and a vendor who documents progress pushes their own clock out.
+   */
+  vendor_dispatched_at:        string | null
   completed_date:              string | null
   estimated_cost:              number | null
   nte_amount:                  number | null
@@ -1455,6 +1506,59 @@ export interface ReviewResponse {
   regeneration_count:  number
   created_at:          string
   updated_at:          string
+}
+
+/**
+ * A vendor's own technicians. Populated by the technician self-enrolling the
+ * first time they open a work-order link, so the vendor never types a phone
+ * number: no typos to clean up, and the consent is first-party rather than an
+ * employer volunteering an employee's mobile.
+ *
+ * SERVICE-ROLE ONLY. RLS is enabled with no policies and no `authenticated`
+ * GRANT, registered in `check-db-invariants.mjs`'s `SERVICE_ROLE_ONLY_TABLES`.
+ * These are a third party's employees' numbers: the PM needs attribution
+ * ("completed by Mike"), not the vendor's staff list, so the name surfaces on
+ * the work order and the number never renders to the PM.
+ */
+export interface VendorTechnician {
+  id:            string
+  vendor_id:     string
+  org_id:        string
+  /** Nullable: a technician may name himself and skip the mobile. E.164 only. */
+  phone_e164:    string | null
+  label:         string
+  first_seen_at: string
+  last_used_at:  string | null
+  use_count:     number
+  created_at:    string
+}
+
+/**
+ * One technician's access to ONE work order. Per work order, not per
+ * technician, so access dies with the job: a credential that outlives the work
+ * is hard to claw back later.
+ *
+ * Every write made through a grant stamps its id, so photos, line items and
+ * progress changes carry real attribution instead of the free-text name typed
+ * at the end. `last_used_at` answers "did he open it" per person, which is what
+ * the never-written `work_orders.public_viewed_at` was supposed to do.
+ *
+ * `expires_at` is capped at the parent work order's
+ * `completion_token_expires_at` by the issuing code. SERVICE-ROLE ONLY.
+ */
+export interface WorkOrderAccessGrant {
+  id:            string
+  work_order_id: string
+  org_id:        string
+  vendor_id:     string
+  /** SET NULL on roster delete: attribution outlives the roster entry. */
+  technician_id: string | null
+  token:         string
+  label:         string | null
+  expires_at:    string
+  revoked_at:    string | null
+  last_used_at:  string | null
+  created_at:    string
 }
 
 export interface QuoteRequest {
@@ -2360,6 +2464,8 @@ export interface HandWrittenRowMap {
   audit_events:                        AuditEvent
   stripe_processed_events:             StripeProcessedEvent
   org_invites:                         OrgInvite
+  vendor_technicians:                  VendorTechnician
+  work_order_access_grants:            WorkOrderAccessGrant
   quote_requests:                      QuoteRequest
   quote_request_line_items:            QuoteRequestLineItem
   communication_logs:                  CommunicationLog

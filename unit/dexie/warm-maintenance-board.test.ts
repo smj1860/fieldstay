@@ -26,7 +26,7 @@ const workOrder = (id: string, over: Partial<WorkOrder> = {}): WorkOrder => ({
   id, org_id: ORG, property_id: 'prop-1', vendor_id: null,
   wo_number: 'WO-1', title: 'Fix handrail', description: null,
   category: 'general', priority: 'medium', status: 'pending', source: 'manual',
-  scheduled_date: null, completed_date: null,
+  needed_by_date: null, completed_date: null,
   estimated_cost: null, nte_amount: null, actual_cost: null,
   access_notes: null, portal_enabled: false, completion_token: null,
   completion_notes: null, completed_by_name: null, invoice_reference: null,

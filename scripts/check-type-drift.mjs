@@ -141,6 +141,8 @@ const ENUM_MAP = {
   turnover_status:      'TurnoverStatus',
   txn_category:         'TxnCategory',
   txn_type:             'TxnType',
+  vendor_decline_reason: 'VendorDeclineReason',
+  vendor_progress:      'VendorProgress',
   vendor_specialty:     'VendorSpecialty',
   wo_category:          'WoCategory',
   wo_source:            'WoSource',

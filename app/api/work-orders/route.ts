@@ -187,8 +187,17 @@ function parseBody(body: unknown): ParsedBody {
       category:                WoCategorySchema.safeParse(r.category).data ?? null,
       vendor_id:               optionalId(r.vendor_id),
       assigned_crew_member_id: optionalId(r.assigned_crew_member_id),
-      scheduled_date:          optionalId(r.scheduled_date),
-      scheduled_time:          optionalId(r.scheduled_time),
+      // Accepts BOTH spellings on purpose. An offline device can hold a
+      // queued create minted before the date split shipped (the outbox
+      // survives deploys), and that payload carries scheduled_date.
+      // Reading only the new key would silently drop the deadline off every
+      // such replay — a write that succeeds with a field missing, which is
+      // the exact failure the upload-payload guardrail exists for.
+      needed_by_date:          optionalId(r.needed_by_date) ?? optionalId(r.scheduled_date),
+      // Not captured by the offline create form, which has neither field.
+      scheduled_time:          null,
+      access_notes:            null,
+      parking_notes:           null,
       estimated_cost:          optionalNumber(r.estimated_cost),
       nte_amount:              optionalNumber(r.nte_amount),
       asset_id:                optionalId(r.asset_id),

@@ -10,6 +10,7 @@ import { QuoteComparison }            from '@/components/work-orders/quote-compa
 import type { QuoteSummary, QuoteLineItem } from '@/components/work-orders/quote-comparison'
 import { isThumbtackConfigured }      from '@/lib/integrations/thumbtack'
 import { FindProOnThumbtackSection }  from '@/components/thumbtack/FindProOnThumbtackSection'
+import { asScheduledWindow } from '@/lib/work-orders/display-date'
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -30,7 +31,7 @@ export default async function WorkOrderPage({ params }: Props) {
       .select(`
         id, property_id, vendor_id, assigned_crew_member_id,
         wo_number, title, description, category, priority, status, source,
-        scheduled_date, completed_date,
+        needed_by_date, vendor_scheduled_at, vendor_scheduled_window, completed_date,
         estimated_cost, nte_amount, actual_cost,
         access_notes, completion_notes, completed_by_name, invoice_reference,
         portal_enabled, completion_token,
@@ -146,7 +147,9 @@ export default async function WorkOrderPage({ params }: Props) {
     priority:               wo.priority,
     status:                 wo.status,
     source:                 wo.source ?? '',
-    scheduled_date:         wo.scheduled_date,
+    needed_by_date:         wo.needed_by_date,
+    vendor_scheduled_at:    wo.vendor_scheduled_at,
+    vendor_scheduled_window: asScheduledWindow(wo.vendor_scheduled_window),
     completed_date:         wo.completed_date,
     estimated_cost:         wo.estimated_cost,
     nte_amount:             wo.nte_amount,

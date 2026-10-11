@@ -4,12 +4,20 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { workOrderDisplayDay } from '@/lib/work-orders/display-date'
 
 interface CalendarWO {
   id: string
   title: string
   property_id: string
-  scheduled_date: string | null
+  /**
+   * Both dates, since the split (20261011120000). The calendar places a work
+   * order on the vendor's confirmed appointment where there is one, and on the
+   * PM's deadline otherwise, via workOrderDisplayDay() — so a job nobody has
+   * committed to still appears, on the day it is due rather than nowhere.
+   */
+  needed_by_date: string | null
+  vendor_scheduled_at: string | null
   priority: string
   status: string
 }
@@ -183,7 +191,7 @@ export function MaintenanceCalendar({
               const iso       = isoOf(day)
               const isToday   = day.toDateString() === today.toDateString()
               const isPast    = day < today
-              const dayWOs    = workOrders.filter(wo => wo.scheduled_date === iso)
+              const dayWOs    = workOrders.filter(wo => workOrderDisplayDay(wo) === iso)
               const dayScheds = schedules.filter(s  => s.next_due_date  === iso)
               const total     = dayWOs.length + dayScheds.length
 
@@ -264,7 +272,7 @@ export function MaintenanceCalendar({
               const day       = new Date(weekStart.getTime() + i * 86_400_000)
               const iso       = isoOf(day)
               const isToday   = day.toDateString() === today.toDateString()
-              const dayWOs    = workOrders.filter(wo => wo.scheduled_date === iso)
+              const dayWOs    = workOrders.filter(wo => workOrderDisplayDay(wo) === iso)
               const dayScheds = schedules.filter(s => s.next_due_date === iso)
 
               return (

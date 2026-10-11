@@ -87,6 +87,13 @@ function makeSupabase(
     for (const m of [
       'select', 'insert', 'update', 'delete', 'upsert',
       'eq', 'neq', 'in', 'not', 'is', 'gte', 'order', 'limit',
+      // `gt`/`lt`/`lte`/`or` complete the comparison set. `gt` specifically is
+      // needed by resolveNeededByDate's next-booking lookup (it asks for a
+      // check-in strictly after today); without it the chain method is
+      // undefined, the call throws, and createWorkOrder's catch turns a
+      // missing MOCK into "Operation failed" — a test failure that looks
+      // nothing like its cause.
+      'gt', 'lt', 'lte', 'or',
       // `range` is needed by the fetchAllRows() pagination that replaced the
       // unbounded existing-schedules read in broadcastMaintenanceTemplate.
       'range',

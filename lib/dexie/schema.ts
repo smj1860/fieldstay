@@ -219,7 +219,13 @@ export interface CrewWorkOrderRow {
   description:             string | null
   status:                  string
   priority:                string
-  scheduled_date:          string | null
+  /**
+   * The PM's deadline, and the vendor's confirmed appointment, since the date
+   * split (20261011120000). A crew-assigned work order has no vendor, so it
+   * carries only the first; both may be null.
+   */
+  needed_by_date:          string | null
+  vendor_scheduled_at:     string | null
   wo_number:               string | null
   created_at:              string
 }
@@ -496,6 +502,22 @@ export class FieldStayDexie extends Dexie {
     // full scan, same reasoning as `mutations.failed`.
     this.version(13).stores({
       sync_incidents: '++id, reported',
+    })
+
+    // Schema 14 — the work-order date split (20261011120000).
+    //
+    // crew_work_orders' index still named `scheduled_date`, a column the
+    // cached row no longer has. Dexie does not error on that: the index is
+    // simply built over `undefined` for every row, so any future query
+    // against it would silently match nothing. Nothing queries it today
+    // (app/crew/page.tsx filters in memory after .toArray()), which is the
+    // only reason this was not already a bug rather than a trap.
+    //
+    // A NEW version rather than an edit to 5 and 8: Dexie replays versions in
+    // order on an existing device, so rewriting a historical `stores()` makes
+    // the upgrade path depend on which version that device last opened.
+    this.version(14).stores({
+      crew_work_orders: 'id, property_id, org_id, status, needed_by_date, vendor_scheduled_at',
     })
   }
 }

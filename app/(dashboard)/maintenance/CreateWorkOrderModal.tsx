@@ -145,7 +145,7 @@ export function CreateWorkOrderModal({
       assetId:              text('asset_id'),
       assignedCrewMemberId: assignMode === 'crew' ? text('assigned_crew_member_id') : null,
       vendorId:             assignMode === 'vendor' ? text('vendor_id') : null,
-      scheduledDate:        text('scheduled_date'),
+      scheduledDate:        text('needed_by_date'),
     })
     setQueueing(false)
     if (!result.ok) {
@@ -383,8 +383,7 @@ export function CreateWorkOrderModal({
                 </div>
                 <div>
                   <label htmlFor="wo-category" className="label">
-                    Category
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Category<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Needed for vendor suggestions
                     </span>
                   </label>
@@ -408,14 +407,17 @@ export function CreateWorkOrderModal({
                 </div>
               </div>
 
-              {/* Scheduled date + NTE */}
+              {/* Needed-by date + NTE */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="wo-date" className="label">Completed By Date</label>
-                  <Input id="wo-date" name="scheduled_date" type="date" />
+                  <label htmlFor="wo-date" className="label">
+                    Needed by<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                      Defaults to the next guest check-in
+                    </span>
+                  </label>
+                  <Input id="wo-date" name="needed_by_date" type="date" />
                   <label htmlFor="wo-time" className="label mt-3">
-                    Scheduled time
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Hard time limit<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Optional, use for same-day flip vendor windows
                     </span>
                   </label>
@@ -423,8 +425,7 @@ export function CreateWorkOrderModal({
                 </div>
                 <div>
                   <label htmlFor="wo-nte" className="label">
-                    NTE ($)
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    NTE ($)<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       ceiling
                     </span>
                   </label>
@@ -437,6 +438,45 @@ export function CreateWorkOrderModal({
                     placeholder="0.00"
                   />
                 </div>
+              </div>
+
+              {/* Getting in. NOT a place for the door code: that lives on the
+                  property, Vault-encrypted, and is revealed in the vendor
+                  portal once they accept. These are the per-job notes that go
+                  with it. */}
+              <div>
+                <label htmlFor="wo-access-notes" className="label">
+                  Access notes<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Optional, shown after the vendor accepts
+                  </span>
+                </label>
+                <textarea
+                  id="wo-access-notes"
+                  name="access_notes"
+                  rows={2}
+                  maxLength={500}
+                  className="input"
+                  placeholder="Lockbox is on the back gate, not the front door"
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  The property door code is sent automatically. Set it once under
+                  the property&apos;s details.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="wo-parking-notes" className="label">
+                  Parking<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Optional
+                  </span>
+                </label>
+                <Input
+                  id="wo-parking-notes"
+                  name="parking_notes"
+                  type="text"
+                  maxLength={200}
+                  placeholder="Use the driveway, street parking is permit only"
+                />
               </div>
 
               {/* Assignment mode */}

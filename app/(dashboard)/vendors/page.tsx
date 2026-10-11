@@ -39,7 +39,7 @@ export default async function VendorsPage() {
 
   const scorecardWOsRes = await supabase
     .from('work_orders')
-    .select('vendor_id, vendor_rating, scheduled_date, completed_date, status')
+    .select('vendor_id, vendor_rating, needed_by_date, completed_date, status')
     .eq('org_id', membership.org_id)
     .not('vendor_id', 'is', null)
     .gte('created_at', oneYearAgo.toISOString())
@@ -77,7 +77,7 @@ export default async function VendorsPage() {
   type ScorecardWO = {
     vendor_id: string | null
     vendor_rating: number | null
-    scheduled_date: string | null
+    needed_by_date: string | null
     completed_date: string | null
     status: string
   }
@@ -97,10 +97,15 @@ export default async function VendorsPage() {
       .filter((r): r is number => r !== null && r > 0)
 
     const completedWithDates = workOrders.filter(
-      (wo) => wo.status === 'completed' && wo.scheduled_date && wo.completed_date
+      // needed_by_date, the PM's DEADLINE, since the date split
+      // (20261011120000). It reads the same field this always meant to read:
+      // the old scheduled_date was also being used as the vendor's
+      // appointment, so grading a vendor against it increasingly meant
+      // grading them against a date they had chosen themselves.
+      (wo) => wo.status === 'completed' && wo.needed_by_date && wo.completed_date
     )
     const onTimeCount = completedWithDates.filter(
-      (wo) => wo.completed_date! <= wo.scheduled_date!
+      (wo) => wo.completed_date! <= wo.needed_by_date!
     ).length
 
     return {

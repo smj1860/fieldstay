@@ -142,6 +142,7 @@ import { workOrderDispatch } from '@/lib/inngest/functions/work-order-dispatch'
 
 // Work order vendor assignment → dispatch
 import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
+import { workOrderVendorDeclined } from '@/lib/inngest/functions/work-order-vendor-declined'
 
 // Work order internal crew assignment + completion
 import { handleWorkOrderCrewAssigned }  from '@/lib/inngest/functions/work-order-crew-assigned'
@@ -367,6 +368,7 @@ export const { GET, POST, PUT } = serve({
     // Work order public dispatch
     workOrderDispatch,
     handleWorkOrderVendorAssigned,
+    workOrderVendorDeclined,
     handleWorkOrderCrewAssigned,
     handleWorkOrderCrewCompleted,
 

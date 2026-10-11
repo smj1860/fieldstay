@@ -84,6 +84,13 @@ export type AuditAction =
   | 'work_order.suggestion.accepted'
   | 'work_order.suggestion.dismissed'
   | 'work_order.vendor_signoff'
+  /**
+   * A vendor or technician was shown a property's door code through the
+   * portal. The trail that answers "who saw the code, and when" — which
+   * matters because a code is a physical credential and the people holding it
+   * are not the PM's own staff. Never carries the code itself.
+   */
+  | 'work_order.access_revealed'
   | 'property.rates.updated'
   | 'asset.capex_projection.triggered'
   | 'asset.replacement_status.updated'

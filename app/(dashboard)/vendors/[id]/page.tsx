@@ -106,7 +106,7 @@ export default async function VendorDetailPage({ params }: Props) {
 
     supabase
       .from('work_orders')
-      .select('id, wo_number, title, status, priority, scheduled_date, completed_date, actual_cost')
+      .select('id, wo_number, title, status, priority, needed_by_date, vendor_scheduled_at, completed_date, actual_cost')
       .eq('vendor_id', id)
       .eq('org_id', membership.org_id)
       .order('created_at', { ascending: false })

@@ -236,7 +236,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         // clean run.
         const woRes = await supabase
           .from('work_orders')
-          .select('scheduled_date')
+          .select('needed_by_date')
           .eq('id', work_order_id)
           .eq('org_id', org_id)
           .maybeSingle()
@@ -244,7 +244,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const wo = unwrap(woRes, {
           site: 'inngest.work-order-created.fetch-scheduled-date', orgId: org_id,
         })
-        return wo?.scheduled_date ?? null
+        return wo?.needed_by_date ?? null
       })
 
       if (scheduledDate) {
@@ -281,7 +281,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
               work_order_id,
               property_id,
               org_id,
-              scheduled_date: scheduledDate,
+              needed_by_date: scheduledDate,
               days_overdue:   3,
             },
           })
@@ -470,7 +470,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
 
       const { data: wo, error: woError } = await supabase
         .from('work_orders')
-        .select('id, title, status, scheduled_date, vendors(name), properties(name)')
+        .select('id, title, status, needed_by_date, vendors(name), properties(name)')
         .eq('id', work_order_id)
         .eq('org_id', org_id)
         .single()
@@ -497,7 +497,10 @@ export const handleWorkOrderOverdue = inngest.createFunction(
           subject: `⚠️ Work order overdue: ${wo.title} at ${property?.name}`,
           html: await renderPmAlert({
             heading:  `Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue`,
-            body:     `${wo.title} was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.`,
+            // "needed by", not "scheduled for": this reads the PM's
+            // deadline, and calling it a schedule asserts an appointment
+            // that may never have been booked.
+            body:     `${wo.title} was needed by ${new Date(wo.needed_by_date!).toLocaleDateString()} and hasn't been completed.`,
             details: [
               { label: 'Assigned To', value: vendor?.name ?? null },
             ],
@@ -541,7 +544,7 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
           id, quote_token, status,
           work_orders (
             id, title, description, wo_number, category, priority,
-            scheduled_date, estimated_cost, nte_amount,
+            needed_by_date, vendor_scheduled_at, estimated_cost, nte_amount,
             properties (name, address, city, state, zip)
           ),
           vendors (name, email)
@@ -571,8 +574,8 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
         vendorName:    vendor.name,
         jobTitle:      wo?.title ?? '',
         description:   wo?.description ?? undefined,
-        scheduledDate: wo?.scheduled_date
-          ? new Date(wo.scheduled_date).toLocaleDateString('en-US', {
+        scheduledDate: wo?.needed_by_date
+          ? new Date(wo.needed_by_date).toLocaleDateString('en-US', {
               month: 'long', day: 'numeric', year: 'numeric',
             })
           : undefined,

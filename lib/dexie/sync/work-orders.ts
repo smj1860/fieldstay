@@ -21,7 +21,30 @@ import { reportError } from '@/lib/observability/report-error'
 
 const WO_COLUMNS =
   'id, org_id, property_id, assigned_crew_member_id, title, description, ' +
-  'status, priority, scheduled_date, wo_number, created_at, updated_at'
+  'status, priority, needed_by_date, vendor_scheduled_at, wo_number, created_at, updated_at'
+
+/**
+ * The retention filter, since the date split (20261011120000).
+ *
+ * It used to read `scheduled_date.is.null,scheduled_date.gte.<cutoff>` against
+ * the one overloaded column. There are now two dates with different meanings,
+ * and a crew work order can legitimately carry either, neither, or both: a
+ * vendor appointment exists only once a vendor accepts, and a crew-assigned
+ * work order has no vendor at all and so only ever has the PM's deadline.
+ *
+ * Checking just one column would shed the other kind. Keeping a row when EITHER
+ * date is recent, and when BOTH are absent, preserves the original intent (do
+ * not sync work long past) without quietly narrowing what reaches the device —
+ * and shedding a still-assigned work order is the failure mode this file's own
+ * reconcile pass is most able to make permanent.
+ */
+function retentionFilter(cutoffDate: string): string {
+  return [
+    `needed_by_date.gte.${cutoffDate}`,
+    `vendor_scheduled_at.gte.${cutoffDate}`,
+    'and(needed_by_date.is.null,vendor_scheduled_at.is.null)',
+  ].join(',')
+}
 
 
 interface WoPull { fetched: Record<string, unknown>[]; currentIds: Set<string> }
@@ -77,7 +100,7 @@ async function idSnapshot(
     .select('id')
     .eq('assigned_crew_member_id', crewMemberId)
     .not('status', 'in', '("completed","cancelled")')
-    .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
+    .or(retentionFilter(twoWeeksAgo))
     // Paging by offset needs a total order, or pages overlap and skip.
     .order('id', { ascending: true })
     .range(from, to),
@@ -198,7 +221,7 @@ export async function syncWorkOrders(
     .select(WO_COLUMNS)
     .eq('assigned_crew_member_id', crewMemberId)
     .not('status', 'in', '("completed","cancelled")')
-    .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
+    .or(retentionFilter(twoWeeksAgo))
     .order('id', { ascending: true })
     .range(from, to)
 

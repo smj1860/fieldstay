@@ -8,6 +8,7 @@ import { useRouter }              from 'next/navigation'
 import { ArrowLeft, Wrench, CheckCircle2, Check } from 'lucide-react'
 import type { PropertyRow } from '@/lib/dexie/schema'
 import { CrewLoading } from '@/components/crew/CrewLoading'
+import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
 
 export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const [id, setId]               = useState<string | null>(null)
@@ -58,6 +59,10 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
 
   if (!wo) return <CrewLoading />
 
+  // Not a hook, so it is safe below the early return above. A vendor-confirmed
+  // appointment outranks the PM's deadline, and the label says which it is.
+  const displayDate = workOrderDisplayDate(wo)
+
   if (done) return (
     <div className="p-6 text-center">
       <CheckCircle2 className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--accent-green)' }} />
@@ -106,9 +111,10 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
           {property?.name && (
             <p className="text-sm text-secondary-themed mt-0.5">{property.name}</p>
           )}
-          {wo.scheduled_date && (
+          {displayDate && (
             <p className="text-xs text-muted-themed mt-0.5">
-              Scheduled: {new Date(wo.scheduled_date).toLocaleDateString('en-US', {
+              {displayDate.kind === 'appointment' ? 'Scheduled' : 'Needed by'}:{' '}
+              {new Date(displayDate.value).toLocaleDateString('en-US', {
                 weekday: 'long', month: 'long', day: 'numeric',
               })}
             </p>

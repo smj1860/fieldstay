@@ -197,6 +197,17 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
   // str_prospects_icp, the view over it, is security_invoker so it cannot
   // become a way around this.
   'str_prospects',
+  // Technician access to a work order, and the vendor's technician roster
+  // (20261011130000). Deny-all is the DESIGN: the technician route validates
+  // its token in-file and reads through the service role, and the roster holds
+  // a THIRD PARTY's employees' mobile numbers. The PM is owed attribution
+  // ("completed by Mike"), which surfaces on the work order, not the vendor's
+  // staff list — so there is no client query here for a policy to permit, and
+  // neither anon nor authenticated holds a grant either (Postgres checks the
+  // grant before RLS). Adding a policy to either means adding the grant too
+  // (check 6 enforces that) and removing the entry from this list.
+  'vendor_technicians',
+  'work_order_access_grants',
 ])
 
 // Storage buckets with deliberately NO storage.objects policy: no client ever

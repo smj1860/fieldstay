@@ -36,6 +36,8 @@ import {
 } from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
+import { resolveNeededByDate } from '@/lib/work-orders/needed-by'
+import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 
 // A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
 // success for a change that never happened. Every write below whose WHERE
@@ -175,8 +177,10 @@ function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
     category:                categoryInput ? (WoCategorySchema.safeParse(categoryInput).data ?? null) : null,
     vendor_id:               formText(formData, 'vendor_id'),
     assigned_crew_member_id: formText(formData, 'assigned_crew_member_id'),
-    scheduled_date:          formText(formData, 'scheduled_date'),
+    needed_by_date:          formText(formData, 'needed_by_date'),
     scheduled_time:          formText(formData, 'scheduled_time'),
+    access_notes:            formText(formData, 'access_notes'),
+    parking_notes:           formText(formData, 'parking_notes'),
     estimated_cost:          formNumber(formData, 'estimated_cost'),
     nte_amount:              formNumber(formData, 'nte_amount'),
     asset_id:                formText(formData, 'asset_id'),
@@ -200,7 +204,7 @@ async function resolveCreationWarning(
   usePortal: boolean,
 ): Promise<string | undefined> {
   const timeOff = await checkCrewTimeOffWarning(
-    supabase, orgId, input.assigned_crew_member_id, input.scheduled_date,
+    supabase, orgId, input.assigned_crew_member_id, input.needed_by_date,
   )
   if (timeOff) return timeOff
 
@@ -253,7 +257,17 @@ export async function createWorkOrder(
     const valid = await validateWorkOrderCreate(supabase, membership.org_id, input)
     if (!valid.ok) return { error: valid.error }
 
-    const { payload, usePortal } = buildWorkOrderInsert(input, membership.org_id)
+    // The deadline defaults to the property's next guest arrival when the PM
+    // left it blank. Resolved HERE rather than inside buildWorkOrderInsert,
+    // which is pure and synchronous and is worth keeping that way.
+    const neededBy = await resolveNeededByDate(
+      supabase, membership.org_id, input.property_id, input.needed_by_date,
+    )
+
+    const { payload, usePortal } = buildWorkOrderInsert(
+      { ...input, needed_by_date: neededBy.date },
+      membership.org_id,
+    )
 
     const { data: wo, error } = await supabase
       .from('work_orders')
@@ -283,7 +297,12 @@ export async function createWorkOrder(
       assignedCrewMemberId: input.assigned_crew_member_id,
     })
 
-    const warning = await resolveCreationWarning(supabase, membership.org_id, input, usePortal)
+    // The RESOLVED needed-by, not the raw form value: the crew-time-off check
+    // reads that date, and a PM who left it blank still gets a warning when the
+    // derived next-check-in date falls on their assignee's day off.
+    const warning = await resolveCreationWarning(
+      supabase, membership.org_id, { ...input, needed_by_date: neededBy.date }, usePortal,
+    )
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -1025,7 +1044,7 @@ export async function createWorkOrderFromSchedule(
       .from('work_orders')
       .select('id')
       .eq('source_schedule_id', scheduleId)
-      .eq('scheduled_date', scheduledDate)
+      .eq('needed_by_date', scheduledDate)
       .not('status', 'in', '("completed","cancelled")')
       .maybeSingle()
 
@@ -1066,7 +1085,11 @@ export async function createWorkOrderFromSchedule(
         status:             WoStatusSchema.parse(vendorId ? 'assigned' : 'pending'),
         source:             'maintenance_schedule',
         source_schedule_id: schedule.id,
-        scheduled_date:     scheduledDate,
+        // The schedule's due date is a DEADLINE, so needed_by_date. Written
+        // together with the idempotency read below, which keys on the same
+        // column: splitting them would break the dedupe and have the cron
+        // create a duplicate work order every run.
+        needed_by_date:     scheduledDate,
         estimated_cost:     schedule.estimated_cost,
         portal_enabled:     !!vendorId,
         completion_token:   vendorId ? completion_token : null,
@@ -1170,7 +1193,13 @@ export async function bulkAssignVendor(
     // reported success, having already told the PM the vendor was assigned.
     const { data: assignedRows, error } = await supabase
       .from('work_orders')
-      .update({ vendor_id: vendorId, assigned_crew_member_id: null })
+      .update({
+        vendor_id:               vendorId,
+        assigned_crew_member_id: null,
+        // Same reasoning as the single-dispatch path: the clock starts on the
+        // unconditional vendor write, so a re-assignment restarts it.
+        ...vendorDispatchFields(),
+      })
       .in('id', workOrderIds)
       .eq('org_id', membership.org_id)
       .select('id')
@@ -1325,7 +1354,9 @@ async function writeAcceptedSuggestion(
   supabase:    SupabaseClient,
   orgId:       string,
   workOrderId: string,
-  assignee:    Record<string, string>,
+  // `string | null`, since the vendor path spreads vendorDispatchFields() in
+  // here and those fields clear the previous vendor's response.
+  assignee:    Record<string, string | null>,
   site:        string,
 ): Promise<{ error: string } | { ok: true }> {
   const { data: accepted, error } = await supabase
@@ -1410,7 +1441,8 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
     }
 
     const written = await writeAcceptedSuggestion(
-      supabase, membership.org_id, workOrderId, { vendor_id: vendorId }, site,
+      supabase, membership.org_id, workOrderId,
+      { vendor_id: vendorId, ...vendorDispatchFields() }, site,
     )
     if ('error' in written) return written
 
@@ -2332,7 +2364,7 @@ export async function fetchArchivedWorkOrders() {
       .select(`
         id, property_id, vendor_id, assigned_crew_member_id,
         wo_number, title, description, category, priority, status, source,
-        scheduled_date, completed_date,
+        needed_by_date, vendor_scheduled_at, vendor_scheduled_window, completed_date,
         estimated_cost, nte_amount, actual_cost,
         access_notes, completion_notes, completed_by_name, invoice_reference,
         portal_enabled, completion_token,

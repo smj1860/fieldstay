@@ -139,7 +139,7 @@ export async function getWorkOrderStatus(orgId: string) {
   const { data, error } = await supabase
     .from('work_orders')
     .select(`
-      wo_number, title, status, priority, scheduled_date, completed_date,
+      wo_number, title, status, priority, needed_by_date, completed_date,
       nte_amount, actual_cost, vendor_dispatch_email, assigned_crew_member_id,
       properties ( name ),
       vendors ( name )
@@ -192,7 +192,7 @@ export async function getWorkOrderStatus(orgId: string) {
                           ?? (wo.assigned_crew_member_id ? crewNameById.get(wo.assigned_crew_member_id) : undefined)
                           ?? 'Unassigned',
       dispatchedToVendor: wo.vendor_dispatch_email !== null,
-      scheduledDate:      wo.scheduled_date,
+      scheduledDate:      wo.needed_by_date,
       completedDate:      wo.completed_date,
       nteAmount:          wo.nte_amount,
       actualCost:         wo.actual_cost,

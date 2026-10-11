@@ -15,6 +15,16 @@ import {
 import { getVendorWoDb } from '@/lib/dexie/vendorWoSchema'
 import type { VendorWoMutationRow, VendorPendingPhotoRow } from '@/lib/dexie/vendorWoSchema'
 import { getVendorPendingPhotoBlob } from '@/lib/dexie/vendorPhotoQueue'
+import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
+import type { VendorProgress } from '@/lib/work-orders/vendor-progress'
+import {
+  AcceptDeclinePanel,
+  ProgressPanel,
+  TechnicianPanel,
+  AccessPanel,
+  type GrantRow,
+  type AccessRevealView,
+} from './vendor-response-panels'
 import {
   queueVendorPhotoUpload,
   retryVendorPhotoUpload,
@@ -27,7 +37,13 @@ interface WorkOrderInfo {
   title:          string
   description:    string | null
   status?:        string
-  scheduled_date: string | null
+  /** The PM's deadline. */
+  needed_by_date: string | null
+  /** The appointment, once this vendor has accepted and named a date. */
+  vendor_scheduled_at: string | null
+  /** Null means dispatched with no answer yet, which is what gates the accept panel. */
+  vendor_progress:     VendorProgress | null
+  vendor_accepted_at:  string | null
   estimated_cost: number | null
   wo_number:      string | null
   category:       string | null
@@ -104,6 +120,35 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * The appointment this vendor confirmed, else the PM's deadline.
+ *
+ * Labelled separately, and that is the point: "Scheduled" on a date nobody has
+ * agreed to asserts a commitment that does not exist, which is the confusion
+ * the work-order date split exists to end. A date-only deadline is parsed at
+ * noon so a timezone west of UTC cannot render it as the previous day.
+ */
+function WODateLine({ workOrder }: Readonly<{ workOrder: WorkOrderInfo }>) {
+  const resolved = workOrderDisplayDate(workOrder)
+  if (!resolved) return null
+
+  const stamp = resolved.kind === 'appointment'
+    ? new Date(resolved.value)
+    : new Date(`${resolved.value}T12:00:00`)
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-accent-500">
+      <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+      <span>
+        {resolved.kind === 'appointment' ? 'You are booked for ' : 'Needed by '}
+        {stamp.toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        })}
+      </span>
+    </div>
+  )
+}
+
 function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: PropertyInfo | null }) {
   const categoryLabel  = workOrder.category ? (CATEGORY_LABELS[workOrder.category] ?? workOrder.category) : null
   const priorityStyle  = workOrder.priority ? (PRIORITY_STYLES[workOrder.priority] ?? PRIORITY_STYLES.low) : null
@@ -163,18 +208,7 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
           </div>
         )}
 
-        {/* Scheduled date */}
-        {workOrder.scheduled_date && (
-          <div className="flex items-center gap-2 text-xs text-accent-500">
-            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>
-              Scheduled:{' '}
-              {new Date(workOrder.scheduled_date + 'T12:00:00').toLocaleDateString('en-US', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-              })}
-            </span>
-          </div>
-        )}
+        <WODateLine workOrder={workOrder} />
 
         {/* NTE amount */}
         {workOrder.nte_amount != null && (
@@ -418,6 +452,9 @@ export function VendorPortal({
   expired,
   vendorConnectToken,
   vendorChargesEnabled,
+  principalKind = 'vendor',
+  technicianGrants = [],
+  access = { revealed: false, reason: 'not_accepted' },
 }: {
   token:                string
   workOrder:            WorkOrderInfo
@@ -425,6 +462,20 @@ export function VendorPortal({
   expired:              boolean
   vendorConnectToken:   string
   vendorChargesEnabled: boolean
+  /**
+   * Whether the holder of this link is the VENDOR or a technician they
+   * forwarded it to. Only the vendor may mint or revoke technician links, so a
+   * forwarded link cannot chain onward.
+   */
+  principalKind?:       'vendor' | 'technician'
+  /** The live technician links on this work order. Vendor view only. */
+  technicianGrants?:    GrantRow[]
+  /**
+   * How to get in, resolved server-side. The door code is simply absent from
+   * this prop until the vendor has accepted, so the gate cannot be defeated by
+   * reading the page source.
+   */
+  access?:              AccessRevealView
 }) {
   const [notes,       setNotes]       = useState('')
   const [technicianName, setTechnicianName] = useState('')
@@ -732,9 +783,35 @@ export function VendorPortal({
   }
 
   // ── State: Line items form ───────────────────────────────────────────────
+  //
+  // The response panels sit ABOVE the completion form, because accepting is
+  // what comes first in the job and because an unanswered dispatch is the
+  // thing the PM is waiting on. A vendor who has not accepted can still
+  // complete the work order (nothing blocks the form below), so this never
+  // traps somebody who just did the job and wants to invoice for it.
+  const awaitingResponse = !workOrder.vendor_accepted_at && !workOrder.vendor_progress
+
   return shell(
     <>
       <WOInfo workOrder={workOrder} property={property} />
+
+      {awaitingResponse ? (
+        <AcceptDeclinePanel token={token} neededByDate={workOrder.needed_by_date} />
+      ) : (
+        <ProgressPanel
+          token={token}
+          current={workOrder.vendor_progress}
+          scheduledAt={workOrder.vendor_scheduled_at}
+          nteAmount={workOrder.nte_amount}
+        />
+      )}
+
+      <AccessPanel access={access} />
+
+      {/* Vendor only: a forwarded link must not be able to mint further ones. */}
+      {principalKind === 'vendor' && (
+        <TechnicianPanel token={token} grants={technicianGrants} />
+      )}
 
       {error && (
         <div style={{

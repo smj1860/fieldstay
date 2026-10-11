@@ -8,7 +8,8 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvents: vi.fn(async () => undefined),
 }))
 vi.mock('@/lib/inngest/helpers', () => ({
-  createPmNotification: vi.fn(async () => undefined),
+  createPmNotification:  vi.fn(async () => undefined),
+  createPmNotifications: vi.fn(async () => undefined),
 }))
 vi.mock('@/lib/vendors/compliance', () => ({
   isVendorHardBlocked: vi.fn(async () => false),
@@ -20,7 +21,7 @@ vi.mock('@/lib/observability/report-error', () => ({
 import { dailyWorkOrderOps, workOrderOpsOrg } from '@/lib/inngest/functions/cron/work-order-ops'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
-import { createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification, createPmNotifications } from '@/lib/inngest/helpers'
 import { isVendorHardBlocked } from '@/lib/vendors/compliance'
 import { invokeHandler } from './test-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
@@ -154,7 +155,11 @@ describe('workOrderOpsOrg (per-org handler)', () => {
 
   it('is a no-op when there are no aging work orders and no due auto-WO schedules', async () => {
     const supabase = makeSupabase({
-      work_orders:           [{ data: [], error: null }],
+      work_orders:           [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },{ data: [], error: null }],
       maintenance_schedules: [{ data: [], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -166,7 +171,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ org_id: 'org_1', aging_escalated: 0, auto_wos_attempted: 0 })
+    expect(result).toEqual({ org_id: 'org_1', aging_escalated: 0, dispatch_silent: 0, auto_wos_attempted: 0 })
     expect(step.sendEvent).not.toHaveBeenCalled()
     expect(logAuditEvent).not.toHaveBeenCalled()
     expect(logAuditEvents).not.toHaveBeenCalled()
@@ -175,6 +180,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('escalates a stale work order to urgent priority, logs it, and fires an aging-escalated event', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         {
           data: [{
             id: 'wo_1', org_id: 'org_1', property_id: 'prop_1',
@@ -223,6 +232,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('writes no escalation notes when the optimistic-locked bulk update matched nothing (retry safety)', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         {
           data: [{
             id: 'wo_1', org_id: 'org_1', property_id: 'prop_1',
@@ -252,6 +265,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('auto-creates a work order for a due schedule, resolves a specialty-hint vendor, and notifies the PM', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },       // aging scan — none
         { data: [], error: null },       // batched idempotency read — no WO at that date yet
         { data: { id: 'wo_new' }, error: null }, // insert .select().single()
@@ -316,6 +333,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
 
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },   // aging scan — none
         { data: [], error: null },   // batched idempotency read
         { data: { id: 'wo_new' }, error: null },
@@ -353,7 +374,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   //
   // A silent failure here is permanent, not transient. next_due_date stays
   // put, so tomorrow the schedule looks due again, and the auto-create step's
-  // (source_schedule_id, scheduled_date) unique constraint rejects the
+  // (source_schedule_id, needed_by_date) unique constraint rejects the
   // duplicate as an expected race — so the schedule stops producing work
   // orders for this occurrence AND every future one, while the cron reports a
   // clean run every day.
@@ -363,6 +384,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('throws when the next_due_date advance fails, rather than leaving the schedule stuck', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },                 // aging scan — none
         { data: [], error: null },                 // batched idempotency read — none
         { data: { id: 'wo_new' }, error: null },   // the insert
@@ -390,6 +415,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('scopes the next_due_date advance to the org, not just the schedule id', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },
         { data: [], error: null },
         { data: { id: 'wo_new' }, error: null },
@@ -430,8 +459,12 @@ describe('workOrderOpsOrg (per-org handler)', () => {
   it('skips auto-creating a work order when one already exists for the schedule + due date (idempotency)', async () => {
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },                    // aging scan — none
-        { data: [{ source_schedule_id: 'sched_1', scheduled_date: '2026-07-22' }], error: null }, // batched idempotency read finds one
+        { data: [{ source_schedule_id: 'sched_1', needed_by_date: '2026-07-22' }], error: null }, // batched idempotency read finds one
       ],
       maintenance_schedules: [
         {
@@ -477,8 +510,12 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     }))
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: [], error: null },  // aging scan — none
-        { data: stuck.map((s) => ({ source_schedule_id: s.id, scheduled_date: '2026-05-01' })), error: null },
+        { data: stuck.map((s) => ({ source_schedule_id: s.id, needed_by_date: '2026-05-01' })), error: null },
       ],
       maintenance_schedules: [{ data: stuck, error: null }],
     })
@@ -505,8 +542,12 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     ]
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
         { data: [], error: null },
-        { data: [{ source_schedule_id: 'sched_done', scheduled_date: '2026-07-22' }], error: null },
+        { data: [], error: null },
+        { data: [{ source_schedule_id: 'sched_done', needed_by_date: '2026-07-22' }], error: null },
         { data: { id: 'wo_new' }, error: null },
       ],
       maintenance_schedules: [{ data: schedules, error: null }],
@@ -529,6 +570,10 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     }))
     const supabase = makeSupabase({
       work_orders: [
+        // find-silent-dispatches runs FIRST in the per-org handler, so it
+        // consumes the first work_orders response. Empty here: these tests
+        // cover the aging and auto-WO passes.
+        { data: [], error: null },
         { data: aging, error: null },                                // paginated aging scan
         // The escalating UPDATE is CHUNKED (500), because `.select('id')` on an
         // UPDATE is a PostgREST response and max_rows caps its RETURNING too.
@@ -557,5 +602,150 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const notesInsert = supabase.calls.find((c) => c.table === 'work_order_updates' && c.method === 'insert')
     expect((notesInsert?.args[0] as unknown[]).length).toBe(2_050)
     expect(step.sendEvent.mock.calls[0]![1]).toHaveLength(2_050)
+  })
+})
+
+describe('workOrderOpsOrg: dispatch silence', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW_MS))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  const DISPATCHED_30H_AGO = new Date(NOW_MS - 30 * 3_600_000).toISOString()
+  const DISPATCHED_80H_AGO = new Date(NOW_MS - 80 * 3_600_000).toISOString()
+
+  function silentFixture(rows: unknown[]): Record<string, TableSpec> {
+    return {
+      work_orders:           [{ data: rows, error: null }],
+      maintenance_schedules: [{ data: [], error: null }],
+    }
+  }
+
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'wo_silent', wo_number: 'WO-900', title: 'Burst pipe', property_id: 'prop_1',
+      category: 'plumbing', vendor_dispatched_at: DISPATCHED_30H_AGO,
+      vendors: { name: 'Ace Plumbing' },
+      ...overrides,
+    }
+  }
+
+  it('nudges the PM once past 24h, without asking for an alternative yet', async () => {
+    const supabase = createSupabaseDouble(silentFixture([row()]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step, logger: makeLogger() })
+
+    expect(result).toMatchObject({ dispatch_silent: 1 })
+
+    const notifications = (createPmNotifications as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Record<string, unknown>[]
+    expect(notifications).toHaveLength(1)
+    expect(notifications[0]).toMatchObject({
+      orgId:     'org_1',
+      type:      'work_order.dispatch_silent',
+      severity:  'amber',
+      href:      '/maintenance/wo_silent',
+      // Keyed on the THRESHOLD, so the 24h nudge fires once rather than every
+      // day the vendor stays quiet.
+      dedupeKey: 'dispatch_silent:wo_silent:24h',
+    })
+    expect(notifications[0]!.subtitle).toContain('30 hours')
+
+    // Under 72h, nobody is asked for an alternative yet: the question is still
+    // "did they see it", not "who else can go".
+    const suggestions = step.sendEvent.mock.calls.find(
+      (c) => c[0] === 'request-alternatives-for-silent-dispatches',
+    )
+    expect(suggestions).toBeUndefined()
+  })
+
+  it('escalates past 72h and asks the existing scorer for an alternative', async () => {
+    const supabase = createSupabaseDouble(silentFixture([row({ vendor_dispatched_at: DISPATCHED_80H_AGO })]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step, logger: makeLogger() })
+
+    const notifications = (createPmNotifications as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Record<string, unknown>[]
+    expect(notifications[0]).toMatchObject({
+      severity:  'red',
+      dedupeKey: 'dispatch_silent:wo_silent:72h',
+    })
+
+    // The EXISTING suggestion event, so there is one vendor scorer rather than
+    // two that could recommend different people for the same work order.
+    expect(step.sendEvent).toHaveBeenCalledWith(
+      'request-alternatives-for-silent-dispatches',
+      [{
+        name: 'work-order/vendor-suggestion.requested',
+        data: { work_order_id: 'wo_silent', property_id: 'prop_1', org_id: 'org_1', category: 'plumbing' },
+      }],
+    )
+  })
+
+  it('never reassigns the work order itself', async () => {
+    // Vendors are suggest-only (vendor_auto_assign_mode is CHECK-constrained
+    // to ('suggest','disabled')). An unattended cron is the last place to
+    // cross that line: it would pick a contractor and send them a property's
+    // access details with nobody told.
+    const supabase = createSupabaseDouble(silentFixture([row({ vendor_dispatched_at: DISPATCHED_80H_AGO })]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step: makeStep(), logger: makeLogger() })
+
+    const vendorWrites = supabase.calls.filter(
+      (c) => c.table === 'work_orders' && (c.method === 'update' || c.method === 'upsert'),
+    )
+    expect(vendorWrites).toEqual([])
+  })
+
+  it('reads vendor_dispatched_at and a null vendor_progress, never updated_at', async () => {
+    const supabase = createSupabaseDouble(silentFixture([]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step: makeStep(), logger: makeLogger() })
+
+    // The whole point of this pass: updated_at is reset by any note, photo or
+    // line item, so a vendor who documents progress pushes their own clock
+    // out. Only an actual answer clears vendor_progress.
+    const isNull = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'is')
+    expect(isNull.map((c) => c.args)).toEqual(expect.arrayContaining([['vendor_progress', null]]))
+
+    const lt = supabase.calls.find(
+      (c) => c.table === 'work_orders' && c.method === 'lt' && c.args[0] === 'vendor_dispatched_at',
+    )
+    expect(lt?.args[1]).toBe(new Date(NOW_MS - 24 * 3_600_000).toISOString())
+  })
+
+  it('skips the suggestion for a work order with no category', async () => {
+    // auto-assign-vendor maps wo_category onto vendor_specialty; with no
+    // category there is nothing to score against, so asking would dead-letter.
+    const supabase = createSupabaseDouble(silentFixture([
+      row({ vendor_dispatched_at: DISPATCHED_80H_AGO, category: null }),
+    ]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step, logger: makeLogger() })
+
+    expect(createPmNotifications).toHaveBeenCalled()
+    expect(step.sendEvent.mock.calls.find(
+      (c) => c[0] === 'request-alternatives-for-silent-dispatches',
+    )).toBeUndefined()
+  })
+
+  it('falls back to a generic vendor name rather than failing', async () => {
+    const supabase = createSupabaseDouble(silentFixture([row({ vendors: null })]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step: makeStep(), logger: makeLogger() })
+
+    const notifications = (createPmNotifications as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Record<string, unknown>[]
+    expect(notifications[0]!.title).toContain('The vendor')
   })
 })

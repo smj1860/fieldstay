@@ -49,6 +49,16 @@ const PROOF_PATTERNS: RegExp[] = [
   // of a column named token, while this names the function that actually checks
   // revoked_at and expires_at.
   /validatePortalToken/,
+  // The vendor portal's equivalent, for the OTHER token-gated surface:
+  // work_orders.completion_token (the vendor's own link) and
+  // work_order_access_grants.token (a technician's forwarded one). Like
+  // validatePortalToken above, this is a recognizer rather than an EXCEPTIONS
+  // entry because it names the function that actually performs the check, and
+  // it is STRICTER than the generic `.eq('…token')` pattern it would otherwise
+  // match: it verifies revoked_at, expires_at, portal_enabled, the grant's own
+  // org scope, and that the work order has not since been re-dispatched to a
+  // different vendor.
+  /resolvePortalToken/,
   /platform_staff/,                       // staff-gated admin surfaces
   /demoSecretMatches/,                    // /demo/* shared-secret gate (constant-time, fails closed when unset)
 ]

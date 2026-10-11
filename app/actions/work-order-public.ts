@@ -16,6 +16,7 @@ import {
   VENDOR_HARD_BLOCKED_ERROR,
   VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR,
 } from '@/lib/vendors/compliance'
+import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
@@ -317,6 +318,11 @@ export async function dispatchWorkOrderToVendor(input: {
         // dispatch path already sets this for the same reason
         // (work-order-vendor-assigned.ts:99).
         portal_enabled:              true,
+        // Starts the dispatch-silence clock and clears any previous vendor's
+        // response. On the UNCONDITIONAL vendor write rather than the filtered
+        // status advance below, which skips an already-assigned work order and
+        // so would never restart the clock on a re-dispatch.
+        ...vendorDispatchFields(),
       })
       .eq('id', input.workOrderId)
       // Defence in depth. The row was already org-scoped on the read above and

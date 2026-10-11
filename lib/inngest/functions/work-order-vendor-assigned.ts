@@ -1,5 +1,6 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
+import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 import { NonRetriableError }    from 'inngest'
 import { render }               from '@react-email/render'
 import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
@@ -29,7 +30,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         supabase
           .from('work_orders')
           .select(`
-            id, wo_number, title, description, nte_amount, scheduled_date,
+            id, wo_number, title, description, nte_amount, needed_by_date,
             scheduled_time, portal_enabled,
             status, org_id, property_id, vendor_id, asset_id
           `)
@@ -146,6 +147,11 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           portal_enabled:              true,
           status:                      'assigned',
           vendor_id:                   vendorId,
+          // The fourth dispatch path, and it needs the clock started for the
+          // same reason as the three server-action ones: the dispatch-silence
+          // timer reads vendor_dispatched_at plus a null vendor_progress, and
+          // a vendor notified from here would otherwise never be chased.
+          ...vendorDispatchFields(),
         })
         .eq('id', workOrderId)
         .eq('org_id', orgId)
@@ -261,13 +267,16 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         const e164 = normalizePhoneToE164(vendorPhone!)
         if (!e164) return { skipped: true, reason: 'invalid-phone' }
 
+        // needed_by_date: at dispatch nobody has accepted, so the only time
+        // fact available is the PM's hard limit (scheduled_time, deprecated
+        // but still the one timezone-safe representation) against the deadline.
         let vendorWindow: string | undefined
-        if (wo.scheduled_time && wo.scheduled_date) {
+        if (wo.scheduled_time && wo.needed_by_date) {
           const { formatPropertyTime } = await import('@/lib/utils/timezone')
           const propTz = property?.timezone ?? 'America/New_York'
           vendorWindow = formatPropertyTime(
             wo.scheduled_time.slice(0, 5),
-            wo.scheduled_date,
+            wo.needed_by_date,
             propTz,
             'long'
           )

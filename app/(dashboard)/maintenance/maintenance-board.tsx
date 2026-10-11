@@ -21,9 +21,16 @@ import {
   acceptVendorSuggestion, dismissVendorSuggestion,
   acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor, VendorScheduledWindow, VendorProgress } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
+import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
+import {
+  groupByWorkflowStage,
+  compareWorkflowOrder,
+  stageNeedsPmAction,
+  type WorkflowStage,
+} from '@/lib/work-orders/workflow-stage'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -46,7 +53,18 @@ interface WorkOrderRow {
   category: string | null
   priority: PriorityLevel
   status: WoStatus
-  scheduled_date: string | null
+  needed_by_date: string | null
+  vendor_scheduled_at: string | null
+  vendor_scheduled_window: VendorScheduledWindow | null
+  // The vendor-written progress axis. Without it every row falls through to
+  // the status-only branches of the stage ladder and the board can never show
+  // vendor_blocked, scheduled or in_progress, which is most of what the
+  // grouping exists to surface. Declared as the union rather than narrowed at
+  // the boundary like vendor_scheduled_window above, because this one IS a
+  // real Postgres enum: the column cannot hold a label outside the type, and
+  // check-type-drift.mjs now fails if a migration adds one without the TS
+  // union moving with it.
+  vendor_progress: VendorProgress | null
   completed_date: string | null
   estimated_cost: number | null
   nte_amount: number | null
@@ -121,7 +139,10 @@ function cachedWorkOrderToRow(
     category:                  cached.category ?? null,
     priority:                  cached.priority,
     status:                    cached.status,
-    scheduled_date:            cached.scheduled_date ?? null,
+    needed_by_date:            cached.needed_by_date ?? null,
+    vendor_scheduled_at:       cached.vendor_scheduled_at ?? null,
+    vendor_scheduled_window:   cached.vendor_scheduled_window ?? null,
+    vendor_progress:           cached.vendor_progress ?? null,
     completed_date:            cached.completed_date ?? null,
     estimated_cost:            cached.estimated_cost ?? null,
     nte_amount:                cached.nte_amount ?? null,
@@ -258,7 +279,9 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
     priority:               wo.priority,
     status:                 wo.status,
     source:                 '',
-    scheduled_date:         wo.scheduled_date,
+    needed_by_date:         wo.needed_by_date,
+    vendor_scheduled_at:    wo.vendor_scheduled_at,
+    vendor_scheduled_window: wo.vendor_scheduled_window,
     completed_date:         wo.completed_date,
     estimated_cost:         wo.estimated_cost,
     nte_amount:             wo.nte_amount,
@@ -409,6 +432,80 @@ function firstResolvableName(
   return undefined
 }
 
+/**
+ * A stage section heading on the list view.
+ *
+ * The stages waiting on the PM are accented and the rest are muted, so the
+ * part of the board that is a to-do list is distinguishable at a glance from
+ * the part that is a status report. Gold rather than red: this is work to do,
+ * not an alarm, and the board already spends red on urgent priority.
+ */
+function StageHeading({
+  stage,
+  label,
+  count,
+}: Readonly<{ stage: WorkflowStage; label: string; count: number }>) {
+  const needsAction = stageNeedsPmAction(stage)
+  const color = needsAction ? 'var(--accent-gold)' : 'var(--text-muted)'
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <h3
+        className="text-xs font-semibold uppercase tracking-wide"
+        style={{ color }}
+      >
+        {label}
+      </h3>
+      <span
+        className="text-xs font-medium px-2 py-0.5 rounded-full"
+        style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)' }}
+      >
+        {count}
+      </span>
+      <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+    </div>
+  )
+}
+
+/**
+ * A work order's date, labelled for which of the two it is.
+ *
+ * Since the date split (20261011120000) a work order carries a vendor-confirmed
+ * appointment, the PM's deadline, or neither. Rendering both the same way is
+ * what made the old single column ambiguous in the first place, so a deadline
+ * is prefixed "By" and an appointment is shown bare. Shared by the live board
+ * card and the archived list rather than written twice, so the two cannot drift
+ * into labelling the same work order differently.
+ */
+function WoDateChip({
+  wo,
+  withIcon = false,
+  asParagraph = false,
+}: Readonly<{
+  wo: { needed_by_date: string | null; vendor_scheduled_at: string | null }
+  withIcon?: boolean
+  asParagraph?: boolean
+}>) {
+  const resolved = workOrderDisplayDate(wo)
+  if (!resolved) return null
+
+  const prefix = resolved.kind === 'deadline' ? 'By ' : ''
+  const label  = `${prefix}${formatDate(resolved.value)}`
+
+  if (asParagraph) {
+    return (
+      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-1">
+      {withIcon && <Calendar className="w-3 h-3" />}
+      {label}
+    </span>
+  )
+}
+
 function WorkOrderCard({
   wo,
   vendors,
@@ -499,12 +596,7 @@ function WorkOrderCard({
                 {wo.status === 'completed' && wo.completed_by_name && ` (${wo.completed_by_name})`}
               </span>
             )}
-            {wo.scheduled_date && (
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {formatDate(wo.scheduled_date)}
-              </span>
-            )}
+            <WoDateChip wo={wo} withIcon />
             {(wo.nte_amount != null || wo.estimated_cost != null) && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
@@ -1091,6 +1183,7 @@ export function MaintenanceBoard({
   crewMembers = [],
   propertyAssets = [],
   vendorCompliance = [],
+  quoteApprovalWorkOrderIds = [],
   inspectionForms = [],
   orgMembers = [],
   orgId = '',
@@ -1104,6 +1197,15 @@ export function MaintenanceBoard({
   crewMembers?:     CrewMemberOption[]
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
+  /**
+   * Work orders a vendor has priced and nobody has approved or declined.
+   * Lives in `quote_requests`, so it arrives as ids beside the rows.
+   *
+   * Defaults to empty, which is what the offline Dexie path gets: the cache
+   * holds no quote rows, so those work orders simply are not hoisted rather
+   * than the board failing to render at all.
+   */
+  quoteApprovalWorkOrderIds?: string[]
   /** §7's pickers, only reached from the schedule form. */
   inspectionForms?: InspectionFormOption[]
   orgMembers?:      OrgMemberOption[]
@@ -1253,6 +1355,32 @@ export function MaintenanceBoard({
     if (filterPriority !== 'all' && wo.priority !== filterPriority) return false
     return true
   })
+
+  const quoteApprovalIds = useMemo(
+    () => new Set(quoteApprovalWorkOrderIds),
+    [quoteApprovalWorkOrderIds],
+  )
+
+  /**
+   * The list view, grouped by where each work order sits in the workflow, with
+   * the stages waiting on the PM first and "a vendor quote needs your
+   * approval" at the very top.
+   *
+   * Grouped rather than merely sorted, because a sort alone leaves the PM
+   * guessing where one stage ends and the next begins. Empty stages are
+   * dropped by groupByWorkflowStage, so nobody scans past an empty
+   * "Quote needs your approval" band to reach their actual work.
+   *
+   * The quote signal is attached HERE rather than stored on the row: it lives
+   * in quote_requests, and the only thing the ladder needs from it is a
+   * boolean.
+   */
+  const stageGroups = useMemo(
+    () => groupByWorkflowStage(
+      filtered.map((wo) => ({ ...wo, hasQuoteAwaitingApproval: quoteApprovalIds.has(wo.id) })),
+    ),
+    [filtered, quoteApprovalIds],
+  )
 
   // Stats
   const openCount    = effectiveWorkOrders.filter((w) => w.status !== 'completed' && w.status !== 'cancelled').length
@@ -1423,7 +1551,7 @@ export function MaintenanceBoard({
       {/* Calendar View */}
       {viewMode === 'calendar' && (
         <MaintenanceCalendar
-          workOrders={allWorkOrders.filter(wo => wo.scheduled_date)}
+          workOrders={allWorkOrders.filter(wo => workOrderDisplayDay(wo) !== null)}
           schedules={schedules}
         />
       )}
@@ -1467,17 +1595,28 @@ export function MaintenanceBoard({
               </label>
             </div>
           )}
-          <div className="space-y-3">
-            {filtered.map((wo) => (
-              <WorkOrderCard
-                key={wo.id}
-                wo={wo}
-                vendors={vendors}
-                crewMembers={crewMembers}
-                onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
-                isSelected={selectedIds.has(wo.id)}
-                onToggle={() => toggleSelect(wo.id)}
-              />
+          <div className="space-y-6">
+            {stageGroups.map((group) => (
+              <div key={group.stage}>
+                <StageHeading
+                  stage={group.stage}
+                  label={group.label}
+                  count={group.workOrders.length}
+                />
+                <div className="space-y-3">
+                  {group.workOrders.map((wo) => (
+                    <WorkOrderCard
+                      key={wo.id}
+                      wo={wo}
+                      vendors={vendors}
+                      crewMembers={crewMembers}
+                      onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
+                      isSelected={selectedIds.has(wo.id)}
+                      onToggle={() => toggleSelect(wo.id)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -1487,7 +1626,14 @@ export function MaintenanceBoard({
       {viewMode === 'kanban' && (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {KANBAN_COLUMNS.map((col) => {
-            const colWOs = filtered.filter((wo) => wo.status === col.key)
+            // Kanban is grouped by STATUS, so the stage ladder cannot regroup
+            // it. Sorting by the same comparator still applies the ladder
+            // WITHIN a column, which is what puts a work order whose quote is
+            // waiting at the top of its column rather than buried in it.
+            const colWOs = filtered
+              .filter((wo) => wo.status === col.key)
+              .map((wo) => ({ ...wo, hasQuoteAwaitingApproval: quoteApprovalIds.has(wo.id) }))
+              .sort(compareWorkflowOrder)
             return (
               <div key={col.key} className="flex-shrink-0 w-72">
                 <div
@@ -1551,13 +1697,7 @@ export function MaintenanceBoard({
                             {wo.completed_by_name && ` (${wo.completed_by_name})`}
                           </p>
                         )}
-                        {wo.scheduled_date && (
-                          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                            {new Date(wo.scheduled_date).toLocaleDateString('en-US', {
-                              month: 'short', day: 'numeric',
-                            })}
-                          </p>
-                        )}
+                        <WoDateChip wo={wo} asParagraph />
                       </button>
                     )
                   })}
