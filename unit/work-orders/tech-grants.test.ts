@@ -188,45 +188,85 @@ describe('listTechnicianGrants', () => {
 })
 
 describe('identifyTechnician', () => {
-  function fixture(grantResp: Resp, rosterResp: Resp = { data: { id: 'tech_1' }, error: null }) {
+  function fixture(
+    grantResp: Resp,
+    rosterResp: Resp = { data: { id: 'tech_1' }, error: null },
+    rosterSecond?: Resp,
+  ) {
     return makeSupabase({
-      vendor_technicians:       [rosterResp],
+      vendor_technicians:       rosterSecond ? [rosterResp, rosterSecond] : [rosterResp],
       work_order_access_grants: [grantResp],
     })
   }
 
-  it('names the grant and creates the roster entry', async () => {
+  it('names the grant and inserts the roster entry', async () => {
     const { client, calls } = fixture({ data: [{ id: 'g1', label: 'Mike' }], error: null })
 
     await expect(identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: '(334) 555-1212' }))
       .resolves.toEqual({ ok: true, value: { label: 'Mike' } })
 
-    const upsert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'upsert')
-    const row = upsert?.args[0] as Record<string, unknown>
+    const insert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'insert')
+    const row = insert?.args[0] as Record<string, unknown>
     // The phone IS the roster identity, so it is stored normalized or not at
     // all: a roster keyed on unnormalized text silently fragments into three
     // Mikes.
     expect(row.phone_e164).toBe('+13345551212')
-    expect(upsert?.args[1]).toEqual({ onConflict: 'vendor_id,phone_e164' })
   })
 
-  it('stores no number, and no conflict target, when none was given', async () => {
+  it('never uses onConflict, because the unique index is PARTIAL', async () => {
+    // Postgres cannot use a partial index as an ON CONFLICT arbiter from a
+    // bare column list, and supabase-js cannot express the predicate. An
+    // upsert here raises 42P10 at RUNTIME for every technician who enters a
+    // phone number, which is what it did until check-db-invariants caught it.
+    // A query double does not enforce arbiter semantics, so this asserts the
+    // SHAPE of the call rather than its result.
+    const { client, calls } = fixture({ data: [{ id: 'g1', label: 'Mike' }], error: null })
+    await identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: '3345551212' })
+
+    expect(calls.find((c) => c.table === 'vendor_technicians' && c.method === 'upsert')).toBeUndefined()
+  })
+
+  it('refreshes the existing row when the insert collides', async () => {
+    // 23505 is the expected path from the second job onward, not a fault.
+    const { client, calls } = fixture(
+      { data: [{ id: 'g1', label: 'Mike' }], error: null },
+      { data: null, error: { code: '23505', message: 'duplicate key' } },
+      { data: { id: 'tech_existing' }, error: null },
+    )
+
+    await expect(identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: '3345551212' }))
+      .resolves.toEqual({ ok: true, value: { label: 'Mike' } })
+
+    const update = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'update')
+    expect(update?.args[0]).toMatchObject({ label: 'Mike' })
+    // Scoped by the same pair the index is on, so it can only ever touch the
+    // row that actually collided.
+    const eqs = calls.filter((c) => c.table === 'vendor_technicians' && c.method === 'eq').map((c) => c.args)
+    expect(eqs).toEqual(expect.arrayContaining([
+      ['vendor_id', 'vend_1'], ['org_id', 'org_1'], ['phone_e164', '+13345551212'],
+    ]))
+
+    // The collision is expected, so it is not reported as a fault.
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('stores no number when none was given, and never collides', async () => {
     const { client, calls } = fixture({ data: [{ id: 'g1', label: 'Mike' }], error: null })
     await identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: null })
 
-    const upsert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'upsert')
-    expect((upsert?.args[0] as Record<string, unknown>).phone_e164).toBeNull()
-    // The partial unique index only covers rows WITH a number, so naming it as
-    // an arbiter with none would be wrong.
-    expect(upsert?.args[1]).toBeUndefined()
+    const insert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'insert')
+    expect((insert?.args[0] as Record<string, unknown>).phone_e164).toBeNull()
+    // The index is NULLS DISTINCT, so two technicians who gave no number are
+    // not the same person and each keeps their own row.
+    expect(calls.find((c) => c.table === 'vendor_technicians' && c.method === 'update')).toBeUndefined()
   })
 
   it('drops an unusable number rather than storing it raw', async () => {
     const { client, calls } = fixture({ data: [{ id: 'g1', label: 'Mike' }], error: null })
     await identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: 'call the office' })
 
-    const upsert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'upsert')
-    expect((upsert?.args[0] as Record<string, unknown>).phone_e164).toBeNull()
+    const insert = calls.find((c) => c.table === 'vendor_technicians' && c.method === 'insert')
+    expect((insert?.args[0] as Record<string, unknown>).phone_e164).toBeNull()
   })
 
   it('claims only an UNNAMED grant, so a shared link cannot be renamed', async () => {
@@ -251,22 +291,22 @@ describe('identifyTechnician', () => {
     // blocked job today.
     const { client, calls } = fixture(
       { data: [{ id: 'g1', label: 'Mike' }], error: null },
-      { data: null, error: { message: 'boom' } },
+      { data: null, error: { code: '42501', message: 'boom' } },
     )
 
     await expect(identifyTechnician(client, 'g1', 'org_1', 'vend_1', { name: 'Mike', phone: null }))
       .resolves.toEqual({ ok: true, value: { label: 'Mike' } })
 
     expect(reportError).toHaveBeenCalledWith(
-      { message: 'boom' },
+      { code: '42501', message: 'boom' },
       expect.objectContaining({ level: 'warning', orgId: 'org_1' }),
     )
     // And the failure must not have carried the number into the report.
     const reported = (reportError as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Record<string, unknown>
     expect(JSON.stringify(reported)).not.toMatch(/\+1|555/)
 
-    const update = calls.find((c) => c.table === 'work_order_access_grants' && c.method === 'update')
-    expect((update?.args[0] as Record<string, unknown>).technician_id).toBeNull()
+    const grantUpdate = calls.find((c) => c.table === 'work_order_access_grants' && c.method === 'update')
+    expect((grantUpdate?.args[0] as Record<string, unknown>).technician_id).toBeNull()
   })
 
   it('rejects an empty name', async () => {

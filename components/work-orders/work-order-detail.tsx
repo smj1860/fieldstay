@@ -15,6 +15,7 @@ import { VendorDispatchDialog } from './VendorDispatchDialog'
 import { VendorRatingPanel } from './VendorRatingPanel'
 import { getWorkOrderPhotoUrls } from '@/app/(dashboard)/maintenance/actions'
 import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
+import type { VendorScheduledWindow } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ export interface WorkOrderDetailData {
   source:                  string
   needed_by_date:          string | null
   vendor_scheduled_at:     string | null
-  vendor_scheduled_window: string | null
+  vendor_scheduled_window: VendorScheduledWindow | null
   completed_date:          string | null
   estimated_cost:          number | null
   nte_amount:              number | null

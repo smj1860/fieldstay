@@ -10,6 +10,7 @@ import type {
 import type { Metadata } from 'next'
 import { isThumbtackConfigured } from '@/lib/integrations/thumbtack'
 import { CategoryPickerFindProSection } from '@/components/thumbtack/CategoryPickerFindProSection'
+import { asScheduledWindow } from '@/lib/work-orders/display-date'
 
 export const metadata: Metadata = { title: 'Maintenance' }
 
@@ -302,6 +303,15 @@ export default async function MaintenancePage() {
     (r): r is VendorComplianceRow => r.vendor_id !== null && r.compliance_status !== null
   )
 
+  // vendor_scheduled_window is a `text` column with a CHECK, so the generated
+  // type is `string | null` and the board's own union cannot be satisfied
+  // without narrowing. Validated rather than cast, so a value that got past
+  // the constraint reads as "no window" instead of flowing on as a lie.
+  const boardWorkOrders = (workOrders ?? []).map((wo) => ({
+    ...wo,
+    vendor_scheduled_window: asScheduledWindow(wo.vendor_scheduled_window),
+  }))
+
   // The work orders a vendor has priced and nobody has decided on. Passed as
   // ids rather than rows: the board only needs to know WHICH work orders are
   // waiting, and the quote itself is already rendered on /maintenance/[id].
@@ -330,7 +340,7 @@ export default async function MaintenancePage() {
         </div>
       )}
       <MaintenanceBoard
-        workOrders={workOrders ?? []}
+        workOrders={boardWorkOrders}
         properties={propertiesResult.data ?? []}
         vendors={vendorsResult.data ?? []}
         schedules={schedules ?? []}

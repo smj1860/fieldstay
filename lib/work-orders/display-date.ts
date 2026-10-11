@@ -28,16 +28,36 @@ export interface WorkOrderDisplayDate {
   window: VendorScheduledWindow | null
 }
 
+const SCHEDULED_WINDOWS: ReadonlySet<string> = new Set([
+  'morning', 'afternoon', 'evening', 'all_day', 'exact',
+])
+
+/**
+ * Narrows the window as it comes off the database.
+ *
+ * `vendor_scheduled_window` is a `text` column with a CHECK constraint, not a
+ * Postgres enum, so `supabase gen types` can only say `string | null` — the
+ * CHECK is a real guarantee that TypeScript cannot see. A bare cast would
+ * assert that guarantee without testing it; this VALIDATES, so a value that
+ * somehow got past the constraint (a direct SQL write, a dropped constraint)
+ * reads as "no window" rather than flowing on as a lie.
+ */
+export function asScheduledWindow(value: string | null | undefined): VendorScheduledWindow | null {
+  return value && SCHEDULED_WINDOWS.has(value) ? (value as VendorScheduledWindow) : null
+}
+
 export function workOrderDisplayDate(wo: {
   vendor_scheduled_at?:     string | null
-  vendor_scheduled_window?: VendorScheduledWindow | string | null
+  // Not `| string`: that widens the union back to plain string and loses
+  // every bit of checking the five literals buy.
+  vendor_scheduled_window?: VendorScheduledWindow | null
   needed_by_date?:          string | null
 }): WorkOrderDisplayDate | null {
   if (wo.vendor_scheduled_at) {
     return {
       value:  wo.vendor_scheduled_at,
       kind:   'appointment',
-      window: (wo.vendor_scheduled_window as VendorScheduledWindow | null) ?? null,
+      window: wo.vendor_scheduled_window ?? null,
     }
   }
   if (wo.needed_by_date) {

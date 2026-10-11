@@ -40,6 +40,7 @@ import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
+import type { VendorScheduledWindow } from '@/types/database'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ interface WorkOrderRow {
   status: WoStatus
   needed_by_date: string | null
   vendor_scheduled_at: string | null
-  vendor_scheduled_window: string | null
+  vendor_scheduled_window: VendorScheduledWindow | null
   completed_date: string | null
   estimated_cost: number | null
   nte_amount: number | null

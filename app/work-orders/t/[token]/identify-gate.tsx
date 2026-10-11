@@ -124,8 +124,7 @@ export function IdentifyGate({
           />
 
           <label htmlFor="tech-phone" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
-            Your mobile
-            <span style={{ fontWeight: 400, color: '#94a3b8' }}> (optional)</span>
+            Your mobile<span style={{ fontWeight: 400, color: '#94a3b8' }}> (optional)</span>
           </label>
           <input
             id="tech-phone"

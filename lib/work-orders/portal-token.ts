@@ -211,7 +211,7 @@ async function finish(
 
     const lookup = tryUnwrap(vendorRes, { site: `${site}.vendorOrg` })
     if (!lookup.ok) return { ok: false, reason: 'unavailable' }
-    if (!lookup.data || lookup.data.org_id !== workOrder.org_id) {
+    if (lookup.data?.org_id !== workOrder.org_id) {
       return { ok: false, reason: 'vendor_mismatch' }
     }
   }

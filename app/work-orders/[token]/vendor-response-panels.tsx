@@ -262,8 +262,7 @@ export function AcceptDeclinePanel({
           </select>
 
           <label htmlFor="decline-note" style={labelStyle}>
-            Anything they should know
-            <span style={{ fontWeight: 400, color: PALETTE.textFaint }}> (optional)</span>
+            Anything they should know<span style={{ fontWeight: 400, color: PALETTE.textFaint }}> (optional)</span>
           </label>
           <textarea
             id="decline-note"
@@ -391,10 +390,7 @@ export function ProgressPanel({
       )}
 
       <label htmlFor="progress-note" style={labelStyle}>
-        Note
-        <span style={{ fontWeight: 400, color: PALETTE.textFaint }}>
-          {needsNote ? '' : ' (optional)'}
-        </span>
+        Note<span style={{ fontWeight: 400, color: PALETTE.textFaint }}>{needsNote ? '' : ' (optional)'}</span>
       </label>
       <textarea
         id="progress-note"

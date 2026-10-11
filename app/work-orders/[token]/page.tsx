@@ -15,9 +15,9 @@ export const metadata: Metadata = { title: 'Work Order | FieldStay' }
  */
 export default async function VendorPortalPage({
   params,
-}: {
+}: Readonly<{
   params: Promise<{ token: string }>
-}) {
+}>) {
   const { token } = await params
 
   const load = await loadPortalPage(token)

@@ -28,9 +28,9 @@ export const metadata: Metadata = {
  */
 export default async function TechnicianWorkOrderPage({
   params,
-}: {
+}: Readonly<{
   params: Promise<{ token: string }>
-}) {
+}>) {
   const { token } = await params
 
   const load = await loadPortalPage(token)

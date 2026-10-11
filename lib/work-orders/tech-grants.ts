@@ -286,7 +286,7 @@ export async function identifyTechnician(
 }
 
 /**
- * Adds or touches the vendor's roster entry. Returns its id, or null.
+ * Adds or refreshes the vendor's roster entry. Returns its id, or null.
  *
  * The phone IS the roster identity, so normalization decides whether
  * "(334) 555-1212", "334-555-1212" and "+13345551212" are one technician or
@@ -294,10 +294,11 @@ export async function identifyTechnician(
  * raw: a roster keyed on unnormalized text silently fragments, and a number
  * that cannot be dialled is worse than no number.
  *
- * With no usable phone there is no key to collide on, so a row is inserted
- * without one. It still carries the name, and the vendor can text that person
- * himself; what he does not get is a pick-list entry, because there is nothing
- * to send to.
+ * With no usable phone there is no key to collide on (the index is NULLS
+ * DISTINCT, so NULL never equals NULL), and each unnamed-number technician
+ * keeps their own row. That is correct: two people who gave no number are not
+ * the same person. They still carry a name; what they do not get is a
+ * pick-list entry, because there is nothing to send to.
  */
 async function upsertRosterEntry(
   supabase: ServiceClient,
@@ -307,38 +308,75 @@ async function upsertRosterEntry(
   rawPhone: string | null,
 ): Promise<string | null> {
   const phone = rawPhone ? normalizePhoneToE164(rawPhone) : null
+  const now = new Date().toISOString()
 
-  const res = await supabase
+  const insertRes = await supabase
     .from('vendor_technicians')
-    .upsert(
-      {
-        vendor_id:    vendorId,
-        org_id:       orgId,
-        phone_e164:   phone,
-        label:        name,
-        last_used_at: new Date().toISOString(),
-      },
-      // The partial unique index is on (vendor_id, phone_e164) WHERE
-      // phone_e164 IS NOT NULL, so this collides only when a number is
-      // present. With none, every open creates its own row, which is correct:
-      // two unnamed-number technicians are not the same person.
-      phone ? { onConflict: 'vendor_id,phone_e164' } : undefined,
-    )
+    .insert({
+      vendor_id:    vendorId,
+      org_id:       orgId,
+      phone_e164:   phone,
+      label:        name,
+      last_used_at: now,
+    })
     .select('id')
     .maybeSingle()
 
-  if (res.error) {
-    // Never fatal, and never logged with the number attached: phone numbers are
-    // PII and this is a third party's employee. The technician's own access
-    // does not depend on the roster write, so the degradation is a missing
-    // pick-list entry on the vendor's next job, not a blocked job today.
-    reportError(res.error, {
+  if (!insertRes.error) return insertRes.data?.id ?? null
+
+  // 23505 = unique_violation on vendor_technicians_vendor_phone_key, which
+  // means this vendor already has this technician. Expected, not a fault:
+  // every job after the first takes this branch.
+  //
+  // INSERT-THEN-CATCH rather than upsert(onConflict), because that index is
+  // PARTIAL (`WHERE phone_e164 IS NOT NULL`) and Postgres cannot use a partial
+  // index as an arbiter from a bare column list — it needs
+  // `ON CONFLICT (cols) WHERE <predicate>`, which supabase-js's onConflict
+  // cannot express. An upsert here raises 42P10 at RUNTIME for every
+  // technician who enters a phone number, which is exactly what it did until
+  // check-db-invariants caught it. The index still arbitrates, so this is not
+  // a TOCTOU window: two simultaneous enrolments cannot both insert, and the
+  // loser lands here.
+  if (insertRes.error.code !== '23505') {
+    // Never logged with the number attached: phone numbers are PII and this is
+    // a third party's employee. The technician's own access does not depend on
+    // the roster write, so the degradation is a missing pick-list entry on the
+    // vendor's next job, not a blocked job today.
+    reportError(insertRes.error, {
       site: 'lib.work-orders.tech-grants.upsertRoster', orgId, level: 'warning',
     })
     return null
   }
 
-  return res.data?.id ?? null
+  // Only a row WITH a phone number can have collided: the index is NULLS
+  // DISTINCT, so a null never conflicts with anything. Narrowing here rather
+  // than asserting keeps that reasoning in the code instead of in a `!`.
+  if (phone === null) {
+    reportError(insertRes.error, {
+      site: 'lib.work-orders.tech-grants.upsertRosterNullCollision', orgId, level: 'warning',
+    })
+    return null
+  }
+
+  // Refresh the existing row's name and last-used stamp. Scoped by the same
+  // pair the index is on, so it can only ever touch the row that collided.
+  const updateRes = await supabase
+    .from('vendor_technicians')
+    .update({ label: name, last_used_at: now })
+    .eq('vendor_id', vendorId)
+    .eq('org_id', orgId)
+    .eq('phone_e164', phone)
+    .select('id')
+    .maybeSingle()
+
+  if (updateRes.error) {
+    reportError(updateRes.error, {
+      site: 'lib.work-orders.tech-grants.upsertRosterRefresh', orgId, level: 'warning',
+    })
+    return null
+  }
+
+  return updateRes.data?.id ?? null
 }
 
 /**

@@ -57,7 +57,7 @@ export const VENDOR_RESPONSE_FAILURES: Record<VendorResponseFailure, { status: n
 
 type Result<T> = { ok: true; value: T } | { ok: false; reason: VendorResponseFailure }
 
-const CLOSED: readonly WoStatus[] = ['completed', 'cancelled']
+const CLOSED: ReadonlySet<WoStatus> = new Set(['completed', 'cancelled'])
 
 /**
  * The audit row every one of these writes leaves behind.
@@ -164,7 +164,7 @@ export async function acceptWorkOrder(
   principal: PortalPrincipal,
   input:     AcceptInput,
 ): Promise<Result<AcceptOutcome>> {
-  if (CLOSED.includes(workOrder.status)) return { ok: false, reason: 'already_closed' }
+  if (CLOSED.has(workOrder.status)) return { ok: false, reason: 'already_closed' }
   if (!workOrder.vendor_id) return { ok: false, reason: 'not_dispatched' }
 
   const now = new Date().toISOString()
@@ -246,7 +246,7 @@ export async function declineWorkOrder(
   principal: PortalPrincipal,
   input:     DeclineInput,
 ): Promise<Result<DeclineOutcome>> {
-  if (CLOSED.includes(workOrder.status)) return { ok: false, reason: 'already_closed' }
+  if (CLOSED.has(workOrder.status)) return { ok: false, reason: 'already_closed' }
   if (!workOrder.vendor_id) return { ok: false, reason: 'not_dispatched' }
 
   const vendorId = workOrder.vendor_id
@@ -317,7 +317,7 @@ export async function setVendorProgress(
   principal: PortalPrincipal,
   input:     ProgressInput,
 ): Promise<Result<{ status: WoStatus }>> {
-  if (CLOSED.includes(workOrder.status)) return { ok: false, reason: 'already_closed' }
+  if (CLOSED.has(workOrder.status)) return { ok: false, reason: 'already_closed' }
   if (!workOrder.vendor_id) return { ok: false, reason: 'not_dispatched' }
   if (!workOrder.vendor_accepted_at) return { ok: false, reason: 'not_accepted' }
   // Releasing the vendor is declineWorkOrder's job, which also clears the

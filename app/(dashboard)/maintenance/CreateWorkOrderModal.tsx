@@ -383,8 +383,7 @@ export function CreateWorkOrderModal({
                 </div>
                 <div>
                   <label htmlFor="wo-category" className="label">
-                    Category
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Category<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Needed for vendor suggestions
                     </span>
                   </label>
@@ -412,15 +411,13 @@ export function CreateWorkOrderModal({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="wo-date" className="label">
-                    Needed by
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Needed by<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Defaults to the next guest check-in
                     </span>
                   </label>
                   <Input id="wo-date" name="needed_by_date" type="date" />
                   <label htmlFor="wo-time" className="label mt-3">
-                    Hard time limit
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    Hard time limit<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Optional, use for same-day flip vendor windows
                     </span>
                   </label>
@@ -428,8 +425,7 @@ export function CreateWorkOrderModal({
                 </div>
                 <div>
                   <label htmlFor="wo-nte" className="label">
-                    NTE ($)
-                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                    NTE ($)<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       ceiling
                     </span>
                   </label>
@@ -450,8 +446,7 @@ export function CreateWorkOrderModal({
                   with it. */}
               <div>
                 <label htmlFor="wo-access-notes" className="label">
-                  Access notes
-                  <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                  Access notes<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                     Optional, shown after the vendor accepts
                   </span>
                 </label>
@@ -471,8 +466,7 @@ export function CreateWorkOrderModal({
 
               <div>
                 <label htmlFor="wo-parking-notes" className="label">
-                  Parking
-                  <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                  Parking<span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                     Optional
                   </span>
                 </label>
