@@ -5,8 +5,10 @@ import { sendEventsChunked }     from '@/lib/inngest/chunk'
 import { createPmNotifications } from '@/lib/inngest/helpers'
 import { frictionDateString, frictionDayUtcBounds } from '@/lib/friction/date'
 import { loadCrewBaselines, resolveBaselines }      from '@/lib/planning/baselines'
-import { loadOrgDayCrewJobs }    from '@/lib/scoring/crew-day-context'
+import { loadOrgDayCrewJobs, type OrgDayCrewJobs } from '@/lib/scoring/crew-day-context'
 import { rankCascadeRisk, type CascadeRisk } from '@/lib/scoring/cascade'
+import { lookupTravelMinutes }   from '@/lib/travel/resolve'
+import type { TravelStop, TravelLegMap } from '@/lib/travel/estimate'
 
 /**
  * SCHEDULED: every 30 minutes.
@@ -107,6 +109,32 @@ function subtitleFor(risk: CascadeRisk, crewMemberName: string): string {
   return `${late}${overrun}.${risk.travelUnknown ? ' Drive time unknown.' : ''}`
 }
 
+interface RankedRisk {
+  risk:           CascadeRisk
+  crewMemberName: string
+}
+
+/**
+ * Every crew member's risks for the day, flattened and ordered worst first.
+ *
+ * Shared by the cheap pre-check and the real pass so the two cannot disagree
+ * about what counts as a risk — the only difference between them is whether
+ * routed drive times were available to feed in.
+ */
+function rank(
+  crewDays: readonly OrgDayCrewJobs[],
+  now: number,
+  routedTravel?: TravelLegMap,
+): RankedRisk[] {
+  return crewDays
+    .flatMap((day) => rankCascadeRisk(day.jobs, now, routedTravel)
+      .filter((risk) => risk.hasDownstream)
+      .map((risk) => ({ risk, crewMemberName: day.crewMemberName })))
+    .sort((a, b) =>
+      b.risk.overrunMinutes - a.risk.overrunMinutes
+      || b.risk.minutesLate - a.risk.minutesLate)
+}
+
 export const checkCascadeForOrg = inngest.createFunction(
   {
     id: 'org-cascade-check', name: 'Check One Org for Cascading Delays', retries: 2,
@@ -133,14 +161,34 @@ export const checkCascadeForOrg = inngest.createFunction(
     // measured against the same instant. Per-crew clocks would make two jobs
     // checked a second apart incomparable for no gain.
     const now = Date.now()
-    const ranked = crewDays
-      .flatMap((day) => rankCascadeRisk(day.jobs, now)
-        .filter((risk) => risk.hasDownstream)
-        .map((risk) => ({ risk, crewMemberName: day.crewMemberName })))
-      .sort((a, b) =>
-        b.risk.overrunMinutes - a.risk.overrunMinutes
-        || b.risk.minutesLate - a.risk.minutesLate)
 
+    // Ranked TWICE on purpose, and the first pass is the cheap filter. Most
+    // of the 48 runs a day find nothing late, and ranking is pure arithmetic
+    // over rows already in hand — so establishing that there is nothing to
+    // report costs no query at all, where loading travel first would spend a
+    // read on every quiet run.
+    if (rank(crewDays, now).length === 0) {
+      return { notified: 0, check_date: checkDate }
+    }
+
+    // Routed drive times, READ ONLY — never fetched here. This function runs
+    // every 30 minutes; routing from it would spend a month of API budget in
+    // a week. The overnight day planner is what populates the cache, and a
+    // pair it has not covered falls back to the straight line, which
+    // rankCascadeRisk reports as travelUnknown rather than as zero.
+    const routedEntries = await step.run('load-cached-travel', async () => {
+      const chains: TravelStop[][] = crewDays.map((day) =>
+        [...day.jobs]
+          .sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt))
+          .map((job) => ({ id: job.turnoverId, lat: job.lat, lng: job.lng })))
+      const legs = await lookupTravelMinutes(orgId, chains)
+      return [...legs.entries()]
+    })
+
+    // The real ranking, with drive time in it. A routed leg can only make an
+    // overrun BIGGER than the straight line suggested, so the cheap pass
+    // above never hides a risk this one would have found.
+    const ranked = rank(crewDays, now, new Map(routedEntries))
     if (ranked.length === 0) {
       return { notified: 0, check_date: checkDate }
     }

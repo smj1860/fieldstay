@@ -95,7 +95,7 @@ export default async function OpsSnapshotPage() {
           id, property_id, prev_booking_id, checkout_datetime, checkin_datetime,
           window_minutes, status, priority, notes, completed_at, started_at,
           checklist_template_id,
-          turnover_assignments(id, crew_member_id, crew_member:crew_members(id, name))
+          turnover_assignments(id, crew_member_id, crew_member:crew_members(id, name, home_lat, home_lng))
         `)
         .eq('org_id', membership.org_id)
         .neq('status', 'cancelled')

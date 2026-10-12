@@ -224,7 +224,7 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   // ── Geocoding ─────────────────────────────────────────────────────────────
   MAPBOX_PUBLIC_TOKEN: {
     tier: 'production', schema: prefixed('pk.'),
-    why: 'property and vendor geocoding on save — crew auto-assignment scores by distance',
+    why: 'property and vendor geocoding on save, plus the Directions Matrix behind routed drive times (lib/travel/mapbox.ts) — crew scoring and the day plan both measure distance',
   },
 
   // ── Web push ──────────────────────────────────────────────────────────────

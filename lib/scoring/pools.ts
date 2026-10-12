@@ -68,3 +68,73 @@ export function computeDayWorkloadMap<T>(
   }
   return byDate
 }
+
+/**
+ * One row of a crew member's day, as the prior-stop lookup needs it.
+ *
+ * `lat`/`lng` are the PROPERTY's, not the crew member's: this answers "where
+ * will they be coming from", and the answer is the last place they were
+ * working.
+ */
+export interface PriorStopRow {
+  crewMemberId: string
+  /**
+   * The turnover's checkout timestamp. Both the day key and the ordering key.
+   *
+   * OPTIONAL rather than `string | null | undefined` on a required key: these
+   * rows cross an Inngest step boundary, where JSON drops an undefined value
+   * and the property itself goes missing. A required key would make the
+   * serialized shape fail to type-check against the one that produced it.
+   */
+  when?:        string | null
+  lat:          number | null
+  lng:          number | null
+}
+
+export type CrewOrigin = { lat: number | null; lng: number | null } | null
+
+/**
+ * Each crew member's LAST stop before `before` on the same calendar day.
+ *
+ * This is what makes the scorer's proximity term measure from the right
+ * place. Measuring from home is correct for the first job of a day and wrong
+ * for every job after it — a crew member whose 10am is next door to the 2pm
+ * being scored was being treated as though they would drive from their
+ * kitchen, with 15% of the standard weight riding on it.
+ *
+ * The day is the ISO string's leading `YYYY-MM-DD`, the same slice
+ * computeDayWorkloadMap() and the crew_availability lookup use, for the same
+ * reason: parsing to a Date and reading local parts buckets a late-evening
+ * checkout differently depending on where the function happens to run.
+ *
+ * A crew member with no earlier stop that day is deliberately ABSENT from the
+ * result rather than present with a null — the scorer's fallback to home is
+ * then the ordinary missing-key path, not a special case.
+ */
+export function computePriorStopOrigins(
+  rows:   readonly PriorStopRow[],
+  before: string,
+): Record<string, CrewOrigin> {
+  const day = before.slice(0, 10)
+  const latestByCrew: Record<string, { when: string; lat: number | null; lng: number | null }> = {}
+
+  for (const row of rows) {
+    const when = row.when
+    if (!when || when.slice(0, 10) !== day) continue
+
+    // Strictly earlier. An equal timestamp is the turnover being scored
+    // itself, or a genuine tie we cannot order — neither is a prior stop.
+    if (when >= before) continue
+
+    const current = latestByCrew[row.crewMemberId]
+    if (!current || when > current.when) {
+      latestByCrew[row.crewMemberId] = { when, lat: row.lat, lng: row.lng }
+    }
+  }
+
+  const origins: Record<string, CrewOrigin> = {}
+  for (const [crewId, stop] of Object.entries(latestByCrew)) {
+    origins[crewId] = { lat: stop.lat, lng: stop.lng }
+  }
+  return origins
+}

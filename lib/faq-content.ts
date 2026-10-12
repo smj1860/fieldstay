@@ -678,6 +678,12 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
           'FieldStay works out what time each crew member should start each job on a given date, in order, from the property\'s checkout time, the job before it, the drive between them, and that crew member\'s own average pace. It recomputes overnight and again whenever you change who is assigned to that date. Crew see nothing until you press "Publish to crew" in the Day plan bar at the top of the Turnovers board, because a start time is an obligation and one sent with no human in between would make a crew member late against a number nobody agreed to. Published times appear on the crew card as "Start 10:40" alongside "Free from 10:00", the checkout time it is derived from. You can withdraw a published day at any time, which returns their cards to showing the checkout time alone. Missing a planned start does not affect anyone\'s reliability score: late is still measured against the guest\'s check-in time.',
       },
       {
+        id:       'crew-travel-time',
+        question: 'Are the travel times real driving routes, and why do some say "at least"?',
+        answer:
+          'They are real driving routes wherever FieldStay has been able to look one up. Each ordered pair of properties is routed once and reused, since a crew member\'s week is mostly the same pairs, and refreshed a few times a year. Where no route is available the estimate falls back to a straight line, which is always shorter than the road, so a day of unroutable stops runs tighter than it looks. "At least" means part of that day could not be measured at all: a drive needs both ends on the map, and a property with no geocodable address gives nothing to measure. The number shown is the sum of the legs that could be measured, so it is a floor rather than a total. Give the property a full address under Properties to clear it. The Ops snapshot\'s per-crew figure also includes the commute at both ends of the day and any work orders they hold, not only their turnovers.',
+      },
+      {
         id:       'crew-cascade-alert',
         question: 'Will FieldStay tell me when a turnover is about to make the next one late?',
         answer:

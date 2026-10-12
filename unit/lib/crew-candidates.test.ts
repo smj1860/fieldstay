@@ -20,7 +20,7 @@ describe('scoreCrewCandidates', () => {
       property:  { lat: null, lng: null },
       crew:      [crew({ id: 'a', reliability_score: 0.5 }), crew({ id: 'b', reliability_score: 1 })],
       familiarCrewIds: [],
-      workloadMap:     {}, dayWorkloadMap: {},
+      workloadMap:     {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(scored.map((s) => s.crew_member_id)).toEqual(['b', 'a'])
   })
@@ -31,7 +31,7 @@ describe('scoreCrewCandidates', () => {
       property:  { lat: null, lng: null },
       crew:      [crew({ id: 'familiar' }), crew({ id: 'stranger' })],
       familiarCrewIds: ['familiar'],
-      workloadMap:     {}, dayWorkloadMap: {},
+      workloadMap:     {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.crew_member_id).toBe('familiar')
     expect(top!.breakdown.familiarity).toBe(1)
@@ -45,12 +45,12 @@ describe('scoreCrewCandidates', () => {
     const far  = crew({ id: 'far',  home_lat: 40.7,  home_lng: -74.0 })
 
     const sameDay = scoreCrewCandidates({
-      isSameDay: true, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {},
+      isSameDay: true, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(sameDay[0]!.crew_member_id).toBe('near')
 
     const standard = scoreCrewCandidates({
-      isSameDay: false, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {},
+      isSameDay: false, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(standard[0]!.crew_member_id).toBe('far')
   })
@@ -59,7 +59,7 @@ describe('scoreCrewCandidates', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: null, lng: null },
       crew: [crew({ id: 'a', reliability_score: '0.85', capacity_score: '0.9' })],
-      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.reliability).toBe(0.85)
     expect(top!.breakdown.capacity).toBe(0.9)
@@ -68,7 +68,7 @@ describe('scoreCrewCandidates', () => {
   it('treats missing coordinates as neutral, not as a penalty', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: 32.5, lng: -85.9 },
-      crew: [crew({ id: 'nohome' })], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      crew: [crew({ id: 'nohome' })], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.proximity).toBe(0.5)
   })
@@ -86,7 +86,7 @@ describe('scoreCrewCandidates', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: 32.5, lng: -85.9 },
       crew: [crew({ id: 'zeroed', home_lat: '0.000000', home_lng: '0.000000' })],
-      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.proximity).toBe(0.5)
   })
@@ -95,7 +95,7 @@ describe('scoreCrewCandidates', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: '0.000000', lng: '0.000000' },
       crew: [crew({ id: 'a', home_lat: 32.5, home_lng: -85.9 })],
-      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.proximity).toBe(0.5)
   })
@@ -106,7 +106,7 @@ describe('scoreCrewCandidates', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: 32.5, lng: -85.9 },
       crew: [crew({ id: 'zeroed', home_lat: 0, home_lng: 0 })],
-      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.proximity).toBe(0.5)
   })
@@ -117,7 +117,7 @@ describe('scoreCrewCandidates', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property,
       crew: [crew({ id: 'here', home_lat: 32.5, home_lng: -85.9 })],
-      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.breakdown.proximity).toBeGreaterThan(0.5)
   })
@@ -126,7 +126,7 @@ describe('scoreCrewCandidates', () => {
     const scored = scoreCrewCandidates({
       isSameDay: false, property: { lat: null, lng: null },
       crew: [crew({ id: 'busy' }), crew({ id: 'free' })],
-      familiarCrewIds: [], workloadMap: { busy: 4 }, dayWorkloadMap: {},
+      familiarCrewIds: [], workloadMap: { busy: 4 }, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(scored[0]!.crew_member_id).toBe('free')
     expect(scored.find((s) => s.crew_member_id === 'busy')!.breakdown.workload).toBe(0)
@@ -135,10 +135,74 @@ describe('scoreCrewCandidates', () => {
   it('does not divide by zero when nobody has upcoming work', () => {
     const [top] = scoreCrewCandidates({
       isSameDay: false, property: { lat: null, lng: null },
-      crew: [crew({ id: 'a' })], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      crew: [crew({ id: 'a' })], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(Number.isNaN(top!.score)).toBe(false)
     expect(top!.breakdown.workload).toBe(1)
+  })
+})
+
+describe('proximity origin', () => {
+  // The defect: proximity measured from HOME for a crew member who is
+  // already out working. Someone whose morning job is next door to the
+  // turnover being scored was treated as driving from their kitchen, and
+  // proximity carries 15% of the standard weight.
+  const property = { lat: 32.50, lng: -85.90 }
+  const nextDoor = { lat: 32.50, lng: -85.90 }
+  const farAway  = { lat: 35.00, lng: -90.00 }
+
+  const score = (
+    originByCrew: Record<string, { lat: number | null; lng: number | null } | null>,
+    home: { home_lat: number | null; home_lng: number | null },
+  ) => topCrewCandidate({
+    isSameDay: true,
+    property,
+    crew: [crew({ id: 'dana', ...home })],
+    familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+    originByCrew,
+  })!.breakdown.proximity
+
+  it('measures from the previous stop when there is one', () => {
+    const fromNextDoor = score({ dana: nextDoor }, { home_lat: 35.0, home_lng: -90.0 })
+    const fromHome     = score({}, { home_lat: 35.0, home_lng: -90.0 })
+
+    expect(fromNextDoor).toBe(1.0)
+    expect(fromHome).toBeLessThan(fromNextDoor)
+  })
+
+  it('measures from home for a crew member with no prior stop that day', () => {
+    expect(score({}, { home_lat: 32.50, home_lng: -85.90 })).toBe(1.0)
+  })
+
+  it('falls back to home when the prior stop has no coordinates', () => {
+    expect(score({ dana: { lat: null, lng: null } }, { home_lat: 32.50, home_lng: -85.90 })).toBe(1.0)
+  })
+
+  // (0, 0) is null island, which is what a failed geocode looks like once
+  // coerced to a number, not a place anybody is working from.
+  it('treats a null-island prior stop as no origin at all', () => {
+    expect(score({ dana: { lat: 0, lng: 0 } }, { home_lat: 32.50, home_lng: -85.90 })).toBe(1.0)
+  })
+
+  it('is neutral, not penalised, with neither a prior stop nor a home', () => {
+    expect(score({}, { home_lat: null, home_lng: null })).toBe(0.5)
+  })
+
+  it('is neutral when the PROPERTY has no coordinates, whatever the origin', () => {
+    const proximity = topCrewCandidate({
+      isSameDay: true,
+      property: { lat: null, lng: null },
+      crew: [crew({ id: 'dana', home_lat: 32.5, home_lng: -85.9 })],
+      familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      originByCrew: { dana: nextDoor },
+    })!.breakdown.proximity
+
+    expect(proximity).toBe(0.5)
+  })
+
+  it('scores a candidate out at a far stop below one starting from home nearby', () => {
+    const fromFarStop = score({ dana: farAway }, { home_lat: 32.50, home_lng: -85.90 })
+    expect(fromFarStop).toBeLessThan(1.0)
   })
 })
 
@@ -151,7 +215,7 @@ describe('topCrewCandidate', () => {
   it('returns null for an empty candidate pool', () => {
     expect(topCrewCandidate({
       isSameDay: false, property: { lat: null, lng: null },
-      crew: [], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {},
+      crew: [], familiarCrewIds: [], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })).toBeNull()
   })
 
@@ -166,7 +230,7 @@ describe('topCrewCandidate', () => {
       ],
       familiarCrewIds: ['c'],
       workloadMap:     { a: 2 },
-      dayWorkloadMap:  { a: 1 },
+      dayWorkloadMap:  { a: 1 }, originByCrew: {},
     }
     const [expected] = scoreCrewCandidates(input)
     const top = topCrewCandidate(input)
@@ -182,7 +246,7 @@ describe('topCrewCandidate', () => {
     const far  = crew({ id: 'far',  home_lat: 40.7, home_lng: -74.0 })
 
     const top = topCrewCandidate({
-      isSameDay: true, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {},
+      isSameDay: true, property, crew: [far, near], familiarCrewIds: ['far'], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     expect(top!.crew_member_id).toBe('near')
   })
@@ -220,7 +284,7 @@ describe('dayWorkload', () => {
       familiarCrewIds: [],
       // Identical fortnights. Only the day differs.
       workloadMap:    { stacked: 3, spread: 3 },
-      dayWorkloadMap: { stacked: 3, spread: 0 },
+      originByCrew: {}, dayWorkloadMap: { stacked: 3, spread: 0 },
     })
 
     expect(scored[0]!.crew_member_id).toBe('spread')
@@ -233,7 +297,7 @@ describe('dayWorkload', () => {
       isSameDay: false, property,
       crew: [crew({ id: 'busy' }), crew({ id: 'free' })],
       familiarCrewIds: [], workloadMap: {},
-      dayWorkloadMap: { busy: 4 },
+      dayWorkloadMap: { busy: 4 }, originByCrew: {},
     })
     expect(scored.find((s) => s.crew_member_id === 'busy')!.breakdown.dayWorkload).toBe(0)
     expect(scored.find((s) => s.crew_member_id === 'free')!.breakdown.dayWorkload).toBe(1)
@@ -245,7 +309,7 @@ describe('dayWorkload', () => {
     const [only] = scoreCrewCandidates({
       isSameDay, property,
       crew: [crew({ id: 'perfect', reliability_score: 1, capacity_score: 1 })],
-      familiarCrewIds: ['perfect'], workloadMap: {}, dayWorkloadMap: {},
+      familiarCrewIds: ['perfect'], workloadMap: {}, dayWorkloadMap: {}, originByCrew: {},
     })
     // Every component is 1 except proximity, which is UNKNOWN_PROXIMITY (0.5)
     // with no coordinates — so a perfect score is 1 minus half that weight.
@@ -261,7 +325,7 @@ describe('dayWorkload', () => {
       crew: [crew({ id: 'swamped' }), crew({ id: 'quiet' })],
       familiarCrewIds: [],
       workloadMap:    { swamped: 10 },
-      dayWorkloadMap: {},
+      dayWorkloadMap: {}, originByCrew: {},
     })
     expect(scored[0]!.crew_member_id).toBe('quiet')
   })

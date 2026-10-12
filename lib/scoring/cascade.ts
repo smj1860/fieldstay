@@ -24,8 +24,10 @@
  * constraint lib/scoring/crew-day-context.ts carries and this keeps.
  */
 
-import { haversineKm } from '@/lib/scoring/geo'
-import { AVG_DRIVE_SPEED_KMH, ARRIVAL_BUFFER_MINUTES } from '@/lib/planning/day-plan'
+import {
+  travelLegKey, straightLineMiles, minutesForMiles, type TravelLegMap,
+} from '@/lib/travel/estimate'
+import { ARRIVAL_BUFFER_MINUTES } from '@/lib/planning/day-plan'
 
 export interface CascadeJob {
   turnoverId:       string
@@ -66,15 +68,26 @@ export interface CascadeRisk {
 
 const MS_PER_MINUTE = 60_000
 
-function travelMinutes(from: CascadeJob, to: CascadeJob): { minutes: number; known: boolean } {
-  if (from.lat === null || from.lng === null || to.lat === null || to.lng === null) {
+function travelMinutes(
+  from: CascadeJob,
+  to: CascadeJob,
+  routed?: TravelLegMap,
+): { minutes: number; known: boolean } {
+  // A real driving duration where the planner has already cached one for this
+  // pair (lib/travel/resolve.ts). The cascade check runs 48 times a day, so it
+  // only ever READS that cache and never spends a routing request of its own.
+  const key   = travelLegKey(from, to)
+  const known = key !== null && routed ? routed.get(key) : undefined
+  if (known !== undefined) return { minutes: known.minutes, known: true }
+
+  const miles = straightLineMiles(from, to)
+  if (miles === null) {
     // Contributes ZERO rather than a guess, and says so. Same honest-absence
     // convention as an unmapped ZIP scoring 'none' in the seasonal profile:
     // a fabricated drive time would move the ranking on data we do not have.
     return { minutes: 0, known: false }
   }
-  const km = haversineKm(from.lat, from.lng, to.lat, to.lng)
-  return { minutes: Math.round((km / AVG_DRIVE_SPEED_KMH) * 60), known: true }
+  return { minutes: minutesForMiles(miles), known: true }
 }
 
 /**
@@ -97,7 +110,11 @@ function remainingMinutes(job: CascadeJob): number {
  * by start time here, because "the next job" has to mean the next one by the
  * clock and a caller's array order is not a promise.
  */
-export function rankCascadeRisk(jobs: readonly CascadeJob[], now: number): CascadeRisk[] {
+export function rankCascadeRisk(
+  jobs: readonly CascadeJob[],
+  now: number,
+  routedTravel?: TravelLegMap,
+): CascadeRisk[] {
   const ordered = [...jobs].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt))
 
   const risks: CascadeRisk[] = []
@@ -125,7 +142,7 @@ export function rankCascadeRisk(jobs: readonly CascadeJob[], now: number): Casca
       continue
     }
 
-    const travel      = travelMinutes(job, next)
+    const travel      = travelMinutes(job, next, routedTravel)
     const finishesAt  = now + remainingMinutes(job) * MS_PER_MINUTE
     const arrivesAt   = finishesAt + (travel.minutes + ARRIVAL_BUFFER_MINUTES) * MS_PER_MINUTE
     const nextStart   = Date.parse(next.startAt)

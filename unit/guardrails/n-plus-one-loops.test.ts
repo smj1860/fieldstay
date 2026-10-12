@@ -160,6 +160,10 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-unique-coordinate-group update — already the optimized end state (grouped from one geocode call per property down to one per distinct resolved lat/lng); a single UPDATE cannot set different coordinate values across differently-grouped id sets without a CASE expression, which is a bigger and less readable change for the same 3-4 typical groups per run.',
   'lib/inngest/functions/geocoding-backfill.ts:145':
     'Vendor twin of geocoding-backfill.ts:117 — same reasoning.',
+  'lib/travel/resolve.ts:90':
+    'ONE query per 400-KEY BATCH of the travel cache, not per row — this IS the batched form the rule asks for, chunked only because a .in() list travels in the URL and an org with hundreds of property pairs would otherwise build a single request past the gateway\'s length limit. The loop iterates batches; the number of round trips is ceil(legs / 400), which is 1 for every real org today.',
+  'lib/travel/resolve.ts:152':
+    'The write twin of resolve.ts:90 — one upsert per 400-ROW batch, chunked for request-body size. An unchunked upsert of a 300-property org\'s whole night would fail whole rather than in part.',
 }
 
 describe('guardrail: no query-per-loop-iteration (N+1) outside named exceptions', () => {

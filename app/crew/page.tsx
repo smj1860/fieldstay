@@ -10,14 +10,12 @@ import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-r
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { useCrewT, formatActiveAssignments } from '@/lib/crew/i18n'
-import { distanceMiles }                 from '@/lib/geocoding'
+import { chainTravel, type TravelStop }   from '@/lib/travel/estimate'
 import { workOrderDisplayDate, workOrderDisplayDay } from '@/lib/work-orders/display-date'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 import { Dialog }                        from '@/components/ui/Dialog'
 import { LanguageToggle }                from './_components/language-toggle'
 import type { CrewLocale } from '@/types/database'
-
-const AVG_DRIVE_SPEED_MPH = 30
 
 // Stable identity for the useLiveQuery(...) ?? fallback below — a fresh `[]`
 // literal there would change reference every render while the query is
@@ -55,6 +53,29 @@ type PropertyRow = {
 }
 
 /**
+ * "Total Travel Time: 24.3 mi, 1:15", or "at least 24.3 mi, 1:15" when part of
+ * the day could not be measured, or "unavailable" when none of it could.
+ *
+ * The middle state is the one that did not exist before: a floor is useful and
+ * an unmeasured leg presented as a complete total is not.
+ */
+function travelTimeLine(
+  summary: ReturnType<typeof calcTravelSummary>,
+  t: ReturnType<typeof useCrewT>,
+): string {
+  if (summary.measured === 0) {
+    return `${t('dashboardTravelTimePrefix')} ${t('dashboardTravelTimeUnavailable')}`
+  }
+
+  const hours   = Math.floor(summary.minutes / 60)
+  const mins    = String(summary.minutes % 60).padStart(2, '0')
+  const figure  = `${summary.miles.toFixed(1)} mi, ${hours}:${mins}`
+  const prefix  = summary.unmeasured > 0 ? `${t('dashboardTravelTimeAtLeast')} ` : ''
+
+  return `${t('dashboardTravelTimePrefix')} ${prefix}${figure}`
+}
+
+/**
  * The crew home screen shows turnovers and work orders side by side, and both
  * wear the same status pill. Two lookups rather than two chained ternaries
  * each — and note they are separate on purpose: the class is an internal
@@ -77,21 +98,36 @@ function crewStatusLabel(status: string, t: ReturnType<typeof useCrewT>): string
   return status
 }
 
-function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string, PropertyRow>) {
-  const stops = turnovers.map((t) => propertyMap[t.property_id]).filter(Boolean) as PropertyRow[]
-  if (stops.length < 2) return { miles: 0, minutes: 0, available: stops.length > 0 }
+/**
+ * The day's driving, through the one shared implementation
+ * (lib/travel/estimate.ts).
+ *
+ * Two things changed when this stopped being its own copy of the maths. A
+ * property with no coordinates used to zero the WHOLE figure, which reads as
+ * "no driving today" rather than "we could not measure one leg" — the chain
+ * now reports the legs it could measure and how many it could not, and the
+ * caller says "at least". And work orders are in the chain: they were
+ * excluded entirely, so a day with two turnovers and three repairs reported
+ * only the turnovers' miles.
+ *
+ * A crew work order carries `needed_by_date`, a DATE with no time, so there
+ * is no clock position to interleave it by. They are appended rather than
+ * placed — the day still has to reach those properties, which is what this
+ * total is for, but nothing here claims to know the order they happen in.
+ */
+function calcTravelSummary(
+  turnovers:   TurnoverRow[],
+  workOrders:  CrewWorkOrderRow[],
+  propertyMap: Record<string, PropertyRow>,
+) {
+  const stops: TravelStop[] = [
+    ...turnovers.map((t) => ({ id: t.id, property: propertyMap[t.property_id] })),
+    ...workOrders.map((w) => ({ id: w.id, property: propertyMap[w.property_id] })),
+  ]
+    .filter((s): s is { id: string; property: PropertyRow } => Boolean(s.property))
+    .map(({ id, property }) => ({ id, lat: property.lat, lng: property.lng }))
 
-  let miles = 0
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i]!
-    const b = stops[i + 1]!
-    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
-      return { miles: 0, minutes: 0, available: false }
-    }
-    miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
-  }
-  const minutes = Math.round((miles / AVG_DRIVE_SPEED_MPH) * 60)
-  return { miles, minutes, available: true }
+  return chainTravel(stops)
 }
 
 function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow }) {
@@ -378,7 +414,9 @@ export default function CrewDashboardPage() {
     return day === null || day > today
   })
 
-  const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
+  const travelSummary = calcTravelSummary(
+    todayTurnovers, todayWorkOrders, propertyMap as Record<string, PropertyRow>,
+  )
 
   // Three distinct states, where there used to be two. `everSynced` false with
   // an empty list is NOT "all caught up" — it is "we never managed to load your
@@ -423,9 +461,7 @@ export default function CrewDashboardPage() {
           </div>
           {todayTurnovers.length > 0 && (
             <p className="text-xs text-center text-muted-themed mb-3">
-              {travelSummary.available
-                ? `${t('dashboardTravelTimePrefix')} ${travelSummary.miles.toFixed(1)} mi, ${Math.floor(travelSummary.minutes / 60)}:${String(travelSummary.minutes % 60).padStart(2, '0')}`
-                : `${t('dashboardTravelTimePrefix')} ${t('dashboardTravelTimeUnavailable')}`}
+              {travelTimeLine(travelSummary, t)}
             </p>
           )}
           {todayTurnovers.length === 0 && todayWorkOrders.length === 0

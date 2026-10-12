@@ -183,6 +183,22 @@ No. Late is still measured against the guest: a turnover is late when it is comp
 
 ---
 
+## Why does a travel time say "at least"?
+
+Because part of that day could not be measured. A drive needs both ends on the map, and a property with no geocodable address gives FieldStay nothing to measure from or to.
+
+The figure shown is the sum of the legs it could measure, so it is a floor rather than a total. It used to read "Travel time unavailable" in this case, which told you less than the legs it already knew. To clear it, give the property a full address under Properties; coordinates are resolved on save.
+
+---
+
+## Are drive times real routes or straight lines?
+
+Real driving routes wherever FieldStay has been able to look one up. Each pair of properties is routed once and reused, since a crew member's week is mostly the same pairs, and refreshed a few times a year.
+
+Where a route is not available, the estimate falls back to a straight line, which is always shorter than the road. That is why a planned day can run tighter than it looks on a day of unroutable stops.
+
+---
+
 ## What is the "running late" notification, and why did I only get one?
 
 Every 30 minutes FieldStay checks for a turnover that is past its own check-in with checklist items still open, where the same crew member has another job later that day. The notification tells you how far past check-in they are and how far the delay is projected to run into the next job, so you can decide whether to move that job, warn the guest, or let it ride.

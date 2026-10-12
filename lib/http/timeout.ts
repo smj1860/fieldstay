@@ -122,6 +122,19 @@ export const ROUTE_WARM_TIMEOUT_MS = 8_000
 export const PUSH_SUBSCRIBE_TIMEOUT_MS = 10_000
 
 /**
+ * Mapbox Directions Matrix, for routed drive times between a crew member's
+ * stops (lib/travel/mapbox.ts).
+ *
+ * Longer than GEOCODE_TIMEOUT_MS because a matrix of up to 25 coordinates is
+ * real work on their side, and shorter than it would be if anything waited on
+ * it: the only caller is the overnight day planner, and every failure mode
+ * falls back to the straight-line estimate the plan used before routing
+ * existed. Nobody is held waiting, so the budget buys a better plan rather
+ * than a faster page.
+ */
+export const MAPBOX_MATRIX_TIMEOUT_MS = 10_000
+
+/**
  * Stripe SDK calls. The SDK's own default is 80s — longer than the function
  * budget, so a slow call inside the webhook handler gets the whole invocation
  * killed by the platform. That skips the `catch` that releases the dedup
