@@ -17,6 +17,8 @@ decision is still open it says so rather than inventing one.
 | `20261011120000_split_work_order_dates` | applied 2026-10-11 | **applied 2026-10-11** |
 | `20261011130000_vendor_progress_and_tech_grants` | applied 2026-10-11 | **applied 2026-10-11** |
 | `20261012140000_crew_max_turnovers_per_day` | applied 2026-10-12 | **applied 2026-10-12** |
+| `20261012180000_turnover_assignment_day_plan` | applied 2026-10-12 | **applied 2026-10-12** |
+| `20261012190000_set_turnover_assignment_plans` | applied 2026-10-12 | **applied 2026-10-12** |
 
 Both commits introducing these say "NOT YET APPLIED TO PRODUCTION" in their
 messages. That was true when written and is no longer; a commit message cannot

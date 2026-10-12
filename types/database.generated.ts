@@ -7565,6 +7565,10 @@ export type Database = {
         }
         Returns: Json
       }
+      set_turnover_assignment_plans: {
+        Args: { p_org_id: string; p_plans: Json }
+        Returns: number
+      }
       storage_org_prefix: { Args: { object_name: string }; Returns: string }
       store_integration_refresh_token: {
         Args: {

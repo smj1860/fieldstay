@@ -154,7 +154,17 @@ function groupJobsByCrew(
   return byCrew
 }
 
-interface PlanWrite { id: string; planned_start_at: string; planned_end_at: string }
+/**
+ * The RPC payload. Carries an index signature so it satisfies the generated
+ * `Json` arg type without a cast: every value here genuinely IS a string, so
+ * saying so is accurate rather than a way around the checker.
+ */
+interface PlanWrite {
+  [key: string]:    string
+  id:               string
+  planned_start_at: string
+  planned_end_at:   string
+}
 
 /** Runs the pure planner over every crew member's day and flattens the result. */
 function planAllCrewDays(
