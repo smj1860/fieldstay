@@ -1,5 +1,49 @@
+import type { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
 import { getServiceClient } from '../helpers/teardown'
+
+/**
+ * Waits for the crew outbox to hold exactly `expected` queued mutations.
+ *
+ * The outbox IS the observable condition here, and nothing in the UI exposes
+ * it: the logout dialog's count is read ONCE when Log out is clicked
+ * (countPendingSyncWork in crew-shell.tsx), not live, so a sleep that is a
+ * few milliseconds short snapshots a half-finished queue and the assertion
+ * that follows cannot retry its way out of it. Polling IndexedDB directly
+ * asserts the actual precondition instead of guessing at a duration, which
+ * matters most on a loaded CI runner.
+ *
+ * The database is found by prefix rather than built from a user id, because
+ * these tests mint a throwaway crew account and never hold its uuid.
+ *
+ * indexedDB.databases() is Chromium-only, which this suite runs exclusively.
+ * If a Firefox project is ever added, this returns -1 there and the poll
+ * times out with its message rather than passing on a false reading.
+ */
+async function waitForQueuedMutations(page: Page, expected: number): Promise<void> {
+  await expect.poll(
+    () => page.evaluate(async () => {
+      const dbs  = await indexedDB.databases()
+      const name = dbs.map((d) => d.name).find((n) => n?.startsWith('fieldstay-crew-'))
+      if (!name) return -1
+
+      return await new Promise<number>((resolve) => {
+        // No version argument: this opens the CURRENT version read-only and
+        // never triggers an upgrade, so it cannot race the app's own handle.
+        const open = indexedDB.open(name)
+        open.onerror   = () => resolve(-1)
+        open.onsuccess = () => {
+          const db = open.result
+          if (!db.objectStoreNames.contains('mutations')) { db.close(); return resolve(-1) }
+          const count = db.transaction('mutations', 'readonly').objectStore('mutations').count()
+          count.onsuccess = () => { const n = count.result; db.close(); resolve(n) }
+          count.onerror   = () => { db.close(); resolve(-1) }
+        }
+      })
+    }),
+    { timeout: 10_000, message: `outbox never reached ${expected} queued mutation(s)` },
+  ).toBe(expected)
+}
 
 // This spec creates its OWN disposable crew login + turnover per test
 // (mirroring 27-crew-feedback.spec.ts) rather than reusing the shared
@@ -50,28 +94,22 @@ test.describe('Crew logout guard', () => {
       await page.context().setOffline(true)
 
       await page.getByLabel(/Mark (complete|incomplete)/).first().click()
-      // Optimistic local writes — no network round trip to wait for, but
-      // there are now TWO sequential Dexie transactions (the tick, then the
-      // implicit start), and countPendingSyncWork() is read ONCE when Log out
-      // is clicked rather than live. A short settle here would snapshot the
-      // count mid-way and read 1, which the assertion below cannot retry its
-      // way out of.
-      await page.waitForTimeout(600)
+
+      // TWO optimistic writes, in two sequential Dexie transactions: the tick,
+      // then the implicit start (writeChecklistItem -> ensureTurnoverStarted
+      // in use-turnover-actions.ts, since Phase C). Waited on directly rather
+      // than slept through, for the reason in the helper's comment.
+      await waitForQueuedMutations(page, 2)
 
       await page.getByRole('button', { name: 'Log out' }).click()
 
       const dialog = page.getByText('Unsynced work on this device')
       await expect(dialog).toBeVisible({ timeout: 10_000 })
 
-      // TWO items, not one, and the second is the point. The seeded turnover
-      // is `assigned`, so since Phase C the first completed tick also queues
-      // the implicit start (writeChecklistItem -> ensureTurnoverStarted in
-      // use-turnover-actions.ts). Both are offline writes and both have to
-      // survive, so this doubles as the proof that the inferred start is
-      // queued durably rather than fired at the network and lost.
-      //
-      // If this reads 1 again, the implicit start has stopped happening:
-      // check the funnel before relaxing the number.
+      // Both offline writes have to survive, so the count doubles as the
+      // proof that the inferred start is queued durably rather than fired at
+      // the network and lost. If this reads 1, the implicit start has stopped
+      // happening: check the funnel before relaxing the number.
       await expect(page.getByText(/2 items.*haven.t reached FieldStay yet/)).toBeVisible()
 
       await page.getByRole('button', { name: 'Stay Logged In' }).click()

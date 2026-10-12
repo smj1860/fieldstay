@@ -52,7 +52,10 @@ export function makeSupabase(queue: Record<string, Resp[]>): FakeSupabase {
 
 /** The cookie-session client `requireCrewMember()` reads. */
 export function makeAuthClient(userId: string | null, crewResult: Resp) {
-  const getUser = vi.fn(async () => ({ data: { user: userId ? { id: userId } : null } }))
+  // Promise.resolve rather than an `async` arrow with nothing to await: the
+  // caller awaits this, so the shape has to be thenable, but the body has no
+  // asynchronous work in it.
+  const getUser = vi.fn(() => Promise.resolve({ data: { user: userId ? { id: userId } : null } }))
   const { from } = makeSupabase({ crew_members: [crewResult] })
   return { auth: { getUser }, from }
 }
