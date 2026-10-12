@@ -81,6 +81,11 @@ export type AuditAction =
   | 'turnover.unarchived'
   | 'turnover.autopilot.assigned'
   | 'turnover.pm_rating.submitted'
+  // Phase E. Publishing is what makes a planned start time visible to crew,
+  // so it is an account-relevant act: it is the moment a computed estimate
+  // becomes something a person is expected to work to.
+  | 'turnover.day_plan.published'
+  | 'turnover.day_plan.unpublished'
   | 'work_order.suggestion.accepted'
   | 'work_order.suggestion.dismissed'
   | 'work_order.vendor_signoff'

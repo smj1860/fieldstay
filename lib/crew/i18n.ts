@@ -53,6 +53,13 @@ const CREW_DICT = {
   feedbackThankYouBody: { en: 'Your feedback goes straight to the team that builds this app.', es: 'Tus comentarios van directo al equipo que crea esta app.' },
   feedbackGenericError: { en: 'Something went wrong', es: 'Algo salió mal' },
 
+  // Phase E. A planned start is only ever shown for a day a PM published, so
+  // "Start" here is a commitment somebody reviewed, not a computer's guess.
+  // "Free from" labels the OTHER time on the card, which is when the guest
+  // leaves: that is the one crew were previously shown on its own, and it
+  // reads as an arrival instruction when it is really a constraint.
+  startPrefix:      { en: 'Start', es: 'Inicio' },
+  freeFromPrefix:   { en: 'Free from', es: 'Libre desde' },
   statusAssigned:   { en: 'Assigned', es: 'Asignado' },
   statusInProgress: { en: 'In Progress', es: 'En progreso' },
   woBadge:          { en: 'WO', es: 'OT' },

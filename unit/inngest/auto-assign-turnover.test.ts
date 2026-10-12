@@ -319,6 +319,40 @@ describe('autoAssignTurnover', () => {
     }))
   })
 
+  it('asks for a day re-plan after an autopilot assignment', async () => {
+    // Phase E. An autopilot assignment changes the day as much as a PM's own
+    // does, and nobody is in the loop to notice the overnight plan went stale.
+    const step = makeStep()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew:    [{ id: 'c1', name: 'Planner Crew' }],
+      assigns: true,
+    }))
+
+    await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(step.sendEvent).toHaveBeenCalledWith('replan-day', expect.objectContaining({
+      name: 'org/day_plan.requested',
+      // The CENTRAL operating day for this checkout, not a UTC slice: from
+      // about 7pm CT those name different dates and the cron writes the former.
+      data: expect.objectContaining({ org_id: ORG_ID, plan_date: '2026-07-25' }),
+    }))
+  })
+
+  it('asks for no re-plan when nothing was assigned', async () => {
+    // A suggestion changed no assignment, so the existing plan still holds.
+    // Re-planning anyway would be a wasted org-wide pass on every suggestion.
+    const step = makeStep()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      mode: 'suggest',
+      crew: [{ id: 'c1', name: 'Suggested Crew' }],
+    }))
+
+    await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    const replans = step.sendEvent.mock.calls.filter((c: unknown[]) => c[0] === 'replan-day')
+    expect(replans).toHaveLength(0)
+  })
+
   it('alerts with all_at_capacity when every eligible crew member has hit their daily limit', async () => {
     // Phase D. The third way a filter can empty a pool that has people in it,
     // and the only one the PM created themselves — so it needs its own reason

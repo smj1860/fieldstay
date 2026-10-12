@@ -22,6 +22,7 @@ import {
   bulkUpdateTurnoverStatus,
   acceptSuggestion, dismissSuggestion,
   archiveTurnover, unarchiveTurnover,
+  publishDayPlan, unpublishDayPlan,
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
 import { NudgeBanner } from '@/components/nudge-banner'
@@ -57,6 +58,14 @@ const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
 interface TurnoverAssignment {
   id: string
   crew_member_id: string
+  /**
+   * The day plan for this crew member on this turnover (Phase E). Computed
+   * nightly; `plan_published_at` is null until a PM publishes the day, and
+   * until then crew see nothing — this board is the only place it shows.
+   */
+  planned_start_at:  string | null
+  planned_end_at:    string | null
+  plan_published_at: string | null
   crew_member: AssignedCrewMember | null
 }
 
@@ -480,6 +489,34 @@ function TurnoverCard({
             ) : (
               <span className="text-muted-themed">No next booking</span>
             )}
+          </div>
+
+          {/* The day plan (Phase E). Shown per assignee, because the plan is a
+              property of one crew member's day: two people sharing a turnover
+              each have their own sequence around it and can legitimately be
+              due at different times.
+
+              The published/unpublished distinction is stated rather than
+              implied. An unpublished time is visible HERE and nowhere else,
+              and a PM needs to know which of those they are looking at before
+              deciding whether the day is worth sending out. */}
+          <div className="flex items-center gap-3 mt-1 text-xs flex-wrap">
+            {turnover.turnover_assignments
+              .filter((a) => a.planned_start_at)
+              .map((a) => (
+                <span key={a.id} className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+                  <span className="text-secondary-themed">
+                    {a.crew_member?.name ?? 'Crew'}
+                  </span>
+                  <span className="font-semibold text-primary-themed">
+                    {new Date(a.planned_start_at!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                  <Badge tone={a.plan_published_at ? 'green' : 'slate'}>
+                    {a.plan_published_at ? 'Published' : 'Draft'}
+                  </Badge>
+                </span>
+              ))}
           </div>
 
           {/* Auto-assignment suggestion banner */}
@@ -1305,6 +1342,96 @@ function BoardBody({
 
 // ── Main Board ───────────────────────────────────────────────────────────────
 
+/**
+ * Publish or withdraw a day's plan.
+ *
+ * The planner computes planned times nightly and never publishes them, so
+ * this bar is the only thing that puts a start time in front of a crew
+ * member. That separation is the safety design: a computed start time shown
+ * with no human in between makes someone "behind" against a number nobody
+ * committed to, and crew reliability is a real score in this product.
+ *
+ * Defaults to TOMORROW, not today. The plan runs overnight for the day ahead,
+ * and by the time a PM is looking at this, today's crew are already working to
+ * whatever they were told this morning.
+ */
+function DayPlanBar({ turnovers }: Readonly<{ turnovers: Turnover[] }>) {
+  const [date, setDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]!
+  })
+  const [busy, startPublish] = useTransition()
+  const [message, setMessage] = useState<string | null>(null)
+
+  // Counted off the board's own rows rather than re-queried: the page already
+  // holds every assignment it is showing, and a second read could disagree
+  // with what the PM is looking at.
+  const planned = turnovers.flatMap((t) =>
+    t.turnover_assignments.filter((a) => a.planned_start_at?.startsWith(date)))
+  const publishedCount = planned.filter((a) => a.plan_published_at).length
+
+  const run = (action: (d: string) => Promise<{ error?: string; success?: boolean }>) => {
+    setMessage(null)
+    startPublish(async () => {
+      const result = await action(date)
+      setMessage(result.error ?? null)
+    })
+  }
+
+  return (
+    <Card className="mb-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          <span className="text-sm font-semibold text-primary-themed">Day plan</span>
+        </div>
+
+        <label htmlFor="day-plan-date" className="sr-only">Plan date</label>
+        <Input
+          id="day-plan-date"
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="py-1 text-sm w-40"
+        />
+
+        {/* The counts ARE the decision. "12 planned, 0 published" is the state
+            a PM needs to see before pressing anything, and it is the only
+            place the published/draft split is visible in aggregate. */}
+        <span className="text-xs text-muted-themed">
+          {planned.length === 0
+            ? 'Nothing planned for this day yet'
+            : `${planned.length} planned, ${publishedCount} published`}
+        </span>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <Button
+            variant="secondary"
+            disabled={busy || planned.length === 0}
+            onClick={() => run(publishDayPlan)}
+          >
+            {busy ? 'Working...' : 'Publish to crew'}
+          </Button>
+          {publishedCount > 0 && (
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => run(unpublishDayPlan)}
+            >
+              Withdraw
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{message}</p>
+      )}
+    </Card>
+  )
+}
+
 export function TurnoverBoard({
   turnovers,
   propertyMap,
@@ -1426,6 +1553,8 @@ export function TurnoverBoard({
           linkText="Enable auto-assignment"
         />
       )}
+
+      <DayPlanBar turnovers={turnovers} />
 
       {/* Page header */}
       <div className="page-header flex items-start justify-between">
