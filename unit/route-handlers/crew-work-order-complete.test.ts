@@ -16,48 +16,7 @@ import { POST } from '@/app/api/crew/work-orders/[id]/complete/route'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
-
-type Resp = { data?: unknown; error?: unknown }
-
-function makeSupabase(queue: Record<string, Resp[]>) {
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-  const from = vi.fn((table: string) => {
-    const q = queue[table]
-    const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'eq', 'neq']) {
-      chain[m] = vi.fn((...args: unknown[]) => {
-        calls.push({ table, method: m, args })
-        return chain
-      })
-    }
-    chain.single      = vi.fn(() => Promise.resolve(result))
-    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
-    chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
-    return chain
-  })
-  return { from, calls }
-}
-
-function makeAuthClient(userId: string | null, crewResult: Resp) {
-  const getUser = vi.fn(async () => ({ data: { user: userId ? { id: userId } : null } }))
-  const { from } = makeSupabase({ crew_members: [crewResult] })
-  return { auth: { getUser }, from }
-}
-
-// work_orders.id is a `uuid` column. The route rejects a malformed path param
-// at the boundary so it can never reach Postgres, raise 22P02, and be answered
-// with the 503 that lib/dexie/net.ts retries forever.
-const WO_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
-/**
- * Stand-ins for "a real work order that is not yours". They must be
- * well-formed uuids: the IDOR guard is the org/assignment scoping, not the id
- * FORMAT, and a malformed id is now rejected earlier — which would let these
- * tests pass without ever exercising what they are named for.
- */
-const OTHER_ORG_WO   = '2f1b8c44-1111-4222-8333-444455556666'
-const OTHER_CREW_WO  = '3a2c9d55-2222-4333-8444-555566667777'
+import { makeSupabase, makeAuthClient, WO_ID, OTHER_ORG_WO, OTHER_CREW_WO } from './crew-work-order-harness'
 
 function postRequest(body: unknown = {}) {
   return new NextRequest('http://localhost/api/crew/work-orders/wo_1/complete', {

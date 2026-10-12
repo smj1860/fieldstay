@@ -12,38 +12,7 @@ vi.mock('@/lib/audit', () => ({
 import { POST } from '@/app/api/crew/work-orders/[id]/start/route'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
-
-type Resp = { data?: unknown; error?: unknown }
-
-function makeSupabase(queue: Record<string, Resp[]>) {
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-  const from = vi.fn((table: string) => {
-    const q = queue[table]
-    const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'eq', 'neq']) {
-      chain[m] = vi.fn((...args: unknown[]) => {
-        calls.push({ table, method: m, args })
-        return chain
-      })
-    }
-    chain.single      = vi.fn(() => Promise.resolve(result))
-    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
-    chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
-    return chain
-  })
-  return { from, calls }
-}
-
-function makeAuthClient(userId: string | null, crewResult: Resp) {
-  const getUser = vi.fn(async () => ({ data: { user: userId ? { id: userId } : null } }))
-  const { from } = makeSupabase({ crew_members: [crewResult] })
-  return { auth: { getUser }, from }
-}
-
-const WO_ID        = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
-const OTHER_ORG_WO = '2f1b8c44-1111-4222-8333-444455556666'
+import { makeSupabase, makeAuthClient, WO_ID, OTHER_ORG_WO, type Resp } from './crew-work-order-harness'
 
 const CREW = { id: 'crew_1', org_id: 'org_1' }
 

@@ -50,14 +50,29 @@ test.describe('Crew logout guard', () => {
       await page.context().setOffline(true)
 
       await page.getByLabel(/Mark (complete|incomplete)/).first().click()
-      // Optimistic local write — no network round trip to wait for.
-      await page.waitForTimeout(300)
+      // Optimistic local writes — no network round trip to wait for, but
+      // there are now TWO sequential Dexie transactions (the tick, then the
+      // implicit start), and countPendingSyncWork() is read ONCE when Log out
+      // is clicked rather than live. A short settle here would snapshot the
+      // count mid-way and read 1, which the assertion below cannot retry its
+      // way out of.
+      await page.waitForTimeout(600)
 
       await page.getByRole('button', { name: 'Log out' }).click()
 
       const dialog = page.getByText('Unsynced work on this device')
       await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await expect(page.getByText(/1 item.*haven.t reached FieldStay yet/)).toBeVisible()
+
+      // TWO items, not one, and the second is the point. The seeded turnover
+      // is `assigned`, so since Phase C the first completed tick also queues
+      // the implicit start (writeChecklistItem -> ensureTurnoverStarted in
+      // use-turnover-actions.ts). Both are offline writes and both have to
+      // survive, so this doubles as the proof that the inferred start is
+      // queued durably rather than fired at the network and lost.
+      //
+      // If this reads 1 again, the implicit start has stopped happening:
+      // check the funnel before relaxing the number.
+      await expect(page.getByText(/2 items.*haven.t reached FieldStay yet/)).toBeVisible()
 
       await page.getByRole('button', { name: 'Stay Logged In' }).click()
       await expect(dialog).not.toBeVisible()
