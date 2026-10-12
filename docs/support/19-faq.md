@@ -169,6 +169,30 @@ Separately, assignment scoring now counts a crew member's jobs **on the specific
 
 ---
 
+## My crew app shows "Start 10:40" and "Free from 10:00". Which one is it?
+
+Both, and they mean different things. **Free from 10:00** is when the guest leaves and the property becomes available. **Start 10:40** is when FieldStay has planned for that crew member to actually begin, given the job they are doing before it and the drive between the two.
+
+The start time is the one to work to. It only appears once you have published that day's plan from the Day plan bar on the Turnovers board. Until then the card shows the checkout time alone, exactly as it always did. See [The Crew Day Plan](./38-crew-day-plan.md).
+
+---
+
+## If a crew member misses their planned start time, does it count against them?
+
+No. Late is still measured against the guest: a turnover is late when it is completed after the guest's check-in time. The planned start is a plan, not a deadline, and missing it does not touch anyone's reliability score.
+
+---
+
+## What is the "running late" notification, and why did I only get one?
+
+Every 30 minutes FieldStay checks for a turnover that is past its own check-in with checklist items still open, where the same crew member has another job later that day. The notification tells you how far past check-in they are and how far the delay is projected to run into the next job, so you can decide whether to move that job, warn the guest, or let it ride.
+
+You get one per turnover per day. The first check that sees the job slip notifies you and the rest of the day's checks stay quiet, because being told early is the point and a job that is 30 minutes late at noon does not need reminding about every half hour until 5pm.
+
+FieldStay does not reassign anything on its own. See **Running-Late Alerts** in [Notifications](./32-notifications-and-digests.md).
+
+---
+
 ## Can my crew post progress updates the way vendors do?
 
 Not in the same detail. Crew have **Start Work** and **Mark Work Complete** on a work order, and that is it.

@@ -50,6 +50,8 @@ Click any turnover card to open the detail view. From there you can:
 
 Once assigned, the turnover appears in the crew member's app immediately.
 
+Above the board, the **Day plan** bar shows how many of a chosen day's assignments have planned start times and how many of those you have published to crew. See [The Crew Day Plan](./38-crew-day-plan.md).
+
 ---
 
 ## Archiving Completed Turnovers

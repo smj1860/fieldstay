@@ -671,6 +671,18 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         question: MULTI_CREW_START_FAQ.question,
         answer:   MULTI_CREW_START_FAQ.answer,
       },
+      {
+        id:       'crew-day-plan',
+        question: 'What is the day plan, and why do crew not see the times right away?',
+        answer:
+          'FieldStay works out what time each crew member should start each job on a given date, in order, from the property\'s checkout time, the job before it, the drive between them, and that crew member\'s own average pace. It recomputes overnight and again whenever you change who is assigned to that date. Crew see nothing until you press "Publish to crew" in the Day plan bar at the top of the Turnovers board, because a start time is an obligation and one sent with no human in between would make a crew member late against a number nobody agreed to. Published times appear on the crew card as "Start 10:40" alongside "Free from 10:00", the checkout time it is derived from. You can withdraw a published day at any time, which returns their cards to showing the checkout time alone. Missing a planned start does not affect anyone\'s reliability score: late is still measured against the guest\'s check-in time.',
+      },
+      {
+        id:       'crew-cascade-alert',
+        question: 'Will FieldStay tell me when a turnover is about to make the next one late?',
+        answer:
+          'Yes. Every 30 minutes FieldStay looks for a turnover that is past its own check-in time with checklist items still open, where that same crew member has another job later the same day. You get one bell notification naming how far past check-in they are and how many minutes the delay is projected to run into the next job, worst first if several are slipping at once. The projection uses the live checklist, so it reflects how much is actually left rather than an estimate of how it is going. You are told once per turnover per day rather than every half hour. FieldStay does not reassign anything on its own: moving the next job, warning the incoming guest, or letting it ride is your call.',
+      },
     ],
   },
   {

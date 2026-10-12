@@ -27,6 +27,7 @@ import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turno
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
 import { dailyWrapUp, dailyWrapUpOrg }  from '@/lib/inngest/functions/cron/daily-wrapup'
 import { dayPlanner, planDayForOrg }    from '@/lib/inngest/functions/cron/day-planner'
+import { cascadeAlert, checkCascadeForOrg } from '@/lib/inngest/functions/cron/cascade-alert'
 import { billingPropertyReconciliation, reconcilePropertyCountForOrg } from '@/lib/inngest/functions/cron/billing-property-reconciliation'
 import { webhookDedupCleanup }          from '@/lib/inngest/functions/cron/webhook-dedup-cleanup'
 
@@ -243,6 +244,8 @@ export const { GET, POST, PUT } = serve({
     dailyWrapUp,
     dayPlanner,
     planDayForOrg,
+    cascadeAlert,
+    checkCascadeForOrg,
     dailyWrapUpOrg,
     billingPropertyReconciliation,
     reconcilePropertyCountForOrg,

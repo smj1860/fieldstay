@@ -55,7 +55,7 @@ FieldStay doesn't use a fixed default crew member per property — assignment su
 Once assigned, the turnover appears in the crew member's app under Today's Turnovers or Upcoming Turnovers depending on the date. Tapping it shows:
 
 - Property name and address
-- Check-in and checkout times
+- Check-in and checkout times, or a planned start time once you have published that day's plan (see [The Crew Day Plan](./38-crew-day-plan.md))
 - The full cleaning checklist
 - Inventory count section
 - Mark Complete button
@@ -83,6 +83,8 @@ To assign a crew work order, go to **Maintenance → New Work Order**, fill in t
 ## Tracking Progress
 
 The Turnovers Board updates in real time as crew members work through their checklist. The status moves from Assigned → In Progress when they tap Start, and → Complete when they tap Mark Complete. You receive a notification when the turnover is marked complete.
+
+If a turnover runs past its own check-in with items still open and that crew member has another job later the same day, FieldStay raises a running-late alert naming how far the delay is projected to run into the next job. See **Running-Late Alerts** in [Notifications](./32-notifications-and-digests.md).
 
 **A turnover also starts itself the moment the first checklist item is ticked.** Crew who open the checklist and get straight to work rarely remember to tap Start first, and before this the board showed nothing happening while the job was visibly underway. If you see a turnover go to In Progress without anyone tapping Start, that is why. The tick is the evidence.
 

@@ -68,6 +68,30 @@ A hard exclusion rather than a scoring penalty: a crew member at their limit is 
 
 ---
 
+## Day Plan
+
+A per-crew-member sequence of planned start and end times for one date, computed from each job's checkout time, the job before it, the drive between them, and that crew member's own average pace. Recomputed overnight and whenever assignments for that date change.
+
+A day plan is **draft** until published. Crew see planned times only after a PM publishes the day, and withdrawing it returns their cards to showing the checkout time alone.
+
+---
+
+## Planned Start
+
+The time FieldStay has worked out that a crew member should begin a particular turnover, as opposed to the checkout time, which is only when the property becomes free. Shown on the crew card as "Start 10:40" alongside "Free from 10:00".
+
+Advisory. Lateness is still measured against the guest's check-in time, so a missed planned start does not affect a crew member's reliability score.
+
+---
+
+## Cascade Alert
+
+A notification raised when a turnover is past its own check-in with checklist items still open **and** the same crew member has another job later that day. It reports how far past check-in the job is and how far the delay is projected to run into the next one.
+
+Deduplicated to one alert per turnover per day. It ranks and reports only: FieldStay never reassigns work in response to it.
+
+---
+
 ## Maintenance Schedule
 
 A maintenance schedule is a recurring task template that automatically creates work orders when a due date is reached — HVAC filter changes, pest control, gutter cleaning, and similar periodic tasks. Schedules have a defined frequency (monthly, quarterly, annually) and can be linked to a specific vendor or asset.

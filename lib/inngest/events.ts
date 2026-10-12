@@ -418,6 +418,16 @@ export type FieldStayEvents = {
     }
   }
 
+  // Phase F: the cascade alert. One event per org, dispatched by
+  // cron-cascade-alert every 30 minutes, same fan-out shape as above.
+  'org/cascade_check.requested': {
+    data: {
+      org_id:     string
+      /** YYYY-MM-DD in FRICTION_TIMEZONE. Captured once so a retry checks the same day. */
+      check_date: string
+    }
+  }
+
   'crew/assignment-gap': {
     data: {
       turnover_id:   string

@@ -64,6 +64,24 @@ Phase H  →  item 7  half-day availability, late signal, co-assignee names
 Item 1 splits in two. The **date split** (A) is a prerequisite for item 2 and ships first.
 The **day planner** (E) depends on the capacity model from item 4, so it ships after.
 
+## Help docs ship with the phase
+
+Every phase from G onward carries its own `docs/support/**` update in the same PR as the
+code, not a separate pass afterwards. `.github/workflows/seed-support-kb.yml` re-embeds
+those files into `support_kb_chunks` on merge to `main`, so the docs commit is also what
+updates Finn. A phase merged without them leaves the assistant confidently answering
+about the previous behaviour, which is worse than it saying it does not know.
+
+Phases A-D were documented in one catch-up pass (PR #784). E and F were documented
+together after the fact, which is the gap this convention closes. What each one needs:
+
+- a section or doc under `docs/support/` for anything a PM, crew member, vendor or owner
+  can see
+- a `19-faq.md` entry per question the change invites, and a `18-glossary.md` term for any
+  new noun the UI uses
+- the in-app FAQ (`lib/faq-content.ts`) for PM-facing behaviour, and the crew app's own
+  FAQ (`app/crew/crew-shell.tsx`) in **both languages** for anything crew see
+
 ---
 
 # Phase A — Split the work-order date
@@ -689,19 +707,72 @@ in Phase D, and by the time the planner runs the assignments already exist.
 
 ---
 
-# Phase F — item 3: cascade alert
+# Phase F — item 3: cascade alert — BUILT
 
-`lib/scoring/crew-day-context.ts` is written, paginated, N+1-safe, and has no caller by
-design. Promote it:
+`lib/scoring/crew-day-context.ts` was written, paginated and N+1-safe with no caller by
+design. It is promoted, and **re-shaped per org rather than per turnover**:
+`loadOrgDayCrewJobs()` runs the same three reads (assignments, checklist instances,
+checklist items) for a whole org-day. Calling the old per-turnover
+`getCrewDayContext()` once per turnover, 48 times a day, is precisely the N+1
+`unit/guardrails/n-plus-one-loops.test.ts` exists to catch.
 
-- a 30-minute cron over orgs with turnovers today
-- fire when an in-flight turnover is past its own `checkin_datetime` with an incomplete
-  checklist AND the crew member has later turnovers today
-- the notification names the downstream jobs, so the PM can decide whether to reassign or
-  warn a guest
+That function is **deleted**, not kept beside the new one. Its only remaining callers
+were its own 11 tests, which is the "dead implementation with a full passing test suite"
+shape CLAUDE.md's `unreferenced-server-actions` rationale describes: it keeps the API
+surface of the live path while missing whatever the live path had to learn, so whoever
+revives it inherits the old version. Its tests were rewritten against
+`loadOrgDayCrewJobs` rather than dropped, so the coverage moved with the behaviour.
 
-Keep the module's own constraint: it decides nothing. No severity, no auto-reassignment.
-The judgment stays with the dispatcher. Per CLAUDE.md the cron fans out one event per org.
+`cron-cascade-alert` runs every 30 minutes, finds orgs with an in-flight assigned
+turnover today, and fans out one `org/cascade_check.requested` per org.
+
+### The ranking
+
+Multiple turnovers can be running late at once, so they are ordered. **One derived
+number, not a weighted composite** (`lib/scoring/cascade.ts`, pure, 16 tests):
+projected minutes this job runs into the NEXT one's start, remaining work plus drive
+time plus the arrival buffer.
+
+The composite was the obvious design and was rejected on the live data. Of 59
+properties, 17 have coordinates and 10 have square footage, against 59 with bedrooms.
+A score over "how late, how far along, how far to drive, how big" would look
+authoritative while being computed largely from nulls, and hand-set weights here would
+stay unvalidated indefinitely — CLAUDE.md is explicit that the friction scorer's weights
+are never auto-tuned. Projected overrun absorbs what IS measurable into a quantity with
+units a person can act on, and it doubles as the rank, which is why the notification
+carries the minutes rather than an opaque "#2 of 3" badge.
+
+Missing coordinates contribute ZERO drive time and set `travelUnknown`, which the
+notification says out loud ("Drive time unknown."). A fabricated drive time would move
+the ranking on data we do not have — the same honest-absence convention as an unmapped
+ZIP scoring `'none'` in the seasonal profile.
+
+A null `completionRatio` (no checklist instance yet) is read as no work done. That is
+deliberately pessimistic: under-reporting a cascade is the failure that matters, since
+the whole point is to surface the problem before it lands.
+
+### One notification per turnover per day
+
+`dedupe_key` is `cascade:<turnover_id>:<date>`, enforced by the unique index on
+`notifications.dedupe_key`, not by a flag the cron keeps. The first run that sees a job
+slip notifies; the other 47 that day do not. Being told once, early, is the value; a job
+that is 30 minutes late at noon and four hours late at 4pm does not need nine reminders
+in between.
+
+The whole org's rows go out through `createPmNotifications` in one statement, in rank
+order — its per-row `ignoreDuplicates` is what keeps one already-notified turnover from
+aborting the batch, which a plain multi-row insert would.
+
+### It still decides nothing
+
+No severity ladder, no threshold that moves anybody, no auto-reassignment. Every row
+goes out at one severity (amber) on purpose: picking amber for one and red for another
+is the judgment this is not making. The ranking is presentation; the dispatcher decides
+whether to reassign, warn the guest, or let it ride.
+
+Start times come from the published plan where Phase E produced one, and fall back to
+`checkout_datetime` otherwise. An unpublished planned time is a draft nobody agreed to,
+so the alert measures against what the crew member is actually looking at.
 
 ---
 
