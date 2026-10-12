@@ -219,6 +219,63 @@ export function useTurnoverActions(id: string) {
   )
 
   /**
+   * Ticking the first checklist item starts the turnover.
+   *
+   * "Start Turnover" is still on the hub, but it was the ONLY way in, and it
+   * is skippable: a crew member who opens the checklist and starts ticking
+   * leaves the turnover sitting at `assigned` for the whole clean. The PM's
+   * board then shows nothing happening while the work is visibly underway,
+   * and `turnovers.started_at` — which the duration half of the crew scoring
+   * loop reads — is never written at all.
+   *
+   * Inferred rather than added as a second button because the tick IS the
+   * evidence. Asking someone to announce they have started, while they are
+   * demonstrably doing the work, is the kind of double entry this product
+   * exists to remove.
+   */
+  const startedRequestRef = useRef(false)
+
+  const ensureTurnoverStarted = async () => {
+    // Only from `assigned`. The route no-ops on anything else, but checking
+    // here keeps a pointless mutation out of the outbox, where it would cost
+    // a crew member on a bad connection a real round trip per tick.
+    if (isCancelled || turnover?.status !== 'assigned') return
+    // Set BEFORE the await: `turnover` comes from a live query, so two quick
+    // ticks can both observe `assigned` before the local write lands. The
+    // route is idempotent, so this is about not queueing the second one.
+    if (startedRequestRef.current) return
+    startedRequestRef.current = true
+
+    try {
+      await startTurnover(userId, id)
+    } catch (err) {
+      // Deliberately NOT surfaced. The tick itself already succeeded and is
+      // what the crew member was doing; an error toast about a start they
+      // never asked for would read as "your tick failed". Released so a later
+      // tick can retry.
+      startedRequestRef.current = false
+      console.error('[Crew] implicit startTurnover failed:', err)
+      reportError(err, { site: 'crew.turnovers.ensureTurnoverStarted' })
+    }
+  }
+
+  /**
+   * Every path that can COMPLETE a checklist item goes through here.
+   *
+   * There are four of them (toggle, asset capture, photo capture, and a note
+   * saved against an item that is already ticked), and the implicit start
+   * belongs to all four. Wiring it into each call site is how it would end up
+   * on three.
+   */
+  const writeChecklistItem = async (
+    itemId: string,
+    input: Parameters<typeof updateChecklistItem>[2],
+  ) => {
+    await updateChecklistItem(userId, itemId, input, crewMemberId)
+    if (input.isCompleted) await ensureTurnoverStarted()
+  }
+
+  /**
    * An Asset Discovery row is a prompt, not a task: ticking it by hand would
    * mark the property surveyed while writing nothing to property_assets, so
    * lib/asset-discovery/engine.ts would hand the same prompt out on the next
@@ -231,7 +288,7 @@ export function useTurnoverActions(id: string) {
 
   /** Called by the capture modal once the asset is written locally + queued. */
   const completeCapturedItem = async (itemId: string) => {
-    await updateChecklistItem(userId, itemId, { isCompleted: true }, crewMemberId)
+    await writeChecklistItem(itemId, { isCompleted: true })
   }
 
   const toggleItem = async (itemId: string, current: number, requiresPhoto: number, photoPath: string | null, sectionName: string) => {
@@ -239,7 +296,7 @@ export function useTurnoverActions(id: string) {
       fileInputRefs.current[itemId]?.click()
       return
     }
-    await updateChecklistItem(userId, itemId, { isCompleted: !current }, crewMemberId)
+    await writeChecklistItem(itemId, { isCompleted: !current })
     // Check if section is now fully complete
     if (!current) {
       const sectionItems = sections[sectionName] ?? []
@@ -257,10 +314,10 @@ export function useTurnoverActions(id: string) {
       setOpenNoteItemId(null)
       return
     }
-    await updateChecklistItem(userId, itemId, {
+    await writeChecklistItem(itemId, {
       isCompleted: isCompleted === 1,
       crewNotes:   noteText,
-    }, crewMemberId)
+    })
     setOpenNoteItemId(null)
   }
 
@@ -354,7 +411,7 @@ export function useTurnoverActions(id: string) {
         retry_count:    0,
         created_at:     new Date().toISOString(),
       })
-      await updateChecklistItem(userId, itemId, { isCompleted: true }, crewMemberId)
+      await writeChecklistItem(itemId, { isCompleted: true })
 
       // Attempt immediately in case we're actually online — no need to wait
       // for the next interval tick or a reconnect event.
