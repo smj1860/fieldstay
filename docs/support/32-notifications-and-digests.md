@@ -22,6 +22,29 @@ Each notification links directly to the relevant turnover, work order, or page â
 
 ---
 
+## Running-Late Alerts (The Cascade Check)
+
+Every 30 minutes, FieldStay looks for a turnover that is **past its own check-in time with work still left on the checklist**, where that same crew member has **another job later the same day**. When it finds one, you get a bell notification.
+
+The late turnover itself is already visible on the board. What is not visible is that it is about to make the next one late too, and that is the only thing this alert is for.
+
+The notification names the crew member, how far past check-in they are, and how far the delay is projected to run into their next job, for example:
+
+> **Juniper Cottage is running late**
+> Dana is 45 min past check-in, projected 30 min into Lake House.
+
+That projected figure is remaining work plus drive time plus the arrival buffer. Remaining work comes from the live checklist: how many items are ticked off right now, not an estimate of how it is going. If several turnovers are running late at once, they are listed worst-projected-overrun first, so the top one is the one to deal with.
+
+Three things worth knowing:
+
+- **You get told once per turnover per day, not every 30 minutes.** The first check that sees a job slip notifies you, and the rest of that day's checks stay quiet. Being told early is the value; a job that is 30 minutes late at noon and four hours late at 4pm does not need nine reminders in between.
+- **FieldStay does not act on it.** There is no automatic reassignment and no severity ladder. Whether to move the next job to someone else, warn the incoming guest, or let it ride is your call, and nothing happens until you make it.
+- **"Drive time unknown" means exactly that.** If either property is missing coordinates, the drive between them is counted as zero and the notification says so. The real overrun is at least the number shown, never less.
+
+A turnover with no later job on that crew member's day does not raise this alert, however late it is. There is nobody downstream for it to cascade into.
+
+---
+
 ## The Daily Wrap-Up Email
 
 Once a day (evening, Central Time), FieldStay sends a summary email to your account's Owner(s) and Admin(s) covering what happened and what's coming up. It's meant to be the one email that tells you everything you need to know without opening the dashboard, and it only highlights what changed since yesterday rather than repeating the same items every day.

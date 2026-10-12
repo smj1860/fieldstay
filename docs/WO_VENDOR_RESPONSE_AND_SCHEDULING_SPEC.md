@@ -64,6 +64,24 @@ Phase H  →  item 7  half-day availability, late signal, co-assignee names
 Item 1 splits in two. The **date split** (A) is a prerequisite for item 2 and ships first.
 The **day planner** (E) depends on the capacity model from item 4, so it ships after.
 
+## Help docs ship with the phase
+
+Every phase from G onward carries its own `docs/support/**` update in the same PR as the
+code, not a separate pass afterwards. `.github/workflows/seed-support-kb.yml` re-embeds
+those files into `support_kb_chunks` on merge to `main`, so the docs commit is also what
+updates Finn. A phase merged without them leaves the assistant confidently answering
+about the previous behaviour, which is worse than it saying it does not know.
+
+Phases A-D were documented in one catch-up pass (PR #784). E and F were documented
+together after the fact, which is the gap this convention closes. What each one needs:
+
+- a section or doc under `docs/support/` for anything a PM, crew member, vendor or owner
+  can see
+- a `19-faq.md` entry per question the change invites, and a `18-glossary.md` term for any
+  new noun the UI uses
+- the in-app FAQ (`lib/faq-content.ts`) for PM-facing behaviour, and the crew app's own
+  FAQ (`app/crew/crew-shell.tsx`) in **both languages** for anything crew see
+
 ---
 
 # Phase A — Split the work-order date

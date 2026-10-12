@@ -633,6 +633,26 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: 'Sí. FieldStay Crew Ops está diseñada para funcionar sin conexión. Si estás en una propiedad sin señal, la app seguirá funcionando normalmente. Puedes completar listas de verificación, contar inventario y tomar fotos. Todo se sincroniza automáticamente cuando vuelves a tener conexión.',
     },
   },
+  plannedStart: {
+    q: {
+      en: 'My card says "Start 10:40" and "Free from 10:00". Which time do I go by?',
+      es: 'Mi tarjeta dice "Inicio 10:40" y "Libre desde 10:00". ¿Cuál hora sigo?',
+    },
+    a: {
+      en: 'Go by the start time. "Free from" is when the guest leaves and the property is empty, which is the earliest anyone could possibly begin. "Start" is when your manager has planned for you to actually begin this job, counting the job you are doing before it and the drive between the two. On a day with one job the two are usually close. On a busy day they are not, and the start time is the one that accounts for the rest of your day. If you only see one time, your manager has not published a plan for that day, so work to the checkout time as usual.',
+      es: 'Sigue la hora de inicio. "Libre desde" es cuando el huésped se va y la propiedad queda vacía, que es lo más temprano que alguien podría empezar. "Inicio" es la hora en que tu gerente planificó que empieces este trabajo, contando el trabajo que haces antes y el traslado entre los dos. En un día con un solo trabajo las dos horas suelen ser parecidas. En un día ocupado no lo son, y la hora de inicio es la que toma en cuenta el resto de tu día. Si solo ves una hora, tu gerente no publicó un plan para ese día, así que trabaja con la hora de salida como siempre.',
+    },
+  },
+  behindPlannedStart: {
+    q: {
+      en: 'What happens if I start later than my planned start time?',
+      es: '¿Qué pasa si empiezo más tarde de mi hora de inicio planificada?',
+    },
+    a: {
+      en: 'Nothing happens to your record. The planned start is a plan, not a deadline, and it is not part of how your work is scored. What matters is finishing before the next guest arrives, which is the check-in time. If something is going to make that impossible, message your manager rather than rushing: they would much rather know at 11am than find out at 3pm.',
+      es: 'No pasa nada con tu historial. La hora de inicio planificada es un plan, no un plazo, y no forma parte de cómo se evalúa tu trabajo. Lo que importa es terminar antes de que llegue el siguiente huésped, que es la hora de entrada. Si algo va a hacer eso imposible, envía un mensaje a tu gerente en vez de apurarte: prefieren saberlo a las 11am que enterarse a las 3pm.',
+    },
+  },
   photographingStickers: {
     q: {
       en: 'Why are we photographing manufacturer stickers and data plates on appliances?',
