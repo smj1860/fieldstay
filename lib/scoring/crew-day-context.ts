@@ -4,52 +4,44 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { estimateMinutes } from '@/lib/planning/day-plan'
+import type { Baselines } from '@/lib/planning/baselines'
+import type { CascadeJob } from '@/lib/scoring/cascade'
 
 /**
- * Ceilings on the three reads below.
+ * ONE org's ONE operating day: every crew member's unfinished turnovers with
+ * live checklist progress, in three reads, for lib/scoring/cascade.ts to rank.
  *
- * All three are bounded by one crew's one day, so none is reachable in
+ * ── Why checklist items and not assignment_outcomes ──
+ * assignment_outcomes.started_at/completed_at are written AFTER a turnover
+ * fully finishes, which is useless for same-day awareness: by definition the
+ * thing you would want to react to has not finished yet.
+ * checklist_instance_items.completed_at updates live, item by item, as a
+ * cleaner works. "Has this even started", "how far along", and "is it already
+ * behind its own window" are all answerable right now from data already
+ * flowing, with no new instrumentation and no new write path.
+ *
+ * ── It decides nothing ──
+ * No suggestion, no score, no severity, no recommended action, no
+ * reassignment. Deciding how to react to a cascade risk (alert the PM? the
+ * guest? wait?) is judgment-shaped work, and nothing in here is another fixed
+ * formula bolted onto lib/scoring/friction.ts. Do not scope-creep it into one.
+ *
+ * ── The ceilings below ──
+ * Both reads are bounded by one org's one day, so neither is reachable in
  * practice — but PostgREST truncates at max_rows with a 200 and no signal, and
  * a silently short read here would under-report a cascade risk, which is the
- * one thing this function exists to surface.
+ * one thing this module exists to surface. A date window caps the days, not
+ * the rows.
  *
- * MAX_CHECKLIST_ITEMS is above max_rows (1000) on purpose — a busy crew
- * member's several same-day turnovers can genuinely carry that many items
- * across their checklists — which is exactly why the read it bounds goes
- * through fetchAllRows()'s .range() pagination rather than a bare .limit():
- * a .limit() above max_rows is not a higher ceiling, it is the same 1000-row
- * truncation with a bigger, misleading number written next to it.
+ * MAX_CHECKLIST_ITEMS is above max_rows (1000) on purpose — one org's several
+ * same-day turnovers genuinely carry that many items across their checklists —
+ * which is exactly why the read it bounds goes through fetchAllRows()'s
+ * .range() pagination rather than a bare .limit(): a .limit() above max_rows
+ * is not a higher ceiling, it is the same 1000-row truncation with a bigger,
+ * misleading number written next to it.
  */
-const MAX_EARLIER_ASSIGNMENTS = 200
-const MAX_CHECKLIST_ITEMS     = 4000
-
-export interface EarlierTurnoverStatus {
-  turnoverId:        string
-  propertyId:        string
-  checkoutDatetime:  string
-  checkinDatetime:   string
-  hasStarted:        boolean
-  /** completed items / total items in this turnover's checklist instance. null = no checklist instance yet. */
-  completionRatio:   number | null
-  /** Past its own checkin_datetime with an incomplete checklist. */
-  isRunningLate:     boolean
-}
-
-export interface CrewDayContext {
-  crewMemberId:           string
-  crewMemberName:         string
-  earlierTurnoversToday:  EarlierTurnoverStatus[]
-}
-
-interface EarlierAssignmentRow {
-  crew_member_id: string
-  turnovers: {
-    id: string
-    property_id: string
-    checkout_datetime: string
-    checkin_datetime: string
-  } | { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string }[] | null
-}
+const MAX_CHECKLIST_ITEMS = 4000
 
 interface ChecklistProgress {
   total:       number
@@ -99,145 +91,148 @@ async function loadChecklistItems(
   )
 }
 
+const MAX_ORG_DAY_ASSIGNMENTS = 4000
+
+export interface OrgDayCrewJobs {
+  crewMemberId:   string
+  crewMemberName: string
+  jobs:           CascadeJob[]
+}
+
+interface OrgDayAssignmentRow {
+  crew_member_id:   string
+  turnover_id:      string
+  planned_start_at: string | null
+  plan_published_at: string | null
+  crew_members: { name: string | null } | { name: string | null }[] | null
+  turnovers: {
+    checkout_datetime: string
+    checkin_datetime:  string | null
+    properties:
+      | { name: string | null; lat: number | null; lng: number | null; bedrooms: number | null }
+      | { name: string | null; lat: number | null; lng: number | null; bedrooms: number | null }[]
+      | null
+  } | null
+}
+
 /**
- * STUB — READ-ONLY. Surfaces same-day cascading-delay context for a flagged
- * turnover's assigned crew: their OTHER turnovers scheduled earlier the same
- * calendar day, and each one's real-time progress.
+ * Every crew member's unfinished turnovers for one operating day, with live
+ * checklist progress, ready for lib/scoring/cascade.ts to rank.
  *
- * It decides nothing. No suggestion, no score, no severity, no recommended
- * action, no reassignment — deciding how to react to a cascade risk (alert the
- * PM? the guest? wait?) is judgment-shaped work, better suited to a dispatcher
- * or an agent reasoning over live context than to another fixed formula bolted
- * onto lib/scoring/friction.ts. Do not scope-creep this into that decision.
- *
- * WHY THIS READ IS DIFFERENT from every other outcome signal in the project:
- * assignment_outcomes.started_at/completed_at are written AFTER a turnover
- * fully finishes, which is useless for same-day awareness — by definition the
- * thing you would want to react to has not finished yet.
- * checklist_instance_items.completed_at updates live, item by item, as a
- * cleaner works. "Has this even started", "how far along", and "is it already
- * behind its own window" are all answerable right now from data already
- * flowing, with no new instrumentation and no new write path.
- *
- * Nothing calls this yet, deliberately. The seam is the signature and the
- * return shape, not an integration.
+ * READ-ONLY, and it still decides nothing: no severity, no threshold, no
+ * suggestion. Same constraint getCrewDayContext() carries.
  */
-export async function getCrewDayContext(
-  turnoverId: string,
-  orgId:      string,
-): Promise<CrewDayContext[]> {
-  const supabase = createServiceClient({ system: 'friction-crew-day-context' })
+export async function loadOrgDayCrewJobs(
+  orgId:    string,
+  startUtc: string,
+  endUtc:   string,
+  baselines: Baselines,
+): Promise<OrgDayCrewJobs[]> {
+  const supabase = createServiceClient({ system: 'inngest:cascade-alert' })
 
-  const targetRes = await supabase
-    .from('turnovers')
-    .select('checkout_datetime, turnover_assignments(crew_member_id, crew_members(id, name))')
-    .eq('id', turnoverId)
-    .eq('org_id', orgId)
-    .maybeSingle()
+  // Only turnovers still in flight. A completed or cancelled one cannot
+  // cascade into anything, and a cancelled one still holding a crew slot
+  // would invent a downstream job nobody is driving to.
+  const assignments = await fetchAllRows<OrgDayAssignmentRow>(
+    (from, to) => supabase
+      .from('turnover_assignments')
+      .select(`
+        crew_member_id, turnover_id, planned_start_at, plan_published_at,
+        crew_members ( name ),
+        turnovers!inner (
+          checkout_datetime, checkin_datetime, status,
+          properties ( name, lat, lng, bedrooms )
+        )
+      `)
+      .eq('org_id', orgId)
+      .gte('turnovers.checkout_datetime', startUtc)
+      .lt('turnovers.checkout_datetime', endUtc)
+      .in('turnovers.status', ['assigned', 'in_progress'])
+      .order('turnover_id')
+      .range(from, to),
+    { label: `cascade.orgDayAssignments[org=${orgId}]`, maxRows: MAX_ORG_DAY_ASSIGNMENTS },
+  )
 
-  if (targetRes.error) throw targetRes.error
-  const target = targetRes.data
-  if (!target) return []
+  if (assignments.length === 0) return []
 
-  const targetCheckout = target.checkout_datetime as string
-  const dayStart = `${targetCheckout.slice(0, 10)}T00:00:00Z`
+  const turnoverIds = [...new Set(assignments.map((a) => a.turnover_id))]
 
-  const crewAssignments = (target.turnover_assignments ?? []) as {
-    crew_member_id: string
-    crew_members: { id: string; name: string } | { id: string; name: string }[] | null
-  }[]
-
-  if (crewAssignments.length === 0) return []
-
-  const crewIds = [...new Set(crewAssignments.map((a) => a.crew_member_id))]
-
-  // ONE read for EVERY crew member's earlier turnovers, not one per person.
-  // The per-crew loop the obvious shape invites is the N+1 that
-  // unit/guardrails/n-plus-one-loops.test.ts exists to catch.
-  const earlierRes = await supabase
-    .from('turnover_assignments')
-    .select('crew_member_id, turnovers!inner(id, property_id, checkout_datetime, checkin_datetime, status)')
-    .in('crew_member_id', crewIds)
-    .eq('org_id', orgId)
-    .neq('turnover_id', turnoverId)
-    .gte('turnovers.checkout_datetime', dayStart)
-    .lt('turnovers.checkout_datetime', targetCheckout)
-    .in('turnovers.status', ['assigned', 'in_progress'])
-    .limit(MAX_EARLIER_ASSIGNMENTS)
-
-  const earlier = unwrapList<EarlierAssignmentRow>(earlierRes, {
-    site: 'scoring.crew-day-context.earlierAssignments', orgId,
-  })
-
-  if (earlier.length === 0) {
-    return crewAssignments.map((a) => ({
-      crewMemberId:          a.crew_member_id,
-      crewMemberName:        unwrapJoin(a.crew_members)?.name ?? 'Unknown',
-      earlierTurnoversToday: [],
-    }))
-  }
-
-  const earlierTurnoverIds = [
-    ...new Set(earlier.map((row) => unwrapJoin(row.turnovers)?.id).filter((id): id is string => Boolean(id))),
-  ]
-
-  // ONE read for every checklist instance across all of those turnovers.
+  // ONE read for every checklist instance across the whole org-day.
   const instancesRes = await supabase
     .from('checklist_instances')
     .select('id, turnover_id')
-    .in('turnover_id', earlierTurnoverIds)
+    .in('turnover_id', turnoverIds)
     .eq('org_id', orgId)
-    .limit(earlierTurnoverIds.length)
+    .limit(turnoverIds.length)
 
   const instances = unwrapList<{ id: string; turnover_id: string }>(instancesRes, {
-    site: 'scoring.crew-day-context.checklistInstances', orgId,
+    site: 'scoring.crew-day-context.orgDayInstances', orgId,
   })
 
   const instanceByTurnover = new Map(instances.map((i) => [i.turnover_id, i.id]))
-
-  // ONE read for every item across every instance, folded in memory.
   const progressByInstance = instances.length === 0
     ? new Map<string, ChecklistProgress>()
     : foldProgress(await loadChecklistItems(supabase, instances))
 
-  const now = Date.now()
+  const byCrew = new Map<string, OrgDayCrewJobs>()
 
-  function statusFor(turnover: NonNullable<ReturnType<typeof unwrapJoin<{
-    id: string; property_id: string; checkout_datetime: string; checkin_datetime: string
-  }>>>): EarlierTurnoverStatus {
-    const instanceId = instanceByTurnover.get(turnover.id)
-    const progress   = instanceId ? progressByInstance.get(instanceId) : undefined
+  for (const row of assignments) {
+    const job = cascadeJobFor(row, { instanceByTurnover, progressByInstance, baselines })
+    if (!job) continue
 
-    // null, not 0: no checklist instance (or an instance with no items) means
-    // "no progress signal", which is a different claim from "nothing done".
-    const completionRatio = progress && progress.total > 0
-      ? progress.completed / progress.total
-      : null
-
-    return {
-      turnoverId:       turnover.id,
-      propertyId:       turnover.property_id,
-      checkoutDatetime: turnover.checkout_datetime,
-      checkinDatetime:  turnover.checkin_datetime,
-      hasStarted:       progress?.hasStarted ?? false,
-      completionRatio,
-      isRunningLate:    now > new Date(turnover.checkin_datetime).getTime()
-                        && (completionRatio === null || completionRatio < 1.0),
-    }
+    const existing = byCrew.get(row.crew_member_id)
+    if (existing) existing.jobs.push(job)
+    else byCrew.set(row.crew_member_id, {
+      crewMemberId:   row.crew_member_id,
+      crewMemberName: unwrapJoin(row.crew_members)?.name ?? 'Unknown',
+      jobs:           [job],
+    })
   }
 
-  const byCrew = new Map<string, EarlierTurnoverStatus[]>()
-  for (const row of earlier) {
-    const turnover = unwrapJoin(row.turnovers)
-    if (!turnover) continue
-    const list = byCrew.get(row.crew_member_id)
-    if (list) list.push(statusFor(turnover))
-    else byCrew.set(row.crew_member_id, [statusFor(turnover)])
-  }
+  return [...byCrew.values()]
+}
 
-  return crewAssignments.map((a) => ({
-    crewMemberId:          a.crew_member_id,
-    crewMemberName:        unwrapJoin(a.crew_members)?.name ?? 'Unknown',
-    earlierTurnoversToday: byCrew.get(a.crew_member_id) ?? [],
-  }))
+interface JobContext {
+  instanceByTurnover: Map<string, string>
+  progressByInstance: Map<string, ChecklistProgress>
+  baselines:          Baselines
+}
+
+/** One assignment row as a rankable job. null when its turnover embed is absent. */
+function cascadeJobFor(row: OrgDayAssignmentRow, ctx: JobContext): CascadeJob | null {
+  const turnover = unwrapJoin(row.turnovers)
+  if (!turnover) return null
+
+  const property   = unwrapJoin(turnover.properties)
+  const instanceId = ctx.instanceByTurnover.get(row.turnover_id)
+  const progress   = instanceId ? ctx.progressByInstance.get(instanceId) : undefined
+
+  // null, not 0: no checklist instance means no progress SIGNAL, which is a
+  // different claim from "nothing done". cascade.ts reads it pessimistically
+  // and says so, rather than this read guessing on its behalf.
+  const completionRatio = progress && progress.total > 0
+    ? progress.completed / progress.total
+    : null
+
+  // The published plan wins where there is one. An unpublished planned time
+  // is a draft nobody agreed to, so falling back to checkout matches what the
+  // crew member is actually looking at on their card.
+  const startAt = row.plan_published_at !== null && row.planned_start_at !== null
+    ? row.planned_start_at
+    : turnover.checkout_datetime
+
+  return {
+    turnoverId:      row.turnover_id,
+    propertyName:    property?.name ?? null,
+    startAt,
+    checkinAt:       turnover.checkin_datetime,
+    lat:             property?.lat ?? null,
+    lng:             property?.lng ?? null,
+    durationMinutes: estimateMinutes({
+      bedrooms:              property?.bedrooms ?? null,
+      crewMinutesPerBedroom: ctx.baselines.byCrew.get(row.crew_member_id) ?? null,
+      orgMedianPerBedroom:   ctx.baselines.median,
+    }),
+    completionRatio,
+  }
 }

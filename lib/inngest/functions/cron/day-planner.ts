@@ -1,11 +1,11 @@
 import { inngest }               from '@/lib/inngest/client'
 import { createServiceClient }   from '@/lib/supabase/server'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
-import { unwrapList }            from '@/lib/supabase/unwrap'
 import { sendEventsChunked }     from '@/lib/inngest/chunk'
 import { unwrapJoin }            from '@/lib/utils/supabase-joins'
 import { frictionDateString, frictionDayUtcBounds } from '@/lib/friction/date'
 import { planDay, estimateMinutes, type PlannableTurnover } from '@/lib/planning/day-plan'
+import { loadCrewBaselines, resolveBaselines, type Baselines } from '@/lib/planning/baselines'
 
 /**
  * SCHEDULED: 07:30 UTC, half an hour after cron-pre-flight-friction.
@@ -95,19 +95,6 @@ interface AssignmentRow {
       | { lat: number | null; lng: number | null; bedrooms: number | null }[]
       | null
   } | null
-}
-
-/** Minutes-per-bedroom per crew member, plus the org median for the rest. */
-interface Baselines {
-  byCrew: Map<string, number>
-  median: number | null
-}
-
-function medianOf(values: number[]): number | null {
-  if (!values.length) return null
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
 }
 
 interface CrewEntry { assignmentId: string; job: PlannableTurnover }
@@ -238,35 +225,13 @@ export const planDayForOrg = inngest.createFunction
         return { planned: 0, crew: 0 }
       }
 
-      const baselines = await step.run('load-baselines', async () => {
-        const supabase = createServiceClient({ system: 'inngest:day-planner' })
+      // Shared with the cascade-alert cron: both need this crew member's own
+      // minutes-per-bedroom and a median for everyone with no row.
+      const baselines = await step.run('load-baselines', () => loadCrewBaselines(
+        createServiceClient({ system: 'inngest:day-planner' }), orgId,
+      ))
 
-        // Bounded by the org's crew count, which is plan-capped. Crew under
-        // three completed turnovers in the 90-day window have no row at all,
-        // which is exactly what the median below is for.
-        const res = await supabase
-          .from('crew_speed_baselines')
-          .select('crew_member_id, avg_minutes_per_bedroom')
-          .eq('org_id', orgId)
-          .limit(500)
-
-        const rows = unwrapList(res, { site: 'inngest.day-planner.baselines', orgId })
-        const perBedroom = rows
-          .map((r) => (r.avg_minutes_per_bedroom === null ? null : Number(r.avg_minutes_per_bedroom)))
-          .filter((n): n is number => n !== null && Number.isFinite(n) && n > 0)
-
-        return {
-          byCrew: rows
-            .filter((r) => r.avg_minutes_per_bedroom !== null)
-            .map((r) => [r.crew_member_id, Number(r.avg_minutes_per_bedroom)] as const),
-          median: medianOf(perBedroom),
-        }
-      })
-
-      const resolved: Baselines = {
-        byCrew: new Map(baselines.byCrew),
-        median: baselines.median,
-      }
+      const resolved: Baselines = resolveBaselines(baselines)
 
       const byCrew = groupJobsByCrew(assignments, resolved)
 
