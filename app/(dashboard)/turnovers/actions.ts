@@ -8,7 +8,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { frictionDayUtcBounds } from '@/lib/friction/date'
+import { frictionDateString, frictionDayUtcBounds } from '@/lib/friction/date'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwrap'
 import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
@@ -479,6 +479,9 @@ export async function assignCrew(
     })
 
     await sendAssignmentPush(membership.org_id, crewMemberId, turnovers)
+
+    // The day plan is now stale for every date these turnovers fall on.
+    await requestDayReplan(supabase, membership.org_id, turnovers.map((t) => t.id))
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
@@ -985,6 +988,8 @@ export async function addCrewToTurnover(
     )
     const timeOffCount = timeOffRows?.length ?? 0
 
+    await requestDayReplan(supabase, membership.org_id, turnoverIds)
+
     revalidatePath('/turnovers')
     const warnings: string[] = []
     if (existingAssignments === null) warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts, please verify manually.`)
@@ -1058,6 +1063,10 @@ export async function removeCrewFromTurnover(
       targetId:   crewMemberId,
       metadata:   { turnover_id: turnoverId },
     })
+
+    // Removing someone frees capacity, so the whole day is re-planned rather
+    // than just the departing crew member's sequence.
+    await requestDayReplan(supabase, membership.org_id, [turnoverId])
 
     revalidatePath('/turnovers')
     return { success: true }
@@ -1666,6 +1675,63 @@ export async function rateTurnoverCompletion(
     console.error('[rateTurnoverCompletion]', err)
     reportError(err, { site: 'serverAction.turnovers.rateTurnoverCompletion.outer' })
     return { error: 'Failed to save rating. Please try again.' }
+  }
+}
+
+// ── Day plan: recompute after an assignment changes (Phase E) ──────────────
+//
+// The planner runs overnight. A reassignment at 9am leaves yesterday's 2am
+// plan standing — the new crew member has no times, the old one keeps a
+// sequence built around a job they no longer have, and nothing says so.
+//
+// Re-planning the whole org's day rather than the one crew member is both
+// simpler and more correct: removing someone frees capacity that changes
+// everyone else's options, and planDayForOrg is already bounded and
+// idempotent, with concurrency:1 per org so overlapping requests serialise
+// rather than racing.
+//
+// plan_published_at is deliberately NOT cleared by the replan. The PM made
+// this change themselves, so the new times follow from their own action, and
+// silently un-publishing would strand crew with no times at all. A newly
+// assigned crew member's row has no plan until the re-plan lands and no
+// publish stamp until the PM publishes again — which the board surfaces as
+// "12 planned, 11 published" rather than hiding.
+
+/**
+ * Fire-and-forget: a failed replan must never fail the assignment that
+ * triggered it. The worst case is a stale plan until the next nightly run,
+ * which is strictly better than refusing to assign someone.
+ */
+async function requestDayReplan(
+  supabase: Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:    string,
+  turnoverIds: string[],
+): Promise<void> {
+  if (!turnoverIds.length) return
+
+  const res = await supabase
+    .from('turnovers')
+    .select('checkout_datetime')
+    .eq('org_id', orgId)
+    .in('id', turnoverIds)
+    // Bounded by the id list the caller already holds.
+    .limit(turnoverIds.length)
+
+  const rows = tryUnwrapList(res, { site: 'serverAction.turnovers.requestDayReplan', orgId })
+  if (!rows.ok) return
+
+  // Distinct operating days, derived the way the planner derives them. A
+  // UTC slice would name a different day from about 7pm Central onward and
+  // re-plan a date the cron never wrote.
+  const dates = new Set(
+    rows.data
+      .map((r) => r.checkout_datetime)
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => frictionDateString(new Date(d))),
+  )
+
+  for (const planDate of dates) {
+    sendEventAsync({ name: 'org/day_plan.requested', data: { org_id: orgId, plan_date: planDate } })
   }
 }
 

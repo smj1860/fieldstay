@@ -5,6 +5,7 @@ import { topCrewCandidate, crewSuggestionReasoning, atDayCapacity } from '@/lib/
 import { computeWorkloadMap, computeDayWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { frictionDateString } from '@/lib/friction/date'
 
 /**
  * How far back "has worked this property before" looks.
@@ -404,6 +405,22 @@ export const autoAssignTurnover = inngest.createFunction(
         throw new Error(`Failed to record assignment outcome: ${error.message}`)
       }
     })
+
+    // Phase E. An autopilot assignment changes the day as much as a PM's own
+    // does, and nobody is in the loop here to notice the plan went stale.
+    // Fired at the function's TOP LEVEL, never inside a step.run — step
+    // tooling nested in a callback unwinds the request and replays every side
+    // effect written before it (CLAUDE.md's Inngest constraints).
+    //
+    // Only when an assignment actually landed: a 'noop' or a suggestion-only
+    // run changed nothing to re-plan, and the nightly cron already covers the
+    // ordinary case.
+    if (acted.action === 'autopilot_assigned') {
+      await step.sendEvent('replan-day', {
+        name: 'org/day_plan.requested' as const,
+        data: { org_id, plan_date: frictionDateString(new Date(checkout_datetime)) },
+      })
+    }
 
     return { action: acted.action, top_crew: top.name }
   }

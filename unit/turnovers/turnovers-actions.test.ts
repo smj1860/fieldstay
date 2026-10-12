@@ -628,8 +628,16 @@ describe('turnovers/actions', () => {
 
       await removeCrewFromTurnover('t_1', 'crew_1')
 
-      expect(supabase.from).not.toHaveBeenCalledWith('turnover_assignments')
-      expect(supabase.from).not.toHaveBeenCalledWith('turnovers')
+      // Asserted on WRITES, which is what the regression is about, rather
+      // than on `.from()` being called at all. The action now also READS
+      // turnovers after the RPC returns, to find which day's plan went stale
+      // (Phase E) — a read that happens strictly after the atomic removal and
+      // cannot reintroduce the race. A blanket "never touches these tables"
+      // was a proxy for this invariant and would have blocked that.
+      const writes = supabase.calls.filter((c) =>
+        ['insert', 'update', 'delete', 'upsert'].includes(c.method)
+        && ['turnovers', 'turnover_assignments'].includes(c.table))
+      expect(writes).toEqual([])
     })
 
     it('rejects a turnover id that does not belong to the caller org (IDOR check)', async () => {

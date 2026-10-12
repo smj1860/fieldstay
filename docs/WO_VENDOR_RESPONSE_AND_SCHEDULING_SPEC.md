@@ -602,31 +602,90 @@ board, however quiet their fortnight was.
 
 ---
 
-# Phase E — item 1: the day planner
+# Phase E — item 1: the day planner — BUILT
 
-Needs D. Writes `planned_start_at` / `planned_end_at` on `turnover_assignments`.
+Writes `planned_start_at` / `planned_end_at` on `turnover_assignments`, plus
+`plan_published_at`.
 
-Inputs, all of which already exist and are already computed daily:
+### The three open questions, decided
 
-- duration: `crew_speed_baselines.avg_minutes_per_bedroom` × `properties.bedrooms`, org
-  median fallback (`cron/pre-flight-friction.ts:244-272`)
-- hard window: `turnovers.checkout_datetime` → `checkin_datetime`
-- travel: Phase G, or the current haversine estimate until then
-- capacity: Phase D
+**Cron or on demand? Both, plus a third trigger the question did not list.**
+`cron-day-planner` runs 07:30 UTC, half an hour after `cron-pre-flight-friction`
+— a real dependency, since that cron's first step recomputes
+`crew_speed_baselines`, which is where these duration estimates come from.
+On top of that, **any assignment change re-plans that org's day**: a plan
+computed at 2am is wrong the moment a PM reassigns someone at 9am. All four PM
+paths and the autopilot path fire `org/day_plan.requested`.
 
-Open questions, to settle before building E:
+**Dates changing answered itself from existing code.** `refreshExistingPairDates`
+already distinguishes `pending_assignment`/`assigned` (dates written directly)
+from `in_progress` (staged, with the banner) from completed/cancelled (never
+touched). The plan is derived data: it recomputes when real dates move and is
+left alone when a change is merely staged, exactly as `checkout_datetime` is.
+No new acknowledgement dance.
 
-- Does the planner run as a cron (overnight, like friction) or on demand when a PM opens the
-  day? Probably both: a nightly plan plus a re-plan button.
-- Is the plan advisory or authoritative — i.e. does a crew member see a start time that a PM
-  has not confirmed?
-- What happens to a plan when a booking's dates change? `turnovers` already has the
-  `dates_changed_at` / `pending_checkin_datetime` acknowledgement dance; the plan has to
-  participate in it.
+**Advisory or authoritative: PUBLISH-FIRST, with the seam for both.** A start
+time is an obligation. Computed and shown with no human in between, it makes a
+crew member "behind" against a number nobody committed to, and crew reliability
+is a real score here. `plan_published_at` NULL means crew see nothing and the
+card keeps its old behaviour.
 
-Crew PWA consequence: the card's time changes from `checkout_datetime` (the guest's
-departure, which reads like an arrival instruction — `app/crew/page.tsx:126-128`) to the
-planned start, with checkout shown as the window it sits in.
+The seam for a future auto-publish mode is the timestamp itself: publishing is
+a separate act rather than something baked into the computation, so making it
+automatic is the planner stamping that column, not a redesign. Deliberately NOT
+an org-level mode enum today, because a second mode nothing implements would
+read as a capability the product has and does not.
+
+`was_late` is untouched: it stays `completed_at > checkin_datetime`, measured
+against the guest actually arriving. A planned start must not quietly become a
+second, softer definition of late.
+
+### The planner
+
+`lib/planning/day-plan.ts`, pure over its inputs. Each job starts at the LATER
+of two constraints and both bind: when the property becomes free, and when the
+crew member can physically get there from the previous job. Ordering is
+earliest-free-first, NOT a travelling-salesman solve — a route saving eleven
+minutes is worthless if it puts a cleaner at a door before the guest has gone,
+and a PM cannot sanity-check an order they did not expect.
+
+`infeasible` is the most valuable output: a job that cannot finish before the
+next guest arrives, flagged rather than silently clamped, so a day that will
+not work is visible BEFORE it happens. A standalone turnover has no incoming
+guest and is never flagged.
+
+### Writes, and the hole the first draft opened
+
+`set_turnover_assignment_plans` writes a whole org's day in ONE statement
+(`UPDATE ... FROM jsonb_to_recordset`). An UPDATE, never an upsert: an upsert
+keyed on id would RESURRECT an assignment deleted between the planner's read
+and its write.
+
+**The first draft of that RPC reintroduced the vulnerability class
+`20260801280000_authz_gate_security_definer_rpcs.sql` had already closed.**
+SECURITY DEFINER with a caller-supplied `p_org_id` means the argument is the
+only tenant boundary, and `REVOKE ... FROM PUBLIC` does NOT remove Supabase's
+default `authenticated` grant. Fixed with both defences: the `is_org_member`
+gate, and EXECUTE revoked from `authenticated` by name.
+
+### What crew see
+
+The plan rides to the device on the existing turnovers pull via an embedded
+assignment row — no `crew_member_id` filter, because that table's SELECT policy
+already returns only the caller's own. `publishedPlan()` drops an unpublished
+plan at SYNC time, so it never reaches Dexie and no later UI change can start
+showing one by accident.
+
+The card leads with "Start 10:40" and demotes checkout to "Free from 10:00".
+Checkout alone reads as "be there at 10" when it means "you cannot start before
+10"; with three jobs in a day, two of those readings were wrong.
+
+### Not built
+
+Travel is still the haversine estimate at a flat 48km/h, awaiting Phase G.
+Per-crew publishing (this publishes a whole date). The planner does not consider
+`max_turnovers_per_day` when sequencing — that cap governs what gets ASSIGNED,
+in Phase D, and by the time the planner runs the assignments already exist.
 
 ---
 
