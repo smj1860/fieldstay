@@ -48,6 +48,18 @@ They'll log in with the account they just created. This is where they'll access 
 
 ---
 
+## Per-Crew Settings That Affect Auto-Assignment
+
+Two settings on each crew member change what FieldStay proposes. Both are edited inline in Manage Crew and neither affects manual assignment.
+
+**Auto-assign** — whether FieldStay may pick this person at all. On by default.
+
+**Max/day** — how many turnovers they may be auto-assigned or suggested for on a single date. Blank means no limit, which is how everyone starts. A crew member at their limit is skipped entirely rather than scored lower, because a nearby, familiar crew member would otherwise still win while over their limit, and on Autopilot nobody reviews the pick.
+
+If every eligible crew member is at their limit for a date, the turnover stays unassigned and you are alerted with the limit named as the reason.
+
+---
+
 ## Why Crew Members Must Install the App
 
 This is the most important thing to communicate to your crew before their first turnover: **they need to install the FieldStay Crew App on their home screen, not just open it in a browser.**

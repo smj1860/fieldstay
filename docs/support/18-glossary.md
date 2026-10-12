@@ -36,6 +36,38 @@ Work orders differ from maintenance schedules — a work order is a one-time tas
 
 ---
 
+## Needed-By Date
+
+The date a property manager needs a work order finished by. The PM's deadline, not the vendor's visit. It is prefilled at creation from the property's next confirmed check-in and can be changed or cleared.
+
+Distinct from the vendor's **appointment**, which the vendor sets when accepting. Vendor on-time performance is scored against the needed-by date.
+
+---
+
+## Vendor Progress
+
+A second status axis on a work order, written by the vendor from their portal, carrying the detail the main status cannot: appointment scheduled, on the way, tech on site, waiting on access, waiting on your approval, parts ordered, repair in progress, return visit scheduled, job completed.
+
+Waiting on access and waiting on your approval are blocked states: the vendor cannot continue and only the PM can unblock them, so both notify the PM and sort to the top of the Maintenance board.
+
+Crew do not write progress. A crew-assigned work order has Start Work and Mark Work Complete only.
+
+---
+
+## Technician Link
+
+A per-work-order link a vendor generates for one of their own technicians, instead of forwarding their own dispatch link. The technician identifies themselves by name on opening it, and their work is recorded under that name. The link covers one work order, can be revoked by the vendor, and stops working when the job closes.
+
+---
+
+## Daily Turnover Limit
+
+An optional per-crew-member cap (**Max/day** in Manage Crew) on how many turnovers FieldStay will auto-assign or suggest for them on one date. Blank means no limit, which is the default.
+
+A hard exclusion rather than a scoring penalty: a crew member at their limit is not considered, however well they would otherwise score. Manual assignment is unaffected.
+
+---
+
 ## Maintenance Schedule
 
 A maintenance schedule is a recurring task template that automatically creates work orders when a due date is reached — HVAC filter changes, pest control, gutter cleaning, and similar periodic tasks. Schedules have a defined frequency (monthly, quarterly, annually) and can be linked to a specific vendor or asset.
@@ -44,7 +76,9 @@ A maintenance schedule is a recurring task template that automatically creates w
 
 ## Vendor Portal
 
-The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can review work order details, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 30 days.
+The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can accept or decline the job, set an appointment, post progress updates, forward the job to one of their technicians, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 30 days.
+
+Access details (door code, access notes, parking) appear only after the vendor accepts. Before acceptance the page does not contain them.
 
 ---
 

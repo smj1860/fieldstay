@@ -139,22 +139,36 @@ function coerceScore(value: PostgrestNumeric): number {
  * the best) so the two can never drift into scoring the same crew member
  * differently.
  */
+/**
+ * The two workload axes and their denominators, bundled.
+ *
+ * Four loose parameters took scoreOne past the 7-parameter ceiling, and
+ * they belong together anyway: each map is meaningless without the max it is
+ * normalised against, and passing them separately is how a caller ends up
+ * dividing the day counts by the fortnight's busiest figure.
+ */
+interface WorkloadContext {
+  /** Busiest 14-day count across the pool, floored at 1. */
+  maxWorkload:    number
+  /** Busiest count on the turnover's own date, floored at 1. */
+  maxDay:         number
+  workloadMap:    Record<string, number>
+  dayWorkloadMap: Record<string, number>
+}
+
 function scoreOne(
   c:           CrewCandidate,
   weights:     typeof SAME_DAY_WEIGHTS,
   property:    CrewScoringInput['property'],
-  maxWorkload: number,
-  maxDayWorkload: number,
   familiarSet: Set<string>,
-  workloadMap: Record<string, number>,
-  dayWorkloadMap: Record<string, number>,
+  load:        WorkloadContext,
 ): ScoredCrewCandidate {
   const breakdown: CrewScoreBreakdown = {
     proximity:   candidateProximity(c, property),
     reliability: coerceScore(c.reliability_score),
     capacity:    coerceScore(c.capacity_score),
-    workload:    1 - (workloadMap[c.id] ?? 0) / maxWorkload,
-    dayWorkload: 1 - (dayWorkloadMap[c.id] ?? 0) / maxDayWorkload,
+    workload:    1 - (load.workloadMap[c.id] ?? 0) / load.maxWorkload,
+    dayWorkload: 1 - (load.dayWorkloadMap[c.id] ?? 0) / load.maxDay,
     familiarity: familiarSet.has(c.id) ? 1.0 : 0.0,
   }
 
@@ -173,12 +187,15 @@ export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidat
   const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap } = input
 
   const weights     = isSameDay ? SAME_DAY_WEIGHTS : STANDARD_WEIGHTS
-  const maxWorkload = Math.max(...Object.values(workloadMap), 1)
-  const maxDay      = Math.max(...Object.values(dayWorkloadMap), 1)
   const familiarSet = new Set(familiarCrewIds)
+  const load: WorkloadContext = {
+    maxWorkload: Math.max(...Object.values(workloadMap), 1),
+    maxDay:      Math.max(...Object.values(dayWorkloadMap), 1),
+    workloadMap, dayWorkloadMap,
+  }
 
   return crew
-    .map((c) => scoreOne(c, weights, property, maxWorkload, maxDay, familiarSet, workloadMap, dayWorkloadMap))
+    .map((c) => scoreOne(c, weights, property, familiarSet, load))
     .sort((a, b) => b.score - a.score)
 }
 
@@ -199,13 +216,16 @@ export function topCrewCandidate(input: CrewScoringInput): ScoredCrewCandidate |
   if (!crew.length) return null
 
   const weights     = isSameDay ? SAME_DAY_WEIGHTS : STANDARD_WEIGHTS
-  const maxWorkload = Math.max(...Object.values(workloadMap), 1)
-  const maxDay      = Math.max(...Object.values(dayWorkloadMap), 1)
   const familiarSet = new Set(familiarCrewIds)
+  const load: WorkloadContext = {
+    maxWorkload: Math.max(...Object.values(workloadMap), 1),
+    maxDay:      Math.max(...Object.values(dayWorkloadMap), 1),
+    workloadMap, dayWorkloadMap,
+  }
 
   let best: ScoredCrewCandidate | null = null
   for (const c of crew) {
-    const candidate = scoreOne(c, weights, property, maxWorkload, maxDay, familiarSet, workloadMap, dayWorkloadMap)
+    const candidate = scoreOne(c, weights, property, familiarSet, load)
     if (!best || candidate.score > best.score) best = candidate
   }
   return best

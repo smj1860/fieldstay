@@ -8,6 +8,8 @@
 
 When FieldStay creates a turnover from a booking (OwnerRez, Hospitable, Hostex, or Hostaway), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
 
+Scoring looks at how many turnovers a crew member already has **on that specific date**, not just across the next fortnight. Three jobs stacked on one Tuesday and three spread across two weeks used to score the same; they no longer do.
+
 ---
 
 ## Assigning a Single Turnover
@@ -30,6 +32,18 @@ The assignment applies as soon as you pick a name — there's no separate Apply 
 
 ---
 
+## Limiting How Many Turnovers Someone Gets in a Day
+
+Each crew member can carry a **Max/day** limit, set beside the Auto-assign toggle when you edit them in Manage Crew. Leave it blank and there is no limit, which is how every crew member starts.
+
+When a limit is set, FieldStay will not auto-assign or suggest that person for a date they have already filled. This is a hard stop rather than a scoring nudge: a close, familiar crew member would otherwise still win on score while over their limit, and on Autopilot nobody is reviewing the result.
+
+It governs only what FieldStay proposes. You can always assign someone by hand past their limit.
+
+If every eligible crew member is at their limit for a date, the turnover stays unassigned and you get an alert saying so, naming the limit as the reason. That is the trade: a limit you set can leave work unassigned, and FieldStay tells you rather than quietly ignoring the limit.
+
+---
+
 ## Crew Auto-Assignment
 
 FieldStay doesn't use a fixed default crew member per property — assignment suggestions are computed per turnover, not configured per property. See **How Assignment Works** above for the three modes, or go to Settings → Crew Auto-Assignment to change yours.
@@ -45,6 +59,8 @@ Once assigned, the turnover appears in the crew member's app under Today's Turno
 - The full cleaning checklist
 - Inventory count section
 - Mark Complete button
+
+Work orders assigned to crew look different: they carry **Start Work** and **Mark Work Complete** instead of a checklist. Crew have those two steps only. The detailed progress list (parts ordered, waiting on access, and so on) is a vendor feature, so an in-house job shows as In Progress rather than naming a reason.
 
 ---
 
@@ -67,6 +83,8 @@ To assign a crew work order, go to **Maintenance → New Work Order**, fill in t
 ## Tracking Progress
 
 The Turnovers Board updates in real time as crew members work through their checklist. The status moves from Assigned → In Progress when they tap Start, and → Complete when they tap Mark Complete. You receive a notification when the turnover is marked complete.
+
+**A turnover also starts itself the moment the first checklist item is ticked.** Crew who open the checklist and get straight to work rarely remember to tap Start first, and before this the board showed nothing happening while the job was visibly underway. If you see a turnover go to In Progress without anyone tapping Start, that is why. The tick is the evidence.
 
 ---
 

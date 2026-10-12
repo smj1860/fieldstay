@@ -182,7 +182,7 @@ export async function checkQuoteVendorsAssignable(
 
 /**
  * Non-blocking warning check: did the crew member assigned to this work
- * order mark themselves unavailable on the scheduled date? Returns the
+ * order mark themselves unavailable on the needed-by date? Returns the
  * warning message to surface to the PM, or undefined if there's nothing to
  * warn about.
  */
@@ -208,7 +208,7 @@ export async function checkCrewTimeOffWarning(
   const timeOff = unwrap(timeOffRes, { site: 'serverAction.maintenance.crew-time-off', orgId })
 
   return timeOff
-    ? 'Work order created, but the assigned crew member marked time off on the scheduled date.'
+    ? 'Work order created, but the assigned crew member marked time off on the needed-by date.'
     : undefined
 }
 
