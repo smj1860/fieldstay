@@ -70,19 +70,62 @@ function scopeHorizonIso(now: number = Date.now()): string {
   return new Date(now - CREW_SCOPE_HORIZON_DAYS * 86_400_000).toISOString()
 }
 
+/**
+ * The embedded turnover_assignments row carries this crew member's day plan
+ * (Phase E). No crew_member_id filter is needed and none is added: the SELECT
+ * policy on that table is `crew_member_id IN (their own crew rows) OR org_id
+ * IN get_user_org_ids()`, and a crew member holds no organization_members
+ * row, so RLS already returns exactly their own assignment. Adding a filter
+ * here would duplicate that boundary in app code, which is how the two drift.
+ */
 const TURNOVER_COLUMNS =
   'id, property_id, org_id, prev_booking_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
   'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes, ' +
-  'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at, updated_at'
+  'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at, updated_at, ' +
+  'turnover_assignments ( planned_start_at, planned_end_at, plan_published_at )'
+
+interface EmbeddedPlan {
+  planned_start_at:  string | null
+  planned_end_at:    string | null
+  plan_published_at: string | null
+}
+
+/**
+ * The crew member's planned window, but ONLY once a PM has published the day.
+ *
+ * Gated here, at the point the row enters the device, rather than in the
+ * component that renders it. An unpublished time never reaches Dexie at all,
+ * so no later UI change can start showing one by accident — which matters
+ * because the whole point of the publish gate is that a crew member is never
+ * handed a start time no human reviewed.
+ */
+export function publishedPlan(embedded: unknown): { planned_start_at: string | null; planned_end_at: string | null } {
+  const none = { planned_start_at: null, planned_end_at: null }
+
+  // PostgREST returns an embed as an array (or a single object on a to-one
+  // relation). Either shape is accepted rather than assumed.
+  if (!embedded) return none
+  const rows = Array.isArray(embedded) ? embedded : [embedded]
+  const plan = rows[0] as EmbeddedPlan | undefined
+
+  if (!plan?.plan_published_at) return none
+  if (!plan.planned_start_at || !plan.planned_end_at) return none
+
+  return { planned_start_at: plan.planned_start_at, planned_end_at: plan.planned_end_at }
+}
 
 function normalizeTurnovers(rows: Record<string, unknown>[]): TurnoverRow[] {
   return rows.map((t) => {
-    // updated_at feeds the cursor only — keep the Dexie row shape unchanged
-    const { updated_at: _updatedAt, ...row } = t
+    // updated_at feeds the cursor only — keep the Dexie row shape unchanged.
+    // turnover_assignments is flattened into the two plan fields and dropped:
+    // a nested array in a cached row is a shape every reader would have to
+    // re-unwrap.
+    const { updated_at: _updatedAt, turnover_assignments: assignments, ...row } = t
     return {
       ...row,
       inventory_confirmed_by_crew_id: row.inventory_confirmed_by_crew_id ?? '',
       completion_notes:               row.completion_notes ?? '',
+      ...publishedPlan(assignments),
     } as TurnoverRow
   })
 }

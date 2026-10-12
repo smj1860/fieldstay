@@ -35,6 +35,13 @@ type TurnoverRow = {
   /** Null on a standalone turnover: nothing is booked after this checkout. */
   prev_booking_id:   string | null
   property_id:       string
+  /**
+   * This crew member's planned start, present ONLY for a day a PM published
+   * (Phase E). lib/dexie/sync/turnovers.ts drops an unpublished plan before
+   * it reaches the device, so null here means "no published plan" rather than
+   * "not planned yet", and the card falls back to its previous behaviour.
+   */
+  planned_start_at:  string | null
 }
 
 type PropertyRow = {
@@ -90,6 +97,9 @@ function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string,
 function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow }) {
   const translate = useCrewT()
   const checkout = new Date(t.checkout_datetime)
+  // Null unless a PM published this day: lib/dexie/sync/turnovers.ts drops an
+  // unpublished plan before it reaches the device.
+  const plannedStart = t.planned_start_at ? new Date(t.planned_start_at) : null
   const isUrgent = t.priority === 'urgent' || t.priority === 'high'
 
   const fullAddress = [property?.address, property?.city, property?.state]
@@ -125,9 +135,32 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
         )}>
           {crewStatusLabel(t.status, translate)}
         </span>
-        <span className="text-xs text-secondary-themed">
-          {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-        </span>
+        {/* Phase E. When the day's plan is published, the PROMINENT time is
+            when this crew member is due to start, and the checkout time is
+            demoted to the constraint it actually is: when the guest leaves
+            and the property becomes free. Before the plan existed, checkout
+            was shown alone, which reads as "be there at 10" when it means
+            "you cannot start before 10". With three jobs in a day, two of
+            those readings were wrong.
+
+            Unpublished days are unchanged: planned_start_at is dropped at
+            sync time, so this falls back to exactly the old card. */}
+        {plannedStart ? (
+          <>
+            <span className="text-xs font-semibold text-primary-themed">
+              {translate('startPrefix')}{' '}
+              {plannedStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+            <span className="text-xs text-muted-themed">
+              {translate('freeFromPrefix')}{' '}
+              {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          </>
+        ) : (
+          <span className="text-xs text-secondary-themed">
+            {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+          </span>
+        )}
         {/* Only a REAL next booking makes this a window. On a standalone
             turnover window_minutes is the generator's placeholder 4h, and
             showing it tells a cleaner to hurry for nobody. */}

@@ -8,6 +8,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { frictionDayUtcBounds } from '@/lib/friction/date'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwrap'
 import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
@@ -1666,4 +1667,97 @@ export async function rateTurnoverCompletion(
     reportError(err, { site: 'serverAction.turnovers.rateTurnoverCompletion.outer' })
     return { error: 'Failed to save rating. Please try again.' }
   }
+}
+
+// ── Day plan: publish / unpublish (Phase E) ─────────────────────────────────
+//
+// The planner cron computes planned_start_at/planned_end_at nightly and never
+// publishes. Crew see a planned time ONLY once a PM has looked at the day and
+// published it, which is what these two actions do.
+//
+// The gate exists because a start time is an obligation. A computed one shown
+// to a crew member with no human in between makes them "behind" against a
+// number nobody committed to, and crew reliability is a real score here.
+//
+// Published per DATE for the whole org rather than per crew member: "this
+// day's plan is good" is the judgement a PM is actually making, and an
+// all-or-nothing publish means an infeasible day gets fixed before anyone is
+// told to work to it.
+
+/** A plan date is a calendar day, not a timestamp. Rejects anything else. */
+const PLAN_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+async function setDayPlanPublished(
+  planDate: string,
+  publishedAt: string | null,
+  auditAction: 'turnover.day_plan.published' | 'turnover.day_plan.unpublished',
+): Promise<TurnoverActionState> {
+  try {
+    if (!PLAN_DATE_RE.test(planDate)) {
+      return { error: 'Invalid date.' }
+    }
+
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
+    const { startUtc, endUtc } = frictionDayUtcBounds(planDate)
+
+    // Only rows that actually carry a plan. Stamping plan_published_at on an
+    // unplanned assignment would mark it published while leaving crew nothing
+    // to see, which reads as a bug from both ends.
+    //
+    // .eq('org_id') as well as RLS: the policy already scopes this, but
+    // leaning on RLS as the ONLY thing bounding a write is the shape
+    // CLAUDE.md's tenant-isolation rule exists to keep out.
+    const { data, error } = await supabase
+      .from('turnover_assignments')
+      .update({ plan_published_at: publishedAt })
+      .eq('org_id', membership.org_id)
+      .not('planned_start_at', 'is', null)
+      .gte('planned_start_at', startUtc)
+      .lt('planned_start_at', endUtc)
+      .select('id')
+
+    if (error) {
+      console.error('[setDayPlanPublished]', error)
+      reportError(error, { site: 'serverAction.turnovers.setDayPlanPublished', orgId: membership.org_id })
+      return { error: 'Could not update the day plan. Please try again.' }
+    }
+
+    // A refused UPDATE returns 0 rows and no error, so this is the only thing
+    // separating "you lack permission" from "there was nothing planned".
+    if (!data?.length) {
+      return { error: 'Nothing to publish for that day. The plan runs overnight, so a day with no assigned turnovers has nothing to show.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     auditAction,
+      targetType: 'turnover',
+      targetId:   planDate,
+      metadata:   { plan_date: planDate, assignments: data.length },
+    })
+
+    revalidatePath('/turnovers')
+    return { success: true }
+  } catch (err) {
+    console.error('[setDayPlanPublished]', err)
+    reportError(err, { site: 'serverAction.turnovers.setDayPlanPublished' })
+    return { error: 'Could not update the day plan. Please try again.' }
+  }
+}
+
+/** Shows this day's planned start times to the crew working it. */
+export async function publishDayPlan(planDate: string): Promise<TurnoverActionState> {
+  return setDayPlanPublished(planDate, new Date().toISOString(), 'turnover.day_plan.published')
+}
+
+/**
+ * Takes the day's planned times back off the crew app.
+ *
+ * Kept deliberately: publishing is a judgement, and a judgement a PM cannot
+ * reverse is one they will hesitate to make. Crew fall back to the behaviour
+ * they had before the plan existed rather than to a stale time.
+ */
+export async function unpublishDayPlan(planDate: string): Promise<TurnoverActionState> {
+  return setDayPlanPublished(planDate, null, 'turnover.day_plan.unpublished')
 }

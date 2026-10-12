@@ -43,6 +43,14 @@ export interface TurnoverRow {
   // don't require one.
   pending_checkout_datetime:    string | null
   pending_checkin_datetime:     string | null
+  /**
+   * This crew member's planned window for the day (Phase E), present ONLY
+   * when a PM has published that day's plan. Unpublished times are dropped
+   * in lib/dexie/sync/turnovers.ts and never reach the device, so a null here
+   * means "no published plan" and the card falls back to checkout time.
+   */
+  planned_start_at:             string | null
+  planned_end_at:               string | null
   dates_changed_at:             string | null
   dates_change_acknowledged_at: string | null
 }

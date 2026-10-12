@@ -15,7 +15,7 @@ const TURNOVER_COLUMNS = `
         checklist_template_id, is_same_day_turnover, is_archived,
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
-          id, crew_member_id,
+          id, crew_member_id, planned_start_at, planned_end_at, plan_published_at,
           crew_member:crew_members ( id, name, phone, email )
         )
       `
