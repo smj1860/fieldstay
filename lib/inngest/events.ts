@@ -408,6 +408,16 @@ export type FieldStayEvents = {
   // Crew auto-assignment
   // ----------------------------------------------------------
 
+  // Phase E: the day planner. One event per org, dispatched by
+  // cron-day-planner, same fan-out shape as org/daily_wrapup.requested.
+  'org/day_plan.requested': {
+    data: {
+      org_id:    string
+      /** YYYY-MM-DD in FRICTION_TIMEZONE. Captured once so a retry plans the same day. */
+      plan_date: string
+    }
+  }
+
   'crew/assignment-gap': {
     data: {
       turnover_id:   string

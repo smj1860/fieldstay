@@ -5910,6 +5910,9 @@ export type Database = {
           notification_type: Database["public"]["Enums"]["contact_pref"] | null
           notified_at: string | null
           org_id: string | null
+          plan_published_at: string | null
+          planned_end_at: string | null
+          planned_start_at: string | null
           property_id: string | null
           turnover_id: string
           user_id: string | null
@@ -5922,6 +5925,9 @@ export type Database = {
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
           org_id?: string | null
+          plan_published_at?: string | null
+          planned_end_at?: string | null
+          planned_start_at?: string | null
           property_id?: string | null
           turnover_id: string
           user_id?: string | null
@@ -5934,6 +5940,9 @@ export type Database = {
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
           org_id?: string | null
+          plan_published_at?: string | null
+          planned_end_at?: string | null
+          planned_start_at?: string | null
           property_id?: string | null
           turnover_id?: string
           user_id?: string | null
@@ -7555,6 +7564,10 @@ export type Database = {
           p_sponsor_id: string
         }
         Returns: Json
+      }
+      set_turnover_assignment_plans: {
+        Args: { p_org_id: string; p_plans: Json }
+        Returns: number
       }
       storage_org_prefix: { Args: { object_name: string }; Returns: string }
       store_integration_refresh_token: {

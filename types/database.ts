@@ -795,6 +795,24 @@ export interface TurnoverAssignment {
   notified_at:       string | null
   notification_type: ContactPref | null
   created_at:        string
+  /**
+   * The day plan for this crew member on this turnover (20261012180000).
+   * Both null, or both set with end after start — a CHECK constraint enforces
+   * that, so a half-plan is not a state to handle.
+   *
+   * On turnover_assignments rather than turnovers because the plan belongs to
+   * one crew member's DAY: two people sharing a turnover each have their own
+   * sequence of other work around it.
+   */
+  planned_start_at:  string | null
+  planned_end_at:    string | null
+  /**
+   * Set when a PM publishes the day. NULL means crew see no planned time and
+   * the crew card keeps its existing behaviour. The gate exists because a
+   * start time is an obligation, and a computed one with no human in between
+   * would make a crew member late against a number nobody committed to.
+   */
+  plan_published_at: string | null
   crew_members:      AssignedCrewMember[]
 }
 
