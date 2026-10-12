@@ -39,7 +39,7 @@ export const dayPlanner = inngest.createFunction(
     // Memoized so a retry plans the SAME day. This fires at 07:30 UTC, which
     // is mid-evening in Central the day before — re-reading the clock on a
     // retry that crossed midnight would plan a different date.
-    const planDate = await step.run('capture-day', async () => frictionDateString())
+    const planDate = await step.run('capture-day', () => frictionDateString())
 
     const orgIds = await step.run('find-orgs-with-work', async () => {
       const supabase = createServiceClient({ system: 'inngest:day-planner' })

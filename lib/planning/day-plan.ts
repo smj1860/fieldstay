@@ -119,9 +119,16 @@ export function planDay(turnovers: readonly PlannableTurnover[]): DayPlan {
     const end   = start + t.duration_minutes * MS_PER_MINUTE
 
     // Measured against the guest's arrival, the same bar `was_late` uses.
-    // A standalone turnover has no check-in and therefore cannot be late.
-    const checkin    = t.checkin_datetime ? Date.parse(t.checkin_datetime) : NaN
-    const infeasible = !Number.isNaN(checkin) && end > checkin
+    //
+    // `null` and an unparseable date are both "no deadline" here but they are
+    // not the same thing, so they are not collapsed into one NaN sentinel: a
+    // standalone turnover genuinely has no incoming guest, while a malformed
+    // checkin_datetime is data we could not read. Neither can be late, and
+    // keeping them distinct is what stops a future reader assuming the second
+    // case cannot happen.
+    const checkin    = t.checkin_datetime === null ? null : Date.parse(t.checkin_datetime)
+    const hasDeadline = checkin !== null && !Number.isNaN(checkin)
+    const infeasible  = hasDeadline && end > checkin
 
     slots.push({
       turnover_id:      t.turnover_id,

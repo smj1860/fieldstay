@@ -126,6 +126,17 @@ describe('planDay — infeasible days', () => {
   })
 
   // Cascade: the first job running long is what makes the SECOND one late.
+  // Distinct from the null case above: null means no incoming guest, an
+  // unparseable date means data we could not read. Neither can be late, but
+  // collapsing them would hide the second behind the first.
+  it('never flags a turnover whose check-in cannot be parsed', () => {
+    const { slots, hasInfeasible } = planDay([job({
+      turnover_id: 't1', checkin_datetime: 'not-a-date', duration_minutes: 10_000,
+    })])
+    expect(slots[0]!.infeasible).toBe(false)
+    expect(hasInfeasible).toBe(false)
+  })
+
   it('flags a later job pushed past its check-in by an earlier overrun', () => {
     const { slots } = planDay([
       job({
