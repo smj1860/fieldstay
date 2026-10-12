@@ -88,6 +88,71 @@ function baseEvent() {
   }
 }
 
+type CrewRow = {
+  id: string
+  name?: string
+  home_lat?: number | null
+  home_lng?: number | null
+  reliability_score?: number
+  capacity_score?: number
+  auto_assign_eligible?: boolean
+  max_turnovers_per_day?: number | null
+}
+
+/** One upcoming assignment for `crewId`, on `when` (defaults to this turnover's day). */
+function held(crewId: string, when: string = CHECKOUT_ISO) {
+  return { crew_member_id: crewId, turnovers: { checkout_datetime: when } }
+}
+
+/**
+ * The scaffolding every test here shares, so each one shows only what it is
+ * actually about.
+ *
+ * The org/turnover/property rows are identical in all of them and carry no
+ * meaning for any individual case; spelling them out per test buried the one
+ * or two lines that did matter, and made the file 83% duplicated lines once
+ * the capacity cases landed.
+ *
+ * `turnover_assignments` is a QUEUE and its order is load-bearing: the
+ * familiarity read (one joined query) comes first, the workload read second,
+ * and the autopilot insert third. Expressed as named options rather than a
+ * positional array so a test cannot silently feed workload rows to the
+ * familiarity read.
+ */
+function fixture(over: {
+  mode?:         'autopilot' | 'suggest' | 'disabled'
+  crew:          CrewRow[]
+  /** Crew who marked the checkout date as time off. */
+  unavailable?:  string[]
+  /** Upcoming assignments, for both the 14-day and per-day workload counts. */
+  workload?:     ReturnType<typeof held>[]
+  /** True when the run is expected to reach the assignment insert. */
+  assigns?:      boolean
+}) {
+  const assignmentQueue: { data?: unknown; error?: unknown }[] = [
+    { data: [], error: null },                      // familiarity (joined)
+    { data: over.workload ?? [], error: null },     // upcoming workload
+  ]
+  if (over.assigns) assignmentQueue.push({ error: null })  // autopilot insert
+
+  return makeSupabase({
+    organizations: [{ data: { auto_assign_mode: over.mode ?? 'autopilot' }, error: null }],
+    turnovers:     [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+    properties:    [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+    crew_members:  [{
+      data: over.crew.map((c) => ({
+        name: c.id, home_lat: 30.0, home_lng: -90.0,
+        reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true,
+        ...c,
+      })),
+      error: null,
+    }],
+    crew_availability:   [{ data: (over.unavailable ?? []).map((id) => ({ crew_member_id: id })), error: null }],
+    turnover_assignments: assignmentQueue,
+    assignment_outcomes:  [{ error: null }],
+  })
+}
+
 describe('autoAssignTurnover', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -223,16 +288,9 @@ describe('autoAssignTurnover', () => {
     // sat unassigned. An org that has crew and has excluded all of them is
     // exactly the case a PM can fix and cannot otherwise see.
     const step = makeStep()
-    const supabase = makeSupabase({
-      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
-      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
-      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
-      crew_members: [{
-        data: [{ id: 'c1', name: 'Only Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: false }],
-        error: null,
-      }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew: [{ id: 'c1', name: 'Only Crew', auto_assign_eligible: false }],
+    }))
 
     const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
 
@@ -248,17 +306,10 @@ describe('autoAssignTurnover', () => {
     // the day off got no assignment and no alert. Distinguished from the case
     // above so the email can name the right lever.
     const step = makeStep()
-    const supabase = makeSupabase({
-      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
-      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
-      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
-      crew_members: [{
-        data: [{ id: 'c1', name: 'Only Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true }],
-        error: null,
-      }],
-      crew_availability: [{ data: [{ crew_member_id: 'c1' }], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew:        [{ id: 'c1', name: 'Only Crew' }],
+      unavailable: ['c1'],
+    }))
 
     const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
 
@@ -266,6 +317,57 @@ describe('autoAssignTurnover', () => {
     expect(step.sendEvent).toHaveBeenCalledWith('notify-assignment-gap', expect.objectContaining({
       data: expect.objectContaining({ reason: 'all_unavailable' }),
     }))
+  })
+
+  it('alerts with all_at_capacity when every eligible crew member has hit their daily limit', async () => {
+    // Phase D. The third way a filter can empty a pool that has people in it,
+    // and the only one the PM created themselves — so it needs its own reason
+    // for the same purpose as the two above: naming the lever they can pull.
+    const step = makeStep()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew:     [{ id: 'c1', name: 'Fully Booked', max_turnovers_per_day: 2 }],
+      workload: [held('c1'), held('c1')],   // both on this turnover's own date
+    }))
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ gap: true })
+    expect(step.sendEvent).toHaveBeenCalledWith('notify-assignment-gap', expect.objectContaining({
+      data: expect.objectContaining({ reason: 'all_at_capacity' }),
+    }))
+  })
+
+  it('counts only the turnover\'s OWN date against the cap, not the whole window', async () => {
+    // The distinction the whole phase turns on. Three assignments inside the
+    // 14-day window but none on this date leaves the crew member free, and a
+    // cap read off the fortnight count would wrongly exclude them.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew:     [{ id: 'c1', name: 'Busy Fortnight', max_turnovers_per_day: 2 }],
+      workload: [
+        held('c1', '2026-07-26T11:00:00.000Z'),
+        held('c1', '2026-07-27T11:00:00.000Z'),
+        held('c1', '2026-07-28T11:00:00.000Z'),
+      ],
+      assigns: true,
+    }))
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'Busy Fortnight' })
+  })
+
+  it('leaves a crew member with no cap set assignable at any volume', async () => {
+    // null = no limit is what every existing row carries, so this is the
+    // no-change-for-existing-orgs guarantee the migration promises.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(fixture({
+      crew:     [{ id: 'c1', name: 'Uncapped', max_turnovers_per_day: null }],
+      workload: Array.from({ length: 9 }, () => held('c1')),
+      assigns:  true,
+    }))
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'Uncapped' })
   })
 
   it('sends NO reason when the org simply has no active crew — nothing to act on', async () => {

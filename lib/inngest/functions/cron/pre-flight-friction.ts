@@ -4,12 +4,13 @@ import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { sendEventsChunked, chunkArray } from '@/lib/inngest/chunk'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { computeDayWorkloadMap } from '@/lib/scoring/pools'
 import { frictionDateString, localDateFrom, frictionDayUtcBounds } from '@/lib/friction/date'
 import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
 import { reportError }          from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
-import { topCrewCandidate, crewSuggestionReasoning, type CrewCandidate } from '@/lib/scoring/crew-candidates'
+import { topCrewCandidate, crewSuggestionReasoning, atDayCapacity, type CrewCandidate } from '@/lib/scoring/crew-candidates'
 import {
   computeFrictionScore, severityFromScore,
   crewDurationScore, weatherScore, weekendScore, holidayScore,
@@ -398,8 +399,15 @@ interface CrewContext {
    * copies of one shape that only a compile error would ever reconcile.
    */
   crew: CrewCandidate[]
-  /** crew_member_id -> upcoming assignment count. */
+  /** crew_member_id -> assignment count across the 14-day window. */
   workloadMap: Record<string, number>
+  /**
+   * date (YYYY-MM-DD) -> crew_member_id -> assignment count on that date.
+   * Keyed by date because one org's context scores MANY turnovers, each with
+   * its own checkout day; a single flat map would score them all against
+   * whichever day happened to be built.
+   */
+  dayWorkloadByDate: Record<string, Record<string, number>>
   /** property_id -> crew who worked it inside the familiarity window. */
   familiarByProperty: Record<string, string[]>
 }
@@ -423,14 +431,19 @@ async function loadCrewContext(
     fetchAllRows<CrewCandidate>(
       (from, to) => supabase
         .from('crew_members')
-        .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')
+        .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible, max_turnovers_per_day')
         .eq('org_id', orgId)
         .eq('is_active', true)
         .order('id', { ascending: true })
         .range(from, to),
       { label: `pre-flight-friction.crew[org=${orgId}]` },
     ),
-    fetchAllRows<{ crew_member_id: string }>(
+    // The embedded checkout_datetime was always fetched and always discarded.
+    // Typing it is what makes the per-day bucketing below free.
+    fetchAllRows<{
+      crew_member_id: string
+      turnovers: { checkout_datetime: string } | { checkout_datetime: string }[] | null
+    }>(
       (from, to) => supabase
         .from('turnover_assignments')
         .select('crew_member_id, turnovers!inner(checkout_datetime)')
@@ -462,6 +475,12 @@ async function loadCrewContext(
     workloadMap[row.crew_member_id] = (workloadMap[row.crew_member_id] ?? 0) + 1
   }
 
+  const dayWorkloadByDate = computeDayWorkloadMap(
+    upcoming,
+    (a) => a.crew_member_id,
+    (a) => unwrapJoin(a.turnovers)?.checkout_datetime,
+  )
+
   const familiarByProperty: Record<string, string[]> = {}
   for (const row of history) {
     const propertyId = unwrapJoin(row.turnovers)?.property_id
@@ -471,7 +490,7 @@ async function loadCrewContext(
     else familiarByProperty[propertyId] = [row.crew_member_id]
   }
 
-  return { crew, workloadMap, familiarByProperty }
+  return { crew, workloadMap, dayWorkloadByDate, familiarByProperty }
 }
 
 /**
@@ -616,7 +635,16 @@ function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string }
   if (!crewContext.crew.length) return null
 
   const assigned = new Set((turnover.turnover_assignments ?? []).map((a) => a.crew_member_id))
-  const candidates = crewContext.crew.filter((c) => !assigned.has(c.id))
+
+  // The Smart Fix is a suggestion to a human, so the PM's daily cap could in
+  // principle be left to them to notice. It is applied anyway: this panel
+  // exists to REMOVE judgement calls, and offering someone who is already at
+  // their stated limit hands one back.
+  const dayWorkloadMap = crewContext.dayWorkloadByDate[turnover.checkout_datetime.slice(0, 10)] ?? {}
+
+  const candidates = crewContext.crew.filter(
+    (c) => !assigned.has(c.id) && !atDayCapacity(c, dayWorkloadMap[c.id] ?? 0),
+  )
   if (!candidates.length) return null
 
   // topCrewCandidate(), not scoreCrewCandidates(): only the best alternative
@@ -629,6 +657,7 @@ function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string }
     crew:            candidates,
     familiarCrewIds: crewContext.familiarByProperty[turnover.property_id] ?? [],
     workloadMap:     crewContext.workloadMap,
+    dayWorkloadMap,
   })
 
   return top ? { id: top.crew_member_id, reasoning: crewSuggestionReasoning(top) } : null

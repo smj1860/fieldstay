@@ -1163,6 +1163,7 @@ export type Database = {
           invite_token: string | null
           is_active: boolean
           locale: string
+          max_turnovers_per_day: number | null
           name: string
           notes: string | null
           org_id: string
@@ -1191,6 +1192,7 @@ export type Database = {
           invite_token?: string | null
           is_active?: boolean
           locale?: string
+          max_turnovers_per_day?: number | null
           name: string
           notes?: string | null
           org_id: string
@@ -1219,6 +1221,7 @@ export type Database = {
           invite_token?: string | null
           is_active?: boolean
           locale?: string
+          max_turnovers_per_day?: number | null
           name?: string
           notes?: string | null
           org_id?: string

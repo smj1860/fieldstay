@@ -12,7 +12,7 @@ import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supab
  * can actually pull, because the counts alone ("found 0") describe a symptom
  * that looks identical whether they have no crew or have excluded all of them.
  */
-const GAP_REASON_COPY: Record<'none_eligible' | 'all_unavailable', string> = {
+const GAP_REASON_COPY: Record<'none_eligible' | 'all_unavailable' | 'all_at_capacity', string> = {
   none_eligible:
     'Every active crew member is currently switched OFF for turnover ' +
     'auto-assignment. Turn someone back on from Manage Crew, or assign this ' +
@@ -20,6 +20,13 @@ const GAP_REASON_COPY: Record<'none_eligible' | 'all_unavailable', string> = {
   all_unavailable:
     'Every crew member eligible for auto-assignment has marked this date as ' +
     'time off.',
+  // Names the limit AND where to change it: this gap is the only one of the
+  // three the PM created themselves, so "why" is a setting they can recognise
+  // rather than a state they have to go and discover.
+  all_at_capacity:
+    'Every crew member eligible for auto-assignment has already reached their ' +
+    'daily turnover limit for this date. Raise a limit in Manage Crew, or ' +
+    'assign this turnover by hand.',
 }
 
 export const notifyAssignmentGap = inngest.createFunction(

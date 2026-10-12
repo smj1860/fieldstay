@@ -422,7 +422,7 @@ export type FieldStayEvents = {
        * required field would have been a breaking change to an event already
        * in flight.
        */
-      reason?:       'none_eligible' | 'all_unavailable'
+      reason?:       'none_eligible' | 'all_unavailable' | 'all_at_capacity'
     }
   }
 

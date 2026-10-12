@@ -21,7 +21,7 @@ export default async function CrewManagePage() {
 
   const { data: crew, error: crewError } = await supabase
     .from('crew_members')
-    .select('id, name, email, phone, preferred_contact, specialty, role, is_active, notes, user_id, invite_sent_at, invite_accepted_at, auto_assign_eligible')
+    .select('id, name, email, phone, preferred_contact, specialty, role, is_active, notes, user_id, invite_sent_at, invite_accepted_at, auto_assign_eligible, max_turnovers_per_day')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')

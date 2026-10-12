@@ -401,10 +401,26 @@ export async function updateCrewMember(
      * it when the PM actually toggled the box.
      */
     auto_assign_eligible: boolean
+    /**
+     * The PM's hard daily cap, or null for no limit. Partial AND explicitly
+     * nullable: omitting the key leaves the stored value alone, while sending
+     * null is how the form CLEARS a cap. Those are different intents and the
+     * `Partial<>` alone cannot express the second.
+     */
+    max_turnovers_per_day: number | null
   }>
 ): Promise<SettingsActionState> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+
+    // Validated here rather than left to the CHECK constraint. A violation
+    // would come back as a raw Postgres error that this action turns into
+    // "Operation failed. Please try again." — which is wrong twice: it is not
+    // a transient failure, and it does not tell the PM what to change.
+    const cap = data.max_turnovers_per_day
+    if (cap !== undefined && cap !== null && (!Number.isInteger(cap) || cap < 1)) {
+      return { error: 'Daily turnover limit must be a whole number of 1 or more, or left blank for no limit.' }
+    }
 
     const { data: existing, error: existingError } = await supabase
       .from('crew_members')
