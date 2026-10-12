@@ -10,9 +10,10 @@ Go to **Maintenance → New Work Order** and fill in:
 
 - **Property** — which property the work is at
 - **Title** — brief description of what needs to be done
-- **Description** — full details, access notes, anything the vendor needs to know
+- **Description** — full details, anything the vendor needs to know about the job itself
 - **Priority** — Low, Medium, High, or Urgent
-- **Scheduled date** — when the work should happen
+- **Needed by** — the date you need the work done BY. Not the vendor's appointment: the vendor picks that themselves when they accept. FieldStay prefills this from the property's next confirmed check-in, because for a short-term rental that is almost always the real deadline. You can change it or clear it.
+- **Access notes** and **Parking notes** — how to get in and where to park, for this job. The door code itself is not typed here: FieldStay sends the property's stored door code automatically, and only after the vendor accepts (see below).
 - **NTE amount** — Not-To-Exceed limit (optional, shown to vendor)
 
 ---
@@ -23,10 +24,15 @@ At the top of the work order form, choose how you want to assign it:
 
 **Assign Vendor** — sends the work order to an external contractor via email. The vendor receives a dispatch email with a secure link to a vendor portal where they can:
 - Review the work order details
+- **Accept** the job and pick the date and window they can come, or **decline** with a reason
+- Post progress updates as the job moves along (on the way, tech on site, parts ordered, and so on)
+- Forward the job to one of their own technicians
 - Submit line items and a completion photo
 - Sign off when work is complete
 
-**Assign Crew** — routes the task to one of your crew members. It appears in their crew app alongside turnovers. Crew complete it using a simple Mark Complete flow with optional notes. No invoice or vendor portal is involved.
+**Assign Crew** — routes the task to one of your crew members. It appears in their crew app alongside turnovers. Crew tap **Start Work** when they begin and **Mark Work Complete** when they finish, with optional notes. No invoice or vendor portal is involved.
+
+Crew have Start and Complete only. They do not have the vendor's detailed progress list, so a crew work order shows as In Progress rather than "parts ordered" or "waiting on access". If you need that level of detail on a job, send it to a vendor.
 
 Use Assign Vendor for licensed contractors, trades, or specialized work. Use Assign Crew for simple tasks your in-house team handles.
 
@@ -74,7 +80,7 @@ Leaving **Assign to** blank is a normal thing to do. The project is created unas
 ## The Vendor Dispatch Email
 
 When you assign a vendor, FieldStay sends them a dispatch email containing:
-- Property address and scheduled date
+- Property address and the needed-by date
 - Full work order description
 - NTE amount if set
 - A secure link to their vendor portal

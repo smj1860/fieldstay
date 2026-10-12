@@ -23,15 +23,57 @@ The email is a standard FieldStay dispatch email with a "powered by TradeSuite" 
 
 ## The Vendor Portal Link
 
-The link in the dispatch email is unique to each work order and vendor. When the vendor clicks it, they land on a secure page that shows:
-
-- Full work order details including any access notes, lockbox code, and parking instructions
-- The scope of work and authorized spending amount
-- A **Sign Off** button to mark the work complete when they're done
+The link in the dispatch email is unique to each work order and vendor. When the vendor clicks it, they land on a secure page showing the scope of work, the authorized spending amount, and the date you need it done by.
 
 The link is valid for 30 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Send to Vendor** to generate a fresh one.
 
-**The link is for the vendor's eyes only.** Do not forward it or share it publicly — it grants access to property access information including lockbox codes.
+**The link is for that vendor, not for passing around.** Access details are withheld until they accept (see below), but the link is still the key to this job. If the vendor needs to hand the job to one of their technicians, there is a built-in way to do that, covered further down, rather than forwarding this link.
+
+---
+
+## Accept or Decline Comes First
+
+A dispatched work order is an offer, not an instruction. The vendor's first action on the portal is to accept or decline it.
+
+**If they accept**, they pick the date they can come and a window: morning, afternoon, evening, all day, or an exact time. That becomes the appointment on the work order, and it is separate from your needed-by date. You set the deadline; they commit to a date inside it.
+
+**If they decline**, they pick a reason: no capacity, outside their service area, not their trade, below their minimum, cannot access the property, or other. The work order returns to unassigned so you can send it elsewhere, and FieldStay notifies you with the reason. Nothing is auto-dispatched to a second vendor on your behalf.
+
+If a dispatched work order sits with no answer, FieldStay nudges the vendor after a day and flags it to you after three.
+
+---
+
+## Access Details Are Held Back Until They Accept
+
+This is deliberate and it is the main thing to know about dispatch.
+
+The dispatch email and the pre-acceptance portal page carry no door code, no access notes and no parking instructions. Those appear only once the vendor has accepted the job. Until then the page does not contain them at all, so a link that reaches the wrong inbox hands over nothing about getting into the property.
+
+The door code comes from the property record, where it is stored encrypted. You set it once on the property and FieldStay sends it; you do not type a code into the work order. The per-job access and parking notes you wrote when creating the work order appear at the same moment, for the same reason.
+
+Every reveal is recorded, naming who saw it and when. The code itself is never written into that record.
+
+If a vendor has accepted and nothing is waiting for them, the page says so and tells them to contact you, rather than implying something will appear later.
+
+---
+
+## Sending the Job to a Technician
+
+Vendors with crews of their own rarely do the work themselves. Rather than forwarding their own link, the vendor can generate a separate link for a named technician from their portal page.
+
+The technician opens it, enters their name, and optionally their own mobile number. From then on their work is recorded under their name instead of a free-text note at the end of the job. The vendor never types their employee's number, and the technician's name becomes a pick-list entry for that vendor's next job.
+
+Each technician link is for one work order only. The vendor can revoke one at any time, and all of them stop working when the job closes. A technician sees the same access gating: nothing until the vendor has accepted.
+
+---
+
+## Progress Updates
+
+After accepting, the vendor can set where the job stands from a dropdown on their portal page: appointment scheduled, on the way, tech on site, waiting on access, waiting on your approval, parts ordered, repair in progress, return visit scheduled, or job completed.
+
+Two of these are asking something of you rather than reporting. **Waiting on access** means they could not get in. **Waiting on your approval** means they have stopped and need a decision, usually about scope or cost. Both notify you straight away instead of only sitting in a dropdown, and both show at the top of the Maintenance board, because only you can unblock them.
+
+The board groups open work orders by where they are in this sequence, with anything waiting on you first.
 
 ---
 
@@ -75,6 +117,12 @@ Check their spam folder first. If it's not there, open the work order detail pan
 
 **The vendor's link isn't working.**
 Links expire after 30 days. Use **Send to Vendor** to generate a fresh link.
+
+**The vendor says there's no door code on their page.**
+Access details appear only after they accept the job. Ask them to accept first. If they have accepted and still see nothing, check that the property has a door code saved on its own record, since that is where FieldStay sends it from.
+
+**The vendor declined. What happens to the work order?**
+It goes back to unassigned with their reason attached, and you get a notification. Assign a different vendor from the Maintenance board when you are ready. FieldStay does not pick a replacement for you.
 
 **The dispatch email didn't send when I created the work order.**
 The vendor must have an email address on file and the portal option must be enabled when creating the work order. Check the vendor's profile in Vendors (top-level nav, not under Settings) to confirm their email is set. Then use **Send to Vendor** from the work order detail panel to dispatch manually.

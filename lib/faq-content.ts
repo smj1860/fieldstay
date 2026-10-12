@@ -84,7 +84,7 @@ export const TEAM_ACCESS_FAQ = {
 export const MULTI_CREW_START_FAQ = {
   question: 'Two crew members are assigned to the same turnover. Why did only one of them see Start Turnover work?',
   answer:
-    'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete). It isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed. The other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start.',
+    'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete). It isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed. The other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start. The button can also be gone because nobody tapped it: ticking the first checklist item starts the turnover on its own, so a crew member who went straight to the checklist has already moved it to In Progress for the team.',
 } as const
 
 /**

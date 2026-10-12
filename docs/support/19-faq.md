@@ -105,6 +105,80 @@ Capital Planning is the budgeting view built on top of your asset data: a 10-yea
 
 ---
 
+## A work order has a "Needed by" date. Where did the scheduled date go?
+
+They were the same field and they were being read two different ways, which is why it changed.
+
+**Needed by** is yours: the date you need the work finished by. FieldStay prefills it from the property's next confirmed check-in, since for a short-term rental that is usually the real deadline, and you can change or clear it.
+
+**The appointment** is the vendor's: the date and window they commit to when they accept the job. You set the deadline, they commit to a date inside it.
+
+Before the split, one date tried to be both. The practical consequence was that a vendor's on-time percentage was being measured against a date the vendor had often chosen themselves. On-time now scores against your needed-by date, which is what it always meant to measure.
+
+Where both exist, screens show the appointment, because a confirmed visit is the stronger fact. Where there is no appointment yet, you see the deadline, labelled as one.
+
+---
+
+## Can a vendor turn down a work order?
+
+Yes. A dispatched work order is an offer rather than an instruction.
+
+The vendor accepts, and picks the date and window they can come, or declines with a reason: no capacity, outside their service area, not their trade, below their minimum, cannot access the property, or other. A declined work order goes back to unassigned with the reason attached and you get a notification.
+
+FieldStay does not pick a replacement vendor for you. Re-dispatching is your call, from the Maintenance board.
+
+If a vendor does not answer at all, FieldStay nudges them after a day and flags it to you after three.
+
+---
+
+## When does a vendor see the door code?
+
+Only after they accept the job.
+
+The dispatch email and the portal page before acceptance contain no door code, no access notes and no parking instructions. They are not hidden behind a click: the page does not contain them. A dispatch link that reaches the wrong inbox gives away nothing about getting into the property.
+
+The code comes from the property record, where it is stored encrypted. You set it once on the property, not on each work order. The per-job access and parking notes you write when creating the work order appear at the same moment.
+
+Every reveal is recorded with who saw it and when. The code itself is never written into that record.
+
+---
+
+## Can a vendor send the job to one of their own technicians?
+
+Yes, and it is better than forwarding the email.
+
+From their portal page the vendor generates a separate link for a named technician. The technician opens it, enters their name, and optionally their own mobile number. Their work is then recorded under their name rather than a free-text note at the end of the job.
+
+Each technician link covers one work order. The vendor can revoke one at any time, and they all stop working when the job closes. Technicians see the same access gating: nothing until the vendor has accepted.
+
+The vendor never types their employee's phone number. The technician supplies it themselves, if they want to, and it saves them being set up by hand next time.
+
+---
+
+## Can I stop FieldStay giving one cleaner six turnovers in a day?
+
+Yes. Each crew member can carry a **Max/day** limit, set beside the Auto-assign toggle when you edit them in Manage Crew. Blank means no limit, which is how everyone starts.
+
+FieldStay will not auto-assign or suggest someone for a date they have already filled. It is a hard stop rather than a scoring nudge, because a nearby, familiar crew member would otherwise still win on score while over their limit, and on Autopilot nobody reviews the result.
+
+You can still assign past the limit by hand. It governs only what FieldStay proposes.
+
+One trade worth knowing: if everyone eligible is at their limit for a date, the turnover stays unassigned and you get an alert naming the limit as the reason. FieldStay tells you rather than quietly ignoring the limit you set.
+
+Separately, assignment scoring now counts a crew member's jobs **on the specific date** being assigned, not only across the next fortnight. Three jobs stacked on one Tuesday used to score the same as three spread across two weeks.
+
+---
+
+## Can my crew post progress updates the way vendors do?
+
+Not in the same detail. Crew have **Start Work** and **Mark Work Complete** on a work order, and that is it.
+
+The longer list, parts ordered, waiting on access, tech on site and the rest, is a vendor feature. An in-house job shows as In Progress rather than naming a reason, so if you need that level of visibility on a particular job, send it to a vendor.
+
+Turnovers are different again: those start themselves when the first checklist item is ticked, and the checklist is the progress.
+
+---
+
 ## How do I get help with something not covered here?
 
 Use the chat widget in the bottom right corner of your dashboard for immediate questions. For issues that need account-level investigation, email **support@fieldstay.app** with your organization name, which property is affected, and a description of the issue.
@@ -140,6 +214,8 @@ This is expected, not a bug. A turnover has a single shared status (Assigned →
 This comes up most often when two crew members are working different parts of the same property (e.g. one on the kitchen, one on bedrooms) and both reach for the Start button around the same time. Only one tap is needed — whoever gets there first starts it for the whole team. The other crew member doesn't need to do anything differently: they can go straight to checking off checklist items or logging inventory, since every assigned crew member has full access to the checklist and inventory regardless of who tapped Start.
 
 If a crew member's Start Turnover button seems to have "done nothing," it almost always means a teammate already started it a moment earlier — check the turnover's status at the top of the screen to confirm it's already In Progress.
+
+The button can also disappear because nobody tapped it at all: ticking the first checklist item starts the turnover on its own. If one crew member went straight to the checklist, the turnover is already In Progress and the Start button is gone for everyone.
 
 ---
 
