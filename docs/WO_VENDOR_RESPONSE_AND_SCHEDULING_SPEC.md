@@ -540,24 +540,62 @@ deliberate and plural, rather than sitting on every detail panel inviting routin
 
 ---
 
-# Phase D — item 4: per-crew daily capacity
+# Phase D — item 4: per-crew daily capacity — BUILT
 
-Two parts, and the first is a product decision this spec is making explicitly, because
-`auto-assign-turnover.ts:44-56` correctly refuses to invent it:
+Two parts, and the first was a product decision this spec made explicitly, because
+`auto-assign-turnover.ts` correctly refused to invent it: `capacity_score` is a 0-1 SCORING
+WEIGHT, not a limit, and a cleaner doing several turnovers in a day is the normal case
+rather than over-booking.
 
-1. **`crew_members.max_turnovers_per_day`** (integer, nullable; null = no limit) and
-   optionally `max_minutes_per_day`. Enforced as a HARD exclusion in autopilot, the same way
-   `crew_availability` already is — not a score penalty, because no human reviews an
-   autopilot pick. Default null so nothing changes for existing orgs until a PM sets one.
-2. **Workload becomes per-day, not per-fortnight.** `computeWorkloadMap`
-   (`lib/scoring/pools.ts:10-22`) counts assignments across 14 days and
-   `crew-candidates.ts:124` flattens it to `1 - count/max`, so three jobs stacked on one
-   Tuesday scores identically to three spread out. The scorer needs the count for the
-   turnover's OWN date, with the 14-day figure kept as a secondary smoothing term.
+### D1 — `crew_members.max_turnovers_per_day`
 
-Both change `ScoredCrewCandidate.breakdown`, which is persisted to
-`assignment_outcomes.score_breakdown`. Add the new key rather than repurposing `workload`,
-for the same reason `friction` keeps `localEvents: 0` — stored history must stay readable.
+Integer, nullable, `CHECK (... IS NULL OR > 0)`. NULL means no limit and is what every
+existing row carries: a default number would have changed autopilot's behaviour for every
+org the day it shipped, refusing assignments it makes today. Settable per crew member in
+Manage Crew, next to the auto-assign toggle, blank for "Any".
+
+A HARD exclusion, applied before scoring, the same way `crew_availability` already is. A
+weight can be outvoted by proximity and familiarity, and nobody reviews an autopilot pick.
+
+**Deviation from this section as written, deliberate:** the exclusion applies in SUGGEST
+mode too, not only autopilot. `crew_availability` — the exclusion this one is modelled on —
+has always applied to both, and a suggestion that breaks the PM's own stated limit is noise
+they have to notice and override. An org that empties its pool this way now gets a third
+gap reason, `all_at_capacity`, whose copy names the limit and where to change it; it is the
+only one of the three gaps the PM created themselves.
+
+**`max_minutes_per_day` was NOT added.** A minutes budget needs a per-turnover duration
+estimate to spend against it (`crew_speed_baselines` x `properties.bedrooms`), which arrives
+with the day planner in Phase E. A column nothing enforces reads as a capability the product
+has and does not.
+
+### D2 — workload is per-day, with the fortnight kept as smoothing
+
+`computeDayWorkloadMap()` (`lib/scoring/pools.ts`) buckets the same rows
+`computeWorkloadMap()` already counts into `date -> crew -> count`. Both callers were
+ALREADY fetching `turnovers.checkout_datetime` through an `!inner` embed and discarding it,
+so the per-day count cost no new query: only the TypeScript row type widened.
+
+The date comes from slicing the ISO string, never from `new Date()`. `checkout_datetime` is
+stored UTC, so parsing and reading local parts would bucket a late-evening checkout into
+different days depending on where the function ran, and it would stop agreeing with the
+`.split('T')[0]` that the `crew_availability` lookup uses — which is the comparison the cap
+has to line up with.
+
+`dayWorkload` is a NEW breakdown key rather than a repurposing of `workload`, because
+`ScoredCrewCandidate.breakdown` is persisted to `assignment_outcomes.score_breakdown` and
+stored history must stay readable — the same reason `pre_flight_friction` keeps
+`localEvents: 0`.
+
+**The weights split 70/30, day-first, out of the existing workload share.** Every other term
+is untouched and both sets still total 1.00, so this re-tunes one axis rather than re-tuning
+the model: same-day `0.10 -> 0.07 + 0.03`, standard `0.20 -> 0.14 + 0.06`. The fortnight
+share is not zero, because a day count alone would happily stack someone's whole week onto
+consecutive days as long as no single one was crowded.
+
+`crewSuggestionReasoning()`'s "light schedule" now reads the DAY figure. Next to a crew
+member who already has three jobs that Tuesday, it read as wrong to the PM looking at the
+board, however quiet their fortnight was.
 
 ---
 

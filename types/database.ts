@@ -417,6 +417,17 @@ export interface CrewMember {
    */
   auto_assign_eligible: boolean
   /**
+   * Max turnovers this crew member may be auto-assigned or suggested for on
+   * one date (20261012140000). NULL = no limit, which is the default and what
+   * every existing row carries: a number here would have changed autopilot's
+   * behaviour for every org the day it shipped.
+   *
+   * A HARD exclusion in auto-assign-turnover.ts, not a score penalty, because
+   * a weight can be outvoted by proximity and familiarity and nobody reviews
+   * an autopilot pick. Distinct from capacity_score, which is a 0-1 weight.
+   */
+  max_turnovers_per_day: number | null
+  /**
    * Preferred UI language for the crew PWA. NOT NULL DEFAULT 'en'
    * (20260910125639) — opt-in, so existing crew keep English until they
    * explicitly switch. Written only via createServiceClient({ crew }); see

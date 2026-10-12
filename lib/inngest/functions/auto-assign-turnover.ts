@@ -1,9 +1,10 @@
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { topCrewCandidate, crewSuggestionReasoning } from '@/lib/scoring/crew-candidates'
-import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
+import { topCrewCandidate, crewSuggestionReasoning, atDayCapacity } from '@/lib/scoring/crew-candidates'
+import { computeWorkloadMap, computeDayWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
  * How far back "has worked this property before" looks.
@@ -21,7 +22,7 @@ const FAMILIARITY_WINDOW_DAYS = 90
  * which lever to pull. "No crew available" on an org with five cleaners reads
  * as a bug; "all five are excluded from auto-assignment" is actionable.
  */
-type GapReason = 'none_eligible' | 'all_unavailable'
+type GapReason = 'none_eligible' | 'all_unavailable' | 'all_at_capacity'
 
 export const autoAssignTurnover = inngest.createFunction(
   {
@@ -84,10 +85,11 @@ export const autoAssignTurnover = inngest.createFunction(
           id: string; name: string; home_lat: number | null; home_lng: number | null
           reliability_score: number; capacity_score: number
           auto_assign_eligible: boolean
+          max_turnovers_per_day: number | null
         }>(
           (from, to) => supabase
             .from('crew_members')
-            .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')
+            .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible, max_turnovers_per_day')
             .eq('org_id', org_id)
             .eq('is_active', true)
             .order('id')
@@ -121,6 +123,7 @@ export const autoAssignTurnover = inngest.createFunction(
         crew:            [] as typeof crew,
         familiarCrewIds: [] as string[],
         workloadMap:     {} as Record<string, number>,
+        dayWorkloadMap:  {} as Record<string, number>,
         gapReason:       reason,
       })
 
@@ -216,7 +219,12 @@ export const autoAssignTurnover = inngest.createFunction(
       // portfolio still fans out to more assignment rows than the cap. A
       // truncated read UNDERSTATES workload, which biases the suggestion toward
       // the crew members who are already the busiest.
-      const upcoming = await fetchAllRows<{ crew_member_id: string }>(
+      // The embedded checkout_datetime was always on the wire and always
+      // discarded. Typing it is what makes the per-day count below free.
+      const upcoming = await fetchAllRows<{
+        crew_member_id: string
+        turnovers: { checkout_datetime: string } | { checkout_datetime: string }[] | null
+      }>(
         (from, to) => supabase
           .from('turnover_assignments')
           .select('crew_member_id, turnovers!inner(checkout_datetime)')
@@ -230,13 +238,39 @@ export const autoAssignTurnover = inngest.createFunction(
 
       const workloadMap = computeWorkloadMap(upcoming, (a) => a.crew_member_id)
 
+      // Per-day counts for the whole window, then the one date this turnover
+      // actually lands on. `checkoutDate` is the same `.split('T')[0]` the
+      // crew_availability lookup above uses, so the cap and the time-off
+      // exclusion agree on what "that day" means.
+      const dayWorkloadMap = computeDayWorkloadMap(
+        upcoming,
+        (a) => a.crew_member_id,
+        (a) => unwrapJoin(a.turnovers)?.checkout_datetime,
+      )[checkoutDate] ?? {}
+
+      // The PM's hard daily cap. After availability and before scoring, for
+      // the same reason time off is: there is no human reviewing an autopilot
+      // pick, and a weight can be outvoted by proximity and familiarity.
+      //
+      // Applied in SUGGEST mode too, not just autopilot. The spec called for
+      // autopilot only, but crew_availability — the exclusion this one is
+      // modelled on — has always applied to both, and a suggestion that
+      // breaks the PM's own stated limit is noise they have to notice and
+      // override. An org that empties its pool this way gets told why, which
+      // is strictly better than a suggestion they must catch.
+      const withCapacity = availableCrew.filter(
+        (c) => !atDayCapacity(c, dayWorkloadMap[c.id] ?? 0),
+      )
+      if (!withCapacity.length) return gap('all_at_capacity')
+
       return {
         mode,
         isSameDay:       turnover.is_same_day_turnover ?? false,
         property:        { lat: property?.lat ?? null, lng: property?.lng ?? null, bedrooms: property?.bedrooms ?? null },
-        crew:            availableCrew,
+        crew:            withCapacity,
         familiarCrewIds,
         workloadMap,
+        dayWorkloadMap,
         gapReason:       null as GapReason | null,
       }
     })
@@ -254,8 +288,8 @@ export const autoAssignTurnover = inngest.createFunction(
       // ever read here, and doing a full O(n log n) sort of the roster just
       // to throw away everything but index 0 is wasted work on every
       // turnover assigned.
-      const { isSameDay, property, crew, familiarCrewIds, workloadMap } = context
-      return topCrewCandidate({ isSameDay, property, crew, familiarCrewIds, workloadMap })
+      const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap } = context
+      return topCrewCandidate({ isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap })
     })
 
     if (!top) {

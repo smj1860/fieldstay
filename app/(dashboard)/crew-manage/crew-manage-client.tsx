@@ -354,6 +354,15 @@ function CrewCardModal({
               {member.auto_assign_eligible === false ? 'Excluded' : 'Included'}
             </span>
           </div>
+          {/* Shown only when a cap is set. "No limit" is the default every
+              crew member carries, and a row restating it for everyone would
+              bury the handful of people who actually have one. */}
+          {member.max_turnovers_per_day !== null && member.max_turnovers_per_day !== undefined && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Max turnovers per day</span>
+              <span className="text-secondary-themed">{member.max_turnovers_per_day}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-muted-themed">App Access</span>
             <span className="text-secondary-themed">
@@ -813,6 +822,14 @@ function CrewRowEditor({ member, onDone }: Readonly<{ member: CrewMember; onDone
   // `!== false` rather than truthiness: a row read before the column
   // existed comes back undefined, and undefined means eligible.
   const [autoAssign, setAutoAssign] = useState(member.auto_assign_eligible !== false)
+  // A STRING, not a number: the field has to be clearable, and '' is how a PM
+  // says "no limit". Parsed on save, where '' becomes null rather than 0 —
+  // Number('') is 0, which the CHECK constraint rejects and which would mean
+  // "never assignable" rather than "unlimited" if it ever got through.
+  const [dailyCap, setDailyCap] = useState(
+    member.max_turnovers_per_day === null || member.max_turnovers_per_day === undefined
+      ? '' : String(member.max_turnovers_per_day),
+  )
   const [specialty, setSpecialty]   = useState(member.specialty)
   const [email, setEmail]           = useState(member.email ?? '')
   const [phone, setPhone]           = useState(member.phone ?? '')
@@ -828,6 +845,7 @@ function CrewRowEditor({ member, onDone }: Readonly<{ member: CrewMember; onDone
         name, email: email || undefined, phone: phone || undefined, specialty,
         preferred_contact: pref, role: roleVal, home_zip: homeZip || undefined,
         auto_assign_eligible: autoAssign,
+        max_turnovers_per_day: dailyCap.trim() === '' ? null : Number(dailyCap),
       })
       if (result.error) setRowError(result.error)
       else              onDone()
@@ -858,6 +876,23 @@ function CrewRowEditor({ member, onDone }: Readonly<{ member: CrewMember; onDone
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAutoAssign(e.target.checked)}
               />
               <span className="text-xs text-secondary-themed">Auto-assign</span>
+            </label>
+            {/* Sits under Auto-assign because it answers the next question:
+                not whether the engine may pick this person, but how often in
+                one day. Blank is the default and means no limit, which is
+                what every crew member carries until a PM sets one. */}
+            <label htmlFor={`crew-daily-cap-${member.id}`} className="flex items-center gap-2">
+              <span className="text-xs text-muted-themed whitespace-nowrap">Max/day</span>
+              <Input
+                id={`crew-daily-cap-${member.id}`}
+                type="number"
+                min={1}
+                step={1}
+                value={dailyCap}
+                onChange={(e) => setDailyCap(e.target.value)}
+                className="py-1 text-sm w-16"
+                placeholder="Any"
+              />
             </label>
           </div>
         </td>

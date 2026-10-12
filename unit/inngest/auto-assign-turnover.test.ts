@@ -268,6 +268,112 @@ describe('autoAssignTurnover', () => {
     }))
   })
 
+  it('alerts with all_at_capacity when every eligible crew member has hit their daily limit', async () => {
+    // Phase D. The third way a filter can empty a pool that has people in it,
+    // and the only one the PM created themselves — so it needs its own reason
+    // for the same purpose as the two above: naming the lever they can pull.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{
+          id: 'c1', name: 'Fully Booked', home_lat: 30.0, home_lng: -90.0,
+          reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true,
+          max_turnovers_per_day: 2,
+        }],
+        error: null,
+      }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [
+        { data: [], error: null }, // familiarity (joined)
+        // Two already held on the turnover's OWN date, which is their cap.
+        { data: [
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: CHECKOUT_ISO } },
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: CHECKOUT_ISO } },
+        ], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ gap: true })
+    expect(step.sendEvent).toHaveBeenCalledWith('notify-assignment-gap', expect.objectContaining({
+      data: expect.objectContaining({ reason: 'all_at_capacity' }),
+    }))
+  })
+
+  it('counts only the turnover\'s OWN date against the cap, not the whole window', async () => {
+    // The distinction the whole phase turns on. Three assignments inside the
+    // 14-day window but none on this date leaves the crew member free, and a
+    // cap read off the fortnight count would wrongly exclude them.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{
+          id: 'c1', name: 'Busy Fortnight', home_lat: 30.0, home_lng: -90.0,
+          reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true,
+          max_turnovers_per_day: 2,
+        }],
+        error: null,
+      }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [
+        { data: [], error: null }, // familiarity (joined)
+        { data: [
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: '2026-07-26T11:00:00.000Z' } },
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: '2026-07-27T11:00:00.000Z' } },
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: '2026-07-28T11:00:00.000Z' } },
+        ], error: null },
+        { error: null }, // insert (autopilot assignment)
+      ],
+      assignment_outcomes: [{ error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'Busy Fortnight' })
+  })
+
+  it('leaves a crew member with no cap set assignable at any volume', async () => {
+    // null = no limit is what every existing row carries, so this is the
+    // no-change-for-existing-orgs guarantee the migration promises.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{
+          id: 'c1', name: 'Uncapped', home_lat: 30.0, home_lng: -90.0,
+          reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true,
+          max_turnovers_per_day: null,
+        }],
+        error: null,
+      }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [
+        { data: [], error: null },
+        { data: Array.from({ length: 9 }, () => (
+          { crew_member_id: 'c1', turnovers: { checkout_datetime: CHECKOUT_ISO } }
+        )), error: null },
+        { error: null },
+      ],
+      assignment_outcomes: [{ error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'Uncapped' })
+  })
+
   it('sends NO reason when the org simply has no active crew — nothing to act on', async () => {
     // The control for the two above. An empty roster is not a filter problem
     // and needs no alert; without this, "always send a gap" would pass them

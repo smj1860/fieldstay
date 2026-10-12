@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
+import { computeWorkloadMap, computeFamiliarIds, computeDayWorkloadMap } from '@/lib/scoring/pools'
 
 interface Row {
   entity_id: string | null | undefined
@@ -68,5 +68,78 @@ describe('computeFamiliarIds', () => {
       { entity_id: 'crew_2' },
     ]
     expect(computeFamiliarIds(rows, (r) => r.entity_id)).toEqual(['crew_3', 'crew_1', 'crew_2'])
+  })
+})
+
+// ── Phase D: per-day workload ──────────────────────────────────────────────
+
+type DayRow = { crew: string | null; when: string | null }
+const build = (rows: DayRow[]) =>
+  computeDayWorkloadMap(rows, (r) => r.crew, (r) => r.when)
+
+describe('computeDayWorkloadMap', () => {
+  it('buckets by calendar day, per crew member', () => {
+    expect(build([
+      { crew: 'a', when: '2026-10-13T11:00:00Z' },
+      { crew: 'a', when: '2026-10-13T15:00:00Z' },
+      { crew: 'b', when: '2026-10-13T09:00:00Z' },
+      { crew: 'a', when: '2026-10-14T09:00:00Z' },
+    ])).toEqual({
+      '2026-10-13': { a: 2, b: 1 },
+      '2026-10-14': { a: 1 },
+    })
+  })
+
+  /**
+   * The reason the date comes from the string rather than from `new Date()`.
+   * A 23:30 UTC checkout parsed into a Date and read with local getters lands
+   * on the next day for a server east of UTC and the previous one for a
+   * server west of it, so the same turnover would bucket differently
+   * depending on where the function ran. Slicing is also what keeps this
+   * agreeing with the `.split('T')[0]` that the crew_availability lookup
+   * uses, which is the comparison the capacity check has to line up with.
+   */
+  it('takes the date from the ISO string, not the runtime timezone', () => {
+    const original = process.env.TZ
+    try {
+      process.env.TZ = 'Pacific/Kiritimati' // UTC+14
+      const east = build([{ crew: 'a', when: '2026-10-13T23:30:00Z' }])
+      process.env.TZ = 'Pacific/Midway'     // UTC-11
+      const west = build([{ crew: 'a', when: '2026-10-13T23:30:00Z' }])
+      expect(east).toEqual(west)
+      expect(east).toEqual({ '2026-10-13': { a: 1 } })
+    } finally {
+      process.env.TZ = original
+    }
+  })
+
+  it('skips rows with no crew member or no timestamp', () => {
+    expect(build([
+      { crew: null,  when: '2026-10-13T11:00:00Z' },
+      { crew: 'a',   when: null },
+      { crew: 'a',   when: '2026-10-13T11:00:00Z' },
+    ])).toEqual({ '2026-10-13': { a: 1 } })
+  })
+
+  it('is empty for no rows, so a caller gets {} rather than undefined', () => {
+    expect(build([])).toEqual({})
+  })
+
+  // The two maps are built from the SAME row set and must agree on totals,
+  // or the scorer's two workload terms are measuring different populations.
+  it('totals to the same counts as computeWorkloadMap over the same rows', () => {
+    const rows: DayRow[] = [
+      { crew: 'a', when: '2026-10-13T11:00:00Z' },
+      { crew: 'a', when: '2026-10-14T11:00:00Z' },
+      { crew: 'b', when: '2026-10-13T11:00:00Z' },
+    ]
+    const flat = computeWorkloadMap(rows, (r) => r.crew)
+    const byDay = build(rows)
+
+    const summed: Record<string, number> = {}
+    for (const day of Object.values(byDay)) {
+      for (const [id, n] of Object.entries(day)) summed[id] = (summed[id] ?? 0) + n
+    }
+    expect(summed).toEqual(flat)
   })
 })
