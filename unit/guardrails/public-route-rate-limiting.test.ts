@@ -89,6 +89,13 @@ const AUTH_GATES = [
   // unconditionally an auth check; this one calls requireCrewMember() and
   // returns its response on failure before touching anything else.
   'loadCrewTurnoverContext',
+  // The work-order equivalent, added when the crew start/complete pair were
+  // de-duplicated the same way. Same justification with one honest caveat:
+  // its first act is a uuid-format check that can return 400, not the auth
+  // call. That check reads nothing, touches no database and reveals nothing,
+  // and every path that reaches `ok: true` has gone through
+  // requireCrewMember() — which is the property this list actually needs.
+  'loadCrewWorkOrderContext',
 ]
 
 describe('guardrail: public token-guessable routes stay rate-limited', () => {

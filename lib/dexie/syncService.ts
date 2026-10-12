@@ -702,14 +702,29 @@ async function uploadCrewWorkOrderChange(
   targetId: string,
   payload: MutationPayload,
 ): Promise<void> {
+  // Routed through the existing Route Handlers, not a direct table write —
+  // crew has no RLS UPDATE on work_orders by design (the routes verify
+  // assigned_crew_member_id explicitly via service role instead), and the
+  // complete route already fires the PM notification, audit log, and
+  // idempotent completion guard. Do not duplicate any of that logic here.
+  //
+  // The status is matched exhaustively rather than interpolated into the URL:
+  // a path built from payload data would turn an unexpected value into a 404
+  // that retries forever instead of the loud throw below.
+  if (payload.status === 'in_progress') {
+    const res = await fetch(`/api/crew/work-orders/${targetId}/start`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
+    })
+    if (!res.ok) throw new UploadHttpError(`Failed to start work order ${targetId}`, res.status)
+    return
+  }
+
   if (payload.status !== 'completed') {
     throw new Error(`uploadCrewWorkOrderChange: unhandled status "${payload.status}"`)
   }
-  // Routed through the existing Route Handler, not a direct table write —
-  // crew has no RLS UPDATE on work_orders by design (the route verifies
-  // assigned_crew_member_id explicitly via service role instead), and the
-  // route already fires the PM notification, audit log, and idempotent
-  // completion guard. Do not duplicate any of that logic here.
+
   const res = await fetch(`/api/crew/work-orders/${targetId}/complete`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },

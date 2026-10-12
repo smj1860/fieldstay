@@ -3,18 +3,20 @@
 import { useEffect, useState }     from 'react'
 import { useLiveQuery }            from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
-import { completeWorkOrder, retryFailedMutation } from '@/lib/dexie/helpers'
+import { completeWorkOrder, startWorkOrder, retryFailedMutation } from '@/lib/dexie/helpers'
 import { useRouter }              from 'next/navigation'
-import { ArrowLeft, Wrench, CheckCircle2, Check } from 'lucide-react'
+import { ArrowLeft, Wrench, CheckCircle2, Check, Play } from 'lucide-react'
 import type { PropertyRow } from '@/lib/dexie/schema'
 import { CrewLoading } from '@/components/crew/CrewLoading'
 import { workOrderDisplayDate } from '@/lib/work-orders/display-date'
 
-export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default function CrewWorkOrderPage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const [id, setId]               = useState<string | null>(null)
   const [property, setProperty]   = useState<PropertyRow | null>(null)
   const [completing, setCompleting] = useState(false)
   const [completeError, setCompleteError] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const [notes, setNotes]         = useState('')
   const [done, setDone]           = useState(false)
   const db     = useDexieDb()
@@ -43,6 +45,19 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
       : undefined,
     [id, db]
   )
+
+  async function handleStart() {
+    if (!id) return
+    setStarting(true)
+    setStartError(null)
+    try {
+      await startWorkOrder(userId, id)
+    } catch {
+      setStartError('Something went wrong saving that locally. Please try again.')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   async function handleComplete() {
     if (!id) return
@@ -138,6 +153,50 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
             .neq('status','completed') matched a cancelled row), running the
             whole side-effect chain including the owner_transactions
             maintenance expense for work that was called off. */}
+        {/* Start Work. A work order has no checklist to infer a start from
+            (checklist_instances.turnover_id is NOT NULL, so checklists belong
+            to turnovers), so without this tap a crew work order goes straight
+            from assigned to completed and the PM never sees it in progress.
+            Shown only before the work is under way; `in_progress` and beyond
+            fall through to the chip below. Completing without starting stays
+            allowed, because plenty of these are five-minute jobs. */}
+        {(wo.status === 'assigned' || wo.status === 'pending') && (
+          <div className="pt-4 border-t border-themed">
+            <button
+              onClick={handleStart}
+              disabled={starting}
+              className="w-full rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 border disabled:opacity-60"
+              style={{
+                borderColor: 'var(--accent-gold)',
+                color:       'var(--accent-gold)',
+                background:  'transparent',
+              }}
+            >
+              <Play className="w-4 h-4" />
+              {starting ? 'Starting...' : 'Start Work'}
+            </button>
+            <p className="text-xs text-muted-themed text-center mt-2">
+              Lets your manager see this is under way.
+            </p>
+            {startError && (
+              <p className="text-sm text-center mt-2" style={{ color: 'var(--accent-red)' }}>
+                {startError}
+              </p>
+            )}
+          </div>
+        )}
+
+        {wo.status === 'in_progress' && (
+          <div
+            className="rounded-xl p-3 text-center border"
+            style={{ background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold-dim)' }}
+          >
+            <p className="text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>
+              In progress
+            </p>
+          </div>
+        )}
+
         {wo.status !== 'completed' && wo.status !== 'cancelled' && (
           <div className="pt-4 border-t border-themed">
             <h2 className="text-xs font-bold text-muted-themed uppercase tracking-wide mb-2">

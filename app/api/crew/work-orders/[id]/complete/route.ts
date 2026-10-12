@@ -1,9 +1,7 @@
-import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient }       from '@/lib/supabase/server'
-import { requireCrewMember }         from '@/lib/crew-auth'
 import { inngest }                   from '@/lib/inngest/client'
 import { logAuditEvent }             from '@/lib/audit'
+import { loadCrewWorkOrderContext }  from '@/lib/work-orders/crew-route-context'
 import {
   workOrderCompletionFields,
   finalizeWorkOrderCompletion,
@@ -11,7 +9,6 @@ import {
   type CompletedWorkOrderRow,
 } from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
 import type { WoStatus } from '@/types/database'
-import { UUID_RE } from '@/lib/validation/uuid'
 
 /**
  * POST /api/crew/work-orders/[id]/complete
@@ -45,71 +42,36 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id } = await params
 
-  if (!UUID_RE.test(id)) {
-    return NextResponse.json({ error: 'Invalid work order id' }, { status: 400 })
-  }
-
-  // Canonical crew auth gate (lib/crew-auth.ts). This route was the last
-  // straggler on the inline-lookup pattern the 2026-07-22 crew-auth sweep
-  // replaced everywhere else — surfaced by the service-role-authorization
-  // guardrail the day it landed.
-  const auth = await requireCrewMember()
-  if (!auth.ok) return auth.response
-  const { crew, user } = auth
-
+  // The id check, crew auth, org/assignment scoping and the cancelled refusal
+  // are shared with the start route (lib/work-orders/crew-route-context.ts).
+  // They were hand-rolled here first and every one of them was paid for once;
+  // the second route copying them is exactly how the turnover pair drifted,
+  // so there is now one implementation that cannot disagree with itself.
+  // Parsed before the context load so the length check can run inside its
+  // beforeRead seam: an oversized body must not cost a database round trip,
+  // and must answer 400 rather than a 404 that hides what was wrong.
   const { notes } = (await req.json().catch(() => ({}))) as { notes?: string }
 
-  if (typeof notes === 'string' && notes.length > MAX_NOTES_LENGTH) {
-    return NextResponse.json(
-      { error: `Completion notes are too long. Please keep them under ${MAX_NOTES_LENGTH} characters.` },
-      { status: 400 },
-    )
-  }
+  const ctx = await loadCrewWorkOrderContext<{
+    id: string; wo_number: string | null; title: string
+    property_id: string; org_id: string; status: string
+  }>(
+    id,
+    'id, wo_number, title, property_id, org_id, assigned_crew_member_id, status',
+    'api.crew.work-orders.complete',
+    () => (typeof notes === 'string' && notes.length > MAX_NOTES_LENGTH
+      ? NextResponse.json(
+          { error: `Completion notes are too long. Please keep them under ${MAX_NOTES_LENGTH} characters.` },
+          { status: 400 },
+        )
+      : null),
+  )
+  if (!ctx.ok) return ctx.response
 
-  // Service client for the WO read/update — crew role has no UPDATE policy on
-  // work_orders; assignment is verified explicitly below instead of via RLS.
-  const supabase = createServiceClient({ crew })
+  const { supabase, workOrder: wo } = ctx
+  const { user, crew } = ctx.auth
 
-  const woRes = await supabase
-    .from('work_orders')
-    .select('id, wo_number, title, property_id, org_id, assigned_crew_member_id, status')
-    .eq('id', id)
-    .eq('assigned_crew_member_id', crew.id)
-    .eq('org_id', crew.org_id)
-    .maybeSingle()
-
-  // 503, not 404, when the READ fails: lib/dexie/net.ts classifies 4xx as
-  // TERMINAL and >=500 as transient, so answering a transient DB error with a
-  // 404 dead-lettered the crew member's queued mutation permanently instead of
-  // retrying it. A genuinely missing row still returns 404.
-  const woOut = tryUnwrap(woRes, { site: 'api.crew.work-orders.complete', orgId: crew.org_id })
-  if (!woOut.ok) {
-    return NextResponse.json({ error: 'Could not load the work order. Please try again.' }, { status: 503 })
-  }
-
-  const wo = woOut.data
-  if (!wo)                       return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (wo.status === 'completed') return NextResponse.json({ alreadyCompleted: true })
-
-  // A cancelled work order must not be completable, and nothing else stopped
-  // it: the check above only catches `completed`, and the UPDATE's
-  // `.neq('status', 'completed')` below MATCHES a cancelled row. So completing
-  // one flipped it to `completed` and ran the full side-effect chain —
-  // including the owner_transactions maintenance expense — for work that was
-  // called off. This is the turnover complete route's guard, which that route
-  // already had and this one did not.
-  //
-  // Nothing removes a cancelled work order from the crew's device either: the
-  // sync pulls by assigned_crew_member_id with no status filter, and only the
-  // crew LIST filters cancelled out. 409 deliberately — lib/dexie/net.ts
-  // treats 4xx as terminal, and this refusal is permanent, so retrying it
-  // forever is the wrong behaviour.
-  if (wo.status === 'cancelled') {
-    return NextResponse.json(
-      { error: 'This work order was cancelled. Check with your manager before doing any more work on it.' },
-      { status: 409 },
-    )
-  }
 
   const trimmedNotes = notes?.trim() ? notes.trim() : 'Marked complete by crew'
 

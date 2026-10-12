@@ -296,6 +296,28 @@ export async function completeTurnover(userId: string, turnoverId: string): Prom
  * and idempotent completion guard all still fire once the mutation drains
  * — including for a completion that happened while fully offline.
  */
+/**
+ * Marks a crew-assigned work order in_progress locally and queues the
+ * mutation. SyncEngine routes it through /api/crew/work-orders/[id]/start.
+ *
+ * A work order has no checklist — `checklist_instances.turnover_id` is NOT
+ * NULL, so checklists belong to turnovers alone. That is why this is an
+ * explicit tap rather than something inferred the way a turnover's start is:
+ * on a work order there is no first tick to infer it from, so without this
+ * button a crew work order goes assigned -> completed and is never once
+ * visibly in progress to the PM watching the board.
+ */
+export async function startWorkOrder(
+  userId: string,
+  workOrderId: string,
+): Promise<void> {
+  await writeAndQueue(
+    userId, 'crew_work_orders', workOrderId, 'PATCH',
+    { status: 'in_progress' },
+    (db) => db.crew_work_orders.update(workOrderId, { status: 'in_progress' }),
+  )
+}
+
 export async function completeWorkOrder(
   userId: string,
   workOrderId: string,

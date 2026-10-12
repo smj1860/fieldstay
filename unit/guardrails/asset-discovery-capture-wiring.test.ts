@@ -101,11 +101,17 @@ describe('guardrail: asset-discovery prompts reach the capture form', () => {
       'ticked only once the asset has actually been written and queued.',
     ).toMatch(/onCaptured=\{[^}]*completeCapturedItem/)
 
+    // writeChecklistItem, not updateChecklistItem: since Phase C every path
+    // that completes an item goes through that funnel, which is also what
+    // starts the turnover on the first tick. Asserting the funnel rather than
+    // the raw helper keeps this check strictly stronger — an asset capture
+    // wired straight to the helper would tick the row and silently leave the
+    // turnover at `assigned`.
     expect(
       hook,
       'completeCapturedItem must exist in use-turnover-actions and mark the item ' +
-      'complete.',
-    ).toMatch(/completeCapturedItem[\s\S]{0,200}?updateChecklistItem/)
+      'complete through the writeChecklistItem funnel.',
+    ).toMatch(/completeCapturedItem[\s\S]{0,200}?writeChecklistItem/)
   })
 
   it('the capture modal is shared, not re-implemented per screen', () => {

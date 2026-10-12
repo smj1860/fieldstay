@@ -464,18 +464,79 @@ callers. The STOP webhook writes here in addition to the guest table. Service-ro
 
 ---
 
-# Phase C — item 5: progression writable by whoever is working
+# Phase C — item 5: progression writable by whoever is working — BUILT
 
-Phase B gives the vendor side. This closes the crew side and removes the PM-only path.
+Phase B gave the vendor side. This closes the crew side and removes the PM-only path.
 
-- Crew PWA: the first checklist tick on a work order moves it to `in_progress`. The signal
-  already flows — `checklist_instance_items.completed_at` updates live.
-- The crew work-order screen (`app/crew/work-orders/[id]/page.tsx:135-149`) gains "Start"
-  alongside "Complete" for WOs with no checklist.
-- The maintenance board's bulk "Set status…" dropdown stays (PM override), but `in_progress`
-  stops being the only way in.
-- Open question, not yet decided: whether a single-WO status control belongs on the detail
-  panel, or whether derived status plus the bulk override is enough. Decide when C is built.
+**A correction to this section as originally written.** It said "the first checklist tick on
+a work order moves it to `in_progress`", and then treated "WOs with no checklist" as the
+leftover case. That has it backwards: `checklist_instances.turnover_id` is NOT NULL with an
+FK to `turnovers`, so **a work order never has a checklist**. There is no first tick on a
+work order to infer anything from. The two halves below are therefore different mechanisms,
+not a rule plus its exception.
+
+### C1 — a turnover starts itself on the first tick
+
+"Start Turnover" already existed on the hub, but it was the only way in and it is skippable.
+A crew member who opens the checklist and starts ticking leaves the turnover at `assigned`
+for the whole clean: the PM's board shows nothing happening while the work is visibly under
+way, and `turnovers.started_at` — read by the duration half of the crew scoring loop — is
+never written at all.
+
+Inferred rather than added as a second button, because the tick IS the evidence. Asking
+someone to announce they have started while they are demonstrably doing the work is the
+double entry this product exists to remove.
+
+FOUR paths can complete a checklist item (the toggle, asset capture, photo capture, and a
+note saved against an already-ticked item), so the inference lives in ONE funnel
+(`writeChecklistItem` in `use-turnover-actions.ts`) rather than at four call sites. A fifth
+path, or one of the four reverted to the raw helper, would put the hole straight back with
+nothing failing — the tick still works and only the status is wrong. Enforced by
+`unit/guardrails/crew-implicit-turnover-start.test.ts`.
+
+It fires only from `assigned`, only on a completion (un-ticking is not a start), never on a
+cancelled turnover, and its failure is deliberately NOT surfaced: the tick itself succeeded,
+and an error toast about a start the crew member never asked for reads as "your tick
+failed".
+
+### C2 — a work order gets an explicit Start
+
+No checklist means no inference, so `app/crew/work-orders/[id]/page.tsx` gains "Start Work"
+alongside "Mark Work Complete", routed through a new
+`POST /api/crew/work-orders/[id]/start`. Completing without starting stays allowed: plenty
+of these are five-minute jobs.
+
+The route mirrors the completion route's hard-won shapes rather than inventing its own: a
+400 on a malformed uuid (not the 503 the outbox would retry forever), 503 on a failed read
+so a transient blip retries, a terminal 409 on a cancelled work order, a 200 no-op on
+anything already past `assigned`, and a compare-and-set `UPDATE ... .eq('status', …)` as the
+real guard against two concurrent starts. No `started_at` is written because `work_orders`
+has no such column; the `work_order_updates` row is the timestamp, which is the table that
+already records every other transition.
+
+`uploadCrewWorkOrderChange` had to learn the new status. It previously accepted `completed`
+and threw on anything else, and a thrown plain Error is TERMINAL to
+`classifyUploadFailure` — so queueing an `in_progress` mutation without teaching the handler
+would have dead-lettered the crew member's start rather than sending it. Covered by
+`unit/dexie/crew-work-order-start-outbox.test.ts`, which also pins the endpoint: a start
+POSTed to `/complete` would close the job and fire the owner_transactions maintenance
+expense.
+
+### C3 — the open question, decided: NO single-WO status dropdown
+
+The question was whether a single-WO status control belongs on the detail panel. It does
+not, and the reason is the point of this phase.
+
+With C1 and C2 in, status is DERIVED from whoever is doing the work: crew tick or tap, and
+on the vendor side `vendor_progress` mapped through `woStatusForProgress()`. A PM-facing
+dropdown on the detail panel would re-open the PM-types-the-truth path this phase exists to
+close, and it would COMPETE with those writes: a PM setting `in_progress` on a work order
+whose `vendor_progress` says `parts_ordered` produces a contradiction the two-axis design
+was built to avoid.
+
+The maintenance board's bulk "Set status…" stays as the override. It is the right shape for
+the exception case (fixing a mistake, cancelling several at once) precisely because it is
+deliberate and plural, rather than sitting on every detail panel inviting routine use.
 
 ---
 
