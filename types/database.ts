@@ -2376,42 +2376,6 @@ export interface OrgSmsTemplate {
   updated_at: string
 }
 
-// ── Hospitable launch promo (two-tier price lock) ───────────────────────────
-// See supabase/migrations/20260727150000_hospitable_launch_promo.sql. All
-// writes go through the SECURITY DEFINER tag/claim functions (service_role
-// only); org members can only SELECT their own org's row for the badge.
-export interface HospitableLaunchPromo {
-  org_id:                  string
-  hospitable_tagged:       boolean
-  hospitable_tagged_at:    string | null
-  attribution_source:      string | null   // 'hospitable_marketplace_oneclick' | 'hospitable_landing_page' | 'manual_connect'
-  converted_to_paid_at:    string | null
-  price_lock_awarded:      boolean
-  price_lock_active:       boolean
-  price_lock_sequence:     number | null   // 1-100, tier-1 locks only; NULL for tier 2
-  price_lock_years:        1 | 2 | null
-  price_lock_tier:         string | null
-  price_lock_amount_cents: number | null
-  awarded_at:              string | null
-  price_lock_expires_at:   string | null
-  congrats_email_sent_at:  string | null
-  created_at:              string
-  updated_at:              string
-}
-
-// Singleton counter (id always 1) — service-role-only, mutated exclusively by
-// claim_hospitable_promo_slot(). launch_at + second_tier_window_days gate
-// tier 2; extend the window by updating second_tier_window_days in place.
-export interface PromoHospitableLaunchCounter {
-  id:                        number
-  first_tier_awarded_count:  number
-  first_tier_max:            number
-  second_tier_awarded_count: number
-  second_tier_max:           number
-  launch_at:                 string
-  second_tier_window_days:   number
-}
-
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -2614,8 +2578,6 @@ export interface HandWrittenRowMap {
   notifications:                       Notification
   notification_digest_state:           NotificationDigestState
   demo_activity_log:                   DemoActivityLog
-  hospitable_launch_promo:             HospitableLaunchPromo
-  promo_hospitable_launch_counter:     PromoHospitableLaunchCounter
   inspection_forms:                    InspectionForm
   inspection_form_sections:            InspectionFormSection
   inspection_form_items:               InspectionFormItem

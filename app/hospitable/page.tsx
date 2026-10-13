@@ -90,20 +90,6 @@ export default function HospitablePage() {
       <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
       {/* ══════════════════════════════════════════
-          PROMO BANNER — First 100 Hospitable price lock
-          Deliberately doesn't mention the tier-2 (1-year) fallback — that
-          stays a surprise for anyone who converts after the first 100 fill
-          up, not advertised in advance.
-      ══════════════════════════════════════════ */}
-      <div className="bg-gold-300">
-        <div className="max-w-6xl mx-auto px-6 py-2.5 text-center">
-          <p className="text-xs sm:text-sm font-semibold text-[#0a1628]">
-            🔒 Launch offer. The first 100 accounts to connect via Hospitable get a 2-year price lock on their plan.
-          </p>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════
           SECTION 1 — DARK NAVY
           Nav · Badge · Hero
       ══════════════════════════════════════════ */}
@@ -387,10 +373,6 @@ export default function HospitablePage() {
             It takes about 2 minutes to connect. Your properties and bookings show up right after.
             Cancel with one click if it doesn&apos;t save your team real time in the first week.
           </p>
-          <p className="text-[#0a1628]/70 text-sm font-semibold mb-10">
-            🔒 First 100 accounts get a 2-year price lock, no extra steps, it&apos;s automatic.
-          </p>
-
           <div className="max-w-sm mx-auto">
             <Link
               href="/signup?provider=hospitable&next=/onboarding"

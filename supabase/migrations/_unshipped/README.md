@@ -33,8 +33,11 @@ pass this came from — that pass also found and flagged one **genuine** gap
 (`hospitable_launch_promo`, NOT moved here — see the task notes) where the
 live database was actually missing schema that application code depends on,
 underscoring that "local-only" is not automatically "safe to file away."
-(That gap was closed 2026-07-30: the promo migration is now applied to
-production and E2E.)
+(That gap was closed 2026-07-30: the promo migration was applied to
+production and E2E. The promo itself was removed on 2026-10-13 and its schema
+dropped by `20261013200000_drop_hospitable_launch_promo.sql`, so neither table
+exists any more — the reconciliation point above still stands, the schema it
+reconciled does not.)
 
 **1 additional file** (2026-07-30) —
 `20260617000003_add_missing_fk_indexes.sql`, the same applied-under-another-

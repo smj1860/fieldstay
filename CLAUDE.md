@@ -370,17 +370,36 @@ mechanism in a different file.
 
 ---
 
-### Known follow-up, not done in this rebuild
+### The Hospitable launch promo is GONE (2026-10-13)
 
-The Hospitable launch promo's price-lock (`lib/inngest/functions/promo-
-hospitable-award-lock.ts`) was patched to not CRASH under the new pricing
-(a tiered Stripe Price has no `unit_amount` to read; it now computes a
-dollar snapshot via `monthlyCostCents(quantity)` instead) and its email copy
-was corrected (no more "if you grow into a bigger tier"). What it was NOT
-given is real graduated-pricing semantics: the lock is still a dollar-total
-snapshot, not a locked RATE SCHEDULE, so a price-locked org's bill still
-moves if their property count changes later. Redesigning that promo properly
-is separate scoped work.
+Removed outright when the promo period ended, rather than left dormant. Every
+part of it went: the three Inngest functions, the `promo/hospitable.
+checkout-started` event, the tagging call in `createCheckoutSession`, the
+settings price-lock badge, the `billing.hospitable_price_lock.awarded` audit
+action, the help doc, and both price-lock promises on `/hospitable`.
+
+**The schema went too** (`20261013200000_drop_hospitable_launch_promo.sql`):
+both tables (`hospitable_launch_promo`, `promo_hospitable_launch_counter`) and
+all three functions, two of which were SECURITY DEFINER. A privileged function
+nothing calls is the shape the authz-gate work exists to keep out of the
+schema, so leaving those behind would have been the worse half of the cleanup.
+`promo_hospitable_launch_counter` left `SERVICE_ROLE_ONLY_TABLES` in
+`scripts/check-db-invariants.mjs` in the same change: that registry fails CI on
+a STALE entry as well as a missing one, so the drop and the shrink cannot be
+split across commits.
+
+**It never awarded a single lock.** Production at removal: 0 enrolled rows, 0
+tagged, 0 converted, 0 locks, both tier counters at 0, since launch on
+2026-07-30. That is what made the removal safe to do in one step — there was
+no customer holding a lock whose bill could change — and it is worth knowing
+before anyone proposes reviving the idea: the mechanism was never the thing
+that failed, because it never ran.
+
+The redesign this section used to call for (the lock was a dollar-total
+snapshot rather than a locked RATE SCHEDULE, so a locked org's bill still
+moved when their property count did) is moot. If a price-lock promo is ever
+built again, build it as a locked schedule from the start; do not restore
+this one.
 
 ---
 

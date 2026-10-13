@@ -1778,71 +1778,6 @@ export type Database = {
           },
         ]
       }
-      hospitable_launch_promo: {
-        Row: {
-          attribution_source: string | null
-          awarded_at: string | null
-          congrats_email_sent_at: string | null
-          converted_to_paid_at: string | null
-          created_at: string
-          hospitable_tagged: boolean
-          hospitable_tagged_at: string | null
-          org_id: string
-          price_lock_active: boolean
-          price_lock_amount_cents: number | null
-          price_lock_awarded: boolean
-          price_lock_expires_at: string | null
-          price_lock_sequence: number | null
-          price_lock_tier: string | null
-          price_lock_years: number | null
-          updated_at: string
-        }
-        Insert: {
-          attribution_source?: string | null
-          awarded_at?: string | null
-          congrats_email_sent_at?: string | null
-          converted_to_paid_at?: string | null
-          created_at?: string
-          hospitable_tagged?: boolean
-          hospitable_tagged_at?: string | null
-          org_id: string
-          price_lock_active?: boolean
-          price_lock_amount_cents?: number | null
-          price_lock_awarded?: boolean
-          price_lock_expires_at?: string | null
-          price_lock_sequence?: number | null
-          price_lock_tier?: string | null
-          price_lock_years?: number | null
-          updated_at?: string
-        }
-        Update: {
-          attribution_source?: string | null
-          awarded_at?: string | null
-          congrats_email_sent_at?: string | null
-          converted_to_paid_at?: string | null
-          created_at?: string
-          hospitable_tagged?: boolean
-          hospitable_tagged_at?: string | null
-          org_id?: string
-          price_lock_active?: boolean
-          price_lock_amount_cents?: number | null
-          price_lock_awarded?: boolean
-          price_lock_expires_at?: string | null
-          price_lock_sequence?: number | null
-          price_lock_tier?: string | null
-          price_lock_years?: number | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "hospitable_launch_promo_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: true
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ical_feeds: {
         Row: {
           created_at: string
@@ -4323,36 +4258,6 @@ export type Database = {
           phone?: string | null
           unsubscribe_token?: string
           updated_at?: string
-        }
-        Relationships: []
-      }
-      promo_hospitable_launch_counter: {
-        Row: {
-          first_tier_awarded_count: number
-          first_tier_max: number
-          id: number
-          launch_at: string
-          second_tier_awarded_count: number
-          second_tier_max: number
-          second_tier_window_days: number
-        }
-        Insert: {
-          first_tier_awarded_count?: number
-          first_tier_max?: number
-          id?: number
-          launch_at?: string
-          second_tier_awarded_count?: number
-          second_tier_max?: number
-          second_tier_window_days?: number
-        }
-        Update: {
-          first_tier_awarded_count?: number
-          first_tier_max?: number
-          id?: number
-          launch_at?: string
-          second_tier_awarded_count?: number
-          second_tier_max?: number
-          second_tier_window_days?: number
         }
         Relationships: []
       }
@@ -7307,16 +7212,6 @@ export type Database = {
         Args: { p_org_id: string; p_updates: Json }
         Returns: number
       }
-      claim_hospitable_promo_slot: {
-        Args: { p_org_id: string; p_price_cents: number; p_tier: string }
-        Returns: {
-          already_awarded: boolean
-          lock_years: number
-          not_eligible: boolean
-          sequence_number: number
-          window_closed: boolean
-        }[]
-      }
       claim_pending_integration_link: {
         Args: { p_pending_link_token: string; p_user_id: string }
         Returns: {
@@ -7687,10 +7582,6 @@ export type Database = {
           p_quote_token: string
         }
         Returns: Json
-      }
-      tag_hospitable_trial_signup: {
-        Args: { p_landing_page_cookie_present?: boolean; p_org_id: string }
-        Returns: undefined
       }
       unique_index_shapes: {
         Args: never

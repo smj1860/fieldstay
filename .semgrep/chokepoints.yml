@@ -281,7 +281,7 @@ rules:
       # a table with no org_id column → this file's -global-table, below
       - metavariable-regex:
           metavariable: $T
-          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|stripe_processed_events|support_kb_chunks)["']$)
 
   # ── PROMOTED 2026-08-07: tier 2c of the unbounded-select ladder ─────────
   # Platform-global tables: fixed catalogs (inventory_catalog,
@@ -331,7 +331,7 @@ rules:
       - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
       - metavariable-regex:
           metavariable: $T
-          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$
+          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|stripe_processed_events|support_kb_chunks)["']$
 
   # ══ PROMOTED FROM ratchet.yml 2026-08-11 ═════════════════════════════════
   # The three rules below are the Supabase error-handling family. They were
@@ -523,7 +523,7 @@ rules:
       # ladder's total by one. The tiers are mutually exclusive by design.
       - metavariable-regex:
           metavariable: $T
-          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|stripe_processed_events|support_kb_chunks)["']$)
 
   # ── Tier 2c (HYGIENE): a table that has no org_id column ─────────────────
   # Reached 0 on 2026-08-07 and PROMOTED to chokepoints.yml — see that file

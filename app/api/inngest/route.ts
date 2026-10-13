@@ -192,10 +192,6 @@ import { handleSupportEscalation } from '@/lib/inngest/functions/support-convers
 // Business metrics snapshot (Sentry Application Metrics)
 import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
-// Hospitable launch promo — two-tier price lock for converted trials
-import { tagHospitableTrialSignup }   from '@/lib/inngest/functions/promo-hospitable-tag-trial'
-import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospitable-award-lock'
-import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
@@ -422,9 +418,5 @@ export const { GET, POST, PUT } = serve({
     // Account deletion — the destructive half of DELETE /api/account/delete
     accountDeletion,
 
-    // Hospitable launch promo
-    tagHospitableTrialSignup,
-    awardHospitablePriceLock,
-    expireHospitablePriceLocks,
   ],
 })
