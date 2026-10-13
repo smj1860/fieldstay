@@ -5901,6 +5901,59 @@ export type Database = {
           },
         ]
       }
+      travel_time_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          dest_lat: number
+          dest_lng: number
+          fetched_at: string
+          id: string
+          miles: number | null
+          minutes: number
+          org_id: string
+          origin_lat: number
+          origin_lng: number
+          provider: string
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          dest_lat: number
+          dest_lng: number
+          fetched_at?: string
+          id?: string
+          miles?: number | null
+          minutes: number
+          org_id: string
+          origin_lat: number
+          origin_lng: number
+          provider?: string
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          dest_lat?: number
+          dest_lng?: number
+          fetched_at?: string
+          id?: string
+          miles?: number | null
+          minutes?: number
+          org_id?: string
+          origin_lat?: number
+          origin_lng?: number
+          provider?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travel_time_cache_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       turnover_assignments: {
         Row: {
           assigned_at: string
