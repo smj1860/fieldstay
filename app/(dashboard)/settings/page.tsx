@@ -4,7 +4,6 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SettingsTabs, type ConnectionInfo } from './settings-tabs'
 import type { Organization } from '@/types/database'
-import { getHospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Settings' }
@@ -70,7 +69,6 @@ export default async function SettingsPage() {
 
   throwIfAnyQueryFailed({ site: 'page.settings', orgId: membership.org_id }, slackConfiguredError)
 
-  const hospitablePromo = await getHospitablePromoStatus(membership.org_id)
 
   // The billing tab bills by property count under the graduated pricing
   // model (lib/stripe/brackets.ts) — it needs this to render the org's
@@ -98,7 +96,6 @@ export default async function SettingsPage() {
           org={org as unknown as Organization}
           connections={connectionsByProvider}
           krogerNeedsStore={!!krogerStoreNeeded}
-          hospitablePromo={hospitablePromo}
           slackWebhookConfigured={(slackConfiguredCount ?? 0) > 0}
           canEditOrgSettings={membership.role === 'owner' || membership.role === 'admin'}
           activePropertyCount={activeProperties ?? 0}

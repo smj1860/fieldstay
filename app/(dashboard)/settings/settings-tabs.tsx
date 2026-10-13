@@ -13,9 +13,7 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Organization } from '@/types/database'
-import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 import { reportError } from '@/lib/observability/report-error'
-import { PriceLockBadge } from '@/components/settings/price-lock-badge'
 import {
   MAX_SELF_SERVE_PROPERTIES,
   monthlyCostCents,
@@ -81,7 +79,6 @@ interface Props {
   org:               Organization
   connections?:      Record<string, ConnectionInfo>
   krogerNeedsStore?: boolean
-  hospitablePromo?:  HospitablePromoStatus | null
   /**
    * Whether a Slack webhook is set. The URL itself is deliberately never sent
    * to the client — it is a bearer credential and `orgs_select` lets every
@@ -102,7 +99,6 @@ export function SettingsTabs({
   org,
   connections = {},
   krogerNeedsStore = false,
-  hospitablePromo = null,
   slackWebhookConfigured = false,
   canEditOrgSettings = false,
   activePropertyCount = 0,
@@ -153,7 +149,7 @@ export function SettingsTabs({
 
       {/* Tab panels */}
       {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} canEdit={canEditOrgSettings} />}
-      {activeTab === 'Billing'       && <BillingTab org={org} hospitablePromo={hospitablePromo} activePropertyCount={activePropertyCount} />}
+      {activeTab === 'Billing'       && <BillingTab org={org} activePropertyCount={activePropertyCount} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab slackWebhookConfigured={slackWebhookConfigured} canEdit={canEditOrgSettings} />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
@@ -1334,8 +1330,8 @@ function describeMarginalRates(): string {
 }
 
 function BillingTab({
-  org, hospitablePromo, activePropertyCount,
-}: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null; activePropertyCount: number }>) {
+  org, activePropertyCount,
+}: Readonly<{ org: Organization; activePropertyCount: number }>) {
   const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.platform
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
   const isTrialing  = org.plan_status === 'trialing'
@@ -1390,7 +1386,6 @@ function BillingTab({
           <span className="text-sm text-secondary-themed">
             {quantity} {quantity === 1 ? 'property' : 'properties'}
           </span>
-          <PriceLockBadge promo={hospitablePromo} />
         </div>
 
         {isTrialing && org.trial_ends_at && (
