@@ -60,6 +60,23 @@ If every eligible crew member is at their limit for a date, the turnover stays u
 
 ---
 
+## Time Off, Including Half Days
+
+Crew request time off themselves, in the app under Time Off. Tapping a day marks the whole day, and three chips under it narrow that to **Morning**, **Afternoon** or **Evening** when only part of the day is spoken for.
+
+The windows are fixed rather than free times: morning runs until noon, afternoon until 5pm, evening after that, in your local time. A cleaner free from 2pm marks the afternoon off and loses two workable hours, which is the trade for a rule that is unambiguous on a phone screen and in the scoring engine.
+
+**What a half day actually does.** FieldStay will not auto-assign or suggest that crew member for a turnover whose checkout falls in a window they marked off, and will still consider them for the rest of the day. On the Turnovers board, the dot beside a crew member's name in the assign menu reads against that turnover's own checkout time, so a morning absence shows as a conflict for a 10am checkout and not for a 3pm one.
+
+Two places still treat any time off as a whole day, deliberately:
+
+- **Manage Crew** lists a crew member's upcoming time off without splitting it by window, since it is a roster summary rather than a scheduling decision.
+- **Work orders** carry a date and no time, so there is no hour to compare a window against. A half-day absence raises no warning there; a whole-day one still does.
+
+As before, none of this blocks you. Assigning someone by hand past their own time off works, with a warning.
+
+---
+
 ## Why Crew Members Must Install the App
 
 This is the most important thing to communicate to your crew before their first turnover: **they need to install the FieldStay Crew App on their home screen, not just open it in a browser.**

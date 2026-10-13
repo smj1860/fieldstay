@@ -864,17 +864,86 @@ they already issue, now embedding `properties(lat, lng)` — same rows, same rou
 
 ---
 
-# Phase H — item 7
+# Phase H — item 7 — BUILT
 
-- **Half-day availability.** `crew_availability` is a whole-day boolean. Add a part-of-day
-  dimension (morning / afternoon / evening) rather than free times. Autopilot's hard
-  exclusion becomes window-aware, which needs Phase E's planned times to be meaningful.
-- **Crew "running late" signal.** One tap on the turnover screen, offline-capable through the
-  existing outbox, notifying the PM. Pairs with Phase F from the other direction: F infers
-  lateness, H lets the person say it.
-- **Co-assignee names on crew cards.** `turnover_assignments` already carries every assigned
-  crew member; the card renders none of them. One shared status per turnover is correct and
-  documented (`app/crew/crew-shell.tsx:753`) — the card should say who shares it.
+## Half-day availability
+
+`crew_availability.unavailable_parts text[]` (20261013170000), with a CHECK that gives each
+state exactly ONE spelling:
+
+```
+is_available false, parts NULL    the whole day is off
+is_available true,  parts NULL    available all day (every pre-existing row)
+is_available true,  parts {…}     available except those windows
+```
+
+An empty array and all three windows are both rejected: the first is NULL in disguise, the
+second is the whole-day form written the long way. `lib/scheduling/part-of-day.ts` is the one
+place that resolves the three, and the windows (noon, 5pm) are resolved in
+FRICTION_TIMEZONE — "morning" is a local idea, and a UTC hour would put half the portfolio's
+afternoon jobs in the evening bucket and move the boundary twice a year.
+
+**The dangerous reader was the one that did not change.** `.eq('is_available', false)` still
+compiles and still returns rows; it now means "whole-day absences only", so a crew member who
+booked the morning off reads as fully available. The scan found **four** such readers beyond
+the one the spec anticipated:
+
+| Reader | What it does now |
+|---|---|
+| `auto-assign-turnover.ts` | resolves against the turnover's CHECKOUT time (the planned start does not exist yet at assignment time) |
+| `turnovers/actions.ts` (the PM warning) | takes full timestamps instead of dates, so a morning absence warns for a 10am checkout and not a 3pm one |
+| `turnover-board.tsx` | the assign-menu dot reads against that turnover's own checkout time and says which window clashes |
+| `crew-manage-client.tsx` | uses the shared `hasTimeOff()` predicate, so a half day is no longer "no restrictions set" |
+| `create-work-order-helpers.ts` | **unchanged, deliberately**: a work order has a date and no time, so there is no instant to resolve against, and warning on a half day would fire for an afternoon job because the morning was booked off |
+
+`unit/guardrails/availability-window-aware.test.ts` holds the line. It reads the `.select()`
+string that follows each `.from('crew_availability')` rather than scanning the file, and that
+distinction is not academic: **its first version passed its own fire check** because an
+interface declaring `unavailable_parts` and an unused import of the resolver both satisfied a
+file-wide match. The rewritten version fires on a dropped column and rejects a bare import as
+"resolving".
+
+## The crew "running late" signal
+
+`turnovers.crew_running_late_at` + `crew_running_late_by_crew_member_id`. One tap, queued
+through the existing outbox, drained to `/api/crew/turnovers/[id]/running-late`.
+
+It rides the EXISTING `turnovers` MutationTable rather than adding a new one, so it inherits
+the dead-letter banner entry and retry affordance the crew guardrails require instead of
+needing its own.
+
+**The timestamp is the CLIENT's, and that is the point.** A tap made in a basement may not
+drain for hours; stamping it server-side on arrival would tell a PM the flag was raised at
+noon when it was raised at ten. The route clamps it instead — not in the future, not older
+than 24h — which is the boundary validation CLAUDE.md asks for without throwing away the one
+fact only the device knows.
+
+Idempotent in the WHERE clause (`.is('crew_running_late_at', null)`), not just the read above
+it, so two concurrent drains produce one notification. The notification is deduped per
+turnover rather than per day: a second tap on the same job carries nothing the first did not.
+
+Not gated on the turnover having started, deliberately. The most useful moment to raise it is
+usually before anything has been ticked.
+
+## Co-assignee names
+
+`get_turnover_coassignees(uuid[])`, SECURITY DEFINER, gate derived from `auth.uid()` INSIDE
+the function. The argument only narrows.
+
+An RPC rather than a widened policy, because `turnover_assignments_select` gives a crew member
+their own rows only — so the Phase E embed cannot see a co-assignee, and `crew_members` is
+scoped to self as well, meaning a widened policy would hand over other people's planned times
+and still not resolve a name.
+
+**Fire-checked against production inside a rolled-back transaction**, which is the check my
+Phase E RPC did not get: a stranger's uuid returns 0 rows for the same argument that returns 3
+for the genuinely assigned crew member. A zero that is always zero proves nothing, so both
+halves were measured.
+
+Cached onto the turnover row as `co_assignee_names` rather than as a new synced table, which
+keeps `CREW_SYNCED_TABLES` and the sync-coverage guardrail out of it. Lookup failure is
+silent and non-fatal: a card that does not name a co-worker is a smaller loss than a sync
+that stops.
 
 ---
 

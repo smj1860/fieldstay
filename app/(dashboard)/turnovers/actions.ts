@@ -13,6 +13,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwrap'
 import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
 import type { MemberRole, TablesUpdate } from '@/types/database'
+import { isUnavailableAt } from '@/lib/scheduling/part-of-day'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -178,25 +179,59 @@ async function tryFetchAll<T>(
  * "non-blocking" means a KNOWN conflict doesn't block, never that an unknown
  * one counts as clean.
  */
+interface TimeOffRow {
+  available_date:    string
+  is_available:      boolean
+  unavailable_parts: string[] | null
+}
+
+/**
+ * WINDOW-AWARE since 20261013170000.
+ *
+ * The `.eq('is_available', false)` filter this used to carry is gone, and its
+ * absence is the point: a half-day row carries is_available = TRUE and names
+ * the windows it is off, so filtering on the boolean read a crew member who
+ * had booked the morning off as fully available and warned the PM about
+ * nothing.
+ *
+ * The CHECKOUT TIME decides, not the date, which is why the caller passes
+ * timestamps rather than `YYYY-MM-DD`: a morning absence conflicts with a 10am
+ * checkout and not with a 3pm one, and a date-granular comparison cannot tell
+ * those apart.
+ */
 async function fetchCrewTimeOff(
   supabase:     Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
   orgId:        string,
   crewMemberId: string,
-  dates:        string[],
+  checkouts:    string[],
   site:         string,
 ): Promise<{ available_date: string }[] | null> {
-  return tryFetchAll<{ available_date: string }>(
+  const dates = [...new Set(checkouts.map((iso) => iso.slice(0, 10)))]
+
+  const rows = await tryFetchAll<TimeOffRow>(
     (from, to) => supabase
       .from('crew_availability')
-      .select('available_date')
+      .select('available_date, is_available, unavailable_parts')
       .eq('org_id', orgId)
       .eq('crew_member_id', crewMemberId)
-      .eq('is_available', false)
       .in('available_date', dates)
       .order('available_date')
       .range(from, to),
     site, orgId,
   )
+
+  // null is "the read failed", which both callers surface as "we could not
+  // check" rather than as "clean". Preserved rather than collapsed to [].
+  if (rows === null) return null
+
+  const byDate = new Map(rows.map((row) => [row.available_date, row]))
+
+  return checkouts
+    .filter((iso) => {
+      const row = byDate.get(iso.slice(0, 10))
+      return row ? isUnavailableAt(row, new Date(iso)) : false
+    })
+    .map((iso) => ({ available_date: iso.slice(0, 10) }))
 }
 
 // ── Crew assignment ──────────────────────────────────────────────────────────
@@ -412,7 +447,9 @@ export async function assignCrew(
     // failed read produced zero, the PM was shown no warning at all, and the
     // crew member who booked that Saturday off got assigned it anyway. The
     // outcome now degrades to a warning that says we could not check.
-    const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
+    // Full timestamps, not dates: a half-day absence is resolved against the
+    // checkout TIME inside fetchCrewTimeOff.
+    const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime))]
     const timeOffRows = await fetchCrewTimeOff(
       supabase, membership.org_id, crewMemberId, turnoverDates,
       'serverAction.turnovers.assignCrew.timeOff',
@@ -981,7 +1018,9 @@ export async function addCrewToTurnover(
 
     // Time-off check — non-blocking (a known conflict doesn't block), but an
     // UNKNOWN one must not read as clean. See assignCrew for the full note.
-    const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
+    // Full timestamps, not dates: a half-day absence is resolved against the
+    // checkout TIME inside fetchCrewTimeOff.
+    const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime))]
     const timeOffRows = await fetchCrewTimeOff(
       supabase, membership.org_id, crewMemberId, turnoverDates,
       'serverAction.turnovers.addCrewToTurnover.timeOff',

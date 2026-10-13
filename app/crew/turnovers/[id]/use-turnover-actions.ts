@@ -7,7 +7,7 @@ import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
-  updateChecklistItem, startTurnover, completeTurnover,
+  updateChecklistItem, startTurnover, completeTurnover, flagRunningLate,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted,
   loadTurnoverInventoryCounts, saveTurnoverInventoryCounts, submitTurnoverInventoryCounts,
   type TurnoverInventoryCounts,
@@ -586,6 +586,30 @@ export function useTurnoverActions(id: string) {
   const countedTotal = inventoryItems?.length ?? 0
   const countedSoFar = (inventoryItems ?? []).filter((i) => counts?.[i.id] !== undefined).length
 
+  /**
+   * The crew member's own "running late" tap.
+   *
+   * Deliberately NOT gated on the turnover being started: the most useful
+   * moment to raise it is while still stuck in traffic, before anything has
+   * been ticked. Queued through the outbox like a checklist tick, so it
+   * survives no signal, and the route makes a second tap a no-op rather than
+   * notifying the PM twice.
+   */
+  const flagLate = async () => {
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
+    setActionError(null)
+    try {
+      await flagRunningLate(userId, id)
+    } catch (err) {
+      console.error('[Crew] flagRunningLate failed:', err)
+      reportError(err, { site: 'crew.turnovers.flagRunningLate' })
+      setActionError('Could not send that. Please check your connection and try again.')
+    }
+  }
+
   const markInProgress = async () => {
     if (isCancelled) {
       setActionError(CANCELLED_MESSAGE)
@@ -663,7 +687,7 @@ export function useTurnoverActions(id: string) {
     capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     handleCountChange, toggleChecklistConfirm, toggleInventoryConfirm,
-    getCount, countedSoFar, countedTotal, markInProgress, markComplete,
+    getCount, countedSoFar, countedTotal, markInProgress, markComplete, flagLate,
   }
 }
 

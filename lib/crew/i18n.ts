@@ -46,6 +46,9 @@ const CREW_DICT = {
   // (a property with no coordinates). "at least" is the honest framing: the
   // figure is a floor, not a total.
   dashboardTravelTimeAtLeast:     { en: 'at least', es: 'al menos' },
+  // Co-assignees on a shared turnover. "With" rather than "Also assigned":
+  // the card is read at a glance in a driveway.
+  withPrefix:                     { en: 'With', es: 'Con' },
 
   feedbackTitle:        { en: 'Send feedback', es: 'Enviar comentarios' },
   feedbackPrompt:       { en: 'What would make this app more helpful for your day-to-day work?', es: '¿Qué haría que esta app fuera más útil para tu trabajo diario?' },

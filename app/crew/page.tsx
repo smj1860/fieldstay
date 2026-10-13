@@ -6,7 +6,7 @@ import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { readSyncHealth }               from '@/lib/dexie/sync/cursors'
 
 import Link                              from 'next/link'
-import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-react'
+import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper, Users } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { useCrewT, formatActiveAssignments } from '@/lib/crew/i18n'
@@ -40,6 +40,8 @@ type TurnoverRow = {
    * "not planned yet", and the card falls back to its previous behaviour.
    */
   planned_start_at:  string | null
+  /** The OTHER crew members on this turnover, by name. Empty when it is just them. */
+  co_assignee_names: string[]
 }
 
 type PropertyRow = {
@@ -161,6 +163,19 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
         <div className="text-xs text-muted-themed flex items-center gap-1 mb-1.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">{fullAddress}</span>
+        </div>
+      )}
+
+      {/* Who else is on this job. A turnover has ONE shared status, which the
+          FAQ explains, but until now the card gave no hint that anyone else
+          was on it at all — so a crew member arriving to find the kitchen
+          already done had no way to know that was expected. */}
+      {t.co_assignee_names?.length > 0 && (
+        <div className="text-xs text-muted-themed flex items-center gap-1 mb-1.5">
+          <Users className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">
+            {translate('withPrefix')} {t.co_assignee_names.join(', ')}
+          </span>
         </div>
       )}
 

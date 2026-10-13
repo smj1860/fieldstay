@@ -1,4 +1,4 @@
-import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow } from './schema'
+import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow, type TurnoverRow } from './schema'
 import { reportError } from '@/lib/observability/report-error'
 import { enqueueMutation, enqueueMutationTx, getSyncEngine } from './syncService'
 import { invalidateCursorsFor } from './sync/cursors'
@@ -134,10 +134,15 @@ export async function confirmInventoryComplete(
   crewMemberId: string,
   confirmed:    boolean,
 ): Promise<void> {
-  const changes: Record<string, unknown> = {
+  // `satisfies`, not a Record<string, unknown> annotation: the cached turnover
+  // row now carries an ARRAY field, and Dexie's UpdateSpec types array paths
+  // as `co_assignee_names.${number}`, which a loose index signature no longer
+  // satisfies. Naming the shape keeps both this call and the outbox payload
+  // type-checked instead of widening one of them.
+  const changes = {
     inventory_confirmed_complete_at: confirmed ? new Date().toISOString() : null,
     inventory_confirmed_by_crew_id:  confirmed ? crewMemberId : '',
-  }
+  } satisfies Partial<TurnoverRow>
 
   await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', changes, (db) =>
     db.turnovers.update(turnoverId, changes),
@@ -315,6 +320,32 @@ export async function startWorkOrder(
     userId, 'crew_work_orders', workOrderId, 'PATCH',
     { status: 'in_progress' },
     (db) => db.crew_work_orders.update(workOrderId, { status: 'in_progress' }),
+  )
+}
+
+/**
+ * The crew member's "I am running late" tap.
+ *
+ * Offline-capable through the same outbox as a checklist tick, because the
+ * moment it is most worth raising is the moment a cleaner is standing in a
+ * property with one bar wondering whether to call. The local write and the
+ * outbox row commit in ONE Dexie transaction (writeAndQueue), so a PWA
+ * reclaimed between them cannot leave the button showing raised with nothing
+ * queued to send.
+ *
+ * The timestamp is the CLIENT's on purpose: a tap queued at ten and drained at
+ * noon was raised at ten, and the route clamps an implausible one rather than
+ * overwriting every one with its own clock.
+ */
+export async function flagRunningLate(
+  userId:     string,
+  turnoverId: string,
+): Promise<void> {
+  const raisedAt = new Date().toISOString()
+  await writeAndQueue(
+    userId, 'turnovers', turnoverId, 'PATCH',
+    { crew_running_late_at: raisedAt },
+    (db) => db.turnovers.update(turnoverId, { crew_running_late_at: raisedAt }),
   )
 }
 

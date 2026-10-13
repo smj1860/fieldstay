@@ -1061,6 +1061,7 @@ export type Database = {
           is_available: boolean
           notes: string | null
           org_id: string
+          unavailable_parts: string[] | null
         }
         Insert: {
           available_date: string
@@ -1070,6 +1071,7 @@ export type Database = {
           is_available?: boolean
           notes?: string | null
           org_id: string
+          unavailable_parts?: string[] | null
         }
         Update: {
           available_date?: string
@@ -1079,6 +1081,7 @@ export type Database = {
           is_available?: boolean
           notes?: string | null
           org_id?: string
+          unavailable_parts?: string[] | null
         }
         Relationships: [
           {
@@ -6042,6 +6045,8 @@ export type Database = {
           completion_notes: string | null
           created_at: string
           crew_duration_minutes: number | null
+          crew_running_late_at: string | null
+          crew_running_late_by_crew_member_id: string | null
           dates_change_acknowledged_at: string | null
           dates_changed_at: string | null
           id: string
@@ -6075,6 +6080,8 @@ export type Database = {
           completion_notes?: string | null
           created_at?: string
           crew_duration_minutes?: number | null
+          crew_running_late_at?: string | null
+          crew_running_late_by_crew_member_id?: string | null
           dates_change_acknowledged_at?: string | null
           dates_changed_at?: string | null
           id?: string
@@ -6108,6 +6115,8 @@ export type Database = {
           completion_notes?: string | null
           created_at?: string
           crew_duration_minutes?: number | null
+          crew_running_late_at?: string | null
+          crew_running_late_by_crew_member_id?: string | null
           dates_change_acknowledged_at?: string | null
           dates_changed_at?: string | null
           id?: string
@@ -6144,6 +6153,13 @@ export type Database = {
             columns: ["checklist_template_id"]
             isOneToOne: false
             referencedRelation: "checklist_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turnovers_crew_running_late_by_crew_member_id_fkey"
+            columns: ["crew_running_late_by_crew_member_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
             referencedColumns: ["id"]
           },
           {
@@ -7424,6 +7440,14 @@ export type Database = {
         }[]
       }
       get_system_health: { Args: never; Returns: Json }
+      get_turnover_coassignees: {
+        Args: { p_turnover_ids: string[] }
+        Returns: {
+          crew_member_id: string
+          crew_member_name: string
+          turnover_id: string
+        }[]
+      }
       get_user_org_ids: { Args: never; Returns: string[] }
       inventory_below_par_for_org: {
         Args: { p_org_id: string }

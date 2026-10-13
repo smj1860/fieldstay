@@ -6,6 +6,7 @@ import {
   computeWorkloadMap, computeDayWorkloadMap, computeFamiliarIds, computePriorStopOrigins,
 } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
+import { isUnavailableAt } from '@/lib/scheduling/part-of-day'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { frictionDateString } from '@/lib/friction/date'
 
@@ -42,6 +43,13 @@ interface UpcomingAssignmentRow {
 }
 
 interface PropertyCoords { lat: number | null; lng: number | null }
+
+/** The availability columns the window-aware exclusion reads. */
+interface AvailabilityRow {
+  crew_member_id:    string
+  is_available:      boolean
+  unavailable_parts: string[] | null
+}
 
 export const autoAssignTurnover = inngest.createFunction(
   {
@@ -166,20 +174,33 @@ export const autoAssignTurnover = inngest.createFunction(
       // Exclude crew who've marked themselves unavailable for the turnover's
       // date — there's no human in the loop here to override a bad auto-pick,
       // so this is a hard exclusion rather than a score penalty.
+      //
+      // WINDOW-AWARE since 20261013170000. The `.eq('is_available', false)`
+      // filter is gone on purpose: a half-day row carries is_available = true
+      // and names the windows it is off, so filtering on the boolean would
+      // read a morning-off row as fully available and auto-assign the 10am
+      // checkout it exists to prevent. The three states are decided in one
+      // place by isUnavailableAt() rather than re-derived here.
       const checkoutDate = checkout_datetime.split('T')[0]
       const timeOffRes = await supabase
         .from('crew_availability')
-        .select('crew_member_id')
+        .select('crew_member_id, is_available, unavailable_parts')
         .eq('org_id', org_id)
         .eq('available_date', checkoutDate)
-        .eq('is_available', false)
         .in('crew_member_id', eligibleCrew.map((c) => c.id))
         // Bounded: at most one row per crew member per date.
         .limit(eligibleCrew.length)
 
-      const timeOff = unwrapList(timeOffRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
+      const timeOff = unwrapList<AvailabilityRow>(timeOffRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
 
-      const unavailableIds = new Set(timeOff.map((t) => t.crew_member_id))
+      // Measured at the CHECKOUT time, which is when the work can start. The
+      // planned start from Phase E would be a better instant, but it does not
+      // exist yet at assignment time: the planner runs over assignments that
+      // have already been made.
+      const startsAt = new Date(checkout_datetime)
+      const unavailableIds = new Set(
+        timeOff.filter((row) => isUnavailableAt(row, startsAt)).map((t) => t.crew_member_id),
+      )
       const availableCrew  = eligibleCrew.filter((c) => !unavailableIds.has(c.id))
 
       // Previously `return null`, i.e. silence. An org whose whole eligible

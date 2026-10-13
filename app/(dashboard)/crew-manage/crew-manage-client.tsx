@@ -4,6 +4,7 @@ import { useState, useTransition, useActionState, useRef, useEffect } from 'reac
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
+import { hasTimeOff } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -306,7 +307,7 @@ function CrewCardModal({
           <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
             <span className="text-muted-themed">Availability</span>
             {(() => {
-              const nextOff = availability.filter((r) => !r.is_available)[0]?.available_date ?? null
+              const nextOff = availability.filter(hasTimeOff)[0]?.available_date ?? null
               if (!nextOff) {
                 return (
                   <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
@@ -404,7 +405,7 @@ function CrewCardModal({
 
             {/* Active crew member */}
             {!!member.user_id && (() => {
-              const unavailable = availability.filter((r) => !r.is_available)
+              const unavailable = availability.filter(hasTimeOff)
 
               if (unavailable.length === 0) {
                 return (

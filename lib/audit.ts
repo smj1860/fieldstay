@@ -158,6 +158,11 @@ export type AuditAction =
   | 'inventory.count_committed'
   | 'turnover.completed'
   | 'turnover.started'
+  // The crew member's own "I am running late" tap (Phase H). Audited because
+  // it is the one turnover signal raised by the person doing the work rather
+  // than inferred, and a PM reconstructing a bad day needs to know it was
+  // said at the time, not worked out afterwards.
+  | 'turnover.crew_running_late'
   | 'billing.repuguard_subscription.updated'
   | 'billing.plan_credit.applied'
   | 'work_order.invoice.checkout_started'

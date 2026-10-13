@@ -3,6 +3,7 @@
 import { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { saveCrewAvailability } from '@/app/crew/availability/actions'
+import type { PartOfDay } from '@/lib/scheduling/part-of-day'
 import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -26,8 +27,35 @@ export type AvailRow = {
   id:             string
   available_date: string
   is_available:   boolean
+  /**
+   * Windows this crew member is off, when the day is only partly off. NULL on
+   * a whole-day row, which is_available already describes. See
+   * lib/scheduling/part-of-day.ts for the three states.
+   */
+  unavailable_parts: PartOfDay[] | null
   notes:          string | null
 }
+
+/**
+ * Chip styling. CSS variables only, per CLAUDE.md — a Tailwind colour utility
+ * here would be a hardcoded hex under another name.
+ */
+function partChipClass(selected: boolean): string {
+  return [
+    'text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors',
+    'min-h-8 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]',
+    selected
+      ? 'border-[var(--accent-amber)] text-[var(--accent-amber)] bg-[var(--accent-amber-dim)]'
+      : 'border-[var(--border)] text-secondary-themed',
+  ].join(' ')
+}
+
+/** The chips, in the order a day runs. */
+const PART_LABELS: { value: PartOfDay; label: string }[] = [
+  { value: 'morning',   label: 'Morning' },
+  { value: 'afternoon', label: 'Afternoon' },
+  { value: 'evening',   label: 'Evening' },
+]
 
 /**
  * Rows come from the server (app/crew/availability/page.tsx), not the Dexie
@@ -79,7 +107,10 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
 
   // Local draft state — what the crew member has selected but not yet saved
   // Key: YYYY-MM-DD, Value: { timeOff: boolean, note: string }
-  const [draft, setDraft] = useState<Record<string, { timeOff: boolean; note: string }>>({})
+  // `parts` empty means the WHOLE day, which is what tapping a day gives you.
+  // Picking chips narrows it; picking all three is normalised back to a whole
+  // day by the server action, so the two spellings cannot both reach the row.
+  const [draft, setDraft] = useState<Record<string, { timeOff: boolean; note: string; parts: PartOfDay[] }>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
@@ -124,8 +155,39 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
         [dateStr]: {
           timeOff: !dbIsTimeOff,
           note:    existing?.notes ?? '',
+          parts:   existing?.unavailable_parts ?? [],
         },
       }
+    })
+  }
+
+  /**
+   * Seeds a draft entry for a day that only exists in the database so far.
+   *
+   * Without this, changing the windows on an untouched day would write a
+   * draft with no `timeOff`, and the save loop would read it as "mark this day
+   * available" — the opposite of what the crew member just tapped.
+   */
+  const withDraft = (
+    prev:    Record<string, { timeOff: boolean; note: string; parts: PartOfDay[] }>,
+    dateStr: string,
+  ) => prev[dateStr] ?? {
+    timeOff: true,
+    note:    existingMap.get(dateStr)?.notes ?? '',
+    parts:   existingMap.get(dateStr)?.unavailable_parts ?? [],
+  }
+
+  const setDayParts = (dateStr: string, parts: PartOfDay[]) => {
+    setDraft(prev => ({ ...prev, [dateStr]: { ...withDraft(prev, dateStr), parts } }))
+  }
+
+  const togglePart = (dateStr: string, part: PartOfDay) => {
+    setDraft(prev => {
+      const current = withDraft(prev, dateStr)
+      const parts = current.parts.includes(part)
+        ? current.parts.filter((p) => p !== part)
+        : [...current.parts, part]
+      return { ...prev, [dateStr]: { ...current, parts } }
     })
   }
 
@@ -149,6 +211,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
           date:        dateStr,
           isAvailable: !change.timeOff,
           notes:       change.note || null,
+          parts:       change.parts,
         })
         // Stop on the first failure rather than pressing on: the days that did
         // save are already committed, and clearing the draft would hide the
@@ -179,6 +242,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
         date:        row.available_date,
         isAvailable: true,
         notes:       null,
+        parts:       null,
       })
       if (error) {
         setCancelError(error)
@@ -247,7 +311,8 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
             ? !existing.is_available
             : false
 
-          const noteValue = draftItem?.note ?? existing?.notes ?? ''
+          const noteValue  = draftItem?.note ?? existing?.notes ?? ''
+          const partsValue = draftItem?.parts ?? existing?.unavailable_parts ?? []
           const isInDraft = !!draftItem
 
           return (
@@ -276,6 +341,32 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
                 </span>
               </button>
 
+              {/* Which part of the day, when only part of it is off. No chip
+                  selected means the whole day, which is what tapping the day
+                  already said, so the default needs no extra tap. */}
+              {isTimeOff && (
+                <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-themed">Off for:</span>
+                  <button
+                    type="button"
+                    onClick={() => setDayParts(dateStr, [])}
+                    className={partChipClass(partsValue.length === 0)}
+                  >
+                    All day
+                  </button>
+                  {PART_LABELS.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => togglePart(dateStr, value)}
+                      className={partChipClass(partsValue.includes(value))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Note input — only visible when time off is toggled */}
               {isTimeOff && (
                 <div className="px-4 pb-3">
@@ -289,7 +380,11 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
                       if (!isInDraft) {
                         setDraft(prev => ({
                           ...prev,
-                          [dateStr]: { timeOff: true, note: e.target.value },
+                          [dateStr]: {
+                            timeOff: true,
+                            note:    e.target.value,
+                            parts:   existing?.unavailable_parts ?? [],
+                          },
                         }))
                       } else {
                         updateNote(dateStr, e.target.value)

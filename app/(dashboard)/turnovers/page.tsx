@@ -135,7 +135,7 @@ export default async function TurnoversPage() {
         .order('name').order('id', { ascending: true }).range(from, to)),
 
       drainBoard('crew_availability', (from, to) => supabase
-        .from('crew_availability').select('id, crew_member_id, available_date, is_available')
+        .from('crew_availability').select('id, crew_member_id, available_date, is_available, unavailable_parts')
         .eq('org_id', membership.org_id)
         .gte('available_date', rangeStart).lte('available_date', rangeEnd)
         .order('id', { ascending: true }).range(from, to)),

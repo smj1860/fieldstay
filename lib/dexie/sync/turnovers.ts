@@ -81,7 +81,8 @@ function scopeHorizonIso(now: number = Date.now()): string {
 const TURNOVER_COLUMNS =
   'id, property_id, org_id, prev_booking_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
   'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes, ' +
-  'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at, updated_at, ' +
+  'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at, ' +
+  'crew_running_late_at, updated_at, ' +
   'turnover_assignments ( planned_start_at, planned_end_at, plan_published_at )'
 
 interface EmbeddedPlan {
@@ -246,6 +247,55 @@ async function reconcileRemovedTurnovers(
  * (or when no cursor exists yet), delta pull for known ids. Null on failure
  * so the caller bails without advancing the cursor.
  */
+/**
+ * Who else is on each turnover, by name.
+ *
+ * NOT a table pull, and that is the point. turnover_assignments_select gives a
+ * crew member their OWN assignment rows and nothing else, so the embed that
+ * carries their planned time cannot see a co-assignee, and crew_members is
+ * scoped to self as well. get_turnover_coassignees (20261013170000) is a
+ * SECURITY DEFINER function whose gate is derived from auth.uid() rather than
+ * from its argument: it returns names only for turnovers the caller is
+ * genuinely assigned to, and the id list only narrows that set.
+ *
+ * Failure is SILENT and non-fatal on purpose. A card that does not name a
+ * co-worker is a smaller loss than a sync that stops, and the names are
+ * decoration on top of the job itself.
+ */
+async function fetchCoAssigneeNames(
+  supabase:     DexieSupabaseClient,
+  turnoverIds:  string[],
+  crewMemberId: string,
+): Promise<Map<string, string[]>> {
+  const byTurnover = new Map<string, string[]>()
+  if (!turnoverIds.length) return byTurnover
+
+  const rows = await fetchInChunks<string, { turnover_id: string; crew_member_id: string; crew_member_name: string | null }>(
+    turnoverIds,
+    (chunk) => supabase.rpc('get_turnover_coassignees', { p_turnover_ids: chunk }),
+  )
+
+  if (rows === null) {
+    console.warn('[turnoverSync] co-assignee lookup failed; cards will not name co-workers')
+    return byTurnover
+  }
+
+  for (const row of rows) {
+    // Self is excluded here rather than in SQL: the function answers "who is
+    // on this turnover", and a caller that wanted the full roster should not
+    // have to re-add themselves.
+    if (row.crew_member_id === crewMemberId) continue
+    const name = row.crew_member_name?.trim()
+    if (!name) continue
+
+    const list = byTurnover.get(row.turnover_id)
+    if (list) list.push(name)
+    else byTurnover.set(row.turnover_id, [name])
+  }
+
+  return byTurnover
+}
+
 async function fetchTurnoverRows(
   supabase: DexieSupabaseClient,
   assignedIds: string[],
@@ -387,7 +437,12 @@ export async function syncAssignedTurnovers(
   if (fetched === null) return
 
   if (fetched.length) {
-    await bulkPutShadowed(db.turnovers, userId, 'turnovers', normalizeTurnovers(fetched))
+    const rows = normalizeTurnovers(fetched)
+    const coAssignees = await fetchCoAssigneeNames(supabase, rows.map((r) => r.id), crewMemberId)
+    await bulkPutShadowed(db.turnovers, userId, 'turnovers', rows.map((row) => ({
+      ...row,
+      co_assignee_names: coAssignees.get(row.id) ?? [],
+    })))
   }
   await advanceCursor(userId, 'cursor:turnovers', fetched as { updated_at?: string | null }[])
 

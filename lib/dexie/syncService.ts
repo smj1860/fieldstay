@@ -617,30 +617,67 @@ function turnoverFieldUpdate(payload: MutationPayload): MutationPayload {
   return fieldUpdate
 }
 
+interface RoutedTurnoverWrite {
+  path:    string
+  failure: string
+  body?:   Record<string, unknown>
+}
+
+/**
+ * The turnover writes that must go through a Route Handler rather than a
+ * direct table write, because each has a server-side effect the crew client
+ * cannot perform:
+ *   complete      → the turnover/completed pipeline (cleaning fee, PM
+ *                   notification, crew-duration tracking)
+ *   start         → started_at stamped by the server clock, not the device's
+ *   running-late  → the PM notification
+ *
+ * Returned as data rather than branched inline so uploadTurnoverChange stays
+ * under the cognitive-complexity ceiling as routed writes are added — this is
+ * the third.
+ */
+function routedTurnoverWrite(payload: MutationPayload): RoutedTurnoverWrite | null {
+  if (payload.status === 'completed') {
+    return { path: 'complete', failure: 'Failed to complete turnover' }
+  }
+  if (payload.status === 'in_progress') {
+    return { path: 'start', failure: 'Failed to start turnover' }
+  }
+  if ('crew_running_late_at' in payload) {
+    // The timestamp travels in the BODY rather than being re-derived
+    // server-side, so a tap queued offline keeps the time it was raised
+    // instead of the time it happened to drain.
+    return {
+      path:    'running-late',
+      failure: 'Failed to flag turnover as running late',
+      body:    { crew_running_late_at: payload.crew_running_late_at },
+    }
+  }
+  return null
+}
+
+async function postCrewTurnoverRoute(
+  targetId: string,
+  routed:   RoutedTurnoverWrite,
+): Promise<void> {
+  const res = await fetch(`/api/crew/turnovers/${targetId}/${routed.path}`, {
+    method: 'POST',
+    ...(routed.body
+      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(routed.body) }
+      : {}),
+    signal: AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new UploadHttpError(`${routed.failure} ${targetId}`, res.status)
+}
+
 async function uploadTurnoverChange(
   supabase: DexieSupabaseClient,
   targetId: string,
   payload: MutationPayload,
 ): Promise<void> {
-  if (payload.status === 'completed') {
-    // Routed through a Server Route Handler (not a direct table write) so
-    // the turnover/completed pipeline (cleaning-fee posting, PM
-    // notification, crew-duration tracking) fires for crew completions.
-    const res = await fetch(`/api/crew/turnovers/${targetId}/complete`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
-    })
-    if (!res.ok) throw new UploadHttpError(`Failed to complete turnover ${targetId}`, res.status)
-    return
-  }
-  if (payload.status === 'in_progress') {
-    // Routed through a Server Route Handler so started_at is set
-    // authoritatively by the server, not the client clock.
-    const res = await fetch(`/api/crew/turnovers/${targetId}/start`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
-    })
-    if (!res.ok) throw new UploadHttpError(`Failed to start turnover ${targetId}`, res.status)
+  const routed = routedTurnoverWrite(payload)
+  if (routed) {
+    await postCrewTurnoverRoute(targetId, routed)
     return
   }
 

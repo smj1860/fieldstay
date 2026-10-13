@@ -678,6 +678,18 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
           'FieldStay works out what time each crew member should start each job on a given date, in order, from the property\'s checkout time, the job before it, the drive between them, and that crew member\'s own average pace. It recomputes overnight and again whenever you change who is assigned to that date. Crew see nothing until you press "Publish to crew" in the Day plan bar at the top of the Turnovers board, because a start time is an obligation and one sent with no human in between would make a crew member late against a number nobody agreed to. Published times appear on the crew card as "Start 10:40" alongside "Free from 10:00", the checkout time it is derived from. You can withdraw a published day at any time, which returns their cards to showing the checkout time alone. Missing a planned start does not affect anyone\'s reliability score: late is still measured against the guest\'s check-in time.',
       },
       {
+        id:       'crew-half-day-off',
+        question: 'Can a crew member take just a morning off?',
+        answer:
+          'Yes. In the crew app under Time Off, tapping a day marks the whole day, and three chips narrow it to Morning, Afternoon or Evening. The windows are fixed rather than free start and end times: morning until noon, afternoon until 5pm, evening after that, in your local time. FieldStay will not auto-assign or suggest that person for a turnover whose checkout falls in a window they marked off, and will still consider them for the rest of the day. On the Turnovers board, the dot beside a name in the assign menu reads against that turnover\'s own checkout time, so a morning absence shows as a conflict for a 10am checkout and not for a 3pm one. Two places stay whole-day on purpose: Manage Crew lists upcoming time off without splitting it by window, since it is a roster summary, and work orders carry a date with no time, so only a whole-day absence warns there. None of it blocks you, since assigning by hand past someone\'s time off still works with a warning.',
+      },
+      {
+        id:       'crew-running-late-signal',
+        question: 'Can crew tell me they are running late before the checklist shows it?',
+        answer:
+          'Yes. Their turnover screen carries one button, "I am running late", and one tap sends you a notification naming the property. The button then reads "Your manager has been told", and a second tap does nothing. It works offline: the tap queues on the device like a checklist tick and sends when signal returns, keeping the time it was raised rather than the time it arrived, so a flag raised at 10am in a basement still reads 10am when it reaches you at noon. This is the counterpart to the automatic running-late alert, which infers that a job is behind from the checklist. This one is the person saying so, usually earlier, and for reasons no checklist can see: traffic, a guest who has not left, a key that is not where it should be.',
+      },
+      {
         id:       'crew-travel-time',
         question: 'Are the travel times real driving routes, and why do some say "at least"?',
         answer:

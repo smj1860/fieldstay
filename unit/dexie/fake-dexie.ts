@@ -163,5 +163,19 @@ export function makeFakeSupabase(queued: Record<string, { data?: unknown; error?
     return chain
   }
 
-  return { from, calls }
+  /**
+   * The co-assignee lookup (Phase H) is an RPC, not a table read, because
+   * turnover_assignments' RLS hides other people's rows from a crew member.
+   * Queued under the function name so a test can hand it rows the same way it
+   * hands a table rows; the default is empty, which is the shape of a solo
+   * turnover and keeps every existing test's expectations intact.
+   */
+  const rpc = (fn: string, args: unknown) => {
+    calls.push({ table: fn, method: 'rpc', args: [args] })
+    const idx = counters[fn] ?? 0
+    counters[fn] = idx + 1
+    return Promise.resolve(queued[fn]?.[idx] ?? { data: [], error: null })
+  }
+
+  return { from, rpc, calls }
 }

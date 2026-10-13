@@ -653,6 +653,26 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: 'No pasa nada con tu historial. La hora de inicio planificada es un plan, no un plazo, y no forma parte de cómo se evalúa tu trabajo. Lo que importa es terminar antes de que llegue el siguiente huésped, que es la hora de entrada. Si algo va a hacer eso imposible, envía un mensaje a tu gerente en vez de apurarte: prefieren saberlo a las 11am que enterarse a las 3pm.',
     },
   },
+  halfDayOff: {
+    q: {
+      en: 'Can I take just part of a day off instead of the whole day?',
+      es: '¿Puedo tomar solo una parte del día libre en vez del día completo?',
+    },
+    a: {
+      en: 'Yes. Under Time Off, tap the day and then pick Morning, Afternoon or Evening. Morning runs until noon, afternoon until 5pm, and evening is after that. Your manager will not be offered you for a job that starts inside a window you marked off, and you stay available for the rest of the day. Leave all three unpicked and the whole day is off, which is what tapping the day already means.',
+      es: 'Sí. En Tiempo libre, toca el día y luego elige Mañana, Tarde o Noche. La mañana va hasta el mediodía, la tarde hasta las 5pm, y la noche es después de eso. A tu gerente no se le ofrecerá asignarte un trabajo que empiece dentro de una franja que marcaste, y sigues disponible el resto del día. Si no eliges ninguna de las tres, el día completo queda libre, que es lo que ya significa tocar el día.',
+    },
+  },
+  runningLate: {
+    q: {
+      en: 'What does the "I am running late" button do?',
+      es: '¿Qué hace el botón "Voy retrasado"?',
+    },
+    a: {
+      en: 'It tells your manager right away, naming the property, so they can decide whether to move your next job or warn the guest. One tap is enough: the button then says they have been told, and tapping again changes nothing. It works with no signal too. The message waits on your phone and sends when you are back in range, and it keeps the time you tapped it rather than the time it went through. Use it as soon as you know, not once you are already behind.',
+      es: 'Le avisa a tu gerente de inmediato, nombrando la propiedad, para que decida si mueve tu siguiente trabajo o le avisa al huésped. Con un toque basta: el botón luego dice que ya les avisaron, y tocarlo otra vez no cambia nada. También funciona sin señal. El mensaje espera en tu teléfono y se envía cuando vuelves a tener cobertura, y conserva la hora en que lo tocaste, no la hora en que se envió. Úsalo apenas lo sepas, no cuando ya estés atrasado.',
+    },
+  },
   travelTime: {
     q: {
       en: 'What does the travel time at the top of my list mean?',

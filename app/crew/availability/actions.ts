@@ -6,6 +6,7 @@ import { reportError } from '@/lib/observability/report-error'
 // From ./window.ts, not declared here: this file is `'use server'`, and a
 // Server Actions module may only export async functions.
 import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './window'
+import { isPartOfDay, PART_OF_DAY_VALUES, type PartOfDay } from '@/lib/scheduling/part-of-day'
 
 /**
  * Time-off is deliberately NOT offline-capable.
@@ -75,11 +76,43 @@ function invalidDateReason(date: string): string | null {
   return null
 }
 
+/**
+ * Normalises a part-of-day selection into the one spelling the database
+ * accepts, at the boundary rather than trusting the client.
+ *
+ * Three things happen here and each has a reason:
+ *  - available days carry no windows at all, so a stale selection on a day the
+ *    crew member un-marked cannot survive as a half-day row;
+ *  - unknown strings are dropped rather than rejected, since the only source
+ *    is our own three chips and a 500 for a typo helps nobody;
+ *  - ALL THREE windows become a whole-day request, which is the same thing
+ *    said the long way. The CHECK constraint refuses that spelling, so
+ *    normalising here is the difference between a kind result and an error
+ *    message for a selection that meant exactly what it looked like.
+ */
+function normaliseParts(
+  isAvailable: boolean,
+  parts:       readonly string[] | null | undefined,
+): { isAvailable: boolean; unavailableParts: PartOfDay[] | null } {
+  if (isAvailable) return { isAvailable: true, unavailableParts: null }
+
+  const chosen = [...new Set((parts ?? []).filter(isPartOfDay))]
+  if (chosen.length === 0 || chosen.length === PART_OF_DAY_VALUES.length) {
+    return { isAvailable: false, unavailableParts: null }
+  }
+
+  // is_available stays TRUE on a partial row: the day IS workable, just not in
+  // those windows. The CHECK enforces the same pairing from the other side.
+  return { isAvailable: true, unavailableParts: chosen }
+}
+
 export async function saveCrewAvailability(input: {
   id?:         string
   date:        string
   isAvailable: boolean
   notes:       string | null
+  /** Windows the crew member is off, when isAvailable is false. */
+  parts?:      readonly string[] | null
 }): Promise<{ error?: string }> {
   const auth = await requireCrewMember()
   if (!auth.ok) return { error: 'Could not verify your crew profile. Please reload and try again.' }
@@ -93,6 +126,7 @@ export async function saveCrewAvailability(input: {
     return { error: `Please keep the reason under ${MAX_NOTE_LENGTH} characters.` }
   }
   const notes = trimmed ? trimmed : null
+  const { isAvailable, unavailableParts } = normaliseParts(input.isAvailable, input.parts)
 
   try {
     if (input.id) {
@@ -100,7 +134,7 @@ export async function saveCrewAvailability(input: {
       // nothing on its own.
       const { data, error } = await supabase
         .from('crew_availability')
-        .update({ is_available: input.isAvailable, notes })
+        .update({ is_available: isAvailable, unavailable_parts: unavailableParts, notes })
         .eq('id', input.id)
         .eq('crew_member_id', crew.id)
         .select('id')
@@ -116,7 +150,8 @@ export async function saveCrewAvailability(input: {
             org_id:         crew.org_id,
             crew_member_id: crew.id,
             available_date: input.date,
-            is_available:   input.isAvailable,
+            is_available:   isAvailable,
+            unavailable_parts: unavailableParts,
             notes,
           },
           { onConflict: 'crew_member_id,available_date' },

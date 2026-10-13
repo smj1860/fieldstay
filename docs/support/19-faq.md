@@ -183,6 +183,26 @@ No. Late is still measured against the guest: a turnover is late when it is comp
 
 ---
 
+## Can a crew member take just a morning off?
+
+Yes. In the crew app under Time Off, tapping a day marks the whole day, and three chips narrow it to Morning, Afternoon or Evening.
+
+The windows are fixed: morning until noon, afternoon until 5pm, evening after that, in your local time. FieldStay will not auto-assign or suggest that person for a turnover whose checkout falls in a window they marked off, and will still consider them for the rest of the day.
+
+Two things stay whole-day on purpose. Manage Crew lists upcoming time off without splitting it by window, because it is a roster summary. Work orders carry a date and no time, so there is no hour to compare against, and only a whole-day absence raises a warning there.
+
+---
+
+## A crew member tapped "I am running late". What happens?
+
+You get one notification naming the property, immediately. The button then reads "Your manager has been told", and a second tap does nothing.
+
+It works with no signal: the tap queues on the device and sends when the phone reconnects, keeping the time it was raised rather than the time it arrived. So a flag raised at 10am in a basement still reads 10am when it reaches you.
+
+It is the counterpart to the automatic running-late alert, which works out that a job is behind from the checklist. This one is the person saying so, usually earlier, and for reasons the checklist cannot see.
+
+---
+
 ## Why does a travel time say "at least"?
 
 Because part of that day could not be measured. A drive needs both ends on the map, and a property with no geocodable address gives FieldStay nothing to measure from or to.
