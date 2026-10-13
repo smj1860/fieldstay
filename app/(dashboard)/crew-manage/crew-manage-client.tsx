@@ -307,7 +307,10 @@ function CrewCardModal({
           <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
             <span className="text-muted-themed">Availability</span>
             {(() => {
-              const nextOff = availability.filter(hasTimeOff)[0]?.available_date ?? null
+              // .find, not .filter(...)[0]: the rows are already sorted by date,
+              // so this wants the FIRST match, not every match discarded down
+              // to one.
+              const nextOff = availability.find(hasTimeOff)?.available_date ?? null
               if (!nextOff) {
                 return (
                   <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
