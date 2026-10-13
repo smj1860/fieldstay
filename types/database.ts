@@ -2584,6 +2584,7 @@ export interface HandWrittenRowMap {
   prospect_imports:                    ProspectImport
   prospect_contacts:                   ProspectContact
   str_prospects:                       StrProspect
+  travel_time_cache:                   TravelTimeCache
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
