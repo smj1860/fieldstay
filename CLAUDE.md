@@ -378,6 +378,16 @@ checkout-started` event, the tagging call in `createCheckoutSession`, the
 settings price-lock badge, the `billing.hospitable_price_lock.awarded` audit
 action, the help doc, and both price-lock promises on `/hospitable`.
 
+**The schema went too** (`20261013200000_drop_hospitable_launch_promo.sql`):
+both tables (`hospitable_launch_promo`, `promo_hospitable_launch_counter`) and
+all three functions, two of which were SECURITY DEFINER. A privileged function
+nothing calls is the shape the authz-gate work exists to keep out of the
+schema, so leaving those behind would have been the worse half of the cleanup.
+`promo_hospitable_launch_counter` left `SERVICE_ROLE_ONLY_TABLES` in
+`scripts/check-db-invariants.mjs` in the same change: that registry fails CI on
+a STALE entry as well as a missing one, so the drop and the shrink cannot be
+split across commits.
+
 **It never awarded a single lock.** Production at removal: 0 enrolled rows, 0
 tagged, 0 converted, 0 locks, both tier counters at 0, since launch on
 2026-07-30. That is what made the removal safe to do in one step — there was

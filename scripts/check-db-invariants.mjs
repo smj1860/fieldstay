@@ -167,11 +167,6 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
   // resolveHospitableOwner() via service role. See
   // supabase/migrations/20260728120000_integration_entity_owners.sql.
   'integration_entity_owners',
-  // Hospitable launch promo singleton counter — RLS with zero policies, all
-  // writes via the SECURITY DEFINER claim/tag functions (service_role only).
-  // See supabase/migrations/20260727150000_hospitable_launch_promo.sql,
-  // applied to production + E2E on 2026-07-30.
-  'promo_hospitable_launch_counter',
   // The five below had member-facing policies and no `authenticated` GRANT
   // (2026-07-30 pre-launch audit, H1). Every call site against them uses
   // createServiceClient(), so the policies were dead code that would have
