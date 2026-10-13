@@ -109,7 +109,15 @@ function makeServer(server: Server) {
     return chain
   }
 
-  return { client: { from } as unknown as DexieSupabaseClient, queryLog }
+  // The co-assignee lookup (Phase H) is an RPC rather than a table read,
+  // because turnover_assignments' RLS hides other people's rows from a crew
+  // member. This fixture has one crew member per turnover, so the honest
+  // answer is empty — modelled explicitly rather than left undefined, since a
+  // client with no .rpc would fail these tests for a reason that has nothing
+  // to do with retention.
+  const rpc = () => Promise.resolve({ data: [], error: null })
+
+  return { client: { from, rpc } as unknown as DexieSupabaseClient, queryLog }
 }
 
 // ── Fixture: 10 turnovers, 8 completed + 2 active, 57 items each ────────────

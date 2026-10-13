@@ -51,6 +51,20 @@ export interface TurnoverRow {
    */
   planned_start_at:             string | null
   planned_end_at:               string | null
+  /**
+   * This crew member's own "running late" tap (Phase H). Set optimistically
+   * on the device and confirmed by the server, so the button can show its
+   * raised state offline. Non-indexed, so no Dexie version bump.
+   */
+  crew_running_late_at:         string | null
+  /**
+   * The OTHER crew members on this turnover, by name (Phase H). Empty when
+   * nobody else is assigned. Resolved through the get_turnover_coassignees
+   * RPC at sync time rather than from a cached table — see
+   * lib/dexie/sync/turnovers.ts for why RLS makes a plain embed impossible.
+   * Non-indexed, so no Dexie version bump.
+   */
+  co_assignee_names:            string[]
   dates_changed_at:             string | null
   dates_change_acknowledged_at: string | null
 }

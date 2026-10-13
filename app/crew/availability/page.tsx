@@ -1,7 +1,8 @@
 import { unwrap } from '@/lib/supabase/unwrap'
 import { redirect }        from 'next/navigation'
 import { createClient }    from '@/lib/supabase/server'
-import { TimeOffRequest }  from '@/components/crew/time-off-request'
+import { TimeOffRequest, type AvailRow } from '@/components/crew/time-off-request'
+import { isPartOfDay } from '@/lib/scheduling/part-of-day'
 
 /**
  * Time off is an online-only screen — see ./actions.ts for why. Rows are read
@@ -54,7 +55,7 @@ export default async function CrewAvailabilityPage() {
   // PostgREST's max_rows would decide the cutoff silently.
   const availabilityRes = await supabase
     .from('crew_availability')
-    .select('id, available_date, is_available, notes')
+    .select('id, available_date, is_available, unavailable_parts, notes')
     .eq('crew_member_id', crewMember.id as string)
     .gte('available_date', from)
     .lte('available_date', to)
@@ -66,9 +67,19 @@ export default async function CrewAvailabilityPage() {
     orgId: crewMember.org_id as string,
   })
 
+  // `unavailable_parts` is a Postgres text[], so it arrives typed as string[].
+  // The CHECK constraint guarantees every element is one of the three windows,
+  // but the TYPE cannot say so — narrowed here at the boundary rather than
+  // asserted, which is also what keeps a row written before the constraint
+  // existed from reaching the component as a bad value.
+  const rows: AvailRow[] = (availability ?? []).map((row) => ({
+    ...row,
+    unavailable_parts: row.unavailable_parts?.filter(isPartOfDay) ?? null,
+  }))
+
   return (
     <div className="px-4 pt-4 pb-24">
-      <TimeOffRequest rows={availability ?? []} />
+      <TimeOffRequest rows={rows} />
     </div>
   )
 }

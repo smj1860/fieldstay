@@ -6,6 +6,7 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { isThumbtackConfigured } from '@/lib/integrations/thumbtack'
 import { CategoryPickerFindProSection } from '@/components/thumbtack/CategoryPickerFindProSection'
+import { isPartOfDay } from '@/lib/scheduling/part-of-day'
 
 const CREW_ROLE_OPTIONS = [
   { value: 'cleaning' as const,    label: 'Cleaning' },
@@ -15,6 +16,15 @@ const CREW_ROLE_OPTIONS = [
 ]
 
 export const metadata: Metadata = { title: 'Crew' }
+
+/** The availability columns as PostgREST returns them, before narrowing. */
+interface RawAvailabilityRow {
+  crew_member_id:    string
+  available_date:    string
+  is_available:      boolean
+  unavailable_parts: string[] | null
+  notes:             string | null
+}
 
 export default async function CrewManagePage() {
   const { supabase, membership } = await requireOrgMember()
@@ -64,10 +74,10 @@ export default async function CrewManagePage() {
   //
   // fetchAllRows throws on error, landing in the same error.tsx that
   // throwIfAnyQueryFailed routes this page's other failure to.
-  const availabilityRows = await fetchAllRows<CrewAvailabilityEntry & { crew_member_id: string }>(
+  const availabilityRows = await fetchAllRows<RawAvailabilityRow>(
     (from, to) => supabase
       .from('crew_availability')
-      .select('crew_member_id, available_date, is_available, notes')
+      .select('crew_member_id, available_date, is_available, unavailable_parts, notes')
       .eq('org_id', membership.org_id)
       .gte('available_date', rangeStart)
       .lte('available_date', rangeEnd)
@@ -83,9 +93,14 @@ export default async function CrewManagePage() {
     const key = row.crew_member_id as string
     if (!availabilityMap[key]) availabilityMap[key] = []
     availabilityMap[key]!.push({
-      available_date: row.available_date as string,
-      is_available:   row.is_available   as boolean,
-      notes:          row.notes          as string | null,
+      available_date: row.available_date,
+      is_available:   row.is_available,
+      // Narrowed, not asserted. unavailable_parts is a Postgres text[], so it
+      // arrives as string[]; the CHECK constraint guarantees the contents but
+      // the type cannot say so, and a row written before that constraint
+      // existed would otherwise reach the component as a bad value.
+      unavailable_parts: row.unavailable_parts?.filter(isPartOfDay) ?? null,
+      notes:          row.notes,
     })
   }
 

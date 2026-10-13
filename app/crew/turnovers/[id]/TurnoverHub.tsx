@@ -1,5 +1,5 @@
 'use client'
-import { Loader2, ChevronRight, CheckSquare, Package, StickyNote, Check } from 'lucide-react'
+import { Loader2, ChevronRight, CheckSquare, Package, StickyNote, Check, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import type { TurnoverRow } from '@/lib/dexie/schema'
 import type { TurnoverActions } from './use-turnover-actions'
@@ -30,7 +30,12 @@ export function TurnoverHub({
   onOpenSummary:         () => void
   onMarkCompleteSuccess: () => void
 }>) {
-  const { completedCount, totalCount, inventoryItems, actionError, completing, markInProgress, markComplete, isCancelled } = actions
+  const {
+    completedCount, totalCount, inventoryItems, actionError, completing,
+    markInProgress, markComplete, flagLate, isCancelled,
+  } = actions
+
+  const alreadyFlaggedLate = Boolean(turnover.crew_running_late_at)
 
   return (
     <div className="space-y-3 mt-4">
@@ -68,6 +73,23 @@ export function TurnoverHub({
       {turnover.status === 'assigned' && !isCancelled && (
         <Button variant="secondary" onClick={() => void markInProgress()} className="w-full py-4 text-base">
           Start Turnover
+        </Button>
+      )}
+
+      {/* Running late. Not gated on the turnover having started: the moment
+          worth raising it is usually before anything has been ticked, stuck in
+          traffic or waiting on a guest who has not left. One tap, and a
+          second one is a no-op rather than a second notification. */}
+      {!isCancelled && (
+        <Button
+          variant={alreadyFlaggedLate ? 'ghost' : 'secondary'}
+          onClick={() => void flagLate()}
+          disabled={alreadyFlaggedLate}
+          className="w-full py-4 text-base"
+        >
+          {alreadyFlaggedLate
+            ? <><Check className="w-4 h-4" /> Your manager has been told</>
+            : <><Clock className="w-4 h-4" /> I am running late</>}
         </Button>
       )}
 

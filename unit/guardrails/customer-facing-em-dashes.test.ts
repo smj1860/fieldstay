@@ -105,7 +105,7 @@ const PLACEHOLDER = /(['"`])\s*—\s*\1|\{\s*(['"`])\s*—\s*\2\s*\}|>\s*—\s*<
 const EXCEPTIONS = new Set<string>([
   // Strips separator punctuation out of a pasted CSV cell before parsing it.
   // The em dash is an INPUT here, not output.
-  'app/(dashboard)/crew-manage/crew-manage-client.tsx:98',
+  'app/(dashboard)/crew-manage/crew-manage-client.tsx:99',
   'app/(dashboard)/vendors/vendors-client.tsx:103',
 ])
 

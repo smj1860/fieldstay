@@ -1,5 +1,6 @@
 'use client'
 
+import { isUnavailableAt } from '@/lib/scheduling/part-of-day'
 import { useState, useTransition, useActionState, useRef, useEffect, useMemo, useContext, createContext, type Dispatch, type SetStateAction } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -49,11 +50,17 @@ interface CrewAvailabilityRow {
   crew_member_id: string
   available_date: string
   is_available:   boolean
+  /** Part-of-day windows off, when only part of the day is (20261013170000). */
+  unavailable_parts: string[] | null
 }
 
-// Lookup map keyed by `${crew_member_id}::${YYYY-MM-DD}` → is_available.
+// Lookup map keyed by `${crew_member_id}::${YYYY-MM-DD}` → the availability
+// row. It used to store the bare is_available boolean, which made a half-day
+// absence indistinguishable from a free day: those rows carry is_available =
+// TRUE and name their windows separately. The row goes in whole so the badge
+// can resolve it against the turnover's own checkout TIME.
 // Days with no entry mean "no preference" and carry no badge.
-const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
+const CrewAvailabilityContext = createContext<Record<string, CrewAvailabilityRow>>({})
 
 interface TurnoverAssignment {
   id: string
@@ -218,12 +225,16 @@ function CrewAssignment({
   const availabilityBadge = (crewId: string) => {
     const entry = availabilityMap[`${crewId}::${turnoverDate}`]
     if (entry === undefined) return null
+
+    // Resolved against this turnover's checkout TIME, not just its date: a
+    // crew member off in the morning is a conflict for a 10am checkout and is
+    // not one for a 3pm, and a date-granular badge cannot say which.
+    const clashes = isUnavailableAt(entry, new Date(turnover.checkout_datetime))
+    const label = availabilityLabel(entry, clashes)
+
     return (
-      <span title={entry ? 'Marked available that day' : 'Marked unavailable that day'}>
-        <StatusDot
-          status={entry ? 'good' : 'critical'}
-          label={entry ? 'Marked available that day' : 'Marked unavailable that day'}
-        />
+      <span title={label}>
+        <StatusDot status={clashes ? 'critical' : 'good'} label={label} />
       </span>
     )
   }
@@ -1355,6 +1366,26 @@ function BoardBody({
  * and by the time a PM is looking at this, today's crew are already working to
  * whatever they were told this morning.
  */
+/**
+ * What the dot means, in words, for the title and the screen reader.
+ *
+ * The half-day cases are spelled out rather than folded into "unavailable":
+ * a PM deciding whether to override needs to know it is a morning rather than
+ * the whole day. `status` stays an internal StatusDot key and is NOT renamed
+ * alongside this copy (CLAUDE.md: lookup keys are not display strings).
+ */
+function availabilityLabel(row: CrewAvailabilityRow, clashes: boolean): string {
+  if (!row.is_available) return 'Marked unavailable that day'
+
+  const windows = row.unavailable_parts ?? []
+  if (windows.length === 0) return 'Marked available that day'
+
+  const listed = windows.join(' and ')
+  return clashes
+    ? `Marked unavailable that ${listed}, which covers this checkout`
+    : `Marked unavailable that ${listed}, which does not cover this checkout`
+}
+
 function DayPlanBar({ turnovers }: Readonly<{ turnovers: Turnover[] }>) {
   const [date, setDate] = useState(() => {
     const d = new Date()
@@ -1486,9 +1517,9 @@ export function TurnoverBoard({
   const clearSelection = () => setSelectedIds(new Set())
 
   const availabilityMap = useMemo(() => {
-    const map: Record<string, boolean> = {}
+    const map: Record<string, CrewAvailabilityRow> = {}
     for (const row of crewAvailability) {
-      map[`${row.crew_member_id}::${row.available_date}`] = row.is_available
+      map[`${row.crew_member_id}::${row.available_date}`] = row
     }
     return map
   }, [crewAvailability])

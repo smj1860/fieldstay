@@ -72,6 +72,26 @@ One thing to know: **Start Turnover** and **Mark Complete** act on the turnover 
 
 ---
 
+## When Crew Say They Are Running Late
+
+A crew member's turnover screen carries one button: **I am running late**. One tap sends you a notification naming the property, and the button then reads "Your manager has been told" so nobody taps it twice.
+
+It works offline. The tap is queued on the device like a checklist tick and sent when signal returns, keeping the time it was actually raised rather than the time it arrived, so a flag raised at 10am in a basement still reads 10am when it reaches you at noon.
+
+This is the counterpart to the automatic running-late alert in [Notifications](./32-notifications-and-digests.md). That one works out that a job is behind from the checklist; this one is the person saying so, usually earlier, and for reasons no checklist can see: traffic, a guest who has not left, a key that is not where it should be.
+
+You get one notification per turnover. A second tap changes nothing.
+
+---
+
+## Who Else Is On This Job
+
+When more than one crew member is assigned to a turnover, each of their cards now names the others: **With Dana, Sam**.
+
+The card showed nobody before, which made a shared turnover look identical to a solo one. That matters because a turnover has a single shared status, so a cleaner arriving to find the kitchen already done had no way to tell whether that was expected. Crew see names only, and only for turnovers they are assigned to themselves.
+
+---
+
 ## Crew Work Orders
 
 Separate from turnovers, you can assign a crew member to a **work order** — a specific maintenance or repair task at a property. Work orders assigned to crew appear in the crew app alongside turnovers but have a distinct amber card style and show the work order title rather than a cleaning checklist.

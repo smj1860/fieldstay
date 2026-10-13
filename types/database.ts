@@ -455,9 +455,21 @@ export interface CrewAvailability {
   crew_member_id: string
   available_date: string
   is_available:   boolean
+  /**
+   * Part-of-day windows this crew member is NOT available on that date
+   * (20261013170000). NULL means the row is whole-day, governed by
+   * is_available; a non-NULL value requires is_available = true, and the
+   * database CHECK rejects both an empty array and all three windows so each
+   * state has exactly one spelling. Read it through
+   * lib/scheduling/part-of-day.ts's isUnavailableAt() rather than by hand.
+   */
+  unavailable_parts: PartOfDay[] | null
   notes:          string | null
   created_at:     string
 }
+
+/** The three windows crew_availability.unavailable_parts may name. */
+export type PartOfDay = 'morning' | 'afternoon' | 'evening'
 
 export interface CrewFeedback {
   id:             string
@@ -502,7 +514,25 @@ export interface CrewSyncIncident {
 export interface CrewAvailabilityEntry {
   available_date: string
   is_available:   boolean
+  /** See CrewAvailability.unavailable_parts — same three states. */
+  unavailable_parts: PartOfDay[] | null
   notes:          string | null
+}
+
+/**
+ * True when a row represents time off of ANY kind, whole-day or partial.
+ *
+ * `!row.is_available` is the check this replaces, and it is wrong now: a
+ * half-day row carries is_available = TRUE and names its windows separately,
+ * so the old test rendered a crew member with the morning booked off as having
+ * no restrictions at all. For a question about a DATE rather than an instant
+ * (a roster summary, a "next day off"), any window counts.
+ */
+export function hasTimeOff(row: {
+  is_available: boolean
+  unavailable_parts: PartOfDay[] | null
+}): boolean {
+  return !row.is_available || (row.unavailable_parts?.length ?? 0) > 0
 }
 
 export interface AssignmentOutcome {
@@ -768,6 +798,18 @@ export interface Turnover {
   inventory_started_at:            string | null
   inventory_confirmed_complete_at: string | null
   inventory_confirmed_by_crew_id:  string | null
+  /**
+   * The crew member's own "I am running late" tap (20261013170000), and which
+   * of them tapped it.
+   *
+   * The other direction from the cascade alert: that one INFERS lateness from
+   * a checklist that is behind, this is the person saying so before any
+   * inference could know (traffic, a guest still in the property, a key that
+   * is not where it should be). Null until somebody taps it, and it is never
+   * cleared by the crew app.
+   */
+  crew_running_late_at:                 string | null
+  crew_running_late_by_crew_member_id:  string | null
   auto_generated:        boolean
   is_same_day_turnover:  boolean
   suggested_crew_ids:    string[] | null

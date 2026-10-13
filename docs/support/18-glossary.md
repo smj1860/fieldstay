@@ -84,6 +84,22 @@ Advisory. Lateness is still measured against the guest's check-in time, so a mis
 
 ---
 
+## Part of Day
+
+One of three fixed windows a crew member can mark off instead of a whole day: **Morning** (until noon), **Afternoon** (until 5pm) and **Evening** (after that), in the business's local time.
+
+Auto-assignment compares a turnover's checkout time against the windows, so a morning absence excludes a 10am checkout and not a 3pm one. Fixed windows rather than free start and end times, because the exclusion runs under Autopilot with nobody reviewing it.
+
+---
+
+## Running Late (crew-raised)
+
+A one-tap signal on the crew member's turnover screen that notifies the PM immediately. Queued offline like a checklist tick, and it keeps the time it was raised rather than the time it synced.
+
+Distinct from the cascade alert, which INFERS lateness from a checklist that is behind. This one is the person saying so, and it usually comes first.
+
+---
+
 ## Routed Travel Time
 
 The driving time between two stops, from a real route rather than a straight line. Looked up once per ordered pair of properties and cached per organization, then refreshed a few times a year, since the road between two houses does not move.
