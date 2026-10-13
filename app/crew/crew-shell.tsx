@@ -653,6 +653,16 @@ const FAQ_ITEMS: Record<string, { q: Record<CrewLocale, string>; a: Record<CrewL
       es: 'No pasa nada con tu historial. La hora de inicio planificada es un plan, no un plazo, y no forma parte de cómo se evalúa tu trabajo. Lo que importa es terminar antes de que llegue el siguiente huésped, que es la hora de entrada. Si algo va a hacer eso imposible, envía un mensaje a tu gerente en vez de apurarte: prefieren saberlo a las 11am que enterarse a las 3pm.',
     },
   },
+  travelTime: {
+    q: {
+      en: 'What does the travel time at the top of my list mean?',
+      es: '¿Qué significa el tiempo de viaje en la parte superior de mi lista?',
+    },
+    a: {
+      en: 'It is the driving between today\'s stops: your turnovers and your work orders, in order. It does not include getting from home to your first job or back at the end, so your real time on the road is longer than the number shown. If it says "at least", one of today\'s properties has no map location, so that part of the drive could not be measured and the number is a floor rather than a total. Tell your manager if you see that on a property you visit often, since it is something they can fix.',
+      es: 'Es el manejo entre las paradas de hoy: tus rotaciones y tus órdenes de trabajo, en orden. No incluye ir de tu casa al primer trabajo ni el regreso al final, así que tu tiempo real en el camino es mayor que el número que ves. Si dice "al menos", una de las propiedades de hoy no tiene ubicación en el mapa, así que esa parte del recorrido no se pudo medir y el número es un mínimo, no un total. Avísale a tu gerente si lo ves en una propiedad que visitas seguido, porque es algo que pueden corregir.',
+    },
+  },
   photographingStickers: {
     q: {
       en: 'Why are we photographing manufacturer stickers and data plates on appliances?',

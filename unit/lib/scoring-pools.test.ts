@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeWorkloadMap, computeFamiliarIds, computeDayWorkloadMap } from '@/lib/scoring/pools'
+import { computeWorkloadMap, computeFamiliarIds, computeDayWorkloadMap, computePriorStopOrigins } from '@/lib/scoring/pools'
 
 interface Row {
   entity_id: string | null | undefined
@@ -141,5 +141,81 @@ describe('computeDayWorkloadMap', () => {
       for (const [id, n] of Object.entries(day)) summed[id] = (summed[id] ?? 0) + n
     }
     expect(summed).toEqual(flat)
+  })
+})
+
+describe('computePriorStopOrigins', () => {
+  // The scorer's proximity term measures from here. Measuring from home is
+  // right for a crew member's first job of the day and wrong for every job
+  // after it, with 15% of the standard weight riding on the difference.
+  const stop = (crew: string, when: string, lat: number, lng: number) =>
+    ({ crewMemberId: crew, when, lat, lng })
+
+  it('returns the LAST stop before the target, not the first', () => {
+    const origins = computePriorStopOrigins([
+      stop('dana', '2026-10-13T13:00:00Z', 32.1, -85.1),
+      stop('dana', '2026-10-13T15:00:00Z', 32.2, -85.2),
+    ], '2026-10-13T18:00:00Z')
+
+    expect(origins.dana).toEqual({ lat: 32.2, lng: -85.2 })
+  })
+
+  it('ignores stops on other days', () => {
+    const origins = computePriorStopOrigins([
+      stop('dana', '2026-10-12T23:00:00Z', 32.1, -85.1),
+      stop('dana', '2026-10-14T01:00:00Z', 32.3, -85.3),
+    ], '2026-10-13T18:00:00Z')
+
+    expect(origins.dana).toBeUndefined()
+  })
+
+  it('ignores stops at or after the target', () => {
+    const origins = computePriorStopOrigins([
+      stop('dana', '2026-10-13T18:00:00Z', 32.1, -85.1),   // the target itself
+      stop('dana', '2026-10-13T20:00:00Z', 32.2, -85.2),
+    ], '2026-10-13T18:00:00Z')
+
+    expect(origins.dana).toBeUndefined()
+  })
+
+  // Absent, not present-with-null: the scorer's fall back to home is then the
+  // ordinary missing-key path rather than a second special case.
+  it('omits a crew member with no earlier stop that day', () => {
+    const origins = computePriorStopOrigins([
+      stop('dana', '2026-10-13T13:00:00Z', 32.1, -85.1),
+    ], '2026-10-13T18:00:00Z')
+
+    expect('sam' in origins).toBe(false)
+  })
+
+  it('keeps each crew member on their own day', () => {
+    const origins = computePriorStopOrigins([
+      stop('dana', '2026-10-13T13:00:00Z', 32.1, -85.1),
+      stop('sam',  '2026-10-13T14:00:00Z', 33.1, -86.1),
+    ], '2026-10-13T18:00:00Z')
+
+    expect(origins).toEqual({
+      dana: { lat: 32.1, lng: -85.1 },
+      sam:  { lat: 33.1, lng: -86.1 },
+    })
+  })
+
+  it('tolerates a row with no timestamp', () => {
+    const origins = computePriorStopOrigins(
+      [{ crewMemberId: 'dana', when: null, lat: 32.1, lng: -85.1 }],
+      '2026-10-13T18:00:00Z',
+    )
+    expect(origins.dana).toBeUndefined()
+  })
+
+  // A property with no coordinates is still the prior STOP; the scorer is
+  // what decides an unusable origin means falling back to home. Collapsing
+  // the two here would hide "they are out working, we just cannot say where".
+  it('reports a prior stop whose property has no coordinates', () => {
+    const origins = computePriorStopOrigins(
+      [{ crewMemberId: 'dana', when: '2026-10-13T13:00:00Z', lat: null, lng: null }],
+      '2026-10-13T18:00:00Z',
+    )
+    expect(origins.dana).toEqual({ lat: null, lng: null })
   })
 })

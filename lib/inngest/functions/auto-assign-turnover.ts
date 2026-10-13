@@ -2,7 +2,9 @@ import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { topCrewCandidate, crewSuggestionReasoning, atDayCapacity } from '@/lib/scoring/crew-candidates'
-import { computeWorkloadMap, computeDayWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
+import {
+  computeWorkloadMap, computeDayWorkloadMap, computeFamiliarIds, computePriorStopOrigins,
+} from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { frictionDateString } from '@/lib/friction/date'
@@ -24,6 +26,22 @@ const FAMILIARITY_WINDOW_DAYS = 90
  * as a bug; "all five are excluded from auto-assignment" is actionable.
  */
 type GapReason = 'none_eligible' | 'all_unavailable' | 'all_at_capacity'
+
+/**
+ * The 14-day workload read, which now carries each assignment's property
+ * coordinates as well as its checkout time. Both embeds were already on the
+ * wire for the join; typing them is what makes the per-day count and the
+ * prior-stop origin free.
+ */
+interface UpcomingAssignmentRow {
+  crew_member_id: string
+  turnovers:
+    | { checkout_datetime: string; properties: PropertyCoords | PropertyCoords[] | null }
+    | { checkout_datetime: string; properties: PropertyCoords | PropertyCoords[] | null }[]
+    | null
+}
+
+interface PropertyCoords { lat: number | null; lng: number | null }
 
 export const autoAssignTurnover = inngest.createFunction(
   {
@@ -125,6 +143,7 @@ export const autoAssignTurnover = inngest.createFunction(
         familiarCrewIds: [] as string[],
         workloadMap:     {} as Record<string, number>,
         dayWorkloadMap:  {} as Record<string, number>,
+        originByCrew:    {} as Record<string, { lat: number | null; lng: number | null } | null>,
         gapReason:       reason,
       })
 
@@ -222,13 +241,13 @@ export const autoAssignTurnover = inngest.createFunction(
       // the crew members who are already the busiest.
       // The embedded checkout_datetime was always on the wire and always
       // discarded. Typing it is what makes the per-day count below free.
-      const upcoming = await fetchAllRows<{
-        crew_member_id: string
-        turnovers: { checkout_datetime: string } | { checkout_datetime: string }[] | null
-      }>(
+      const upcoming = await fetchAllRows<UpcomingAssignmentRow>(
         (from, to) => supabase
           .from('turnover_assignments')
-          .select('crew_member_id, turnovers!inner(checkout_datetime)')
+          // The embedded property coordinates are the crew member's PRIOR STOP
+          // for anything later that day, which is what proximity is supposed
+          // to measure from. On the same read, same rows.
+          .select('crew_member_id, turnovers!inner(checkout_datetime, properties(lat, lng))')
           .in('crew_member_id', availableCrew.map((c) => c.id))
           .gte('turnovers.checkout_datetime', new Date().toISOString())
           .lte('turnovers.checkout_datetime', windowEnd.toISOString())
@@ -248,6 +267,23 @@ export const autoAssignTurnover = inngest.createFunction(
         (a) => a.crew_member_id,
         (a) => unwrapJoin(a.turnovers)?.checkout_datetime,
       )[checkoutDate] ?? {}
+
+      // Where each candidate will actually be coming from. Home is the right
+      // origin only for their first job of the day; for every job after it,
+      // the previous property is.
+      const originByCrew = computePriorStopOrigins(
+        upcoming.map((a) => {
+          const t = unwrapJoin(a.turnovers)
+          const p = t ? unwrapJoin(t.properties) : null
+          return {
+            crewMemberId: a.crew_member_id,
+            when:         t?.checkout_datetime,
+            lat:          p?.lat ?? null,
+            lng:          p?.lng ?? null,
+          }
+        }),
+        checkout_datetime,
+      )
 
       // The PM's hard daily cap. After availability and before scoring, for
       // the same reason time off is: there is no human reviewing an autopilot
@@ -272,6 +308,7 @@ export const autoAssignTurnover = inngest.createFunction(
         familiarCrewIds,
         workloadMap,
         dayWorkloadMap,
+        originByCrew,
         gapReason:       null as GapReason | null,
       }
     })
@@ -289,8 +326,10 @@ export const autoAssignTurnover = inngest.createFunction(
       // ever read here, and doing a full O(n log n) sort of the roster just
       // to throw away everything but index 0 is wasted work on every
       // turnover assigned.
-      const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap } = context
-      return topCrewCandidate({ isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap })
+      const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap, originByCrew } = context
+      return topCrewCandidate({
+        isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap, originByCrew,
+      })
     })
 
     if (!top) {

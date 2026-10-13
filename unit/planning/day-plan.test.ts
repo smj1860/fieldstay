@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
+import { travelLegKey } from '@/lib/travel/estimate'
 import {
   planDay, estimateMinutes,
   ARRIVAL_BUFFER_MINUTES, FALLBACK_MINUTES_PER_BEDROOM,
   type PlannableTurnover,
 } from '@/lib/planning/day-plan'
 
-/** Two properties ~24km apart, which at 48km/h is a 30-minute drive. */
+/** Two properties ~15mi apart, which at the shared 30mph is a 30-minute drive. */
 const A = { lat: 32.50, lng: -85.90 }
 const B = { lat: 32.50, lng: -85.64 }
 
@@ -87,6 +88,40 @@ describe('planDay', () => {
   it('adds no travel before the first job of the day', () => {
     const { slots } = planDay([job({ turnover_id: 't1', checkout_datetime: '2026-10-13T09:00:00.000Z', ...B })])
     expect(slots[0]!.planned_start_at).toBe('2026-10-13T09:00:00.000Z')
+  })
+})
+
+describe('planDay — routed travel', () => {
+  // Routed durations come from lib/travel/resolve.ts, which reads Mapbox
+  // through a per-pair cache. The planner is the only thing in the product
+  // that spends a routing request; everything else reads what it cached.
+  const chain = () => [
+    job({ turnover_id: 't1', checkout_datetime: '2026-10-13T15:00:00.000Z', duration_minutes: 60, ...A }),
+    job({ turnover_id: 't2', checkout_datetime: '2026-10-13T15:30:00.000Z', duration_minutes: 60, ...B }),
+  ]
+
+  it('uses a routed duration in place of the straight-line estimate', () => {
+    const estimated = planDay(chain())
+    const routed    = planDay(chain(), {
+      routedTravel: new Map([[travelLegKey(A, B)!, { minutes: 55 }]]),
+    })
+
+    // t1 runs 15:00-16:00 either way; t2 cannot start until t1 ends plus the
+    // drive plus the arrival buffer, so a longer real drive pushes it later.
+    expect(estimated.slots[1]!.planned_start_at).toBe('2026-10-13T16:40:00.000Z')
+    expect(routed.slots[1]!.planned_start_at).toBe('2026-10-13T17:05:00.000Z')
+  })
+
+  it('falls back to the straight line for a leg the map does not cover', () => {
+    const partial = planDay(chain(), {
+      routedTravel: new Map([['some:other>pair', { minutes: 999 }]]),
+    })
+    expect(partial.slots[1]!.planned_start_at).toBe('2026-10-13T16:40:00.000Z')
+  })
+
+  it('plans the same day with an empty routed map as with none at all', () => {
+    expect(planDay(chain(), { routedTravel: new Map() }).slots)
+      .toEqual(planDay(chain()).slots)
   })
 })
 

@@ -2269,6 +2269,33 @@ export interface Notification {
   created_at: string
 }
 
+// ── Routed travel time cache (Phase G) ──────────────────────────────────────
+/**
+ * One ordered (origin, destination) pair's driving time, as returned by the
+ * routing provider and cached per org.
+ *
+ * Written ONLY by the day planner's Inngest step under the service role; org
+ * members have a SELECT policy and no write path at all, which is why there
+ * is no manage policy on the table. `cache_key` is directional and built by
+ * lib/travel/estimate.ts's travelLegKey() from coordinates rounded to four
+ * decimal places.
+ */
+export interface TravelTimeCache {
+  id:         string
+  org_id:     string
+  cache_key:  string
+  origin_lat: number
+  origin_lng: number
+  dest_lat:   number
+  dest_lng:   number
+  minutes:    number
+  /** Null when the provider returned a duration without a distance. */
+  miles:      number | null
+  provider:   string
+  fetched_at: string
+  created_at: string
+}
+
 // ── Daily wrap-up digest diff/stay-static tracking ──────────────────────────
 export interface NotificationDigestState {
   org_id:     string
@@ -2557,6 +2584,7 @@ export interface HandWrittenRowMap {
   prospect_imports:                    ProspectImport
   prospect_contacts:                   ProspectContact
   str_prospects:                       StrProspect
+  travel_time_cache:                   TravelTimeCache
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */

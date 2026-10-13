@@ -776,23 +776,91 @@ so the alert measures against what the crew member is actually looking at.
 
 ---
 
-# Phase G — item 6: routed travel time
+# Phase G — item 6: routed travel time — BUILT
 
-Today: straight-line haversine ÷ a hardcoded `AVG_DRIVE_SPEED_MPH = 30`, duplicated in
-`app/crew/page.tsx:19` and `app/(dashboard)/ops/ops-snapshot.tsx:20`, excluding the home→first
-and last→home legs, excluding work orders from the chain, and silently zero when any
-property lacks coordinates.
+The straight-line-over-30mph estimate was written out FOUR times, not the three the
+original note counted: `app/crew/page.tsx`, `app/(dashboard)/ops/ops-snapshot.tsx`,
+`lib/planning/day-plan.ts` and `lib/scoring/cascade.ts`, each with its own speed constant
+(two in mph, two in km/h) and its own idea of what a missing coordinate meant.
 
-- One shared implementation. Mapbox Directions (Mapbox is already the geocoder) via
-  `safeFetch` with a timeout budget in `lib/http/timeout.ts`, per
-  `unit/guardrails/external-fetch-timeout.test.ts`.
-- Cache per (origin, destination) pair — these are the same property pairs every week.
-- Include both home legs and interleave work orders into the chain.
-- Keep a labelled fallback when routing is unavailable. An unavailable estimate must read as
-  unavailable, not as zero.
-- Feed it into Phase E's planner and into the standard-weight proximity term, which today
-  measures from HOME rather than from the previous stop — a 15% weight on the wrong origin
-  (`lib/scoring/geo.ts`, `crew-candidates.ts:57`).
+### One implementation, three layers
+
+- `lib/travel/estimate.ts` — PURE and client-safe. Types, the one speed constant, the
+  straight-line fallback, the directional cache key, and `chainTravel()`. Imports nothing
+  but `haversineKm`, so the crew PWA calls it without pulling a server module into the
+  bundle.
+- `lib/travel/mapbox.ts` — server-only. The **Directions Matrix** API, not Directions:
+  Directions answers one leg per request, so a six-stop day is five requests and a
+  twelve-crew org is sixty, per night. Matrix answers every pair among up to 25
+  coordinates in ONE request, so a crew member's whole day costs one call. Chunked with a
+  ONE-STOP OVERLAP past 25 coordinates, because consecutive legs span chunk boundaries and
+  a naive split loses one leg per 25 stops.
+- `lib/travel/resolve.ts` — server-only. Cache first, Matrix second, straight line last.
+
+`fetchWithRetry` with `MAPBOX_MATRIX_TIMEOUT_MS`, not `safeFetch`: the spec's bullet named
+`safeFetch`, but that helper exists for URLs that are partly TENANT-supplied, where a
+redirect or a DNS answer can move the target. This URL's host is a literal, which is the
+same reason `lib/geocoding.ts` uses `fetchWithRetry` for the geocoder. The requirement
+behind the bullet — a timeout budget, per `unit/guardrails/external-fetch-timeout.test.ts`
+— is met either way.
+
+### Exactly one caller spends a routing request
+
+The overnight day planner. Everything else READS the cache:
+`lookupTravelMinutes()` never fetches, which is what keeps the cascade check (48 runs a
+day) and the page-render travel summaries from turning into API spend. The cascade cron
+also ranks TWICE — a free pass with no travel to establish whether anything is late at
+all, and the real pass only if something is, so a quiet run costs no query either.
+
+`travel_time_cache` is **org-scoped**, with a SELECT policy for members and no write path
+at all (service role only, same shape as `notifications`). A global pair table would need
+either a policy letting every tenant read every other tenant's coordinate pairs or no
+policy at all, and the policy-less case is a shrink-only allowlist nothing new may join.
+Keyed on a directional TEXT key built from coordinates rounded to 4dp (~11m), so the read
+is one `.in('cache_key', keys)` for a whole org-night rather than a query per leg, and a
+re-geocode that nudges the seventh decimal does not orphan every cached leg. TTL 90 days:
+the planner re-fetches a stale row, the read path still USES one, because a six-month-old
+drive time beats a straight line and the read path cannot refresh it anyway.
+
+### An unavailable estimate never reads as zero
+
+Every figure is labelled. `chainTravel()` reports `measured`/`unmeasured` counts and a
+source of `routed | estimated | mixed | unknown`, and both UI surfaces render **"at
+least"** for a partially-measured day. Before this, ONE unmappable property zeroed the
+whole chain, so a day it could mostly measure displayed "Travel time unavailable" — which
+told a PM less than the four legs already in hand.
+
+### The proximity origin was the real bug in item 6
+
+`crew-candidates.ts` measured proximity from the crew member's HOME, with 15% of the
+standard weight on it. For anyone already out working that is the wrong origin: a crew
+member whose 10am is next door to the 2pm being scored was treated as driving from their
+kitchen. `computePriorStopOrigins()` (`lib/scoring/pools.ts`) resolves each candidate's
+last stop earlier that same day, and home is now the fallback for a first job only, which
+is the one case where home IS the origin.
+
+`originByCrew` is a REQUIRED field on `CrewScoringInput`, for the same reason
+`dayWorkloadMap` is: an optional one lets a caller omit it, and then the board's
+suggestion and the Friction Forecaster's Smart Fix recommend different people for the same
+turnover, each looking correct alone. Both callers get it from the 14-day workload read
+they already issue, now embedding `properties(lat, lng)` — same rows, same round trip.
+
+### What the bullets asked for and did NOT get, and why
+
+- **Both home legs**: in the Ops snapshot, where `crew_members.home_lat/home_lng` ride
+  along on an embed the page already requests. NOT in the crew PWA, which holds no row for
+  the crew member's own home — that needs a new synced Dexie table plus its
+  `CREW_SYNCED_TABLES` / coverage-guardrail entries, which is its own change. The crew app
+  FAQ says the commute is not counted rather than leaving the number unexplained.
+- **Home leg in the PLANNER**: deliberately not, and this is a correction rather than a
+  gap. The commute does not constrain the first job's start, because a crew member can
+  leave home as early as they like. Adding it would push the first start past the time the
+  property is actually free, for no reason a PM could defend. The home legs are DRIVE TIME,
+  which is a different question and belongs in the summary.
+- **Work orders interleaved**: in both travel summaries. NOT in the planner's slotting,
+  which stays turnovers-only: a crew work order carries `needed_by_date`, a DATE with no
+  time, and no duration estimate exists for one, so there is nothing to sequence it by.
+  The summaries append them, and the code says so rather than implying an order.
 
 ---
 

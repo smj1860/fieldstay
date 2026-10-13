@@ -6,6 +6,8 @@ import { unwrapJoin }            from '@/lib/utils/supabase-joins'
 import { frictionDateString, frictionDayUtcBounds } from '@/lib/friction/date'
 import { planDay, estimateMinutes, type PlannableTurnover } from '@/lib/planning/day-plan'
 import { loadCrewBaselines, resolveBaselines, type Baselines } from '@/lib/planning/baselines'
+import { resolveTravelMinutes } from '@/lib/travel/resolve'
+import type { TravelLegMap, TravelStop } from '@/lib/travel/estimate'
 
 /**
  * SCHEDULED: 07:30 UTC, half an hour after cron-pre-flight-friction.
@@ -153,15 +155,31 @@ interface PlanWrite {
   planned_end_at:   string
 }
 
+/**
+ * One ordered chain of stops per crew member, for the router.
+ *
+ * Sorted by checkout time because that is the order planDay() sequences in,
+ * and the legs we pay to route have to be the legs the plan will actually
+ * drive. Sorting differently here would cache a set of pairs nothing asks
+ * for and leave the real ones to the straight-line fallback.
+ */
+function travelChainsFor(byCrew: Map<string, CrewEntry[]>): TravelStop[][] {
+  return [...byCrew.values()].map((entries) =>
+    [...entries]
+      .sort((a, b) => Date.parse(a.job.checkout_datetime) - Date.parse(b.job.checkout_datetime))
+      .map((e) => ({ id: e.job.turnover_id, lat: e.job.lat, lng: e.job.lng })))
+}
+
 /** Runs the pure planner over every crew member's day and flattens the result. */
 function planAllCrewDays(
   byCrew: Map<string, CrewEntry[]>,
+  routedTravel: TravelLegMap,
 ): { writes: PlanWrite[]; infeasibleCount: number } {
   const writes: PlanWrite[] = []
   let infeasibleCount = 0
 
   for (const entries of byCrew.values()) {
-    const { slots } = planDay(entries.map((e) => e.job))
+    const { slots } = planDay(entries.map((e) => e.job), { routedTravel })
     const slotByTurnover = new Map(slots.map((s) => [s.turnover_id, s]))
 
     for (const entry of entries) {
@@ -235,10 +253,22 @@ export const planDayForOrg = inngest.createFunction
 
       const byCrew = groupJobsByCrew(assignments, resolved)
 
+      // Real driving times, cached per property pair. This is the ONE place
+      // in the product that spends a routing request: the planner runs once a
+      // night per org, and everything else (the cascade check at 48 runs a
+      // day, the travel summaries on a page render) reads what this wrote.
+      //
+      // Returned as entries rather than a Map because a step's return value
+      // is JSON-serialized — a Map comes back from a memoized step as `{}`.
+      const routedEntries = await step.run('route-travel', async () => {
+        const legs = await resolveTravelMinutes(orgId, travelChainsFor(byCrew))
+        return [...legs.entries()]
+      })
+
       // Planned OUTSIDE step.run and written inside it: the computation is
       // pure and cheap, so a retry of the write recomputes the identical
       // plan from the same loaded rows rather than re-reading anything.
-      const { writes, infeasibleCount } = planAllCrewDays(byCrew)
+      const { writes, infeasibleCount } = planAllCrewDays(byCrew, new Map(routedEntries))
 
       await step.run('write-plan', async () => {
         const supabase = createServiceClient({ system: 'inngest:day-planner' })
@@ -265,7 +295,8 @@ export const planDayForOrg = inngest.createFunction
 
       logger.info(
         `Day planner: ${orgId} on ${planDate} — ${writes.length} assignment(s) across `
-        + `${byCrew.size} crew member(s), ${infeasibleCount} that cannot make check-in`,
+        + `${byCrew.size} crew member(s), ${infeasibleCount} that cannot make check-in, `
+        + `${routedEntries.length} routed leg(s)`,
       )
       return { planned: writes.length, crew: byCrew.size, infeasible: infeasibleCount }
     },

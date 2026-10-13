@@ -42,6 +42,10 @@ const CREW_DICT = {
   dashboardSendFeedback:        { en: 'Send feedback', es: 'Enviar comentarios' },
   dashboardTravelTimePrefix:    { en: 'Total Travel Time:', es: 'Tiempo total de viaje:' },
   dashboardTravelTimeUnavailable: { en: 'unavailable', es: 'no disponible' },
+  // Shown when SOME legs of the day could be measured and others could not
+  // (a property with no coordinates). "at least" is the honest framing: the
+  // figure is a floor, not a total.
+  dashboardTravelTimeAtLeast:     { en: 'at least', es: 'al menos' },
 
   feedbackTitle:        { en: 'Send feedback', es: 'Enviar comentarios' },
   feedbackPrompt:       { en: 'What would make this app more helpful for your day-to-day work?', es: '¿Qué haría que esta app fuera más útil para tu trabajo diario?' },

@@ -60,6 +60,24 @@ export interface CrewScoringInput {
    */
   isSameDay:       boolean
   property:        { lat: PostgrestNumeric; lng: PostgrestNumeric }
+  /**
+   * Where each candidate will be coming FROM: the property of their last
+   * turnover earlier that same day, or null when this is their first job.
+   *
+   * Required, not optional, and that is the point of it. Proximity measured
+   * from HOME is the wrong origin for anyone already out working — a crew
+   * member whose morning job is next door to this one scored as though they
+   * were starting from their kitchen — and it carries 15% of the standard
+   * weight. An optional field would let one of the two callers omit it, and
+   * then the board's suggestion and the Friction Forecaster's Smart Fix would
+   * recommend different people for the same turnover, each looking correct in
+   * isolation. That drift is the whole reason this module exists.
+   *
+   * An EMPTY map is a legitimate value meaning "nobody has a prior stop" (and
+   * every candidate falls back to home). It is not the same as the field
+   * being absent.
+   */
+  originByCrew:    Record<string, { lat: number | null; lng: number | null } | null>
   crew:            CrewCandidate[]
   familiarCrewIds: string[]
   /** crew_member_id -> assignment count across the 14-day window. */
@@ -112,15 +130,61 @@ function hasCoordinate(value: PostgrestNumeric): boolean {
   return Number(value) !== 0
 }
 
-function candidateProximity(crew: CrewCandidate, property: CrewScoringInput['property']): number {
-  if (!hasCoordinate(crew.home_lat) || !hasCoordinate(crew.home_lng)
-    || !hasCoordinate(property.lat) || !hasCoordinate(property.lng)) {
+/**
+ * What the candidate is being scored against: the property, plus where each
+ * of them would be travelling from.
+ *
+ * Bundled rather than passed as two parameters so scoreOne() stays inside the
+ * 7-parameter ceiling, and because they belong together: a distance is
+ * meaningless without both of its ends.
+ */
+interface ProximityContext {
+  property:     CrewScoringInput['property']
+  originByCrew: CrewScoringInput['originByCrew']
+}
+
+/** A real, present coordinate on a plain-number origin. Same null-island rule. */
+function isUsableOrigin(origin: { lat: number | null; lng: number | null } | null): boolean {
+  if (!origin || origin.lat === null || origin.lng === null) return false
+  if (origin.lat === 0 && origin.lng === 0) return false
+  return Number.isFinite(origin.lat) && Number.isFinite(origin.lng)
+}
+
+/**
+ * Distance from where the candidate will actually be, not from where they
+ * live.
+ *
+ * The previous stop wins when there is one. Home is the fallback for a
+ * candidate whose first job of the day this would be, which is the only case
+ * where home is genuinely the origin.
+ */
+function candidateProximity(crew: CrewCandidate, ctx: ProximityContext): number {
+  if (!hasCoordinate(ctx.property.lat) || !hasCoordinate(ctx.property.lng)) {
     return UNKNOWN_PROXIMITY
   }
+
+  const from = originFor(crew, ctx)
+  if (from === null) return UNKNOWN_PROXIMITY
+
   return proximityScore(haversineKm(
-    Number(crew.home_lat), Number(crew.home_lng),
-    Number(property.lat),  Number(property.lng),
+    from.lat, from.lng,
+    Number(ctx.property.lat), Number(ctx.property.lng),
   ))
+}
+
+/** The previous stop, else home, else nothing to measure from. */
+function originFor(
+  crew: CrewCandidate,
+  ctx:  ProximityContext,
+): { lat: number; lng: number } | null {
+  const previous = ctx.originByCrew[crew.id] ?? null
+  if (isUsableOrigin(previous)) return { lat: previous!.lat!, lng: previous!.lng! }
+
+  if (hasCoordinate(crew.home_lat) && hasCoordinate(crew.home_lng)) {
+    return { lat: Number(crew.home_lat), lng: Number(crew.home_lng) }
+  }
+
+  return null
 }
 
 /**
@@ -159,12 +223,12 @@ interface WorkloadContext {
 function scoreOne(
   c:           CrewCandidate,
   weights:     typeof SAME_DAY_WEIGHTS,
-  property:    CrewScoringInput['property'],
+  proximity:   ProximityContext,
   familiarSet: Set<string>,
   load:        WorkloadContext,
 ): ScoredCrewCandidate {
   const breakdown: CrewScoreBreakdown = {
-    proximity:   candidateProximity(c, property),
+    proximity:   candidateProximity(c, proximity),
     reliability: coerceScore(c.reliability_score),
     capacity:    coerceScore(c.capacity_score),
     workload:    1 - (load.workloadMap[c.id] ?? 0) / load.maxWorkload,
@@ -184,7 +248,8 @@ function scoreOne(
 }
 
 export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidate[] {
-  const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap } = input
+  const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap, originByCrew } = input
+  const proximity: ProximityContext = { property, originByCrew }
 
   const weights     = isSameDay ? SAME_DAY_WEIGHTS : STANDARD_WEIGHTS
   const familiarSet = new Set(familiarCrewIds)
@@ -195,7 +260,7 @@ export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidat
   }
 
   return crew
-    .map((c) => scoreOne(c, weights, property, familiarSet, load))
+    .map((c) => scoreOne(c, weights, proximity, familiarSet, load))
     .sort((a, b) => b.score - a.score)
 }
 
@@ -212,8 +277,10 @@ export function scoreCrewCandidates(input: CrewScoringInput): ScoredCrewCandidat
  * caller that does too.
  */
 export function topCrewCandidate(input: CrewScoringInput): ScoredCrewCandidate | null {
-  const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap } = input
+  const { isSameDay, property, crew, familiarCrewIds, workloadMap, dayWorkloadMap, originByCrew } = input
   if (!crew.length) return null
+
+  const proximity: ProximityContext = { property, originByCrew }
 
   const weights     = isSameDay ? SAME_DAY_WEIGHTS : STANDARD_WEIGHTS
   const familiarSet = new Set(familiarCrewIds)
@@ -225,7 +292,7 @@ export function topCrewCandidate(input: CrewScoringInput): ScoredCrewCandidate |
 
   let best: ScoredCrewCandidate | null = null
   for (const c of crew) {
-    const candidate = scoreOne(c, weights, property, familiarSet, load)
+    const candidate = scoreOne(c, weights, proximity, familiarSet, load)
     if (!best || candidate.score > best.score) best = candidate
   }
   return best

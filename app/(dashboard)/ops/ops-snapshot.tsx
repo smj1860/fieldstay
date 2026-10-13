@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
-import { distanceMiles } from '@/lib/geocoding'
+import { chainTravel, type TravelStop, type TravelChain } from '@/lib/travel/estimate'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { buttonVariantClass } from '@/components/ui/Button'
@@ -17,13 +17,23 @@ import { FrictionExceptions } from './friction-exceptions'
 import type { UpcomingInspection } from '@/lib/inspections/upcoming-for-dashboard'
 import type { FlaggedTurnover } from '@/lib/friction/flagged-for-dashboard'
 
-const AVG_DRIVE_SPEED_MPH = 30
-
 // ── Types ──────────────────────────────────────────────────────
+
+/**
+ * home_lat/home_lng ride along on the embed the page already asked for, which
+ * is what makes the commute legs below free. They arrive as PostgREST
+ * numerics (strings on the wire), hence the coercion at the use site.
+ */
+interface CrewMemberEmbed {
+  id:        string
+  name:      string
+  home_lat?: number | string | null
+  home_lng?: number | string | null
+}
 
 export interface TurnoverAssignment {
   id:           string
-  crew_member: { id: string; name: string } | { id: string; name: string }[] | null
+  crew_member: CrewMemberEmbed | CrewMemberEmbed[] | null
 }
 
 export interface OpsTurnover {
@@ -44,11 +54,9 @@ export interface OpsTurnover {
 interface Property    { id: string; name: string; city: string | null; state: string | null; lat: number | null; lng: number | null }
 
 interface CrewTravelSummary {
-  crewId:    string
-  name:      string
-  miles:     number
-  minutes:   number
-  available: boolean
+  crewId:  string
+  name:    string
+  travel:  TravelChain
 }
 interface WorkOrder   { id: string; title: string; property_id: string; priority: string; status: string; needed_by_date: string | null; vendor_scheduled_at: string | null }
 interface LowStockItem { id: string; name: string; property_id: string; current_quantity: number; par_level: number }
@@ -355,9 +363,7 @@ function DayAccordion({
                     {c.name}
                   </span>
                   <span style={{ color: 'var(--text-muted)' }}>
-                    {c.available
-                      ? `${c.miles.toFixed(1)} mi · ${Math.floor(c.minutes / 60)}:${String(c.minutes % 60).padStart(2, '0')}`
-                      : 'Travel time unavailable'}
+                    {travelFigure(c.travel)}
                   </span>
                 </div>
               ))}
@@ -406,42 +412,83 @@ function urgencyRank(t: OpsTurnover): number {
 
 // ── Crew travel summary ─────────────────────────────────────────
 
-function getCrewTravelSummaries(
-  turnovers:    OpsTurnover[],
-  propertyById: Record<string, Property>
-): CrewTravelSummary[] {
-  const byCrew: Record<string, { name: string; turnovers: OpsTurnover[] }> = {}
+/** A PostgREST numeric, which is a string on the wire, as a usable number. */
+function coord(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+interface CrewDay {
+  name:      string
+  home:      { lat: number | null; lng: number | null }
+  turnovers: OpsTurnover[]
+}
+
+function groupTurnoversByCrew(turnovers: OpsTurnover[]): Record<string, CrewDay> {
+  const byCrew: Record<string, CrewDay> = {}
 
   for (const t of turnovers) {
-    const assignments = unwrapJoinArray(t.turnover_assignments)
-
-    for (const a of assignments) {
-      const cms = unwrapJoinArray(a.crew_member)
-      for (const c of cms) {
-        if (!byCrew[c.id]) byCrew[c.id] = { name: c.name, turnovers: [] }
+    for (const a of unwrapJoinArray(t.turnover_assignments)) {
+      for (const c of unwrapJoinArray(a.crew_member)) {
+        byCrew[c.id] ??= {
+          name: c.name,
+          home: { lat: coord(c.home_lat), lng: coord(c.home_lng) },
+          turnovers: [],
+        }
         byCrew[c.id]!.turnovers.push(t)
       }
     }
   }
 
-  return Object.entries(byCrew).map(([crewId, { name, turnovers: crewTurnovers }]) => {
-    const sorted = [...crewTurnovers].sort((a, b) => a.checkout_datetime.localeCompare(b.checkout_datetime))
-    const stops  = sorted.map((t) => propertyById[t.property_id]).filter(Boolean) as Property[]
+  return byCrew
+}
 
-    if (stops.length < 2) return { crewId, name, miles: 0, minutes: 0, available: stops.length > 0 }
+/**
+ * Each crew member's driving for the day, through the one shared
+ * implementation (lib/travel/estimate.ts).
+ *
+ * Two changes from the copy this replaced. A single property with no
+ * coordinates used to zero the whole figure, so the panel read "Travel time
+ * unavailable" for a day it could mostly measure; the chain now reports what
+ * it measured and the render says "at least". And the COMMUTE is in it: home
+ * to the first stop and the last stop back home are real driving, and leaving
+ * them out understated every crew member's day by two legs. Where a crew
+ * member has no home coordinates those two legs are simply absent, which the
+ * chain counts as unmeasured rather than as zero.
+ *
+ * Routed times are NOT read here: this renders on request, and a page that
+ * waited on a cache read per crew member would pay for a figure that is
+ * decorative. The straight line is explicitly labelled instead.
+ */
+function getCrewTravelSummaries(
+  turnovers:    OpsTurnover[],
+  propertyById: Record<string, Property>
+): CrewTravelSummary[] {
+  return Object.entries(groupTurnoversByCrew(turnovers)).map(([crewId, day]) => {
+    const sorted = [...day.turnovers].sort(
+      (a, b) => a.checkout_datetime.localeCompare(b.checkout_datetime))
 
-    let miles = 0
-    for (let i = 0; i < stops.length - 1; i++) {
-      const a = stops[i]!
-      const b = stops[i + 1]!
-      if (a.lat === null || a.lng === null || b.lat === null || b.lng === null) {
-        return { crewId, name, miles: 0, minutes: 0, available: false }
-      }
-      miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
-    }
-    const minutes = Math.round((miles / AVG_DRIVE_SPEED_MPH) * 60)
-    return { crewId, name, miles, minutes, available: true }
+    const jobStops: TravelStop[] = sorted
+      .map((t) => ({ id: t.id, property: propertyById[t.property_id] }))
+      .filter((s): s is { id: string; property: Property } => Boolean(s.property))
+      .map(({ id, property }) => ({ id, lat: property.lat, lng: property.lng }))
+
+    const home: TravelStop = { id: `home:${crewId}`, lat: day.home.lat, lng: day.home.lng }
+    const stops = [home, ...jobStops, { ...home, id: `home-return:${crewId}` }]
+
+    return { crewId, name: day.name, travel: chainTravel(stops) }
   })
+}
+
+/** "24.3 mi · 1:15", prefixed "at least" when part of the day is unmeasured. */
+function travelFigure(travel: TravelChain): string {
+  if (travel.measured === 0) return 'Travel time unavailable'
+
+  const figure = `${travel.miles.toFixed(1)} mi · `
+    + `${Math.floor(travel.minutes / 60)}:${String(travel.minutes % 60).padStart(2, '0')}`
+
+  return travel.unmeasured > 0 ? `at least ${figure}` : figure
 }
 
 // ── Main Component ─────────────────────────────────────────────

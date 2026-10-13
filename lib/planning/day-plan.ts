@@ -21,10 +21,10 @@
  * would pick by hand, which is what makes the output reviewable.
  */
 
-import { haversineKm } from '@/lib/scoring/geo'
-
-/** Matches the estimate used by app/crew/page.tsx and ops-snapshot.tsx. */
-export const AVG_DRIVE_SPEED_KMH = 48 // ~30 mph
+import {
+  travelLegKey, straightLineMiles, minutesForMiles,
+  type TravelPoint, type TravelLegMap,
+} from '@/lib/travel/estimate'
 
 /**
  * Minutes assumed between arriving and starting work: parking, unloading,
@@ -73,19 +73,39 @@ export interface DayPlan {
 
 const MS_PER_MINUTE = 60_000
 
+/**
+ * Minutes from the previous stop to this one.
+ *
+ * `routed` holds real driving durations keyed by travelLegKey() — the day
+ * planner fills it from lib/travel/resolve.ts, which reads Mapbox through a
+ * per-pair cache. A leg it does not cover falls back to the straight line,
+ * which is what every version of this function did before routing existed.
+ * Both paths now go through lib/travel/estimate.ts rather than each carrying
+ * their own speed constant.
+ *
+ * ── Why the commute from home is not added here ──
+ * Not for want of the data: it is that the first job's start is NOT
+ * constrained by it. A crew member can leave home as early as they like, so
+ * the binding constraint on job one is when the guest leaves, full stop.
+ * Adding a commute would push the first start later than the property is
+ * free, for no reason a PM could defend. The home legs belong in the day's
+ * total DRIVE TIME, which is a different question and lives in the travel
+ * summary surfaces.
+ */
 function travelMinutes(
-  from: { lat: number | null; lng: number | null } | null,
-  to:   { lat: number | null; lng: number | null },
+  from:   TravelPoint | null,
+  to:     TravelPoint,
+  routed?: TravelLegMap,
 ): number {
-  // No previous stop (the first job of the day) means no travel to add. The
-  // leg from home is deliberately NOT estimated: crew home coordinates are
-  // optional and frequently absent, and inventing a commute would move every
-  // start time in the day on data we do not have.
+  // No previous stop: the first job of the day has nothing to drive from.
   if (!from) return 0
-  if (from.lat === null || from.lng === null || to.lat === null || to.lng === null) return 0
 
-  const km = haversineKm(from.lat, from.lng, to.lat, to.lng)
-  return Math.round((km / AVG_DRIVE_SPEED_KMH) * 60)
+  const key   = travelLegKey(from, to)
+  const known = key !== null && routed ? routed.get(key) : undefined
+  if (known !== undefined) return known.minutes
+
+  const miles = straightLineMiles(from, to)
+  return miles === null ? 0 : minutesForMiles(miles)
 }
 
 /**
@@ -97,7 +117,19 @@ function travelMinutes(
  * where someone is in two places at once, and using only the second has them
  * arriving while the guest is still packing.
  */
-export function planDay(turnovers: readonly PlannableTurnover[]): DayPlan {
+export interface PlanDayOptions {
+  /**
+   * Real driving minutes per leg, keyed by travelLegKey(from, to). Partial by
+   * design: whatever is missing falls back to the straight-line estimate, so
+   * a day where routing covered three legs of four still uses the three.
+   */
+  routedTravel?: TravelLegMap
+}
+
+export function planDay(
+  turnovers: readonly PlannableTurnover[],
+  options:   PlanDayOptions = {},
+): DayPlan {
   const ordered = [...turnovers].sort(
     (a, b) => Date.parse(a.checkout_datetime) - Date.parse(b.checkout_datetime),
   )
@@ -110,7 +142,7 @@ export function planDay(turnovers: readonly PlannableTurnover[]): DayPlan {
     const propertyFree = Date.parse(t.checkout_datetime)
     if (Number.isNaN(propertyFree)) continue
 
-    const travel      = travelMinutes(previous, t)
+    const travel      = travelMinutes(previous, t, options.routedTravel)
     const earliestYou = freeFrom === null
       ? propertyFree
       : freeFrom + (travel + ARRIVAL_BUFFER_MINUTES) * MS_PER_MINUTE

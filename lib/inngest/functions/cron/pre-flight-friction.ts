@@ -4,7 +4,7 @@ import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { sendEventsChunked, chunkArray } from '@/lib/inngest/chunk'
 import { unwrapList, type PostgrestNumeric } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { computeDayWorkloadMap } from '@/lib/scoring/pools'
+import { computePriorStopOrigins, computeDayWorkloadMap, type PriorStopRow } from '@/lib/scoring/pools'
 import { frictionDateString, localDateFrom, frictionDayUtcBounds } from '@/lib/friction/date'
 import { resolveSeasonalProfile } from '@/lib/scoring/seasonal-market'
 import type { SeasonalProfile } from '@/types/database'
@@ -410,6 +410,16 @@ interface CrewContext {
   dayWorkloadByDate: Record<string, Record<string, number>>
   /** property_id -> crew who worked it inside the familiarity window. */
   familiarByProperty: Record<string, string[]>
+  /**
+   * The window's assignments with their property coordinates, kept RAW rather
+   * than pre-reduced.
+   *
+   * One org's context scores many turnovers, and "where will this crew member
+   * be coming from" has a different answer for each of them — so the origin
+   * map has to be built per turnover, the same reason dayWorkloadByDate is
+   * keyed by date instead of flattened.
+   */
+  priorStops: PriorStopRow[]
 }
 
 async function loadCrewContext(
@@ -440,13 +450,12 @@ async function loadCrewContext(
     ),
     // The embedded checkout_datetime was always fetched and always discarded.
     // Typing it is what makes the per-day bucketing below free.
-    fetchAllRows<{
-      crew_member_id: string
-      turnovers: { checkout_datetime: string } | { checkout_datetime: string }[] | null
-    }>(
+    fetchAllRows<WorkloadAssignmentRow>(
       (from, to) => supabase
         .from('turnover_assignments')
-        .select('crew_member_id, turnovers!inner(checkout_datetime)')
+        // The property coordinates come along for the prior-stop origin; both
+        // embeds were already on the wire for the join.
+        .select('crew_member_id, turnovers!inner(checkout_datetime, properties(lat, lng))')
         .eq('org_id', orgId)
         .gte('turnovers.checkout_datetime', new Date().toISOString())
         .lte('turnovers.checkout_datetime', workloadEnd)
@@ -490,7 +499,28 @@ async function loadCrewContext(
     else familiarByProperty[propertyId] = [row.crew_member_id]
   }
 
-  return { crew, workloadMap, dayWorkloadByDate, familiarByProperty }
+  const priorStops: PriorStopRow[] = upcoming.map((a) => {
+    const t = unwrapJoin(a.turnovers)
+    const p = t ? unwrapJoin(t.properties) : null
+    return {
+      crewMemberId: a.crew_member_id,
+      when:         t?.checkout_datetime,
+      lat:          p?.lat ?? null,
+      lng:          p?.lng ?? null,
+    }
+  })
+
+  return { crew, workloadMap, dayWorkloadByDate, familiarByProperty, priorStops }
+}
+
+interface FrictionPropertyCoords { lat: number | null; lng: number | null }
+
+interface WorkloadAssignmentRow {
+  crew_member_id: string
+  turnovers:
+    | { checkout_datetime: string; properties: FrictionPropertyCoords | FrictionPropertyCoords[] | null }
+    | { checkout_datetime: string; properties: FrictionPropertyCoords | FrictionPropertyCoords[] | null }[]
+    | null
 }
 
 /**
@@ -658,6 +688,9 @@ function smartFixFor(input: FrictionRowInput): { id: string; reasoning: string }
     familiarCrewIds: crewContext.familiarByProperty[turnover.property_id] ?? [],
     workloadMap:     crewContext.workloadMap,
     dayWorkloadMap,
+    // Per turnover, not per org: the previous stop depends on which turnover
+    // is being scored, which is why the rows are carried raw on the context.
+    originByCrew:    computePriorStopOrigins(crewContext.priorStops, turnover.checkout_datetime),
   })
 
   return top ? { id: top.crew_member_id, reasoning: crewSuggestionReasoning(top) } : null

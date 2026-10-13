@@ -84,6 +84,14 @@ Advisory. Lateness is still measured against the guest's check-in time, so a mis
 
 ---
 
+## Routed Travel Time
+
+The driving time between two stops, from a real route rather than a straight line. Looked up once per ordered pair of properties and cached per organization, then refreshed a few times a year, since the road between two houses does not move.
+
+Used by the day plan's start times and by the cascade alert's projection. Where no route is available, both fall back to a straight-line estimate, and a leg with either end missing from the map is reported as unmeasured rather than as zero. A travel figure covering some measured and some unmeasured legs is shown prefixed "at least".
+
+---
+
 ## Cascade Alert
 
 A notification raised when a turnover is past its own check-in with checklist items still open **and** the same crew member has another job later that day. It reports how far past check-in the job is and how far the delay is projected to run into the next one.
