@@ -231,3 +231,48 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
   },
 ] as const
+
+// ============================================================================
+// "Who are Breezeway's main competitors?" Search Console shows that exact
+// query as this page's single largest source of impressions (33 in 28 days,
+// position 17.8, 0 clicks), and nothing on the page answered it. Naming the
+// field is what that searcher wants, and naming it honestly is what keeps
+// the page trustworthy enough to rank for it.
+//
+// Descriptors are one neutral line each, category only. No pricing, no
+// feature claims, nothing a competitor could dispute. Each entry was checked
+// live on COMPETITORS_CHECKED_ON; re-check before editing a descriptor.
+// EZCare was dropped at that check: ezcare.com did not respond, and an entry
+// whose site cannot be confirmed is left out rather than guessed at.
+// ============================================================================
+
+export const COMPETITORS_CHECKED_ON = '2026-10-14'
+
+export interface Competitor {
+  name:  string
+  blurb: string
+  url:   string
+}
+
+export const BREEZEWAY_COMPETITORS: readonly Competitor[] = [
+  {
+    name:  'Turno',
+    blurb: 'Cleaner scheduling and a marketplace for finding vacation rental cleaners.',
+    url:   'https://turno.com',
+  },
+  {
+    name:  'Operto Teams',
+    blurb: 'Staff and task scheduling, checklists and inventory for hospitality and rental teams.',
+    url:   'https://operto.com/teams',
+  },
+  {
+    name:  'Properly',
+    blurb: 'Turnover scheduling and photo-verified checklists for vacation rental cleaning teams.',
+    url:   'https://www.getproperly.com',
+  },
+  {
+    name:  'FieldStay',
+    blurb: 'Turnovers, crew dispatch, vendor work orders and asset tracking, with pricing published to 150 properties.',
+    url:   'https://fieldstay.app',
+  },
+]

@@ -514,6 +514,20 @@ export const STROPS_FAQ: readonly FaqItem[] = [
  */
 export const BREEZEWAY_FAQ: readonly FaqItem[] = [
   {
+    // The page's single largest query by impressions. The answer names the
+    // same list rendered in the "main competitors" section of
+    // app/breezeway-alternative/page.tsx; the test checks the two agree.
+    id:       'breezeway-main-competitor',
+    question: 'What is the main competitor to Breezeway?',
+    answer:
+      'Breezeway\'s main competitors in short-term rental operations software are Turno, Operto Teams, ' +
+      'Properly, and FieldStay. Turno and Properly focus on cleaning teams; Operto Teams covers staff ' +
+      'scheduling, checklists and inventory; FieldStay covers turnovers, crew dispatch, vendor ' +
+      'work orders and asset tracking in one platform. The practical difference with FieldStay is that ' +
+      'its price is published for any portfolio up to 150 properties, so you can see your own number ' +
+      'without a sales call.',
+  },
+  {
     id:       'breezeway-vs-fieldstay-difference',
     question: 'What is the difference between FieldStay and Breezeway?',
     answer:
