@@ -110,14 +110,14 @@ function ComparisonTable({ data }: SectionProps) {
         FieldStay claims are verifiable against this product directly. {data.competitor} information reflects{' '}
         {data.competitor}&apos;s public website and help documentation, checked on or after {data.researchedOn}.
         Rows are re-checked one at a time, so some carry a later date than others. A
-        competitor&apos;s pricing and features can change at any time, so verify current details at{' '}
+        competitor&apos;s pricing and features can change at any time, so verify current details on{' '}
         <a
           href={data.competitorPricingUrl}
           rel="nofollow noopener"
           target="_blank"
           className="underline hover:text-[var(--mkt-ink)]"
         >
-          {data.competitor}&apos;s pricing page
+          {data.competitor}&apos;s website
         </a>{' '}
         before deciding.
       </p>

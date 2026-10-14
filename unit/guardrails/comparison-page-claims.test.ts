@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-
-import type { ComparisonRow } from '@/app/breezeway-alternative/comparison-data'
+import { BREEZEWAY_COMPETITORS, type ComparisonRow } from '@/app/breezeway-alternative/comparison-data'
 
 // ============================================================================
 // Every "<competitor> alternative" page makes claims about a live competitor's
@@ -17,15 +16,18 @@ import type { ComparisonRow } from '@/app/breezeway-alternative/comparison-data'
 // text, and is deliberately excluded; migrating it is a separate ticket.
 // ============================================================================
 
-const root = process.cwd()
-const appDir = join(root, 'app')
-
-const ALTERNATIVE_DIRS = readdirSync(appDir).filter(
+// Directories are discovered rather than listed, so a new page is picked up
+// with no registry to forget. The import path keeps a relative prefix and a
+// file extension in its static part, which is what Vite needs to analyse it.
+const ALTERNATIVE_DIRS = readdirSync(join(process.cwd(), 'app')).filter(
   (d) =>
     d.endsWith('-alternative') &&
     d !== 'breezeway-alternative' &&
-    existsSync(join(appDir, d, 'comparison-data.ts')),
+    existsSync(join(process.cwd(), 'app', d, 'comparison-data.ts')),
 )
+
+const load = async (dir: string) =>
+  (await import(`../../app/${dir}/comparison-data.ts`)) as DataModule
 
 const DATE = /checked (\d{4}-\d{2}-\d{2})/g
 
@@ -42,7 +44,7 @@ describe('competitor comparison pages cite what they claim', () => {
   for (const dir of ALTERNATIVE_DIRS) {
     describe(`/${dir}`, () => {
       it('every competitor-side source carries a "checked YYYY-MM-DD" date', async () => {
-        const mod = (await import(`@/app/${dir}/comparison-data`)) as DataModule
+        const mod = await load(dir)
         for (const row of mod.COMPARISON_ROWS) {
           expect(
             row.breezewaySource,
@@ -52,7 +54,7 @@ describe('competitor comparison pages cite what they claim', () => {
       })
 
       it('RESEARCHED_ON is no newer than the oldest row date (oldest-not-newest)', async () => {
-        const mod = (await import(`@/app/${dir}/comparison-data`)) as DataModule
+        const mod = await load(dir)
         const dates = mod.COMPARISON_ROWS.flatMap((r) =>
           [...r.breezewaySource.matchAll(DATE)].map((m) => m[1]),
         ).sort((a, b) => a.localeCompare(b))
@@ -65,4 +67,13 @@ describe('competitor comparison pages cite what they claim', () => {
       })
     })
   }
+})
+
+describe('every alternative page is linked from the Breezeway competitors section', () => {
+  it("each page's path is the alternativePath of an entry in BREEZEWAY_COMPETITORS", () => {
+    const linked = new Set(BREEZEWAY_COMPETITORS.map((c) => c.alternativePath))
+    for (const dir of ALTERNATIVE_DIRS) {
+      expect(linked.has(`/${dir}`), `/${dir} has no entry with that alternativePath in BREEZEWAY_COMPETITORS`).toBe(true)
+    }
+  })
 })

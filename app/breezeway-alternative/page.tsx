@@ -170,7 +170,7 @@ export default function BreezewayAlternativePage() {
           Who are Breezeway&apos;s main competitors?
         </h2>
         <p className="text-[var(--mkt-muted)] mb-8 max-w-2xl">
-          Four platforms, including this one, that short-term rental managers evaluate alongside Breezeway.
+          Five platforms, including this one, that short-term rental managers evaluate alongside Breezeway.
           One line each, category only. Checked {COMPETITORS_CHECKED_ON}.
         </p>
         <ul className="grid md:grid-cols-2 gap-4">
@@ -191,6 +191,14 @@ export default function BreezewayAlternativePage() {
                 )}
               </div>
               <p className="text-sm text-[var(--mkt-muted)] leading-relaxed">{c.blurb}</p>
+              {c.alternativePath ? (
+                <Link
+                  href={c.alternativePath}
+                  className="inline-block mt-3 text-sm font-semibold text-[var(--mkt-ink)] underline hover:text-[var(--mkt-gold-hover)]"
+                >
+                  FieldStay vs {c.name}
+                </Link>
+              ) : null}
             </li>
           ))}
         </ul>

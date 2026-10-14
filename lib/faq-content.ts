@@ -521,8 +521,8 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'What is the main competitor to Breezeway?',
     answer:
       'Breezeway\'s main competitors in short-term rental operations software are Turno, Operto Teams, ' +
-      'Properly, and FieldStay. Turno and Properly focus on cleaning teams; Operto Teams covers staff ' +
-      'scheduling, checklists and inventory; FieldStay covers turnovers, crew dispatch, vendor ' +
+      'Properly, EZCare, and FieldStay. Turno and Properly focus on cleaning teams; Operto Teams covers staff ' +
+      'scheduling, checklists and inventory; EZCare covers housekeeping, maintenance and inventory; FieldStay covers turnovers, crew dispatch, vendor ' +
       'work orders and asset tracking in one platform. The practical difference with FieldStay is that ' +
       'its price is published for any portfolio up to 150 properties, so you can see your own number ' +
       'without a sales call.',
@@ -602,6 +602,207 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'with no signal at all. When an owner asks whether the house was ready, or a guest says something was ' +
       'missed, you don\'t go looking for someone to ask. You open the property, pick the date, and read ' +
       'what happened.',
+  },
+] as const
+
+/**
+ * /turno-alternative: comparison-page FAQ, same rules as BREEZEWAY_FAQ above
+ * (each answer stands alone and is quotable by an answer engine; competitor
+ * facts come from app/turno-alternative/comparison-data.ts). Kept OUT of the
+ * neutral FAQ pool for the reason PUBLIC_FAQ_POOL's comment gives.
+ */
+export const TURNO_FAQ: readonly FaqItem[] = [
+  {
+    id:       'turno-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and Turno?',
+    answer:
+      'The biggest practical differences are scope and pricing transparency. Turno is built around ' +
+      'cleaning: it syncs booking calendars, creates cleaning jobs and offers a cleaner marketplace. ' +
+      'FieldStay covers turnovers, crew dispatch, vendor work orders, asset tracking and owner reporting in ' +
+      'one platform, and publishes one graduated rate schedule that prices any portfolio from 1 to 150 ' +
+      'properties with no sales call.',
+  },
+  {
+    id:       'turno-alternative-pricing',
+    question: 'Is FieldStay cheaper than Turno?',
+    answer:
+      'It depends on your property count and on how you staff your cleans. For 10 properties, FieldStay is ' +
+      '$118/month, publicly calculable from the rate schedule before you talk to anyone. Turno\'s published ' +
+      'pricing is a per-property subscription that is free for one property or for hosts who use only its ' +
+      'marketplace cleaners, so for a host using Turno\'s marketplace alone it can cost less. Check ' +
+      'turno.com/pricing for your own count and setup.',
+  },
+  {
+    id:       'turno-alternative-switching',
+    question: 'How do I switch from Turno to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Turno. It connects TO your ' +
+      'booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
+      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
+      'over.',
+  },
+  {
+    id:       'turno-alternative-specific',
+    question: 'Does FieldStay have a cleaner marketplace like Turno?',
+    answer:
+      'FieldStay does not operate a marketplace of vetted cleaners. It is built to run the crew and vendors ' +
+      'you already have: it scores and assigns crew to each turnover, dispatches vendor work orders by ' +
+      'link, and keeps the record of what happened. Turno describes sourcing local cleaners and comparing ' +
+      'bids through its marketplace as a core strength, so if finding new cleaners is the main problem, ' +
+      'that is a real difference. If the people are already in place and the gap is scheduling, proof and ' +
+      'follow-through, that is the part FieldStay covers.',
+  },
+] as const
+
+/**
+ * /operto-teams-alternative: comparison-page FAQ, same rules as BREEZEWAY_FAQ above
+ * (each answer stands alone and is quotable by an answer engine; competitor
+ * facts come from app/operto-teams-alternative/comparison-data.ts). Kept OUT of the
+ * neutral FAQ pool for the reason PUBLIC_FAQ_POOL's comment gives.
+ */
+export const OPERTO_FAQ: readonly FaqItem[] = [
+  {
+    id:       'operto-teams-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and Operto Teams?',
+    answer:
+      'The biggest practical differences are pricing transparency and focus. Operto Teams publishes no ' +
+      'price and directs visitors to a demo. FieldStay publishes one graduated rate schedule that prices ' +
+      'any portfolio from 1 to 150 properties with no sales call. Operto Teams is marketed to hotels and ' +
+      'multifamily housing as well as vacation rentals, while FieldStay is built only for short-term rental ' +
+      'operations.',
+  },
+  {
+    id:       'operto-teams-alternative-pricing',
+    question: 'Is FieldStay cheaper than Operto Teams?',
+    answer:
+      'It depends on your property count, and the honest answer for Operto Teams is that no price is ' +
+      'published to compare against. For 10 properties, FieldStay is $118/month, publicly calculable from ' +
+      'the rate schedule before you talk to anyone. Operto\'s Teams and pricing pages direct visitors to a ' +
+      'demo, so a comparable figure requires a conversation with them.',
+  },
+  {
+    id:       'operto-teams-alternative-switching',
+    question: 'How do I switch from Operto Teams to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Operto Teams. It connects TO ' +
+      'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
+      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
+      'over.',
+  },
+  {
+    id:       'operto-teams-alternative-specific',
+    question: 'How does FieldStay compare with Operto Teams for staff scheduling?',
+    answer:
+      'Both schedule staff and tasks for vacation rentals. Operto Teams describes automated scheduling, ' +
+      'staff time tracking, payroll reports, checklists and inventory, and it is also marketed to hotels ' +
+      'and multifamily housing. FieldStay is built for short-term rental operators specifically: it scores ' +
+      'and assigns crew to each turnover automatically, runs the crew app offline, dispatches vendor work ' +
+      'orders by link and tracks assets. If payroll reports and time tracking are the priority, look ' +
+      'closely at what Operto Teams offers; FieldStay is stronger where turnovers, vendors and owner ' +
+      'reporting need to live together.',
+  },
+] as const
+
+/**
+ * /properly-alternative: comparison-page FAQ, same rules as BREEZEWAY_FAQ above
+ * (each answer stands alone and is quotable by an answer engine; competitor
+ * facts come from app/properly-alternative/comparison-data.ts). Kept OUT of the
+ * neutral FAQ pool for the reason PUBLIC_FAQ_POOL's comment gives.
+ */
+export const PROPERLY_FAQ: readonly FaqItem[] = [
+  {
+    id:       'properly-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and Properly?',
+    answer:
+      'The biggest practical differences are scope and pricing transparency. Properly is built around ' +
+      'cleaning quality: scheduling, photo-verified checklists, a cleaner marketplace and optional paid ' +
+      'inspections. FieldStay covers turnovers, crew dispatch, vendor work orders, asset tracking and owner ' +
+      'reporting in one platform, and publishes one graduated rate schedule that prices any portfolio from ' +
+      '1 to 150 properties with no sales call.',
+  },
+  {
+    id:       'properly-alternative-pricing',
+    question: 'Is FieldStay cheaper than Properly?',
+    answer:
+      'It depends on your property count and which Properly tier you would use. For 10 properties, ' +
+      'FieldStay is $118/month, publicly calculable from the rate schedule before you talk to anyone. ' +
+      'Properly lists self-service pricing from $12.99 per property per month, with volume tiers and custom ' +
+      'pricing for larger portfolios, so the exact comparison depends on the tier. Check ' +
+      'getproperly.com/pricing for your own count.',
+  },
+  {
+    id:       'properly-alternative-switching',
+    question: 'How do I switch from Properly to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Properly. It connects TO ' +
+      'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
+      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
+      'over.',
+  },
+  {
+    id:       'properly-alternative-specific',
+    question: 'How does FieldStay compare with Properly\'s photo-verified cleaning checklists?',
+    answer:
+      'Both give cleaners a checklist with photos so a clean can be verified. Properly is built around ' +
+      'quality verification, with photo-verified checklists and a paid expert inspection option. ' +
+      'FieldStay\'s crew app also timestamps every checklist step and photo, works with no signal, and keeps ' +
+      'that record next to the rest of the property\'s history, including work orders, assets and inventory. ' +
+      'If cleaning verification is the whole problem, Properly\'s focus is a fair strength to weigh; ' +
+      'FieldStay is the better fit when verification has to sit alongside vendors, maintenance and owner ' +
+      'reporting.',
+  },
+] as const
+
+/**
+ * /ezcare-alternative: comparison-page FAQ, same rules as BREEZEWAY_FAQ above
+ * (each answer stands alone and is quotable by an answer engine; competitor
+ * facts come from app/ezcare-alternative/comparison-data.ts). Kept OUT of the
+ * neutral FAQ pool for the reason PUBLIC_FAQ_POOL's comment gives.
+ */
+export const EZCARE_FAQ: readonly FaqItem[] = [
+  {
+    id:       'ezcare-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and EZCare?',
+    answer:
+      'The biggest practical differences are pricing transparency and scope. EZcare describes an integrated ' +
+      'housekeeping, maintenance and inventory platform and directs visitors to a demo request, with no ' +
+      'price shown on the pages reviewed. FieldStay publishes one graduated rate schedule that prices any ' +
+      'portfolio from 1 to 150 properties with no sales call, and adds automatic crew assignment, ' +
+      'link-based vendor work orders and an owner P&L portal.',
+  },
+  {
+    id:       'ezcare-alternative-pricing',
+    question: 'Is FieldStay cheaper than EZCare?',
+    answer:
+      'It depends on your property count, and for EZCare the honest answer is that no price was found to ' +
+      'compare against. For 10 properties, FieldStay is $118/month, publicly calculable from the rate ' +
+      'schedule before you talk to anyone. EZcare\'s public pages direct visitors to a demo request, so a ' +
+      'comparable figure requires a conversation with them.',
+  },
+  {
+    id:       'ezcare-alternative-switching',
+    question: 'How do I switch from EZCare to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM EZCare. It connects TO your ' +
+      'booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
+      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
+      'over.',
+  },
+  {
+    id:       'ezcare-alternative-specific',
+    question: 'How does FieldStay compare with EZCare for housekeeping management?',
+    answer:
+      'Both manage housekeeping and maintenance for vacation rentals. EZcare describes itself as an ' +
+      'integrated housekeeping, maintenance and inventory platform with a mobile app, inspections and a ' +
+      'long list of PMS integrations. FieldStay covers the same ground for short-term rentals and adds ' +
+      'automatic crew assignment, an offline-first crew app, link-based vendor work orders, asset health ' +
+      'scoring with capital forecasting, and an owner portal. EZcare publishes no price on the pages ' +
+      'reviewed, so the practical first step with either product is to see it running on a few of your ' +
+      'properties.',
   },
 ] as const
 

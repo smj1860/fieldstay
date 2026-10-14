@@ -242,8 +242,9 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
 // Descriptors are one neutral line each, category only. No pricing, no
 // feature claims, nothing a competitor could dispute. Each entry was checked
 // live on COMPETITORS_CHECKED_ON; re-check before editing a descriptor.
-// EZCare was dropped at that check: ezcare.com did not respond, and an entry
-// whose site cannot be confirmed is left out rather than guessed at.
+// EZCare's product site is ezcare.io (ezcare.com did not respond on the check
+// date and is not used). Entries with an alternativePath have their own
+// FieldStay comparison page, linked from the section on this page.
 // ============================================================================
 
 export const COMPETITORS_CHECKED_ON = '2026-10-14'
@@ -252,6 +253,8 @@ export interface Competitor {
   name:  string
   blurb: string
   url:   string
+  /** This site's own "<competitor> alternative" page, when one exists. */
+  alternativePath?: string
 }
 
 export const BREEZEWAY_COMPETITORS: readonly Competitor[] = [
@@ -259,16 +262,25 @@ export const BREEZEWAY_COMPETITORS: readonly Competitor[] = [
     name:  'Turno',
     blurb: 'Cleaner scheduling and a marketplace for finding vacation rental cleaners.',
     url:   'https://turno.com',
+    alternativePath: '/turno-alternative',
   },
   {
     name:  'Operto Teams',
     blurb: 'Staff and task scheduling, checklists and inventory for hospitality and rental teams.',
     url:   'https://operto.com/teams',
+    alternativePath: '/operto-teams-alternative',
   },
   {
     name:  'Properly',
     blurb: 'Turnover scheduling and photo-verified checklists for vacation rental cleaning teams.',
     url:   'https://www.getproperly.com',
+    alternativePath: '/properly-alternative',
+  },
+  {
+    name:  'EZCare',
+    blurb: 'Housekeeping, maintenance and inventory management for vacation rental operators.',
+    url:   'https://www.ezcare.io',
+    alternativePath: '/ezcare-alternative',
   },
   {
     name:  'FieldStay',
