@@ -16,7 +16,14 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, TRIAL_OFFER, RESEARCHED_ON } from './comparison-data'
+import {
+  COMPARISON_ROWS,
+  FIELDSTAY_HIGHLIGHTS,
+  TRIAL_OFFER,
+  RESEARCHED_ON,
+  BREEZEWAY_COMPETITORS,
+  COMPETITORS_CHECKED_ON,
+} from './comparison-data'
 import { buildJsonLd, serializeJsonLd, BREEZEWAY_PATH } from './json-ld'
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
 import { monthlyCostCents } from '@/lib/stripe/brackets'
@@ -32,10 +39,10 @@ const EXAMPLE_QTY = 10
 const examplePriceDollars = monthlyCostCents(EXAMPLE_QTY)! / 100
 
 export const metadata: Metadata = {
-  title: 'Breezeway Alternative: FieldStay vs Breezeway',
+  title: 'Breezeway Alternative with Published Pricing',
   description:
-    'Looking for a Breezeway alternative? FieldStay publishes real pricing to 150 properties ' +
-    '(no sales call) and a no-login vendor portal. Free 14-day trial.',
+    `Breezeway's main competitors, compared. FieldStay publishes real pricing up to 150 properties, ` +
+    `no sales call: ${EXAMPLE_QTY} properties is $${examplePriceDollars}/mo. Free 14-day trial.`,
   keywords: [
     'breezeway alternative',
     'fieldstay vs breezeway',
@@ -152,6 +159,41 @@ export default function BreezewayAlternativePage() {
           </a>{' '}
           before deciding.
         </p>
+      </section>
+
+      {/* ── Main competitors ───────────────────────────────────────────── */}
+      {/* Answers "what is the main competitor to breezeway", this page's
+          largest query by impressions. See BREEZEWAY_COMPETITORS for why
+          the descriptors are deliberately generic. */}
+      <section className="max-w-5xl mx-auto px-6 pb-16">
+        <h2 className="text-3xl font-bold text-[var(--mkt-ink)] mb-2 font-display">
+          Who are Breezeway&apos;s main competitors?
+        </h2>
+        <p className="text-[var(--mkt-muted)] mb-8 max-w-2xl">
+          Four platforms, including this one, that short-term rental managers evaluate alongside Breezeway.
+          One line each, category only. Checked {COMPETITORS_CHECKED_ON}.
+        </p>
+        <ul className="grid md:grid-cols-2 gap-4">
+          {BREEZEWAY_COMPETITORS.map((c) => (
+            <li key={c.name} className="rounded-xl border border-[var(--mkt-border)] p-5">
+              <div className="font-semibold text-[var(--mkt-ink)] mb-1">
+                {c.name === 'FieldStay' ? (
+                  c.name
+                ) : (
+                  <a
+                    href={c.url}
+                    rel="nofollow noopener"
+                    target="_blank"
+                    className="underline hover:text-[var(--mkt-gold-hover)]"
+                  >
+                    {c.name}
+                  </a>
+                )}
+              </div>
+              <p className="text-sm text-[var(--mkt-muted)] leading-relaxed">{c.blurb}</p>
+            </li>
+          ))}
+        </ul>
       </section>
 
       {/* ── Worked pricing example ─────────────────────────────────────── */}

@@ -3,7 +3,13 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
-import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, TRIAL_OFFER } from '@/app/breezeway-alternative/comparison-data'
+import {
+  COMPARISON_ROWS,
+  FIELDSTAY_HIGHLIGHTS,
+  TRIAL_OFFER,
+  BREEZEWAY_COMPETITORS,
+  COMPETITORS_CHECKED_ON,
+} from '@/app/breezeway-alternative/comparison-data'
 
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
@@ -138,6 +144,7 @@ describe('structured data cannot drift from the visible page', () => {
     expect(questions.some((q) => q.includes('difference between fieldstay and breezeway'))).toBe(true)
     expect(questions.some((q) => q.includes('cheaper than breezeway'))).toBe(true)
     expect(questions.some((q) => q.includes('switch from breezeway'))).toBe(true)
+    expect(questions.some((q) => q.includes('main competitor to breezeway'))).toBe(true)
   })
 
   it('the advertised entry price matches the real graduated schedule\'s anchor', async () => {
@@ -217,5 +224,52 @@ describe('SEO plumbing', () => {
     const page = read('app/breezeway-alternative/page.tsx')
     expect(page).toMatch(/description:\s*\n?\s*'/)
     expect(page).not.toContain('STR operations platform for property managers.')
+  })
+})
+
+describe('the competitors section answers the query it exists for, and cannot drift from the FAQ', () => {
+  const page = read('app/breezeway-alternative/page.tsx')
+  const faq = FAQS.find((f) => f.id === 'breezeway-main-competitor')!
+
+  it('renders the list from comparison-data, not a hand-typed copy', () => {
+    expect(page).toMatch(/BREEZEWAY_COMPETITORS\.map\(/)
+    expect(page).toContain('{COMPETITORS_CHECKED_ON}')
+  })
+
+  it('every competitor has a name, a one-line category blurb, and an https URL', () => {
+    expect(BREEZEWAY_COMPETITORS.length).toBeGreaterThanOrEqual(3)
+    for (const c of BREEZEWAY_COMPETITORS) {
+      expect(c.name.length).toBeGreaterThan(1)
+      expect(c.blurb.length, `${c.name} blurb is a stub`).toBeGreaterThan(30)
+      expect(c.blurb.length, `${c.name} blurb is a paragraph, keep it to one line`).toBeLessThan(140)
+      expect(c.url).toMatch(/^https:\/\//)
+    }
+  })
+
+  it('FieldStay is in the list, because leaving it out makes the section a referral page', () => {
+    expect(BREEZEWAY_COMPETITORS.some((c) => c.name === 'FieldStay')).toBe(true)
+  })
+
+  it('the FAQ answer names every competitor the section renders', () => {
+    for (const c of BREEZEWAY_COMPETITORS) {
+      expect(faq.answer, `FAQ answer omits ${c.name}`).toContain(c.name)
+    }
+  })
+
+  it('competitor descriptors make no pricing or feature-comparison claims', () => {
+    for (const c of BREEZEWAY_COMPETITORS.filter((x) => x.name !== 'FieldStay')) {
+      expect(c.blurb.toLowerCase()).not.toMatch(/\$|per month|\/mo|cheaper|better|faster|more than|less than/)
+    }
+  })
+
+  it('the check date was actually set', () => {
+    expect(COMPETITORS_CHECKED_ON).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('the title leads with the differentiator and stays under 60 characters once the brand suffix is appended', () => {
+    const m = /title:\s*'([^']*)'/.exec(page)
+    expect(m).not.toBeNull()
+    expect(m![1].toLowerCase()).toContain('breezeway alternative')
+    expect(m![1].length + ' | FieldStay'.length).toBeLessThanOrEqual(60)
   })
 })
