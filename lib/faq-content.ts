@@ -606,6 +606,17 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
 ] as const
 
 /**
+ * The "how do I switch" answer is the same for every competitor, because
+ * FieldStay imports from none of them: it connects to the booking platform.
+ * One template keeps four answers from drifting apart.
+ */
+const switchToFieldstayAnswer = (competitor: string) =>
+  `There's no data migration to run, because FieldStay doesn't import FROM ${competitor}. It connects TO ` +
+  'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
+  'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of properties ' +
+  'during a free trial alongside their current setup before moving the rest of the portfolio over.'
+
+/**
  * /turno-alternative: comparison-page FAQ, same rules as BREEZEWAY_FAQ above
  * (each answer stands alone and is quotable by an answer engine; competitor
  * facts come from app/turno-alternative/comparison-data.ts). Kept OUT of the
@@ -636,11 +647,7 @@ export const TURNO_FAQ: readonly FaqItem[] = [
     id:       'turno-alternative-switching',
     question: 'How do I switch from Turno to FieldStay?',
     answer:
-      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Turno. It connects TO your ' +
-      'booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
-      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
-      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
-      'over.',
+      switchToFieldstayAnswer('Turno'),
   },
   {
     id:       'turno-alternative-specific',
@@ -685,11 +692,7 @@ export const OPERTO_FAQ: readonly FaqItem[] = [
     id:       'operto-teams-alternative-switching',
     question: 'How do I switch from Operto Teams to FieldStay?',
     answer:
-      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Operto Teams. It connects TO ' +
-      'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
-      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
-      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
-      'over.',
+      switchToFieldstayAnswer('Operto Teams'),
   },
   {
     id:       'operto-teams-alternative-specific',
@@ -736,11 +739,7 @@ export const PROPERLY_FAQ: readonly FaqItem[] = [
     id:       'properly-alternative-switching',
     question: 'How do I switch from Properly to FieldStay?',
     answer:
-      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Properly. It connects TO ' +
-      'your booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
-      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
-      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
-      'over.',
+      switchToFieldstayAnswer('Properly'),
   },
   {
     id:       'properly-alternative-specific',
@@ -786,11 +785,7 @@ export const EZCARE_FAQ: readonly FaqItem[] = [
     id:       'ezcare-alternative-switching',
     question: 'How do I switch from EZCare to FieldStay?',
     answer:
-      'There\'s no data migration to run, because FieldStay doesn\'t import FROM EZCare. It connects TO your ' +
-      'booking platform (OwnerRez, Hospitable, Hostex, Hostaway, or Lodgify) and builds your turnover ' +
-      'schedule from your existing bookings automatically. Most teams run FieldStay on a handful of ' +
-      'properties during a free trial alongside their current setup before moving the rest of the portfolio ' +
-      'over.',
+      switchToFieldstayAnswer('EZCare'),
   },
   {
     id:       'ezcare-alternative-specific',
