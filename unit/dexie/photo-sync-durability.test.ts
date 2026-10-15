@@ -201,6 +201,18 @@ describe('photo queue durability', () => {
     expect(Object.keys((mutation as { payload: object }).payload)).toEqual(['photo_storage_path'])
   })
 
+  it('queues the pointer PATCH ahead of the evidence seal, so a failing seal cannot hold the pointer', async () => {
+    await db().pending_photo_uploads.update('ph1', {
+      sha256: 'a'.repeat(64), byte_size: 1, captured_at: '2026-07-30T08:00:00.000Z',
+    })
+    const ok = makeStorage([{ error: null }])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+    await processPendingPhotoUploads(ok.client as any, 'u1')
+
+    const tables = (await db().mutations.toArray() as { table: string }[]).map((m) => m.table)
+    expect(tables).toEqual(['checklist_instance_items', 'evidence_seals'])
+  })
+
   // ── Legacy (pre-org-prefix) paths ────────────────────────────────────────
   // turnover-photos became private mid-flight and its policies key off the
   // first path segment. A photo queued on-device BEFORE that change carries a

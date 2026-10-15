@@ -16,6 +16,7 @@ import type { MemberRole, TablesUpdate } from '@/types/database'
 import { isUnavailableAt } from '@/lib/scheduling/part-of-day'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sealPhoto } from '@/lib/evidence/seal'
+import { isUuid, isSha256, isIsoInstant, isStoragePath, finiteOrNull, latOrNull, lngOrNull } from '@/lib/evidence/validate'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -1875,6 +1876,21 @@ export async function unpublishDayPlan(planDate: string): Promise<TurnoverAction
  * away. Now it is a ledger row against the turnover, so it shows on the
  * property's evidence timeline and in a claim packet.
  */
+function validateFlagSeal(input: FlagSealInput, orgId: string): string | null {
+  const c = input.capture
+  const ok = isUuid(input.turnoverId) && isStoragePath(input.storagePath) && input.storagePath.startsWith(`${orgId}/`)
+    && isSha256(c.sha256) && isIsoInstant(c.captured_at) && isIsoInstant(input.deviceNow)
+    && Number.isFinite(c.byte_size) && c.byte_size >= 0
+  return ok ? null : 'Invalid photo details'
+}
+
+interface FlagSealInput {
+  turnoverId:   string
+  storagePath:  string
+  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_m: number | null }
+  deviceNow:    string
+}
+
 export async function sealFlagPhoto(input: {
   turnoverId:   string
   storagePath:  string
@@ -1883,6 +1899,9 @@ export async function sealFlagPhoto(input: {
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const invalid = validateFlagSeal(input, membership.org_id)
+    if (invalid) return { success: false, error: invalid }
 
     const { data: turnover, error } = await supabase
       .from('turnovers')
@@ -1903,9 +1922,9 @@ export async function sealFlagPhoto(input: {
       byteSize:         input.capture.byte_size,
       deviceCapturedAt: input.capture.captured_at,
       deviceNow:        input.deviceNow,
-      lat:              input.capture.lat,
-      lng:              input.capture.lng,
-      gpsAccuracyM:     input.capture.gps_accuracy_m,
+      lat:              latOrNull(input.capture.lat),
+      lng:              lngOrNull(input.capture.lng),
+      gpsAccuracyM:     finiteOrNull(input.capture.gps_accuracy_m),
       capturedBy:       { kind: 'pm', id: user.id, label: null },
       turnoverId:       turnover.id,
       workOrderId:      null,

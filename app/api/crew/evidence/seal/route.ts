@@ -6,6 +6,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { logAuditEvent } from '@/lib/audit'
 import { sealPhoto } from '@/lib/evidence/seal'
 import { pathMatchesTarget, type CrewSealTarget } from '@/lib/evidence/seal-paths'
+import { UUID_RE, SHA256_RE as SHA_RE, finiteOrNull as optionalNumber } from '@/lib/evidence/validate'
 import type { EvidenceSourceTable } from '@/types/database'
 
 /**
@@ -22,9 +23,6 @@ import type { EvidenceSourceTable } from '@/types/database'
 const CREW_SOURCE_TABLES = new Set<EvidenceSourceTable>([
   'checklist_instance_items', 'checklist_instances', 'property_assets',
 ])
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const SHA_RE  = /^[0-9a-f]{64}$/
 
 interface SealBody {
   client_seal_id: string
@@ -46,10 +44,6 @@ type Parsed = { ok: true; value: SealBody } | { ok: false; response: NextRespons
 
 function bad(msg: string): Parsed {
   return { ok: false, response: NextResponse.json({ error: msg }, { status: 400 }) }
-}
-
-function optionalNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
 function parseBody(raw: unknown): Parsed {
@@ -134,13 +128,14 @@ function sealTargetOf(orgId: string, body: SealBody, target: SealTarget): CrewSe
 }
 
 export async function POST(request: NextRequest) {
-  const parsed = parseBody(await request.json().catch(() => null))
-  if (!parsed.ok) return parsed.response
-  const body = parsed.value
-
+  // Auth first: an unauthenticated caller learns nothing about the body schema.
   const auth = await requireCrewMember()
   if (!auth.ok) return auth.response
   const { supabase, crew, user } = auth
+
+  const parsed = parseBody(await request.json().catch(() => null))
+  if (!parsed.ok) return parsed.response
+  const body = parsed.value
 
   const decision = await checkLimit(evidenceSealRatelimit, crew.id, {
     onError: 'allow',   // a Redis outage must not block an outbox drain

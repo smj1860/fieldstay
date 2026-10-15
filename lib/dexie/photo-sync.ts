@@ -140,39 +140,44 @@ async function applyUploadedPath(
 
   await db.transaction('rw', db.mutations, db.checklist_instance_items,
     db.checklist_instances, db.property_assets, async () => {
-      // The seal's targetId is the queue row id: unique per capture, stable
-      // across retries, and never the storage path (paths are not valid
-      // mutation target ids on the failed-sync surface).
+      await queuePointerWrite(db, row)
+      // Queued AFTER the pointer on purpose: the outbox drains in order and
+      // stops at the first failure, so a seal that 503s must not hold the
+      // pointer PATCH behind it. The seal's targetId is the queue row id:
+      // unique per capture, stable across retries, and never the storage path
+      // (paths are not valid mutation target ids on the failed-sync surface).
       if (seal) await enqueueMutationTx(db, 'evidence_seals', row.id, 'PUT', seal)
-
-      if (row.target_table === 'checklist_instance_items') {
-        await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
-        await enqueueMutationTx(db, 'checklist_instance_items', row.target_id, 'PATCH', {
-          photo_storage_path: row.storage_path,
-        })
-        return
-      }
-
-      if (row.target_table === 'checklist_instances') {
-        await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
-        await enqueueMutationTx(db, 'checklist_instances', row.target_id, 'PATCH', {
-          section_photo_path: row.storage_path,
-        })
-        return
-      }
-
-      // property_assets.photo_url stores the BARE object key, same as the two
-      // targets above. It used to hold a getPublicUrl() result, but turnover-photos
-      // is a private bucket now: a public URL 400s and a signed one expires, so the
-      // stable key is what gets persisted and readers sign it on demand.
-      await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
-      await enqueueMutationTx(db, 'property_assets', row.target_id, 'PATCH', {
-        photo_url:   row.storage_path,
-        scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
-      })
     })
 
   void getSyncEngine(userId).processOutbox()
+}
+
+async function queuePointerWrite(db: ReturnType<typeof getDexieDb>, row: PendingPhotoUploadRow): Promise<void> {
+  if (row.target_table === 'checklist_instance_items') {
+    await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
+    await enqueueMutationTx(db, 'checklist_instance_items', row.target_id, 'PATCH', {
+      photo_storage_path: row.storage_path,
+    })
+    return
+  }
+
+  if (row.target_table === 'checklist_instances') {
+    await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
+    await enqueueMutationTx(db, 'checklist_instances', row.target_id, 'PATCH', {
+      section_photo_path: row.storage_path,
+    })
+    return
+  }
+
+  // property_assets.photo_url stores the BARE object key, same as the two
+  // targets above. It used to hold a getPublicUrl() result, but turnover-photos
+  // is a private bucket now: a public URL 400s and a signed one expires, so the
+  // stable key is what gets persisted and readers sign it on demand.
+  await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
+  await enqueueMutationTx(db, 'property_assets', row.target_id, 'PATCH', {
+    photo_url:   row.storage_path,
+    scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
+  })
 }
 
 /**

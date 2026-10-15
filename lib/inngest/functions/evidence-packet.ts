@@ -137,11 +137,31 @@ async function recordLedger(
   return existing.id
 }
 
+/** The original event's data, read defensively from an `inngest/function.failed` payload. */
+export function failedPacketTarget(failure: unknown): { orgId: string; packetId: string; bookingId: string } | null {
+  const data = (failure as { data?: { event?: { data?: Record<string, unknown> } } } | null)?.data?.event?.data
+  if (!data) return null
+  const { org_id, packet_id, booking_id } = data
+  if (typeof org_id !== 'string' || typeof packet_id !== 'string' || typeof booking_id !== 'string') return null
+  return { orgId: org_id, packetId: packet_id, bookingId: booking_id }
+}
+
+export async function markPacketFailed(failure: unknown): Promise<void> {
+  const target = failedPacketTarget(failure)
+  if (!target) {
+    reportError(new Error('evidence-packet onFailure: unreadable event payload'), { site: 'inngest.evidence-packet.onFailure' })
+    return
+  }
+  const supabase = createServiceClient({ system: 'inngest:evidence-packet' })
+  await writeMilestone(supabase, target.orgId, target.packetId, { status: 'failed', booking_id: target.bookingId })
+}
+
 export const evidencePacket = inngest.createFunction(
   {
     id:   'evidence-packet',
     name: 'Evidence: Build Claim Packet',
     retries: 2,
+    onFailure: async ({ event }) => markPacketFailed(event),
     concurrency: [{ limit: 3 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'evidence/packet.requested' },
@@ -151,13 +171,9 @@ export const evidencePacket = inngest.createFunction(
     // Rendering and uploading is one step so the (large) PDF bytes never cross
     // a step boundary: only the small BuiltPacket summary is memoized.
     const built = await step.run('render-and-upload', async () => {
-      const supabase = createServiceClient({ system: 'inngest:evidence-packet' })
-      try {
-        return await buildPacket(d)
-      } catch (err) {
-        await writeMilestone(supabase, d.org_id, d.packet_id, { status: 'failed', booking_id: d.booking_id })
-        throw err
-      }
+      // A throw here is retried; the milestone is marked failed by onFailure
+      // only once retries are exhausted, never while a retry may still succeed.
+      return buildPacket(d)
     })
 
     if (!built) {

@@ -13,7 +13,7 @@ vi.mock('@/lib/resend/client', () => ({
 }))
 vi.mock('@/lib/resend/emails/pm-alert', () => ({ renderPmAlert: vi.fn(async () => '<p>x</p>') }))
 
-import { evidencePacket, sniffFormat } from '@/lib/inngest/functions/evidence-packet'
+import { evidencePacket, sniffFormat, markPacketFailed, failedPacketTarget } from '@/lib/inngest/functions/evidence-packet'
 import { createServiceClient } from '@/lib/supabase/server'
 import { loadPacketModel } from '@/lib/evidence/packet/model'
 import { renderClaimPacket } from '@/lib/evidence/packet/render'
@@ -85,11 +85,21 @@ describe('evidencePacket', () => {
     expect(s.ledger).toHaveLength(0)
   })
 
-  it('marks the milestone failed and rethrows when the upload fails, writing no ledger row', async () => {
+  it('rethrows an upload failure WITHOUT marking the milestone failed (retries may still succeed), writing no ledger row', async () => {
     const s = stub({ uploadError: { message: 'storage down' } })
     await expect(run()).rejects.toBeTruthy()
-    expect(s.milestones.at(-1)).toMatchObject({ value: { status: 'failed' } })
+    expect(s.milestones.some((m) => (m.value as { status: string }).status === 'failed')).toBe(false)
     expect(s.ledger).toHaveLength(0)
+  })
+
+  it('onFailure marks the milestone failed from the original event, and tolerates an unreadable payload', async () => {
+    const s = stub()
+    await markPacketFailed({ data: { event: { data: DATA } } })
+    expect(s.milestones.at(-1)).toMatchObject({ milestone: 'evidence_packet_p1', value: { status: 'failed' } })
+    const before = s.milestones.length
+    await markPacketFailed({ data: {} })
+    expect(s.milestones).toHaveLength(before)
+    expect(failedPacketTarget(null)).toBeNull()
   })
 
   it('recovers the existing ledger row when the insert replays (23505)', async () => {
