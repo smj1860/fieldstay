@@ -16,7 +16,7 @@ vi.mock('@/lib/rate-limit', async () => {
   }
 })
 vi.mock('@/lib/evidence/seal', () => ({
-  sealPhoto: vi.fn(async () => ({ ok: true, eventId: 'ev_1', duplicate: false, hashVerified: true })),
+  sealPhoto: vi.fn(async () => ({ ok: true, eventId: 'ev_1', duplicate: false, hashVerified: true, bracketed: true })),
 }))
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
@@ -380,5 +380,46 @@ describe('DELETE /api/work-orders/[token]/photos', () => {
     const withdrawal = supabase.calls.find((c) => c.table === 'evidence_events' && c.method === 'insert')
     expect(withdrawal!.args[0]).toMatchObject({ kind: 'photo_withdrawn', refers_to_event_id: 'ev_orig', work_order_id: 'wo_1' })
     expect(supabase.calls.some((c) => c.table === 'work_order_photos' && c.method === 'delete')).toBe(true)
+  })
+
+  it('seals a photo whose upload-time seal is missing, then withdraws it against the new seal', async () => {
+    vi.mocked(sealPhoto).mockResolvedValueOnce({ ok: true, eventId: 'ev_new', duplicate: false, hashVerified: true, bracketed: true })
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      work_order_photos: [
+        { data: { id: 'photo_1', storage_path: 'work-orders/wo_1/completion/x.jpg', work_order_id: 'wo_1', created_at: '2026-10-01T12:00:00Z' }, error: null },
+        { data: null, error: null },
+      ],
+      evidence_events: [
+        { data: null, error: null },   // no original seal
+        { data: null, error: null },   // withdrawal insert
+      ],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await callDelete(VALID_TOKEN, { photoId: 'photo_1' })
+
+    expect(res.status).toBe(200)
+    expect(vi.mocked(sealPhoto).mock.calls[0][1]).toMatchObject({ storagePath: 'work-orders/wo_1/completion/x.jpg', observedAt: '2026-10-01T12:00:00Z' })
+    const withdrawal = supabase.calls.find((c) => c.table === 'evidence_events' && c.method === 'insert')
+    expect(withdrawal!.args[0]).toMatchObject({ kind: 'photo_withdrawn', refers_to_event_id: 'ev_new' })
+  })
+
+  it('503s and keeps the pointer row when the missing seal cannot be written', async () => {
+    vi.mocked(sealPhoto).mockResolvedValueOnce({ ok: false, reason: 'object_missing' })
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      work_order_photos: [
+        { data: { id: 'photo_1', storage_path: 'work-orders/wo_1/completion/x.jpg', work_order_id: 'wo_1', created_at: '2026-10-01T12:00:00Z' }, error: null },
+      ],
+      evidence_events: [{ data: null, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await callDelete(VALID_TOKEN, { photoId: 'photo_1' })
+
+    expect(res.status).toBe(503)
+    expect(supabase.calls.some((c) => c.table === 'evidence_events' && c.method === 'insert')).toBe(false)
+    expect(supabase.calls.some((c) => c.table === 'work_order_photos' && c.method === 'delete')).toBe(false)
   })
 })

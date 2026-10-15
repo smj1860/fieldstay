@@ -53,7 +53,7 @@ export interface SealInput {
 }
 
 export type SealResult =
-  | { ok: true;  eventId: string; duplicate: boolean; hashVerified: boolean }
+  | { ok: true;  eventId: string; duplicate: boolean; hashVerified: boolean; bracketed: boolean }
   | { ok: false; reason: 'object_missing' | 'bad_path' | 'insert_failed' }
 
 function sha256Of(bytes: ArrayBuffer): string {
@@ -115,8 +115,8 @@ async function recoverReplay(supabase: SupabaseClient, input: SealInput): Promis
     .maybeSingle()
   if (existingErr) reportError(existingErr, { site: 'lib.evidence.seal.replayLookup', orgId: input.orgId })
   if (!existing) return null
-  await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: existing.id })
-  return { ok: true, eventId: existing.id, duplicate: true, hashVerified: existing.hash_verified }
+  const bracket = await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: existing.id })
+  return { ok: true, eventId: existing.id, duplicate: true, hashVerified: existing.hash_verified, bracketed: bracket.ok }
 }
 
 export async function sealPhoto(
@@ -193,6 +193,9 @@ export async function sealPhoto(
     return { ok: false, reason: 'insert_failed' }
   }
 
-  await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: inserted.id })
-  return { ok: true, eventId: inserted.id, duplicate: false, hashVerified }
+  // The seal is recorded either way. A failed bracket is reported inside
+  // bracketEvidenceEvent and surfaced here so a caller can see it; the
+  // re-bracket job and the replay path both recompute it.
+  const bracket = await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: inserted.id })
+  return { ok: true, eventId: inserted.id, duplicate: false, hashVerified, bracketed: bracket.ok }
 }

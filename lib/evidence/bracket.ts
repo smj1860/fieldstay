@@ -44,21 +44,34 @@ export interface BracketDecision {
 
 const DAY_MS = 86_400_000
 
+function turnoverDecisions(turnover: BracketTurnover): BracketDecision[] {
+  if (turnover.prev_booking_id && turnover.booking_id) {
+    return [
+      { booking_id: turnover.prev_booking_id, position: 'post_stay' },
+      { booking_id: turnover.booking_id,      position: 'pre_stay'  },
+    ]
+  }
+  if (turnover.booking_id) return [{ booking_id: turnover.booking_id, position: 'post_stay' }]
+  return []
+}
+
 export function resolveBrackets(input: {
   capturedAt: string
   turnover:   BracketTurnover | null
   bookings:   readonly BracketBooking[]   // guest stays for the property, already filtered
+  /**
+   * Booking ids that ARE guest stays (not owner stays, blocks or cancelled).
+   * A turnover names its bookings directly, so the window query's guest-stay
+   * filter never applies to them: without this, an owner stay or a block on
+   * either side of a pair turnover would be bracketed as a claimable stay.
+   * Null skips the check (callers with no turnover).
+   */
+  eligibleBookingIds?: ReadonlySet<string> | null
 }): BracketDecision[] {
   const { turnover, bookings } = input
   if (turnover) {
-    if (turnover.prev_booking_id && turnover.booking_id) {
-      return [
-        { booking_id: turnover.prev_booking_id, position: 'post_stay' },
-        { booking_id: turnover.booking_id,      position: 'pre_stay'  },
-      ]
-    }
-    if (turnover.booking_id) return [{ booking_id: turnover.booking_id, position: 'post_stay' }]
-    return []
+    const eligible = input.eligibleBookingIds
+    return turnoverDecisions(turnover).filter((d) => !eligible || eligible.has(d.booking_id))
   }
 
   const t = Date.parse(input.capturedAt)
@@ -84,26 +97,58 @@ export function resolveBrackets(input: {
   return out
 }
 
+export type BracketResult =
+  | { ok: true;  brackets: number }
+  | { ok: false; reason: 'event_missing' | 'db_error' }
+
+/** Guest-stay booking ids among the ones a turnover names. */
+async function eligibleTurnoverBookings(
+  supabase: SupabaseClient, orgId: string, turnover: BracketTurnover,
+): Promise<ReadonlySet<string> | 'db_error'> {
+  const ids = [turnover.prev_booking_id, turnover.booking_id].filter((x): x is string => !!x)
+  if (ids.length === 0) return new Set()
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('id', ids)
+    .eq('is_block', false)
+    .eq('stay_type', 'guest_stay')
+    .in('status', ['confirmed', 'tentative'])
+    .limit(ids.length)
+  if (error) {
+    reportError(error, { site: 'lib.evidence.bracket.eligible', orgId })
+    return 'db_error'
+  }
+  return new Set((data ?? []).map((b) => b.id))
+}
+
 /**
  * Recomputes and REPLACES the bracket rows for one evidence event. Idempotent:
  * delete-then-insert of a derived set, keyed on the event id.
+ *
+ * RETURNS a result rather than void: every database failure used to be reported
+ * and swallowed, so the Inngest caller finished "ok" and a failed bracket was
+ * never retried. Callers that can retry (the re-bracket job) throw on db_error.
  */
 export async function bracketEvidenceEvent(
   supabase: SupabaseClient,   // service client
   input: { orgId: string; eventId: string },
-): Promise<void> {
+): Promise<BracketResult> {
   const { data: ev, error: evErr } = await supabase
     .from('evidence_events')
     .select('id, org_id, property_id, captured_at, turnover_id')
     .eq('id', input.eventId)
     .eq('org_id', input.orgId)
     .maybeSingle()
-  if (evErr || !ev) {
-    if (evErr) reportError(evErr, { site: 'lib.evidence.bracket.loadEvent', orgId: input.orgId })
-    return
+  if (evErr) {
+    reportError(evErr, { site: 'lib.evidence.bracket.loadEvent', orgId: input.orgId })
+    return { ok: false, reason: 'db_error' }
   }
+  if (!ev) return { ok: false, reason: 'event_missing' }
 
   let turnover: BracketTurnover | null = null
+  let eligible: ReadonlySet<string> | null = null
   if (ev.turnover_id) {
     const { data: t, error: tErr } = await supabase
       .from('turnovers')
@@ -113,9 +158,14 @@ export async function bracketEvidenceEvent(
       .maybeSingle()
     if (tErr) {
       reportError(tErr, { site: 'lib.evidence.bracket.loadTurnover', orgId: input.orgId })
-      return
+      return { ok: false, reason: 'db_error' }
     }
     turnover = t ?? null
+    if (turnover) {
+      const found = await eligibleTurnoverBookings(supabase, input.orgId, turnover)
+      if (found === 'db_error') return { ok: false, reason: 'db_error' }
+      eligible = found
+    }
   }
 
   // Bounded: one property, a 2-window span around the capture. A property
@@ -136,10 +186,12 @@ export async function bracketEvidenceEvent(
     .limit(200)
   if (bErr) {
     reportError(bErr, { site: 'lib.evidence.bracket.loadBookings', orgId: input.orgId })
-    return
+    return { ok: false, reason: 'db_error' }
   }
 
-  const decisions = resolveBrackets({ capturedAt: ev.captured_at, turnover, bookings: bookings ?? [] })
+  const decisions = resolveBrackets({
+    capturedAt: ev.captured_at, turnover, bookings: bookings ?? [], eligibleBookingIds: eligible,
+  })
 
   const { error: delErr } = await supabase
     .from('evidence_stay_brackets')
@@ -148,9 +200,9 @@ export async function bracketEvidenceEvent(
     .eq('evidence_event_id', ev.id)
   if (delErr) {
     reportError(delErr, { site: 'lib.evidence.bracket.clear', orgId: input.orgId })
-    return
+    return { ok: false, reason: 'db_error' }
   }
-  if (decisions.length === 0) return
+  if (decisions.length === 0) return { ok: true, brackets: 0 }
 
   const { error: insErr } = await supabase
     .from('evidence_stay_brackets')
@@ -163,5 +215,9 @@ export async function bracketEvidenceEvent(
       })),
       { onConflict: 'evidence_event_id,booking_id', ignoreDuplicates: true },
     )
-  if (insErr) reportError(insErr, { site: 'lib.evidence.bracket.insert', orgId: input.orgId })
+  if (insErr) {
+    reportError(insErr, { site: 'lib.evidence.bracket.insert', orgId: input.orgId })
+    return { ok: false, reason: 'db_error' }
+  }
+  return { ok: true, brackets: decisions.length }
 }

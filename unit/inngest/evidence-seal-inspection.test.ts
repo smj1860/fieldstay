@@ -32,7 +32,7 @@ function stubDb(items: { id: string; photo_path: string | null; answered_at: str
 const step = { run: async (_n: string, cb: () => unknown) => cb() }
 
 describe('evidenceSealInspection', () => {
-  beforeEach(() => { vi.mocked(sealPhoto).mockReset(); vi.mocked(sealPhoto).mockResolvedValue({ ok: true, eventId: 'e', duplicate: false, hashVerified: false }) })
+  beforeEach(() => { vi.mocked(sealPhoto).mockReset(); vi.mocked(sealPhoto).mockResolvedValue({ ok: true, eventId: 'e', duplicate: false, hashVerified: false, bracketed: true }) })
 
   it('seals once per item with a photo and never for a null photo_path', async () => {
     stubDb([

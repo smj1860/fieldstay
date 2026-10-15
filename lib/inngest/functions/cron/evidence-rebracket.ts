@@ -109,7 +109,11 @@ export const evidenceBracketOne = inngest.createFunction(
     const { org_id: orgId, event_id: eventId } = event.data
     await step.run('bracket', async () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-rebracket' })
-      await bracketEvidenceEvent(supabase, { orgId, eventId })
+      const result = await bracketEvidenceEvent(supabase, { orgId, eventId })
+      // Throw so Inngest retries: returning "ok" here is how a failed bracket
+      // used to be lost. A missing event is not retryable and is not an error.
+      if (!result.ok && result.reason === 'db_error') throw new Error('evidence bracket failed; will retry')
+      return result
     })
     return { ok: true }
   },

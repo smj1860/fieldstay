@@ -235,6 +235,76 @@ export async function POST(
   return NextResponse.json({ success: true, uploaded })
 }
 
+interface PhotoRow { id: string; storage_path: string; created_at: string }
+
+/** Seals the existing object when no seal exists, returning its event id (null on failure). */
+async function sealExistingPhoto(
+  supabase: PortalClient, workOrder: PortalWorkOrder, photo: PhotoRow,
+): Promise<string | null> {
+  const sealed = await sealPhoto(supabase, {
+    orgId: workOrder.org_id, propertyId: workOrder.property_id,
+    bucket: 'work-order-photos', storagePath: photo.storage_path,
+    sourceTable: 'work_order_photos', sourceId: photo.id,
+    claimedSha256: null, byteSize: null,
+    deviceCapturedAt: null, deviceNow: null,
+    lat: null, lng: null, gpsAccuracyM: null,
+    capturedBy: { kind: 'vendor', id: workOrder.vendor_id ?? null, label: null },
+    turnoverId: null, workOrderId: workOrder.id, inspectionId: null,
+    observedAt: photo.created_at,
+  })
+  return sealed.ok ? sealed.eventId : null
+}
+
+/**
+ * Records the withdrawal in the ledger. Returns an error response when the
+ * photo must NOT be deleted (lookup, seal or insert failed), else null.
+ */
+async function withdrawPhoto(
+  supabase: PortalClient, workOrder: PortalWorkOrder, photo: PhotoRow,
+): Promise<NextResponse | null> {
+  const fail = () => NextResponse.json({ error: 'Could not remove photo' }, { status: 503 })
+  const { data: original, error: originalErr } = await supabase
+    .from('evidence_events')
+    .select('id')
+    .eq('org_id', workOrder.org_id)
+    .eq('bucket', 'work-order-photos')
+    .eq('storage_path', photo.storage_path)
+    .eq('kind', 'photo_sealed')
+    .maybeSingle()
+  if (originalErr) {
+    reportError(originalErr, { site: 'api.work-orders.photos.withdrawLookup', orgId: workOrder.org_id })
+    return fail()
+  }
+  const originalId = original?.id ?? await sealExistingPhoto(supabase, workOrder, photo)
+  if (!originalId) {
+    reportError(new Error('vendor photo delete: no seal and sealing failed'), {
+      site: 'api.work-orders.photos.withdrawSeal', orgId: workOrder.org_id,
+    })
+    return fail()
+  }
+  const { error: wErr } = await supabase.from('evidence_events').insert({
+    org_id:             workOrder.org_id,
+    property_id:        workOrder.property_id,
+    kind:               'photo_withdrawn',
+    source_table:       'work_order_photos',
+    source_id:          photo.id,
+    bucket:             'work-order-photos',
+    storage_path:       photo.storage_path,
+    sha256:             '0'.repeat(64),   // a withdrawal carries no bytes; the original row has the hash
+    captured_at:        new Date().toISOString(),
+    captured_at_source: 'server',
+    captured_by_kind:   'vendor',
+    captured_by_id:     workOrder.vendor_id ?? null,
+    work_order_id:      workOrder.id,
+    refers_to_event_id: originalId,
+  })
+  if (wErr && wErr.code !== '23505') {
+    reportError(wErr, { site: 'api.work-orders.photos.withdraw', orgId: workOrder.org_id })
+    return fail()
+  }
+  return null
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -254,7 +324,7 @@ export async function DELETE(
 
   const { data: photo, error: photoError } = await supabase
     .from('work_order_photos')
-    .select('id, storage_path, work_order_id')
+    .select('id, storage_path, work_order_id, created_at')
     .eq('id', photoId)
     .single()
 
@@ -273,41 +343,11 @@ export async function DELETE(
   // vendor's withdrawal is a new ledger row pointing at the original seal,
   // and the work_order_photos pointer row goes away so the UI stops
   // showing it. A withdrawn photo still appears, marked withdrawn, in a
-  // claim packet's chain of custody.
-  const { data: original, error: originalErr } = await supabase
-    .from('evidence_events')
-    .select('id')
-    .eq('org_id', workOrder.org_id)
-    .eq('bucket', 'work-order-photos')
-    .eq('storage_path', photo.storage_path)
-    .eq('kind', 'photo_sealed')
-    .maybeSingle()
-  if (originalErr) {
-    reportError(originalErr, { site: 'api.work-orders.photos.withdrawLookup', orgId: workOrder.org_id })
-    return NextResponse.json({ error: 'Could not remove photo' }, { status: 500 })
-  }
-  if (original) {
-    const { error: wErr } = await supabase.from('evidence_events').insert({
-      org_id:             workOrder.org_id,
-      property_id:        workOrder.property_id,
-      kind:               'photo_withdrawn',
-      source_table:       'work_order_photos',
-      source_id:          photo.id,
-      bucket:             'work-order-photos',
-      storage_path:       photo.storage_path,
-      sha256:             '0'.repeat(64),   // a withdrawal carries no bytes; the original row has the hash
-      captured_at:        new Date().toISOString(),
-      captured_at_source: 'server',
-      captured_by_kind:   'vendor',
-      captured_by_id:     workOrder.vendor_id ?? null,
-      work_order_id:      workOrder.id,
-      refers_to_event_id: original.id,
-    })
-    if (wErr && wErr.code !== '23505') {
-      reportError(wErr, { site: 'api.work-orders.photos.withdraw', orgId: workOrder.org_id })
-      return NextResponse.json({ error: 'Could not remove photo' }, { status: 500 })
-    }
-  }
+  // claim packet's chain of custody. The withdrawal is written BEFORE the
+  // pointer row goes: a photo with no seal is sealed here first, because the
+  // backfill walks pointer rows and would never see it once the row is gone.
+  const withdrawn = await withdrawPhoto(supabase, workOrder, photo)
+  if (withdrawn) return withdrawn
 
   const { error: deleteErr } = await supabase.from('work_order_photos').delete().eq('id', photo.id)
   if (deleteErr) {
