@@ -103,19 +103,19 @@ export default function BreezewayAlternativePage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <Link
-              href={ctaHref}
+            <a
+              href="#comparison"
               className="px-7 py-3.5 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
             >
-              Start free 14-day trial
-            </Link>
-            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required · Starting at $19/month</span>
+              See the side-by-side comparison
+            </a>
+            <span className="text-sm text-[var(--mkt-on-dark-soft)]">Published pricing · Starting at $19/month</span>
           </div>
         </div>
       </section>
 
       {/* ── Comparison table ───────────────────────────────────────────── */}
-      <section className="max-w-5xl mx-auto px-6 py-16">
+      <section id="comparison" className="max-w-5xl mx-auto px-6 py-16 scroll-mt-4">
         <h2 className="text-3xl font-bold text-[var(--mkt-ink)] mb-2 font-display">
           FieldStay vs Breezeway, side by side
         </h2>
@@ -123,21 +123,29 @@ export default function BreezewayAlternativePage() {
           Every claim below cites where it comes from. See the note at the bottom of this section.
         </p>
 
-        <div className="overflow-x-auto rounded-2xl border border-[var(--mkt-border)]">
-          <table className="w-full text-left border-collapse">
-            <thead>
+        {/* Below md each row stacks into a card (category, then one labelled block per
+            product) so nothing scrolls sideways on a phone; from md up it is a table. */}
+        <div className="rounded-2xl border border-[var(--mkt-border)] md:overflow-x-auto">
+          <table className="w-full text-left border-collapse block md:table">
+            <thead className="hidden md:table-header-group">
               <tr className="bg-[var(--mkt-surface)]">
                 <th className="p-4 text-sm font-bold text-[var(--mkt-muted)] uppercase tracking-wide w-1/6">Category</th>
                 <th className="p-4 text-sm font-bold text-[var(--mkt-ink)] w-5/12">FieldStay</th>
                 <th className="p-4 text-sm font-bold text-[var(--mkt-muted)] w-5/12">Breezeway</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="block md:table-row-group">
               {COMPARISON_ROWS.map((row) => (
-                <tr key={row.category} className="border-t border-[var(--mkt-border)] align-top">
-                  <td className="p-4 text-sm font-semibold text-[var(--mkt-ink)]">{row.category}</td>
-                  <td className="p-4 text-sm text-[var(--mkt-muted-strong)] leading-relaxed">{row.fieldstay}</td>
-                  <td className="p-4 text-sm text-[var(--mkt-muted)] leading-relaxed">{row.breezeway}</td>
+                <tr key={row.category} className="block md:table-row border-t border-[var(--mkt-border)] first:border-t-0 md:first:border-t align-top p-4 md:p-0">
+                  <td className="block md:table-cell md:p-4 pb-3 md:pb-4 text-base md:text-sm font-semibold text-[var(--mkt-ink)]">{row.category}</td>
+                  <td className="block md:table-cell md:p-4 mb-3 md:mb-0 text-sm text-[var(--mkt-muted-strong)] leading-relaxed">
+                    <span className="md:hidden block text-xs font-bold uppercase tracking-wide text-[var(--mkt-gold-hover)] mb-1">FieldStay</span>
+                    {row.fieldstay}
+                  </td>
+                  <td className="block md:table-cell md:p-4 rounded-lg bg-[var(--mkt-surface)] p-3 md:bg-transparent md:rounded-none text-sm text-[var(--mkt-muted)] leading-relaxed">
+                    <span className="md:hidden block text-xs font-bold uppercase tracking-wide text-[var(--mkt-muted)] mb-1">Breezeway</span>
+                    {row.breezeway}
+                  </td>
                 </tr>
               ))}
             </tbody>
