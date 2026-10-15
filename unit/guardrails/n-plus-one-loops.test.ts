@@ -158,7 +158,7 @@ const EXCEPTIONS: Record<string, string> = {
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
   'app/api/work-orders/[token]/photos/route.ts:182':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:203':
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:204':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:70':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',

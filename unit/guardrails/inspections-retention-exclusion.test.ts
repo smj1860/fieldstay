@@ -142,13 +142,15 @@ describe('guardrail: inspections are excluded from every retention sweep', () =>
     // source scan is blind to a SECURITY DEFINER function. If this helper is
     // ever dropped, the db-invariants half of the enforcement is gone and only
     // this file remains — which would leave exactly the RPC path uncovered.
-    const files = readdirSync(join(process.cwd(), 'supabase/migrations'))
-      .filter((f) => f.includes('inspections_phase1'))
-    expect(files.length, 'the phase 1 migration is missing').toBeGreaterThan(0)
+    const dir = join(process.cwd(), 'supabase/migrations')
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .filter((f) => read(`supabase/migrations/${f}`).includes('CREATE OR REPLACE FUNCTION public.retention_protected_table_violations'))
+      .sort()
+    expect(files.length, 'the migration defining the DB-side check is missing').toBeGreaterThan(0)
 
-    const sql = read(`supabase/migrations/${files[0]}`)
-    expect(sql, 'retention_protected_table_violations() must be defined by the migration')
-      .toContain('retention_protected_table_violations')
+    // The LATEST definition is the live one, and it must list every protected table.
+    const sql = read(`supabase/migrations/${files[files.length - 1]}`)
     for (const t of RETENTION_PROTECTED_TABLE_NAMES) {
       expect(sql, `${t} missing from the DB-side protected list`).toContain(`('${t}')`)
     }

@@ -44,7 +44,7 @@ BEGIN
     NEW.evidence_role IS DISTINCT FROM OLD.evidence_role
   ) THEN
     RAISE EXCEPTION
-      'checklist_instance_item % is marked non_deletable — task, section_name, evidence_role, and non_deletable cannot be changed.',
+      'checklist_instance_item % is marked non_deletable: task, section_name, evidence_role, and non_deletable cannot be changed.',
       OLD.id
     USING ERRCODE = 'restrict_violation';
   END IF;

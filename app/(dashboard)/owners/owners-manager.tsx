@@ -74,6 +74,7 @@ interface Transaction {
   transaction_date: string
   notes: string | null
   work_order_id: string | null
+  has_photos?: boolean
   booking_id: string | null
   visible_to_owner: boolean
   source: string | null
@@ -493,7 +494,7 @@ function TransactionPanel({
                       <td className="px-3 py-2 text-secondary-themed max-w-[160px]">
                         <div className="truncate">{txn.description}</div>
                         {txn.notes && <div className="truncate text-muted-themed">{txn.notes}</div>}
-                        {txn.work_order_id && (
+                        {txn.work_order_id && txn.has_photos && (
                           <Link
                             href={`/maintenance/${txn.work_order_id}/evidence`}
                             className="underline text-muted-themed focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"

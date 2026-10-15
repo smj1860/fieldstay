@@ -11,6 +11,7 @@ import { distanceMiles } from '@/lib/geocoding'
 import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
+import { compressPhoto } from '@/lib/images/compress'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -201,14 +202,19 @@ export function CreateWorkOrderModal({
       const supabase = createClient()
       let photoFailures = 0
       for (const file of photoFiles) {
-        const ext  = file.name.split('.').pop() ?? 'jpg'
+        // Downscale like every other capture surface. compressPhoto re-encodes to
+        // JPEG, or hands back the original untouched when it cannot, so the
+        // extension and content type follow what we actually upload.
+        const upload = await compressPhoto(file)
+        const isJpeg = upload.type === 'image/jpeg'
+        const ext    = isJpeg ? 'jpg' : (file.name.split('.').pop() ?? 'jpg')
         // The leading `${orgId}/` segment is what the work-order-photos
         // storage RLS policies match on — a path without it is denied on
         // upload and can never be signed for reading.
         const path = orgScopedStoragePath(orgId, workOrderId, `${Date.now()}-${crypto.randomUUID()}.${ext}`)
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
-          .upload(path, file, { contentType: file.type })
+          .upload(path, upload, { contentType: isJpeg ? 'image/jpeg' : file.type })
         if (uploadErr) {
           console.error('[CreateWorkOrderModal] Failed to upload photo:', uploadErr)
           photoFailures++

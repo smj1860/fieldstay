@@ -101,7 +101,7 @@ function TransactionRow({ txn, token }: Readonly<{ txn: OwnerPortalTxn; token: s
         {txn.notes && (
           <p className="text-xs text-muted-themed mt-0.5 truncate">{txn.notes}</p>
         )}
-        {txn.work_order_id && (
+        {txn.work_order_id && txn.has_photos && (
           <a
             href={`/owner/${token}/work-orders/${txn.work_order_id}/photos`}
             className="text-xs underline text-secondary-themed focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"

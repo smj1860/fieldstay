@@ -58,6 +58,14 @@ function usablePath(bucket: EvidenceBucket, stored: string | null, orgId: string
   return path && hasOrgPrefix(path, orgId) ? path : null
 }
 
+/**
+ * Ceiling on rows drained per source per org per run. The scans are already
+ * windowed by BACKFILL_LOOKBACK_DAYS, so this only bites on a pathological org,
+ * where fetchAllRows throws loudly (and the run retries) instead of holding an
+ * unbounded result set in memory.
+ */
+const BACKFILL_MAX_ROWS_PER_SOURCE = 50_000
+
 type Row = Record<string, unknown>
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
 const obj = (v: unknown): Row => (v && typeof v === 'object' && !Array.isArray(v) ? v as Row : {})
@@ -75,7 +83,7 @@ async function itemPointers(supabase: DBClient, orgId: string, since: string): P
     .from('checklist_instance_items')
     .select('id, photo_storage_path, turnover_id, completed_at, updated_at, turnovers!inner(property_id, org_id)')
     .eq('turnovers.org_id', orgId).not('photo_storage_path', 'is', null).gte('updated_at', since)
-    .order('id').range(from, to), { label: 'backfill.items' })
+    .order('id').range(from, to), { label: 'backfill.items', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return rows.flatMap((r) => {
     const propertyId = str(obj(r.turnovers).property_id)
     const p = propertyId && pointerOf(orgId, 'turnover-photos', r.photo_storage_path, {
@@ -92,7 +100,7 @@ async function sectionPointers(supabase: DBClient, orgId: string, since: string)
     .from('checklist_instances')
     .select('id, section_photo_path, turnover_id, updated_at, turnovers!inner(property_id)')
     .eq('org_id', orgId).not('section_photo_path', 'is', null).gte('updated_at', since)
-    .order('id').range(from, to), { label: 'backfill.sections' })
+    .order('id').range(from, to), { label: 'backfill.sections', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return rows.flatMap((r) => {
     const propertyId = str(obj(r.turnovers).property_id)
     const p = propertyId && pointerOf(orgId, 'turnover-photos', r.section_photo_path, {
@@ -108,7 +116,7 @@ async function assetPointers(supabase: DBClient, orgId: string, since: string): 
     .from('property_assets')
     .select('id, photo_url, property_id, updated_at')
     .eq('org_id', orgId).not('photo_url', 'is', null).gte('updated_at', since)
-    .order('id').range(from, to), { label: 'backfill.assets' })
+    .order('id').range(from, to), { label: 'backfill.assets', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return rows.flatMap((r) => {
     const p = pointerOf(orgId, 'turnover-photos', r.photo_url, {
       sourceTable: 'property_assets', sourceId: String(r.id), propertyId: String(r.property_id),
@@ -123,7 +131,7 @@ async function workOrderPhotoPointers(supabase: DBClient, orgId: string, since: 
     .from('work_order_photos')
     .select('id, storage_path, work_order_id, created_at, work_orders!inner(org_id, property_id)')
     .eq('work_orders.org_id', orgId).gte('created_at', since)
-    .order('id').range(from, to), { label: 'backfill.wo-photos' })
+    .order('id').range(from, to), { label: 'backfill.wo-photos', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return rows.flatMap((r) => {
     const propertyId = str(obj(r.work_orders).property_id)
     const p = propertyId && pointerOf(orgId, 'work-order-photos', r.storage_path, {
@@ -139,7 +147,7 @@ async function inspectionPointers(supabase: DBClient, orgId: string, since: stri
     .from('inspection_items')
     .select('id, photo_path, inspection_id, answered_at, updated_at, inspections!inner(property_id, completed_at)')
     .eq('org_id', orgId).not('photo_path', 'is', null).not('inspections.completed_at', 'is', null)
-    .gte('updated_at', since).order('id').range(from, to), { label: 'backfill.inspection-items' })
+    .gte('updated_at', since).order('id').range(from, to), { label: 'backfill.inspection-items', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return rows.flatMap((r) => {
     const propertyId = str(obj(r.inspections).property_id)
     const p = propertyId && pointerOf(orgId, 'inspection-photos', r.photo_path, {
@@ -156,7 +164,7 @@ async function sealedKeys(supabase: DBClient, orgId: string, sinceIso: string): 
     .from('evidence_events')
     .select('bucket, storage_path')
     .eq('org_id', orgId).eq('kind', 'photo_sealed').gte('received_at', sinceIso)
-    .order('id').range(from, to), { label: 'backfill.sealed' })
+    .order('id').range(from, to), { label: 'backfill.sealed', maxRows: BACKFILL_MAX_ROWS_PER_SOURCE })
   return new Set(rows.map((r) => sealKey(r.bucket, r.storage_path)))
 }
 

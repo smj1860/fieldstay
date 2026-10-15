@@ -104,9 +104,9 @@ export function deadlineDedupeKey(bookingId: string, stage: ClaimStage): string 
 }
 
 const BASIS_TEXT: Record<ClaimBasis, string> = {
-  airbnb_checkout_window:     '14 days after checkout',
+  airbnb_checkout_window:     `${AIRBNB_CLAIM_WINDOW_DAYS} days after checkout`,
   airbnb_before_next_checkin: 'before the next guest checks in',
-  vrbo_checkout_window:       '14 days after checkout',
+  vrbo_checkout_window:       `${VRBO_CLAIM_WINDOW_DAYS} days after checkout`,
   org_claim_window:           'your claim window after checkout',
 }
 

@@ -37,7 +37,7 @@ function tonightLocalDate(nowMs: number, timezone: string): string {
 
 export const freezeWatchCron = inngest.createFunction(
   { id: 'cron-freeze-watch', name: 'Cron: Freeze Watch', retries: 2 },
-  { cron: '0 20 * * *' },   // 3pm CT; see confirmation F3
+  { cron: '0 20 * * *' },   // 20:00 UTC = 2pm CDT / 3pm CST. Freeze season is mostly standard time, so 2pm CT in early fall and spring; 3pm CT Nov to Mar. See confirmation F3
   async ({ step, logger }) => {
     const nowMs = await step.run('capture-now', async () => Date.now())
 

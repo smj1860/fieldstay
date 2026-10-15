@@ -68,6 +68,18 @@ export const RETENTION_PROTECTED_TABLES: Record<string, string> = {
     'See inspection_forms. Additionally: remediation and the repeat-visit lookup key on ' +
     'form_item_id, so removing one orphans the link between a work order and the question ' +
     'that raised it.',
+  evidence_events:
+    'The Stay Evidence Ledger: append-only, one row per sealed photo, withdrawal, claim packet and ' +
+    'proof of care. Claim packets cite these rows and carry their own SHA-256 in here, so a swept ' +
+    'row breaks the chain of custody of every packet that cites it. UPDATE and direct DELETE are ' +
+    'already rejected by trigger; a sweep would have to route around that.',
+  evidence_stay_brackets:
+    'Which guest stay each ledger event brackets. Derived and recomputable by the rebracket job, ' +
+    'but a claim countdown and a packet read it directly, so a sweep would silently empty a stay\'s ' +
+    'evidence until the next rebracket run.',
+  property_evidence_spots:
+    'Per-property claim photo spots. Soft-delete only (is_active = false) because a checklist item ' +
+    'keeps its link to the spot; a hard delete orphans the pairing a packet uses across turnovers.',
 }
 
 export const RETENTION_PROTECTED_TABLE_NAMES = Object.keys(RETENTION_PROTECTED_TABLES)

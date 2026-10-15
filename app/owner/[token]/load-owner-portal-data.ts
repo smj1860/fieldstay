@@ -1,6 +1,7 @@
 import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { workOrdersWithPhotos } from '@/lib/evidence/wo-photo-presence'
 import { logAuditEvent } from '@/lib/audit'
 import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import { loadOwnerInspections, type OwnerInspectionHistory } from '@/lib/owner-portal/inspections'
@@ -48,6 +49,8 @@ export interface OwnerPortalTxn {
   notes:            string | null
   /** Set on work order expenses; drives the "View photos" link. */
   work_order_id:    string | null
+  /** True when that work order has at least one photo to show. */
+  has_photos?:      boolean
 }
 
 export type OwnerPortalPageState =
@@ -431,7 +434,7 @@ export async function loadOwnerPortalData(
   // fetchAllRows throws on a query error, which is the same outcome unwrapList
   // produced here (it throws so the segment's error.tsx renders a real error
   // state rather than an empty portal).
-  const [filteredTxns, bookingsRaw] = await Promise.all([
+  const [txnRows, bookingsRaw] = await Promise.all([
     fetchAllRows<OwnerPortalTxn>(
       (from, to) => supabase
         .from('owner_transactions')
@@ -460,6 +463,10 @@ export async function loadOwnerPortalData(
       { label: 'owner-portal.bookings' },
     ),
   ])
+
+  // "View photos" is only offered where the work order actually has photos.
+  const withPhotos = await workOrdersWithPhotos(supabase, txnRows.map((t) => t.work_order_id))
+  const filteredTxns = txnRows.map((t) => ({ ...t, has_photos: t.work_order_id !== null && withPhotos.has(t.work_order_id) }))
 
   // No JS month filter any more — the query IS the filter. The occupancy read
   // below still spans thirteen months on purpose: computeOccupancy derives
