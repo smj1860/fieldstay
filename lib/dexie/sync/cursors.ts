@@ -123,6 +123,7 @@ const CURSORS_BY_MUTATION_TABLE: Readonly<Record<MutationTable, readonly SyncCur
   work_order_reports:       [],
   inventory_counts:         [],
   messages:                 [],
+  evidence_seals:           [],
 
   // Cached, but pulled as a full scope set rather than a delta — see above.
   property_assets:          [],

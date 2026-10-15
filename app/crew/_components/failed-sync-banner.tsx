@@ -43,6 +43,7 @@ const MUTATION_LABELS: Record<MutationTable, CrewDictKey> = {
   property_assets:          'syncApplianceDetails',
   crew_work_orders:         'syncWorkOrderCompletion',
   messages:                 'syncMessageToOps',
+  evidence_seals:           'syncPhotoSeal',
 }
 
 function mutationLabel(table: string, t: (key: CrewDictKey) => string): string {

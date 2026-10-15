@@ -791,6 +791,33 @@ async function uploadWorkOrderReport(
   if (!res.ok) throw new UploadHttpError(`Failed to place work order ${targetId}`, res.status)
 }
 
+/**
+ * Seals one uploaded photo into the evidence ledger. Routed through a Route
+ * Handler because the seal needs the service role (server-side hash check
+ * against the stored object, server receipt time, clock skew measured in the
+ * same request) and crew authenticate with the RLS client.
+ *
+ * `targetId` is the pending_photo_uploads row id, unique per capture: a replay
+ * collides on evidence_events_capture_unique rather than sealing twice.
+ */
+async function uploadEvidenceSeal(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/evidence/seal', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
+    body: JSON.stringify({
+      client_seal_id: targetId,
+      device_now:     new Date().toISOString(),
+      ...payload,
+    }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to seal photo ${targetId}`, res.status)
+}
+
 
 /**
  * A crew inventory count taken during a turnover, submitted as one count.
@@ -967,6 +994,7 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'property_assets:PATCH':          uploadPropertyAssetPhotoUpdate,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
   'messages:PUT':                   uploadCrewMessage,
+  'evidence_seals:PUT':             uploadEvidenceSeal,
 }
 
 /**

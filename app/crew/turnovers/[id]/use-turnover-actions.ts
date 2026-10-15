@@ -5,6 +5,7 @@ import { useDexieDb, useDexieUserId, useCrewMemberId } from '@/lib/dexie/context
 import { createClient } from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
+import { describeCapture } from '@/lib/evidence/capture'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
   updateChecklistItem, startTurnover, completeTurnover, flagRunningLate,
@@ -341,7 +342,10 @@ export function useTurnoverActions(id: string) {
       return
     }
 
-    const ext     = file.name.split('.').pop() ?? 'jpg'
+    // Always .jpg: compressPhoto() re-encodes to JPEG, and the ledger hash is
+    // of those bytes. The original filename's extension (often .heic) must
+    // not label a JPEG object.
+    const ext     = 'jpg'
     const slug    = sectionName.replace(/\s+/g, '-').toLowerCase()
     // Both keys are UUID-suffixed, not Date.now()-suffixed. Two captures
     // landing in the same millisecond (a double-tap, a retry) produced
@@ -358,6 +362,7 @@ export function useTurnoverActions(id: string) {
       if (!sectionItem) return
 
       const compressed = await compressPhoto(file)
+      const capture    = await describeCapture(compressed)
       await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
@@ -366,9 +371,11 @@ export function useTurnoverActions(id: string) {
         target_column:  'section_photo_path',
         storage_path:   path,
         local_blob_key: blobKey,
-        mime_type:      file.type,
+        mime_type:      'image/jpeg',
         retry_count:    0,
-        created_at:     new Date().toISOString(),
+        created_at:     capture.captured_at,
+        turnover_id:    id,
+        ...capture,
       })
 
       void processPendingPhotoUploads(supabase, userId)
@@ -393,12 +400,13 @@ export function useTurnoverActions(id: string) {
       return
     }
     try {
-      const ext     = file.name.split('.').pop() ?? 'jpg'
+      const ext     = 'jpg'   // see handleSectionPhoto: the bytes are JPEG
       // UUID-suffixed, not Date.now() — see handleSectionPhoto above.
       const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${crypto.randomUUID()}.${ext}`)
       const blobKey = `photo-${crypto.randomUUID()}`
 
       const compressed = await compressPhoto(file)
+      const capture    = await describeCapture(compressed)
       await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
@@ -407,9 +415,11 @@ export function useTurnoverActions(id: string) {
         target_column:  'photo_storage_path',
         storage_path:   path,
         local_blob_key: blobKey,
-        mime_type:      file.type,
+        mime_type:      'image/jpeg',
         retry_count:    0,
-        created_at:     new Date().toISOString(),
+        created_at:     capture.captured_at,
+        turnover_id:    id,
+        ...capture,
       })
       await writeChecklistItem(itemId, { isCompleted: true })
 

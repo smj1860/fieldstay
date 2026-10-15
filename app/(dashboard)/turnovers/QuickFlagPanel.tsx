@@ -6,7 +6,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { flagPhotoUpload } from '@/lib/turnovers/flag-photo-upload'
-import { updateTurnoverStatus } from './actions'
+import { updateTurnoverStatus, sealFlagPhoto } from './actions'
 
 /**
  * The authenticated PM's org id, needed only so the quick-flag photo lands on
@@ -73,6 +73,16 @@ export function QuickFlagPanel({
         const upload = await flagPhotoUpload(orgId, turnoverId, flagPhotoFile)
         if (!upload.ok) {
           setFlagError('Photo could not be uploaded, so this issue was not flagged. Try again, or remove the photo to flag without it.')
+          return
+        }
+        const sealed = await sealFlagPhoto({
+          turnoverId,
+          storagePath: upload.path,
+          capture:     upload.capture,
+          deviceNow:   new Date().toISOString(),
+        })
+        if (!sealed.success) {
+          setFlagError('Photo uploaded but could not be recorded, so this issue was not flagged. Try again.')
           return
         }
       }

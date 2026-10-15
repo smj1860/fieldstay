@@ -1414,4 +1414,16 @@ export type FieldStayEvents = {
       url:         string
     }
   },
+
+  /**
+   * One sealed evidence event exists and should be (re-)bracketed. Sent by
+   * nothing yet in phase 1 (sealPhoto() brackets inline); declared now so
+   * the phase-2 re-bracket cron and backfill have a stable name.
+   */
+  'evidence/bracket.requested': {
+    data: {
+      org_id:   string
+      event_id: string
+    }
+  },
 }

@@ -14,6 +14,8 @@ import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwra
 import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
 import type { MemberRole, TablesUpdate } from '@/types/database'
 import { isUnavailableAt } from '@/lib/scheduling/part-of-day'
+import { createServiceClient } from '@/lib/supabase/server'
+import { sealPhoto } from '@/lib/evidence/seal'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -1865,4 +1867,59 @@ export async function publishDayPlan(planDate: string): Promise<TurnoverActionSt
  */
 export async function unpublishDayPlan(planDate: string): Promise<TurnoverActionState> {
   return setDayPlanPublished(planDate, null, 'turnover.day_plan.unpublished')
+}
+
+/**
+ * Seals a quick-flag photo the client just uploaded. The flag photo had no
+ * record anywhere before this: QuickFlagPanel uploaded it and threw the path
+ * away. Now it is a ledger row against the turnover, so it shows on the
+ * property's evidence timeline and in a claim packet.
+ */
+export async function sealFlagPhoto(input: {
+  turnoverId:   string
+  storagePath:  string
+  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_m: number | null }
+  deviceNow:    string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const { data: turnover, error } = await supabase
+      .from('turnovers')
+      .select('id, property_id')
+      .eq('id', input.turnoverId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (error || !turnover) return { success: false, error: 'Turnover not found' }
+
+    const result = await sealPhoto(createServiceClient({ authorizedBy: membership }), {
+      orgId:            membership.org_id,
+      propertyId:       turnover.property_id,
+      bucket:           'turnover-photos',
+      storagePath:      input.storagePath,
+      sourceTable:      'turnover_flags',
+      sourceId:         turnover.id,
+      claimedSha256:    input.capture.sha256,
+      byteSize:         input.capture.byte_size,
+      deviceCapturedAt: input.capture.captured_at,
+      deviceNow:        input.deviceNow,
+      lat:              input.capture.lat,
+      lng:              input.capture.lng,
+      gpsAccuracyM:     input.capture.gps_accuracy_m,
+      capturedBy:       { kind: 'pm', id: user.id, label: null },
+      turnoverId:       turnover.id,
+      workOrderId:      null,
+      inspectionId:     null,
+    })
+    if (!result.ok) return { success: false, error: 'Photo could not be recorded' }
+
+    await logAuditEvent({
+      orgId: membership.org_id, actorId: user.id, action: 'evidence.photo_sealed',
+      targetType: 'evidence_event', targetId: result.eventId, dedupeKey: `evidence-seal-${result.eventId}`,
+    })
+    return { success: true }
+  } catch (err) {
+    reportError(err, { site: 'action.turnovers.sealFlagPhoto' })
+    return { success: false, error: 'Photo could not be recorded' }
+  }
 }

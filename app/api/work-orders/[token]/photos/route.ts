@@ -3,6 +3,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
+import { sealPhoto } from '@/lib/evidence/seal'
+import { createHash } from 'node:crypto'
 
 /**
  * POST /api/work-orders/[token]/photos — upload completion photos, one call
@@ -44,7 +47,7 @@ async function loadOpenWorkOrder(token: string) {
 
   const { data: workOrder, error } = await supabase
     .from('work_orders')
-    .select('id, org_id, status, portal_enabled, completion_token_expires_at')
+    .select('id, org_id, property_id, vendor_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
     .single()
 
@@ -66,6 +69,44 @@ async function loadOpenWorkOrder(token: string) {
   }
 
   return { supabase, workOrder }
+}
+
+type PortalClient = ReturnType<typeof createServiceClient>
+interface PortalWorkOrder { id: string; org_id: string; property_id: string; vendor_id: string | null }
+
+/**
+ * Seals a just-uploaded vendor photo with server-only provenance: the vendor's
+ * browser gave us no device clock and no hash, recorded honestly as
+ * captured_at_source = 'server'. Never throws; a failed seal is reported.
+ */
+async function sealVendorPhoto(
+  supabase:  PortalClient,
+  workOrder: PortalWorkOrder,
+  photo:     { path: string; uploadedBy: string; photoId: string; file: File },
+): Promise<void> {
+  const bytes = await photo.file.arrayBuffer()
+  const sealResult = await sealPhoto(supabase, {
+    orgId:            workOrder.org_id,
+    propertyId:       workOrder.property_id,
+    bucket:           'work-order-photos',
+    storagePath:      photo.path,
+    sourceTable:      'work_order_photos',
+    sourceId:         photo.photoId,
+    claimedSha256:    createHash('sha256').update(Buffer.from(bytes)).digest('hex'),
+    byteSize:         bytes.byteLength,
+    deviceCapturedAt: null,
+    deviceNow:        null,
+    lat: null, lng: null, gpsAccuracyM: null,
+    capturedBy:       { kind: 'vendor', id: workOrder.vendor_id ?? null, label: photo.uploadedBy },
+    turnoverId:       null,
+    workOrderId:      workOrder.id,
+    inspectionId:     null,
+  })
+  if (!sealResult.ok) {
+    reportError(new Error(`vendor photo seal failed: ${sealResult.reason}`), {
+      site: 'api.work-orders.photos.seal', orgId: workOrder.org_id,
+    })
+  }
 }
 
 export async function POST(
@@ -152,6 +193,10 @@ export async function POST(
       return NextResponse.json({ error: 'Failed to save photo. Please try again.' }, { status: 500 })
     }
 
+    // Non-fatal to the vendor: the photo is stored and the row exists; the
+    // backfill cron seals anything with a row and no ledger entry.
+    await sealVendorPhoto(supabase, workOrder, { path, uploadedBy, photoId: inserted.id, file })
+
     uploaded.push(inserted)
   }
 
@@ -192,10 +237,44 @@ export async function DELETE(
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
   }
 
-  const { error: storageErr } = await supabase.storage.from('work-order-photos').remove([photo.storage_path])
-  if (storageErr) {
-    console.error('[work-orders/photos] failed to remove storage object', storageErr)
-    return NextResponse.json({ error: 'Failed to delete photo. Please try again.' }, { status: 500 })
+  // The object is KEPT. Evidence is never deleted by this feature; the
+  // vendor's withdrawal is a new ledger row pointing at the original seal,
+  // and the work_order_photos pointer row goes away so the UI stops
+  // showing it. A withdrawn photo still appears, marked withdrawn, in a
+  // claim packet's chain of custody.
+  const { data: original, error: originalErr } = await supabase
+    .from('evidence_events')
+    .select('id')
+    .eq('org_id', workOrder.org_id)
+    .eq('bucket', 'work-order-photos')
+    .eq('storage_path', photo.storage_path)
+    .eq('kind', 'photo_sealed')
+    .maybeSingle()
+  if (originalErr) {
+    reportError(originalErr, { site: 'api.work-orders.photos.withdrawLookup', orgId: workOrder.org_id })
+    return NextResponse.json({ error: 'Could not remove photo' }, { status: 500 })
+  }
+  if (original) {
+    const { error: wErr } = await supabase.from('evidence_events').insert({
+      org_id:             workOrder.org_id,
+      property_id:        workOrder.property_id,
+      kind:               'photo_withdrawn',
+      source_table:       'work_order_photos',
+      source_id:          photo.id,
+      bucket:             'work-order-photos',
+      storage_path:       photo.storage_path,
+      sha256:             '0'.repeat(64),   // a withdrawal carries no bytes; the original row has the hash
+      captured_at:        new Date().toISOString(),
+      captured_at_source: 'server',
+      captured_by_kind:   'vendor',
+      captured_by_id:     workOrder.vendor_id ?? null,
+      work_order_id:      workOrder.id,
+      refers_to_event_id: original.id,
+    })
+    if (wErr && wErr.code !== '23505') {
+      reportError(wErr, { site: 'api.work-orders.photos.withdraw', orgId: workOrder.org_id })
+      return NextResponse.json({ error: 'Could not remove photo' }, { status: 500 })
+    }
   }
 
   const { error: deleteErr } = await supabase.from('work_order_photos').delete().eq('id', photo.id)

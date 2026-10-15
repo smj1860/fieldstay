@@ -1322,6 +1322,54 @@ export interface WorkOrderUpdate {
   dedupe_key:                string | null
 }
 
+export type EvidenceEventKind      = 'photo_sealed' | 'photo_withdrawn' | 'packet_generated' | 'proof_of_care'
+export type EvidenceSourceTable    =
+  | 'checklist_instance_items' | 'checklist_instances' | 'property_assets'
+  | 'work_order_photos' | 'inspection_items' | 'turnover_flags' | 'evidence_packets'
+export type EvidenceBucket         = 'turnover-photos' | 'work-order-photos' | 'inspection-photos' | 'evidence-packets'
+export type EvidenceCapturedByKind = 'crew' | 'pm' | 'vendor' | 'system'
+export type EvidenceBracketPosition = 'pre_stay' | 'during_stay' | 'post_stay'
+
+export interface EvidenceEvent {
+  id:                          string
+  org_id:                      string
+  property_id:                 string
+  kind:                        EvidenceEventKind
+  source_table:                EvidenceSourceTable
+  source_id:                   string
+  bucket:                      EvidenceBucket
+  storage_path:                string
+  sha256:                      string
+  byte_size:                   number | null
+  hash_verified:               boolean
+  captured_at:                 string
+  captured_at_source:          'server' | 'device'
+  device_captured_at:          string | null
+  device_clock_offset_seconds: number | null
+  received_at:                 string
+  lat:                         number | null
+  lng:                         number | null
+  gps_accuracy_m:              number | null
+  captured_by_kind:            EvidenceCapturedByKind
+  captured_by_id:              string | null
+  captured_by_label:           string | null
+  turnover_id:                 string | null
+  work_order_id:               string | null
+  inspection_id:               string | null
+  refers_to_event_id:          string | null
+  metadata:                    Json
+  created_at:                  string
+}
+
+export interface EvidenceStayBracket {
+  id:                string
+  org_id:            string
+  evidence_event_id: string
+  booking_id:        string
+  position:          EvidenceBracketPosition
+  bracketed_at:      string
+}
+
 export interface WorkOrderPhoto {
   id:            string
   work_order_id: string
@@ -2548,6 +2596,8 @@ export interface HandWrittenRowMap {
   maintenance_catalog_items:           MaintenanceCatalogItem
   maintenance_completions:             MaintenanceCompletion
   work_order_invoices:                 WorkOrderInvoice
+  evidence_events:                     EvidenceEvent
+  evidence_stay_brackets:              EvidenceStayBracket
   reservation_messages:                ReservationMessage
   reviews:                             Review
   review_responses:                    ReviewResponse

@@ -130,7 +130,15 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
   'app/(dashboard)/properties/clone-actions.ts:123':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'app/api/work-orders/[token]/photos/route.ts:109':
+  'lib/evidence/timeline.ts:39':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
+  'lib/evidence/timeline.ts:67':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
+  'lib/evidence/timeline.ts:87':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
+  'lib/evidence/timeline.ts:123':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
+  'app/api/work-orders/[token]/photos/route.ts:150':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:202':
     'Same per-photo storage-upload + row pattern, client-side.',

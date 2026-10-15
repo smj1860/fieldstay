@@ -175,6 +175,17 @@ export interface PendingPhotoUploadRow {
   /** 0/1, not a boolean — see the note on MutationRow.failed. */
   failed?:              DeadLetterFlag
   last_error?:          string
+  // Evidence-ledger capture metadata (lib/evidence/capture.ts). Optional so a
+  // row queued by an older build still drains; a seal is only queued when
+  // sha256 is present.
+  sha256?:              string
+  byte_size?:           number
+  captured_at?:         string
+  lat?:                 number | null
+  lng?:                 number | null
+  gps_accuracy_m?:      number | null
+  /** The turnover the photo was taken against, when known at capture. */
+  turnover_id?:         string
 }
 
 // Defined in ./outbox-primitives, which every outbox surface shares — the
@@ -266,6 +277,7 @@ export type MutationTable =
   | 'property_assets'
   | 'crew_work_orders'
   | 'messages'
+  | 'evidence_seals'
 
 export interface MutationRow {
   id?:        number

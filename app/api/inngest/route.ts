@@ -193,6 +193,7 @@ import { handleSupportEscalation } from '@/lib/inngest/functions/support-convers
 import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
+import { evidenceSealInspection } from '@/lib/inngest/functions/evidence-seal-inspection'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 
@@ -200,6 +201,7 @@ export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     inspectionCompleted,
+    evidenceSealInspection,
     prospectingCrawlDispatch,
     prospectingCrawlProfile,
     inspectionOverdueEmailCron,

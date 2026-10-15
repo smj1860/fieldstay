@@ -1,9 +1,11 @@
 import { createClient } from '@/lib/supabase/client'
 import { reportError } from '@/lib/observability/report-error'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
+import { compressPhoto } from '@/lib/images/compress'
+import { describeCapture, type CaptureMetadata } from '@/lib/evidence/capture'
 
 export type FlagPhotoUploadResult =
-  | { ok: true;  path: string }
+  | { ok: true;  path: string; capture: CaptureMetadata }
   | { ok: false; error: string }
 
 /**
@@ -26,15 +28,20 @@ export type FlagPhotoUploadResult =
  */
 export async function flagPhotoUpload(orgId: string, turnoverId: string, file: File): Promise<FlagPhotoUploadResult> {
   const supabase = createClient()
-  const ext  = file.name.split('.').pop() ?? 'jpg'
-  const path = orgScopedStoragePath(orgId, `turnover-${turnoverId}`, `flag-${Date.now()}.${ext}`)
+  const ext  = 'jpg'
+  // UUID, not Date.now(): two flag photos in the same millisecond overwrote
+  // each other. And the bytes are re-encoded to JPEG below, so the stored
+  // object is always .jpg whatever the camera produced.
+  const path = orgScopedStoragePath(orgId, `turnover-${turnoverId}`, `flag-${crypto.randomUUID()}.${ext}`)
+  const compressed = await compressPhoto(file)
+  const capture    = await describeCapture(compressed)
   const { error } = await supabase.storage
     .from('turnover-photos')
-    .upload(path, file, { upsert: true })
+    .upload(path, compressed, { contentType: 'image/jpeg', upsert: false })
   if (error) {
     console.error('[flagPhotoUpload] upload failed:', error.message)
     reportError(error, { site: 'lib.turnovers.flagPhotoUpload' })
     return { ok: false, error: error.message }
   }
-  return { ok: true, path }
+  return { ok: true, path, capture }
 }

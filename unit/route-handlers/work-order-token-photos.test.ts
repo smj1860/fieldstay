@@ -15,6 +15,9 @@ vi.mock('@/lib/rate-limit', async () => {
     retryAfterSeconds:  retryAfterSecondsStub,
   }
 })
+vi.mock('@/lib/evidence/seal', () => ({
+  sealPhoto: vi.fn(async () => ({ ok: true, eventId: 'ev_1', duplicate: false, hashVerified: true })),
+}))
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
 }))
@@ -22,6 +25,7 @@ vi.mock('@/lib/integrations/webhook-verification', () => ({
 import { POST, DELETE } from '@/app/api/work-orders/[token]/photos/route'
 import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit } from '@/lib/rate-limit'
+import { sealPhoto } from '@/lib/evidence/seal'
 
 type Resp = { data?: unknown; error?: unknown; count?: number }
 
@@ -41,6 +45,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
       })
     }
     chain.single = vi.fn(() => Promise.resolve(result))
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
@@ -51,6 +56,9 @@ function makeSupabase(queue: Record<string, Resp[]>) {
 function baseWo(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id:                          'wo_1',
+    org_id:                      'org_1',
+    property_id:                 'prop_1',
+    vendor_id:                   'vendor_1',
     status:                      'assigned',
     portal_enabled:              true,
     completion_token_expires_at: null,
@@ -241,6 +249,15 @@ describe('POST /api/work-orders/[token]/photos', () => {
     expect(supabase.uploadMock).toHaveBeenCalledTimes(1)
     const insertCall = supabase.calls.find((c) => c.table === 'work_order_photos' && c.method === 'insert')
     expect((insertCall!.args[0] as Record<string, unknown>).work_order_id).toBe('wo_1')
+    // The photo is sealed into the evidence ledger with server-only provenance.
+    expect(sealPhoto).toHaveBeenCalledTimes(1)
+    const seal = vi.mocked(sealPhoto).mock.calls[0][1]
+    expect(seal).toMatchObject({
+      orgId: 'org_1', propertyId: 'prop_1', bucket: 'work-order-photos',
+      sourceTable: 'work_order_photos', sourceId: 'photo_1', workOrderId: 'wo_1',
+      deviceCapturedAt: null, deviceNow: null,
+    })
+    expect(seal.claimedSha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('cleans up the storage object when the DB insert fails', async () => {
@@ -324,12 +341,16 @@ describe('DELETE /api/work-orders/[token]/photos', () => {
     expect(res.status).toBe(404)
   })
 
-  it('deletes a photo that belongs to the work order the token authorizes', async () => {
+  it('withdraws a photo that belongs to the work order: keeps the object, writes a ledger row, drops the pointer row', async () => {
     const supabase = makeSupabase({
       work_orders: [{ data: baseWo(), error: null }],
       work_order_photos: [
         { data: { id: 'photo_1', storage_path: 'work-orders/wo_1/completion/x.jpg', work_order_id: 'wo_1' }, error: null },
         { data: null, error: null },
+      ],
+      evidence_events: [
+        { data: { id: 'ev_orig' }, error: null },   // original seal lookup
+        { data: null, error: null },                // withdrawal insert
       ],
     })
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
@@ -338,6 +359,10 @@ describe('DELETE /api/work-orders/[token]/photos', () => {
     const json = await res.json()
 
     expect(json).toEqual({ success: true })
-    expect(supabase.removeMock).toHaveBeenCalledWith(['work-orders/wo_1/completion/x.jpg'])
+    // Evidence is never deleted from Storage by this feature.
+    expect(supabase.removeMock).not.toHaveBeenCalled()
+    const withdrawal = supabase.calls.find((c) => c.table === 'evidence_events' && c.method === 'insert')
+    expect(withdrawal!.args[0]).toMatchObject({ kind: 'photo_withdrawn', refers_to_event_id: 'ev_orig', work_order_id: 'wo_1' })
+    expect(supabase.calls.some((c) => c.table === 'work_order_photos' && c.method === 'delete')).toBe(true)
   })
 })
