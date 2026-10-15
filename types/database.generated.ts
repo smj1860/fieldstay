@@ -656,6 +656,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "checklist_instance_items_evidence_spot_id_fkey"
+            columns: ["evidence_spot_id"]
+            isOneToOne: false
+            referencedRelation: "property_evidence_spots"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "checklist_instance_items_instance_id_fkey"
             columns: ["instance_id"]
             isOneToOne: false
@@ -1486,6 +1493,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "evidence_events_inspection_id_fkey"
+            columns: ["inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "evidence_events_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
@@ -1500,6 +1514,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "evidence_events_refers_to_event_id_fkey"
+            columns: ["refers_to_event_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_events"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "evidence_events_turnover_id_fkey"
             columns: ["turnover_id"]
             isOneToOne: false
@@ -1511,20 +1532,6 @@ export type Database = {
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "evidence_events_inspection_id_fkey"
-            columns: ["inspection_id"]
-            isOneToOne: false
-            referencedRelation: "inspections"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "evidence_events_refers_to_event_id_fkey"
-            columns: ["refers_to_event_id"]
-            isOneToOne: false
-            referencedRelation: "evidence_events"
             referencedColumns: ["id"]
           },
         ]
@@ -1556,10 +1563,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "evidence_stay_brackets_org_id_fkey"
-            columns: ["org_id"]
+            foreignKeyName: "evidence_stay_brackets_booking_id_fkey"
+            columns: ["booking_id"]
             isOneToOne: false
-            referencedRelation: "organizations"
+            referencedRelation: "bookings"
             referencedColumns: ["id"]
           },
           {
@@ -1570,10 +1577,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "evidence_stay_brackets_booking_id_fkey"
-            columns: ["booking_id"]
+            foreignKeyName: "evidence_stay_brackets_org_id_fkey"
+            columns: ["org_id"]
             isOneToOne: false
-            referencedRelation: "bookings"
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -7322,7 +7329,6 @@ export type Database = {
         ]
       }
     }
-
     Views: {
       friction_forecast_calibration: {
         Row: {
