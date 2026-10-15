@@ -11,7 +11,9 @@ import {
 import { listTechnicianGrants, touchGrant } from '@/lib/work-orders/tech-grants'
 import { revealAccessForPortal, type AccessReveal } from '@/lib/work-orders/access'
 import type { VendorProgress } from '@/lib/work-orders/vendor-progress'
+import { loadWorkOrderEvidence } from '@/lib/evidence/work-order-evidence'
 import type { GrantRow } from './vendor-response-panels'
+import type { PriorPhoto } from './prior-photos-panel'
 
 /**
  * Everything the vendor portal needs, for EITHER principal.
@@ -61,6 +63,14 @@ export interface PortalPageData {
    * source. Unaccepted work orders never carry a code into the render at all.
    */
   access:               AccessReveal
+  /**
+   * The property manager's own sealed photos of the problem, read-only, so
+   * "it was already broken" is answered before it is said. Signed for 5
+   * minutes. Resolved HERE, scoped to the token's work order, for the same
+   * reason the access code is: the vendor's browser never receives a path it
+   * could use to ask for anyone else's.
+   */
+  priorPhotos:          PriorPhoto[]
 }
 
 /**
@@ -158,6 +168,8 @@ export async function loadPortalPage(token: string): Promise<PortalLoad> {
     ? await listTechnicianGrants(supabase, workOrder)
     : []
 
+  const priorPhotos = await loadPriorPhotos(supabase, workOrder.org_id, workOrder.id)
+
   return {
     kind: 'ok',
     data: {
@@ -187,6 +199,14 @@ export async function loadPortalPage(token: string): Promise<PortalLoad> {
     vendorChargesEnabled: vendor?.stripe_connect_charges_enabled ?? false,
     technicianGrants,
     access,
+    priorPhotos,
     },
   }
+}
+
+async function loadPriorPhotos(
+  supabase: ReturnType<typeof createServiceClient>, orgId: string, workOrderId: string,
+): Promise<PriorPhoto[]> {
+  const evidence = await loadWorkOrderEvidence(supabase, { orgId, workOrderId, sides: ['before'] })
+  return evidence.before.map((p) => ({ id: p.id, url: p.url, capturedAt: p.capturedAt }))
 }

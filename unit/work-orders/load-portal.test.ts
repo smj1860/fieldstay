@@ -6,6 +6,9 @@ vi.mock('@/lib/work-orders/tech-grants', () => ({
   listTechnicianGrants: vi.fn(async () => []),
   touchGrant:           vi.fn(async () => undefined),
 }))
+vi.mock('@/lib/evidence/work-order-evidence', () => ({
+  loadWorkOrderEvidence: vi.fn(async () => ({ before: [], after: [] })),
+}))
 vi.mock('@/lib/assets/manual-lookup', () => ({ getManualUrlForAsset: vi.fn(async () => null) }))
 vi.mock('@/lib/supabase/unwrap', () => ({ unwrap: vi.fn((res: { data: unknown }) => res.data) }))
 
@@ -13,6 +16,7 @@ import { loadPortalPage } from '@/app/work-orders/[token]/load-portal'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resolvePortalToken } from '@/lib/work-orders/portal-token'
 import { listTechnicianGrants, touchGrant } from '@/lib/work-orders/tech-grants'
+import { loadWorkOrderEvidence } from '@/lib/evidence/work-order-evidence'
 
 const WO = {
   id: 'wo_1', org_id: 'org_1', property_id: 'prop_1', vendor_id: 'vend_1',
@@ -155,3 +159,19 @@ describe('loadPortalPage: missing display extras', () => {
     await expect(loadPortalPage('tok')).resolves.toEqual({ kind: 'not_found' })
   })
 })
+
+describe('loadPortalPage: the property manager\'s before photos', () => {
+  it('loads only the BEFORE side, scoped to the token\'s own work order, and maps it for the panel', async () => {
+    stubClient()
+    resolvesTo({ ok: true, principal: { kind: 'vendor', grantId: null }, workOrder: WO })
+    ;(loadWorkOrderEvidence as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      before: [{ id: 'e1', url: 'https://signed/1', capturedAt: '2026-10-10T10:00:00Z', side: 'before', capturedByKind: 'pm', hashVerified: true }],
+      after: [],
+    })
+    const out = await loadPortalPage('tok')
+    expect(loadWorkOrderEvidence).toHaveBeenCalledWith(expect.anything(), { orgId: 'org_1', workOrderId: 'wo_1', sides: ['before'] })
+    expect(out.kind).toBe('ok')
+    if (out.kind === 'ok') expect(out.data.priorPhotos).toEqual([{ id: 'e1', url: 'https://signed/1', capturedAt: '2026-10-10T10:00:00Z' }])
+  })
+})
+

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useTransition, useActionState, useEffect } from 'react'
 import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -492,6 +493,14 @@ function TransactionPanel({
                       <td className="px-3 py-2 text-secondary-themed max-w-[160px]">
                         <div className="truncate">{txn.description}</div>
                         {txn.notes && <div className="truncate text-muted-themed">{txn.notes}</div>}
+                        {txn.work_order_id && (
+                          <Link
+                            href={`/maintenance/${txn.work_order_id}/evidence`}
+                            className="underline text-muted-themed focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+                          >
+                            View photos
+                          </Link>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-muted-themed whitespace-nowrap">
                         {CATEGORY_LABELS[txn.category] ?? txn.category}

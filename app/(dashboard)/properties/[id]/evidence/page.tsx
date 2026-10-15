@@ -9,9 +9,11 @@ import { ArrowLeft } from 'lucide-react'
 import { requireProperty } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import { Card } from '@/components/ui/Card'
 import { ClaimSpotsCard, type ClaimSpotView } from '../claim-spots-card'
+import { PacketBuilder, type PacketPhotoOption } from './packet-builder'
+import { ClaimWindowForm } from './claim-window-form'
 import { Badge } from '@/components/ui/Badge'
 import { StatusDot } from '@/components/ui/StatusDot'
 import {
@@ -152,6 +154,9 @@ export default async function PropertyEvidencePage({ params, searchParams }: Rea
     .limit(200)
   const spots = unwrapList(spotsRes, { site: 'page.properties.evidence.spots', orgId }) as ClaimSpotView[]
   const canEditSpots = ['owner', 'admin', 'manager'].includes(membership.role)
+  const canEditWindow = ['owner', 'admin'].includes(membership.role)
+  const orgRes = await supabase.from('organizations').select('claim_window_days').eq('id', orgId).maybeSingle()
+  const claimWindowDays = unwrap(orgRes, { site: 'page.properties.evidence.org', orgId })?.claim_window_days ?? 14
 
   const brackets = await loadBracketsForBookings(supabase, orgId, stays.map((s) => s.id))
   const counts   = countByBooking(brackets)
@@ -166,6 +171,13 @@ export default async function PropertyEvidencePage({ params, searchParams }: Rea
   const urls      = await signThumbnails(allEvents, membership)
 
   const positionOf = new Map(selectedBrackets.map((b) => [b.evidence_event_id, b.position]))
+  const packetPhotos: PacketPhotoOption[] = stayEvents
+    .filter((e) => e.kind === 'photo_sealed' && !withdrawn.has(e.id))
+    .filter((e) => positionOf.get(e.id) === 'pre_stay' || positionOf.get(e.id) === 'post_stay')
+    .map((e) => ({
+      id: e.id,
+      label: `${POSITION_LABEL[positionOf.get(e.id)!]}, ${formatInTimezone(e.captured_at, property.timezone)}, ${e.captured_by_kind}`,
+    }))
 
   return (
     <div className="max-w-6xl space-y-6">
@@ -239,6 +251,10 @@ export default async function PropertyEvidencePage({ params, searchParams }: Rea
         </div>
       </div>
 
+      {selected && canEditSpots && (
+        <PacketBuilder key={selected.id} propertyId={id} bookingId={selected.id} photos={packetPhotos} />
+      )}
+      {canEditWindow && <ClaimWindowForm propertyId={id} initialDays={claimWindowDays} />}
       {canEditSpots && <ClaimSpotsCard propertyId={id} spots={spots} />}
     </div>
   )

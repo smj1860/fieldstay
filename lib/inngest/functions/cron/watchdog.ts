@@ -96,6 +96,9 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   // findDuplicatedCrons.
   { id: 'cron-pre-flight-friction',                 maxSilentHours: 30 },
   { id: 'cron-freeze-watch',                        maxSilentHours: 30 },
+  { id: 'cron-evidence-deadlines',                  maxSilentHours: 30 },
+  { id: 'cron-evidence-backfill',                   maxSilentHours: 30 },
+  { id: 'cron-evidence-rebracket',                  maxSilentHours: 30 },
   { id: 'cron-friction-grading',                    maxSilentHours: 30 },
 ]
 

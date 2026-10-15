@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useRef, useState } from 'react'
+import { sealWorkOrderPhoto } from './seal-work-order-photo'
 import { AlertTriangle, Camera, Info, ShieldOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createWorkOrder } from './actions'
@@ -213,15 +214,20 @@ export function CreateWorkOrderModal({
           photoFailures++
           continue
         }
-        const { error: photoError } = await supabase.from('work_order_photos').insert({
+        // work_order_photos has NO org_id column (it is scoped through its work
+        // order); naming one here made every insert fail, so PM-uploaded photos
+        // never attached.
+        const { data: photoRow, error: photoError } = await supabase.from('work_order_photos').insert({
           work_order_id: workOrderId,
-          org_id:        orgId,
           storage_path:  path,
-        })
-        if (photoError) {
+        }).select('id').single()
+        if (photoError || !photoRow) {
           console.error('[CreateWorkOrderModal] Failed to attach photos:', photoError)
           photoFailures++
+          continue
         }
+        // Best effort: a failed seal is picked up by the nightly evidence backfill.
+        await sealWorkOrderPhoto({ workOrderId, photoId: photoRow.id, storagePath: path })
       }
       // Non-fatal — the WO was created; only photo attachment failed. Surface a
       // non-blocking warning via the existing toast rather than failing the modal.

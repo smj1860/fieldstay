@@ -46,6 +46,8 @@ export interface OwnerPortalTxn {
   description:      string | null
   transaction_date: string
   notes:            string | null
+  /** Set on work order expenses; drives the "View photos" link. */
+  work_order_id:    string | null
 }
 
 export type OwnerPortalPageState =
@@ -433,7 +435,7 @@ export async function loadOwnerPortalData(
     fetchAllRows<OwnerPortalTxn>(
       (from, to) => supabase
         .from('owner_transactions')
-        .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
+        .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes, work_order_id')
         .in('property_id', txnPropertyIds)
         .eq('visible_to_owner', true)
         .gte('transaction_date', monthStart)

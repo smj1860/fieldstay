@@ -42,6 +42,13 @@ export interface SealInput {
   turnoverId:     string | null
   workOrderId:    string | null
   inspectionId:   string | null
+  /**
+   * When the server first learned of a photo captured long before this call
+   * (the backfill sweep: the pointer row's own timestamp). Used as captured_at
+   * ONLY when there is no device clock, and always recorded as a server time.
+   * Never used to fabricate a device claim.
+   */
+  observedAt?:    string | null
   metadata?:      Record<string, string | number | boolean | null>
 }
 
@@ -80,6 +87,38 @@ export function resolveCapturedAt(
   return { capturedAt: new Date(corrected).toISOString(), source: 'device', offsetSeconds }
 }
 
+/**
+ * resolveCapturedAt() plus the backfill's server-observed time. The observed
+ * time only ever replaces a SERVER receipt time (never a device claim), is
+ * clamped to "not in the future", and stays labelled source 'server'.
+ */
+function timingFor(input: SealInput, serverNowMs: number): ReturnType<typeof resolveCapturedAt> {
+  const timing = resolveCapturedAt(input.deviceCapturedAt, input.deviceNow, serverNowMs)
+  const observed = input.observedAt ? Date.parse(input.observedAt) : Number.NaN
+  if (timing.source !== 'server' || Number.isNaN(observed)) return timing
+  return { ...timing, capturedAt: new Date(Math.min(observed, serverNowMs)).toISOString() }
+}
+
+/**
+ * Replay: the first attempt landed and its response was lost. Recover the id so
+ * the bracket step still runs (it is idempotent too). Null when the row cannot
+ * be found, so the caller reports the original insert error.
+ */
+async function recoverReplay(supabase: SupabaseClient, input: SealInput): Promise<SealResult | null> {
+  const { data: existing, error: existingErr } = await supabase
+    .from('evidence_events')
+    .select('id, hash_verified')
+    .eq('org_id', input.orgId)
+    .eq('bucket', input.bucket)
+    .eq('storage_path', input.storagePath)
+    .eq('kind', 'photo_sealed')
+    .maybeSingle()
+  if (existingErr) reportError(existingErr, { site: 'lib.evidence.seal.replayLookup', orgId: input.orgId })
+  if (!existing) return null
+  await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: existing.id })
+  return { ok: true, eventId: existing.id, duplicate: true, hashVerified: existing.hash_verified }
+}
+
 export async function sealPhoto(
   supabase: SupabaseClient,   // MUST be a service client; the caller names why
   input:    SealInput,
@@ -112,8 +151,7 @@ export async function sealPhoto(
     })
   }
 
-  const serverNowMs = Date.now()
-  const timing = resolveCapturedAt(input.deviceCapturedAt, input.deviceNow, serverNowMs)
+  const timing = timingFor(input, Date.now())
 
   const row = {
     org_id:                      input.orgId,
@@ -149,23 +187,8 @@ export async function sealPhoto(
     .single()
 
   if (insErr) {
-    if (insErr.code === '23505') {
-      // Replay: the first attempt landed and its response was lost. Recover
-      // the id so the bracket step still runs (it is idempotent too).
-      const { data: existing, error: existingErr } = await supabase
-        .from('evidence_events')
-        .select('id, hash_verified')
-        .eq('org_id', input.orgId)
-        .eq('bucket', input.bucket)
-        .eq('storage_path', input.storagePath)
-        .eq('kind', 'photo_sealed')
-        .maybeSingle()
-      if (existingErr) reportError(existingErr, { site: 'lib.evidence.seal.replayLookup', orgId: input.orgId })
-      if (existing) {
-        await bracketEvidenceEvent(supabase, { orgId: input.orgId, eventId: existing.id })
-        return { ok: true, eventId: existing.id, duplicate: true, hashVerified: existing.hash_verified }
-      }
-    }
+    const replay = insErr.code === '23505' ? await recoverReplay(supabase, input) : null
+    if (replay) return replay
     reportError(insErr, { site: 'lib.evidence.seal.insert', orgId: input.orgId })
     return { ok: false, reason: 'insert_failed' }
   }

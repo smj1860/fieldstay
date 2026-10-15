@@ -31,6 +31,10 @@ export const ORG_SCOPED_PHOTO_BUCKETS = [
   // `org-scoped-storage-paths` guardrail — INSPECTIONS_SPEC §8a anticipated
   // precisely this: the bucket gets the rule "for free once it is listed".
   'inspection-photos',
+  // Added 2026-10-16 with the evidence claim packet. Written only by the
+  // evidence-packet Inngest function (service role); the SELECT policy is
+  // org-prefix based like the three above.
+  'evidence-packets',
 ] as const
 
 export type OrgScopedPhotoBucket = (typeof ORG_SCOPED_PHOTO_BUCKETS)[number]

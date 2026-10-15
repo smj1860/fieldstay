@@ -187,6 +187,8 @@ export interface Organization {
   plan_status:                  OrgPlanStatus
   trial_ends_at:                string | null
   max_properties:               number
+  /** Days after checkout a claim can be filed on platforms with no window of their own. Default 14. */
+  claim_window_days:            number
   onboarding_steps_completed:   Record<string, boolean>
   bedroom_room_template_id:        string | null
   bathroom_room_template_id:       string | null

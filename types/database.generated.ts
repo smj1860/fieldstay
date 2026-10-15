@@ -3799,6 +3799,7 @@ export type Database = {
           bedroom_room_template_id: string | null
           billing_email: string | null
           capex_inflation_rate_pct: number
+          claim_window_days: number
           comms_log_retention_days: number
           created_at: string
           default_room_templates_seeded_at: string | null
@@ -3833,6 +3834,7 @@ export type Database = {
           bedroom_room_template_id?: string | null
           billing_email?: string | null
           capex_inflation_rate_pct?: number
+          claim_window_days?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null
@@ -3867,6 +3869,7 @@ export type Database = {
           bedroom_room_template_id?: string | null
           billing_email?: string | null
           capex_inflation_rate_pct?: number
+          claim_window_days?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null

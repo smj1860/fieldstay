@@ -66,7 +66,7 @@ const BADGE_STYLES: Record<BadgeColor, string> = {
   amber: 'bg-amber-50 text-amber-700 border border-amber-200',
 }
 
-function TransactionRow({ txn }: Readonly<{ txn: OwnerPortalTxn }>) {
+function TransactionRow({ txn, token }: Readonly<{ txn: OwnerPortalTxn; token: string }>) {
   const isRevenue = (txn.transaction_type as TxnType) === 'revenue'
   const badge     = SOURCE_BADGES[txn.source ?? ''] ?? null
   const desc      = txn.description || SOURCE_FALLBACK_LABELS[txn.source ?? ''] || txn.category
@@ -100,6 +100,14 @@ function TransactionRow({ txn }: Readonly<{ txn: OwnerPortalTxn }>) {
         </div>
         {txn.notes && (
           <p className="text-xs text-muted-themed mt-0.5 truncate">{txn.notes}</p>
+        )}
+        {txn.work_order_id && (
+          <a
+            href={`/owner/${token}/work-orders/${txn.work_order_id}/photos`}
+            className="text-xs underline text-secondary-themed focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+          >
+            View photos
+          </a>
         )}
       </div>
 
@@ -433,7 +441,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
                   </div>
                   <div className="divide-y divide-themed">
                     {txnsByProperty.get(p.id)!.map((txn) => (
-                      <TransactionRow key={txn.id} txn={txn} />
+                      <TransactionRow key={txn.id} txn={txn} token={token} />
                     ))}
                   </div>
                 </div>
@@ -447,7 +455,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
 
             <div className="divide-y divide-themed">
               {filteredTxns.map((txn) => (
-                <TransactionRow key={txn.id} txn={txn} />
+                <TransactionRow key={txn.id} txn={txn} token={token} />
               ))}
             </div>
           </div>
