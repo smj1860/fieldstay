@@ -138,6 +138,12 @@ const EXCEPTIONS: Record<string, string> = {
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
   'lib/evidence/timeline.ts:123':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
+  'lib/inngest/functions/cron/freeze-watch.ts:117':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
+  'lib/inngest/functions/cron/freeze-watch.ts:143':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
+  'lib/inngest/functions/cron/freeze-watch.ts:212':
+    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
   'app/api/work-orders/[token]/photos/route.ts:150':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:202':

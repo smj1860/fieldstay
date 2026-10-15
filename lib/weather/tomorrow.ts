@@ -264,6 +264,14 @@ async function fetchAndCacheWeather(
 export interface DayForecast {
   precipitationProbability: number   // 0-100
   temperatureMax:           number   // Fahrenheit
+  /**
+   * Fahrenheit. NULL when the provider omitted it: Freeze Watch must never
+   * treat a missing low as 0 degrees, which would create a prep work order on
+   * every property every night the field dropped out of the payload. A
+   * forecast cached before this field existed has no key at all (undefined);
+   * callers coalesce it to null.
+   */
+  temperatureMin:           number | null
   weatherCode:              number   // Tomorrow.io integer code
   weatherLabel:             string   // Human-readable label from WEATHER_CODE_MAP
   isClear:                  boolean  // precipitationProbability < CLEAR_PRECIP_PROBABILITY
@@ -315,6 +323,7 @@ interface DailyTimelineEntry {
     precipitationProbabilityMax?: number
     precipitationProbabilityAvg?: number
     temperatureMax?:              number
+    temperatureMin?:              number
     weatherCodeMax?:              number
     weatherCode?:                 number
   }
@@ -354,6 +363,7 @@ async function fetchAndCacheForecast(
   const forecast: DayForecast = {
     precipitationProbability,
     temperatureMax: entry.values.temperatureMax ?? 0,
+    temperatureMin: typeof entry.values.temperatureMin === 'number' ? entry.values.temperatureMin : null,
     weatherCode,
     weatherLabel:   WEATHER_CODE_MAP[weatherCode] ?? 'Unknown',
     isClear:        precipitationProbability < CLEAR_PRECIP_PROBABILITY,

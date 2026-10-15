@@ -70,7 +70,7 @@ export type VendorProgress      = 'declined' | 'cancelled_by_vendor' | 'appointm
                                 | 'return_visit_scheduled' | 'job_completed'
 export type VendorDeclineReason = 'no_capacity' | 'outside_service_area' | 'not_my_trade'
                                 | 'price_below_minimum' | 'cannot_access_property' | 'other'
-export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection'
+export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection' | 'freeze_watch'
 // Inspections (docs/INSPECTIONS_SPEC.md phase 1).
 export type InspectionResult       = 'pass' | 'fail' | 'na'
 export type InspectionResponseType = 'yes_no' | 'count' | 'date' | 'text' | 'photo'
@@ -283,6 +283,8 @@ export interface Property {
   avg_nightly_rate:        number | null
   cleaning_cost:           number | null
   same_day_premium_pct:    number | null
+  /** Forecast low (F) at or below which Freeze Watch creates a prep work order while vacant. NULL = platform default (28). */
+  freeze_threshold_f:      number | null
   cleaning_cost_visible_to_owner: boolean
   square_footage:          number | null
   lat:                     number | null

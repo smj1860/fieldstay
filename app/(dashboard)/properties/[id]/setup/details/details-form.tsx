@@ -198,6 +198,23 @@ export function DetailsForm({
         </div>
       </div>
 
+      <div>
+        <label htmlFor="freeze_threshold_f" className="label">Freeze Watch threshold (°F)</label>
+        <Input
+          id="freeze_threshold_f"
+          name="freeze_threshold_f"
+          type="number"
+          min="-20"
+          max="45"
+          step="1"
+          defaultValue={property.freeze_threshold_f ?? ''}
+          placeholder="28"
+        />
+        <p className="text-xs text-accent-400 mt-1">
+          When the forecast low drops to this or below while the home is vacant, FieldStay creates a freeze prep work order. Leave blank for the default of 28.
+        </p>
+      </div>
+
       <label className="flex items-center gap-2 cursor-pointer select-none">
         <input
           type="checkbox"

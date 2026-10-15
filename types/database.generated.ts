@@ -4474,6 +4474,7 @@ export type Database = {
           external_id: string | null
           external_missing_since: string | null
           external_source: string | null
+          freeze_threshold_f: number | null
           has_security_system: boolean | null
           house_manual: string | null
           id: string
@@ -4522,6 +4523,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          freeze_threshold_f?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -4570,6 +4572,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          freeze_threshold_f?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -8100,6 +8103,7 @@ export type Database = {
         | "guest_report"
         | "vacancy_gap_suggestion"
         | "inspection"
+        | "freeze_watch"
       wo_status:
         | "pending"
         | "quote_requested"
@@ -8479,6 +8483,7 @@ export const Constants = {
         "guest_report",
         "vacancy_gap_suggestion",
         "inspection",
+        "freeze_watch",
       ],
       wo_status: [
         "pending",

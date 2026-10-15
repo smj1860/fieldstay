@@ -1426,4 +1426,17 @@ export type FieldStayEvents = {
       event_id: string
     }
   },
+
+  /**
+   * Freeze Watch, per-org fan-out from cron-freeze-watch. forecast_date is the
+   * local date (YYYY-MM-DD) being checked, captured by the dispatcher so every
+   * org's run agrees on which night it is evaluating.
+   */
+  'org/freeze_watch.requested': {
+    data: {
+      org_id:        string
+      forecast_date: string
+      now_ms:        number
+    }
+  },
 }

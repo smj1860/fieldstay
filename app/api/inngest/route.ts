@@ -194,6 +194,8 @@ import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 import { evidenceSealInspection } from '@/lib/inngest/functions/evidence-seal-inspection'
+import { evidenceProofOfCare } from '@/lib/inngest/functions/evidence-proof-of-care'
+import { freezeWatchCron, freezeWatchOrg } from '@/lib/inngest/functions/cron/freeze-watch'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 
@@ -202,6 +204,9 @@ export const { GET, POST, PUT } = serve({
   functions: [
     inspectionCompleted,
     evidenceSealInspection,
+    evidenceProofOfCare,
+    freezeWatchCron,
+    freezeWatchOrg,
     prospectingCrawlDispatch,
     prospectingCrawlProfile,
     inspectionOverdueEmailCron,
