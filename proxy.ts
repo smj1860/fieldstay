@@ -127,6 +127,10 @@ const PRERENDERED_ROUTES = new Set([
   '/ownerrez',
   '/hospitable',
   '/breezeway-alternative',
+  '/turno-alternative',
+  '/operto-teams-alternative',
+  '/properly-alternative',
+  '/ezcare-alternative',
   '/pricing',
   '/enterprise',
   '/for-vendors',
@@ -274,6 +278,16 @@ const BYPASS_ROUTES = [
   // for an anonymous crawler would defeat the entire point. No auth-branched
   // CTA, like the pages above it.
   '/breezeway-alternative',
+
+  // The four competitor alternative pages (Turno, Operto Teams, Properly,
+  // EZCare). Same reasoning and same failure mode as /breezeway-alternative
+  // directly above: each exists to rank for "<competitor> alternative"
+  // searches, so a 307 to /login for an anonymous crawler defeats the point.
+  // No auth-branched CTA; rendered by components/marketing/ComparisonPage.
+  '/turno-alternative',
+  '/operto-teams-alternative',
+  '/properly-alternative',
+  '/ezcare-alternative',
 
   // Pricing, Enterprise, and Vendor-facing marketing pages — same reasoning
   // and same failure mode as every page above: exist to be found by search
