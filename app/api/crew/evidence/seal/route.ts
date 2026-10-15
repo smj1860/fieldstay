@@ -88,11 +88,19 @@ function parseBody(raw: unknown): Parsed {
  * crew member's RLS client so a row outside their assignments reads as "not
  * found". IDOR is answered by RLS plus the explicit org check, both.
  */
+interface SealTarget {
+  propertyId:     string
+  turnoverId:     string | null
+  evidenceRole?:  string | null
+  evidenceSpotId?: string | null
+  sectionName?:   string | null
+}
+
 async function resolveTarget(
   supabase: CrewAuthContext['supabase'],
   orgId:    string,
   body:     SealBody,
-): Promise<{ propertyId: string; turnoverId: string | null } | null> {
+): Promise<SealTarget | null> {
   const site = 'route.crew.evidence.seal.resolveTarget'
   if (body.source_table === 'property_assets') {
     const res = await supabase.from('property_assets')
@@ -108,10 +116,14 @@ async function resolveTarget(
     return data && pid ? { propertyId: pid, turnoverId: data.turnover_id } : null
   }
   const res = await supabase.from('checklist_instance_items')
-    .select('turnover_id, turnovers!inner(property_id, org_id)').eq('id', body.source_id).maybeSingle()
+    .select('turnover_id, evidence_role, evidence_spot_id, section_name, turnovers!inner(property_id, org_id)').eq('id', body.source_id).maybeSingle()
   const data = unwrap(res, { site, orgId })
   const t = data?.turnovers
-  return data && t && t.org_id === orgId ? { propertyId: t.property_id, turnoverId: data.turnover_id } : null
+  if (!data || !t || t.org_id !== orgId) return null
+  return {
+    propertyId: t.property_id, turnoverId: data.turnover_id,
+    evidenceRole: data.evidence_role, evidenceSpotId: data.evidence_spot_id, sectionName: data.section_name,
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -157,7 +169,12 @@ export async function POST(request: NextRequest) {
     turnoverId,
     workOrderId:      null,
     inspectionId:     null,
-    metadata:         { client_seal_id: body.client_seal_id },
+    metadata: {
+      client_seal_id:   body.client_seal_id,
+      evidence_role:    target.evidenceRole ?? null,
+      evidence_spot_id: target.evidenceSpotId ?? null,
+      section_name:     target.sectionName ?? null,
+    },
   })
 
   if (!result.ok) {

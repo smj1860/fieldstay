@@ -899,6 +899,9 @@ export interface ChecklistInstanceItem {
   is_mandatory:          boolean
   non_deletable:         boolean
   asset_discovery_type:  string | null
+  /** 'room_condition' | 'claim_spot' | null (ordinary task). Set only by snapshotChecklist's injection. */
+  evidence_role:         'room_condition' | 'claim_spot' | null
+  evidence_spot_id:      string | null
   created_at:            string
   updated_at:            string
   /**
@@ -1359,6 +1362,19 @@ export interface EvidenceEvent {
   refers_to_event_id:          string | null
   metadata:                    Json
   created_at:                  string
+}
+
+export interface PropertyEvidenceSpot {
+  id:           string
+  org_id:       string
+  property_id:  string
+  section_name: string
+  label:        string
+  label_es:     string | null
+  sort_order:   number
+  is_active:    boolean
+  created_at:   string
+  updated_at:   string
 }
 
 export interface EvidenceStayBracket {
@@ -2598,6 +2614,7 @@ export interface HandWrittenRowMap {
   work_order_invoices:                 WorkOrderInvoice
   evidence_events:                     EvidenceEvent
   evidence_stay_brackets:              EvidenceStayBracket
+  property_evidence_spots:             PropertyEvidenceSpot
   reservation_messages:                ReservationMessage
   reviews:                             Review
   review_responses:                    ReviewResponse

@@ -89,5 +89,7 @@ export function buildAssetDiscoveryItems(
     is_mandatory:          true,
     non_deletable:         true,
     asset_discovery_type:  assetType,
+    evidence_role:         null as string | null,
+    evidence_spot_id:      null as string | null,
   }))
 }

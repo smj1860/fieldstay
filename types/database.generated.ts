@@ -575,6 +575,8 @@ export type Database = {
           completed_by_crew_id: string | null
           created_at: string
           crew_notes: string | null
+          evidence_role: string | null
+          evidence_spot_id: string | null
           id: string
           instance_id: string
           is_completed: boolean
@@ -599,6 +601,8 @@ export type Database = {
           completed_by_crew_id?: string | null
           created_at?: string
           crew_notes?: string | null
+          evidence_role?: string | null
+          evidence_spot_id?: string | null
           id?: string
           instance_id: string
           is_completed?: boolean
@@ -623,6 +627,8 @@ export type Database = {
           completed_by_crew_id?: string | null
           created_at?: string
           crew_notes?: string | null
+          evidence_role?: string | null
+          evidence_spot_id?: string | null
           id?: string
           instance_id?: string
           is_completed?: boolean
@@ -4730,6 +4736,60 @@ export type Database = {
             columns: ["replaced_by_asset_id"]
             isOneToOne: false
             referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_evidence_spots: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          label_es: string | null
+          org_id: string
+          property_id: string
+          section_name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label: string
+          label_es?: string | null
+          org_id: string
+          property_id: string
+          section_name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          label_es?: string | null
+          org_id?: string
+          property_id?: string
+          section_name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_evidence_spots_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_evidence_spots_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]

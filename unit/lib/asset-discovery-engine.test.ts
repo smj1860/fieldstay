@@ -120,6 +120,8 @@ describe('buildAssetDiscoveryItems', () => {
         requires_photo: false, photo_reason: null, notes: null,
         sort_order: 0, is_completed: false, is_mandatory: true, non_deletable: true,
         asset_discovery_type: 'hvac',
+        evidence_role: null,
+        evidence_spot_id: null,
       },
       {
         instance_id: 'instance_1', turnover_id: 'turnover_1',
@@ -130,6 +132,8 @@ describe('buildAssetDiscoveryItems', () => {
         requires_photo: false, photo_reason: null, notes: null,
         sort_order: 1, is_completed: false, is_mandatory: true, non_deletable: true,
         asset_discovery_type: 'water_heater',
+        evidence_role: null,
+        evidence_spot_id: null,
       },
     ])
   })

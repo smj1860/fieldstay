@@ -11,6 +11,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { Card } from '@/components/ui/Card'
+import { ClaimSpotsCard, type ClaimSpotView } from '../claim-spots-card'
 import { Badge } from '@/components/ui/Badge'
 import { StatusDot } from '@/components/ui/StatusDot'
 import {
@@ -140,6 +141,18 @@ export default async function PropertyEvidencePage({ params, searchParams }: Rea
     .limit(MAX_STAYS)
   const stays = unwrapList(staysRes, { site: 'page.properties.evidence.stays', orgId }) as StayRow[]
 
+  const spotsRes = await supabase
+    .from('property_evidence_spots')
+    .select('id, section_name, label')
+    .eq('org_id', orgId)
+    .eq('property_id', id)
+    .eq('is_active', true)
+    .order('section_name', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .limit(200)
+  const spots = unwrapList(spotsRes, { site: 'page.properties.evidence.spots', orgId }) as ClaimSpotView[]
+  const canEditSpots = ['owner', 'admin', 'manager'].includes(membership.role)
+
   const brackets = await loadBracketsForBookings(supabase, orgId, stays.map((s) => s.id))
   const counts   = countByBooking(brackets)
 
@@ -225,6 +238,8 @@ export default async function PropertyEvidencePage({ params, searchParams }: Rea
           </section>
         </div>
       </div>
+
+      {canEditSpots && <ClaimSpotsCard propertyId={id} spots={spots} />}
     </div>
   )
 }
