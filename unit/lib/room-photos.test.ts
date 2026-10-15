@@ -20,6 +20,11 @@ describe('isRoomSection', () => {
     expect(isRoomSection('  EXTERIOR ')).toBe(false)
     expect(isRoomSection('Kitchen')).toBe(true)
     expect(isRoomSection('')).toBe(false)
+    // "Final Checks" is a closing walk-through, not a room: it must not demand a doorway photo.
+    for (const name of ['Final Checks', 'final check', 'Final Inspection', 'Revisión final', 'Inventario']) {
+      expect(isRoomSection(name), name).toBe(false)
+    }
+    expect(isRoomSection('Master Bedroom')).toBe(true)
   })
 })
 

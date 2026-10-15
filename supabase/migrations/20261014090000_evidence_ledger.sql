@@ -100,11 +100,13 @@ CREATE INDEX IF NOT EXISTS evidence_events_source_idx
 
 -- ── Immutability ────────────────────────────────────────────────────────────
 --
--- UPDATE: rejected, with one exception, the FK ON DELETE SET NULL shape, where
--- exactly one of the nullable FK columns went non-null -> null and every other
--- column is byte-identical (the v_probe pattern from
--- 20260823180804_inspection_items_allow_fk_cleanup.sql). Without it, deleting a
--- turnover, work order or inspection that evidence points at would fail.
+-- UPDATE: rejected, with one exception, the FK ON DELETE SET NULL shape. The
+-- exception is STRICT and per column, the same form the inspections trigger
+-- uses (20260823180804): exactly ONE of the four nullable FK columns went
+-- non-null -> null, and a probe row built from OLD with only that column taken
+-- from NEW is identical to NEW. A looser test (copy all four FK columns from NEW
+-- and compare) would let one statement null a column while REPOINTING another,
+-- which is an edit to the record, not a referential cleanup.
 CREATE OR REPLACE FUNCTION public.reject_evidence_event_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -113,21 +115,21 @@ AS $$
 DECLARE
   v_probe public.evidence_events;
 BEGIN
-  v_probe := OLD;
-  v_probe.turnover_id        := NEW.turnover_id;
-  v_probe.work_order_id      := NEW.work_order_id;
-  v_probe.inspection_id      := NEW.inspection_id;
-  v_probe.refers_to_event_id := NEW.refers_to_event_id;
-
-  IF v_probe IS NOT DISTINCT FROM NEW
-     AND (
-          (OLD.turnover_id        IS NOT NULL AND NEW.turnover_id        IS NULL)
-       OR (OLD.work_order_id      IS NOT NULL AND NEW.work_order_id      IS NULL)
-       OR (OLD.inspection_id      IS NOT NULL AND NEW.inspection_id      IS NULL)
-       OR (OLD.refers_to_event_id IS NOT NULL AND NEW.refers_to_event_id IS NULL)
-     )
-  THEN
-    RETURN NEW;
+  IF OLD.turnover_id IS NOT NULL AND NEW.turnover_id IS NULL THEN
+    v_probe := OLD; v_probe.turnover_id := NEW.turnover_id;
+    IF v_probe IS NOT DISTINCT FROM NEW THEN RETURN NEW; END IF;
+  END IF;
+  IF OLD.work_order_id IS NOT NULL AND NEW.work_order_id IS NULL THEN
+    v_probe := OLD; v_probe.work_order_id := NEW.work_order_id;
+    IF v_probe IS NOT DISTINCT FROM NEW THEN RETURN NEW; END IF;
+  END IF;
+  IF OLD.inspection_id IS NOT NULL AND NEW.inspection_id IS NULL THEN
+    v_probe := OLD; v_probe.inspection_id := NEW.inspection_id;
+    IF v_probe IS NOT DISTINCT FROM NEW THEN RETURN NEW; END IF;
+  END IF;
+  IF OLD.refers_to_event_id IS NOT NULL AND NEW.refers_to_event_id IS NULL THEN
+    v_probe := OLD; v_probe.refers_to_event_id := NEW.refers_to_event_id;
+    IF v_probe IS NOT DISTINCT FROM NEW THEN RETURN NEW; END IF;
   END IF;
 
   RAISE EXCEPTION 'evidence_events % is append-only', OLD.id
@@ -140,16 +142,21 @@ CREATE TRIGGER trg_evidence_events_immutable_update
   BEFORE UPDATE ON public.evidence_events
   FOR EACH ROW EXECUTE FUNCTION public.reject_evidence_event_update();
 
--- DELETE: rejected when issued directly. A cascade from organizations or
--- properties arrives at trigger depth >= 1 and is allowed: evidence dies with
--- its property or tenant (account deletion), never on its own.
+-- DELETE: rejected when issued directly. A BEFORE ROW trigger runs at
+-- pg_trigger_depth() >= 1 ALWAYS, so a direct DELETE arrives at depth 1 and the
+-- check is "<= 1". A cascade from organizations or properties runs inside the
+-- referential-integrity trigger, so it arrives at depth >= 2 and is allowed:
+-- evidence dies with its property or tenant (account deletion), never on its own.
+-- (An earlier draft tested "= 0", which can never be true inside a trigger, so
+-- it rejected nothing. unit/evidence/ledger-triggers.test.ts runs this against a
+-- real Postgres so that cannot silently happen again.)
 CREATE OR REPLACE FUNCTION public.reject_evidence_event_delete()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public, pg_catalog
 AS $$
 BEGIN
-  IF pg_trigger_depth() = 0 THEN
+  IF pg_trigger_depth() <= 1 THEN
     RAISE EXCEPTION 'evidence_events % is append-only; a withdrawal is a new row, not a delete', OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -163,10 +170,14 @@ CREATE TRIGGER trg_evidence_events_immutable_delete
   FOR EACH ROW EXECUTE FUNCTION public.reject_evidence_event_delete();
 
 -- ── RLS ─────────────────────────────────────────────────────────────────────
--- Org members read. Crew read their own org's rows (the crew PWA may later show
--- "sealed" badges; it never reads this today). Nobody writes through RLS:
--- every insert comes from a route handler or Inngest step on the service role,
--- after a server-side hash check. Deny policies document that.
+-- Org members and crew read their own org's rows (the crew PWA may later show
+-- "sealed" badges; it never reads this today). Nobody writes through RLS: every
+-- insert comes from a route handler or Inngest step on the service role, after a
+-- server-side hash check. `authenticated` holds only SELECT, so INSERT, UPDATE
+-- and DELETE are denied by the missing GRANT, which Postgres checks before RLS.
+-- Explicit deny policies were dropped: a policy on a command the role holds no
+-- grant for is what check-db-invariants' policies_without_grant flags, and they
+-- added nothing the grant does not already do.
 ALTER TABLE public.evidence_events ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS evidence_events_select      ON public.evidence_events;
@@ -180,12 +191,6 @@ CREATE POLICY evidence_events_select ON public.evidence_events
     org_id IN (SELECT public.get_user_org_ids())
     OR org_id IN (SELECT public.get_crew_org_ids())
   );
-CREATE POLICY evidence_events_deny_insert ON public.evidence_events
-  FOR INSERT TO authenticated WITH CHECK (false);
-CREATE POLICY evidence_events_deny_update ON public.evidence_events
-  FOR UPDATE TO authenticated USING (false) WITH CHECK (false);
-CREATE POLICY evidence_events_deny_delete ON public.evidence_events
-  FOR DELETE TO authenticated USING (false);
 
 GRANT SELECT ON TABLE public.evidence_events TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.evidence_events TO service_role;

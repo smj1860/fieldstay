@@ -5,6 +5,7 @@ import { checkLimit, retryAfterSeconds, evidenceSealRatelimit } from '@/lib/rate
 import { unwrap } from '@/lib/supabase/unwrap'
 import { logAuditEvent } from '@/lib/audit'
 import { sealPhoto } from '@/lib/evidence/seal'
+import { pathMatchesTarget, type CrewSealTarget } from '@/lib/evidence/seal-paths'
 import type { EvidenceSourceTable } from '@/types/database'
 
 /**
@@ -126,6 +127,12 @@ async function resolveTarget(
   }
 }
 
+function sealTargetOf(orgId: string, body: SealBody, target: SealTarget): CrewSealTarget {
+  if (body.source_table === 'property_assets') return { table: 'property_assets', orgId, propertyId: target.propertyId }
+  if (body.source_table === 'checklist_instances') return { table: 'checklist_instances', orgId, turnoverId: target.turnoverId }
+  return { table: 'checklist_instance_items', orgId, turnoverId: target.turnoverId, itemId: body.source_id }
+}
+
 export async function POST(request: NextRequest) {
   const parsed = parseBody(await request.json().catch(() => null))
   if (!parsed.ok) return parsed.response
@@ -146,6 +153,13 @@ export async function POST(request: NextRequest) {
 
   const target = await resolveTarget(supabase, crew.org_id, body)
   if (!target) return NextResponse.json({ error: 'Target not found' }, { status: 404 })
+
+  // The path is client-supplied. It must be one this target's own capture could
+  // have produced, or a crew member could seal any photo in the org as evidence
+  // for an item they can see. 400 is terminal: the outbox dead-letters it.
+  if (!pathMatchesTarget(body.storage_path, sealTargetOf(crew.org_id, body, target))) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
+  }
 
   // A client-supplied turnover id is only a HINT; the target row is the truth.
   const turnoverId = target.turnoverId ?? body.turnover_id

@@ -260,6 +260,22 @@ describe('POST /api/work-orders/[token]/photos', () => {
     expect(seal.claimedSha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('stops a vendor uploading and deleting in a loop: withdrawn photos still count toward a lifetime cap', async () => {
+    const supabase = makeSupabase({
+      work_orders:        [{ data: baseWo(), error: null }],
+      work_order_photos:  [{ data: null, error: null, count: 0 }],     // none live right now
+      evidence_events:    [{ data: null, error: null, count: 15 }],    // fifteen sealed over time, all withdrawn
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+    const formData = new FormData()
+    formData.append('photos', photoFile())
+
+    const res = await callPost(VALID_TOKEN, formData)
+
+    expect(res.status).toBe(400)
+    expect(supabase.uploadMock).not.toHaveBeenCalled()
+  })
+
   it('cleans up the storage object when the DB insert fails', async () => {
     const supabase = makeSupabase({
       work_orders:        [{ data: baseWo(), error: null }],

@@ -5,6 +5,7 @@ import { sendEventsChunked, IN_CLAUSE_CHUNK_SIZE, chunkArray } from '@/lib/innge
 import { createPmNotifications } from '@/lib/inngest/helpers'
 import { logAuditEvents } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { localDate } from '@/lib/evidence/packet/deadlines'
 import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 import { reportError } from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
@@ -18,10 +19,20 @@ const DAY_MS = 86_400_000
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
-/** Tomorrow's date in the property's timezone as YYYY-MM-DD. */
+/** Tomorrow's date in the property's timezone as YYYY-MM-DD: the day whose forecast LOW is read. */
 function tomorrowLocalDate(nowMs: number, timezone: string): string {
-  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' })
-  return fmt.format(new Date(nowMs + DAY_MS))
+  return localDate(nowMs + DAY_MS, timezone)
+}
+
+/**
+ * The night the low actually happens on. Tomorrow's forecast low is reached in
+ * the early hours of tomorrow, i.e. at the end of the night that STARTS today,
+ * so vacancy is judged for tonight (today's local date), not for tomorrow night.
+ * A guest checking out tomorrow morning is in the house for the freeze; one
+ * arriving tomorrow afternoon is not.
+ */
+function tonightLocalDate(nowMs: number, timezone: string): string {
+  return localDate(nowMs, timezone)
 }
 
 export const freezeWatchCron = inngest.createFunction(
@@ -72,7 +83,10 @@ interface PropertyRow extends FreezeCandidateProperty {
 
 interface PlanItem {
   property:     PropertyRow
+  /** The day whose forecast low triggered this (tomorrow). */
   forecastDate: string
+  /** Tonight: the night the low happens on, and the day the prep has to be done by. */
+  tonight:      string
   low:          number
   threshold:    number
 }
@@ -85,6 +99,8 @@ interface CreatedWorkOrder {
   forecast_date:  string
   property_name:  string | null
   low:            number
+  /** A vendor is attached but has no portal, so nothing contacted them. */
+  vendor_uncontacted: boolean
 }
 
 interface FreezeVendor { vendorId: string; portalEnabled: boolean }
@@ -103,14 +119,14 @@ async function loadProperties(supabase: ServiceClient, orgId: string): Promise<P
 }
 
 /**
- * Properties with a guest stay covering their forecast night. Dates vary by
- * property timezone, so the query takes the widest window and each stay is
- * tested against its own property's date.
+ * Properties with a guest stay covering TONIGHT (see tonightLocalDate). Dates
+ * vary by property timezone, so the query takes the widest window and each stay
+ * is tested against its own property's date.
  */
 async function loadOccupied(
-  supabase: ServiceClient, orgId: string, props: readonly PropertyRow[], forecastDates: ReadonlyMap<string, string>,
+  supabase: ServiceClient, orgId: string, props: readonly PropertyRow[], tonightDates: ReadonlyMap<string, string>,
 ): Promise<Set<string>> {
-  const sorted  = [...forecastDates.values()].sort()
+  const sorted  = [...tonightDates.values()].sort()
   const minDate = sorted[0]
   const maxDate = sorted.at(-1) ?? minDate
   const occupied = new Set<string>()
@@ -128,7 +144,7 @@ async function loadOccupied(
       .limit(2000)
     if (error) { reportError(error, { site: 'inngest.freeze-watch.bookings', orgId }); throw error }
     for (const s of data ?? []) {
-      const d = forecastDates.get(s.property_id)
+      const d = tonightDates.get(s.property_id)
       if (d && s.checkin_date <= d && s.checkout_date > d) occupied.add(s.property_id)
     }
   }
@@ -180,8 +196,9 @@ async function evaluateOrg(orgId: string, nowMs: number): Promise<PlanItem[]> {
   if (props.length === 0) return []
 
   const forecastDates = new Map(props.map((p) => [p.id, tomorrowLocalDate(nowMs, p.timezone)]))
+  const tonightDates  = new Map(props.map((p) => [p.id, tonightLocalDate(nowMs, p.timezone)]))
   const [occupied, openWo, forecasts] = await Promise.all([
-    loadOccupied(supabase, orgId, props, forecastDates),
+    loadOccupied(supabase, orgId, props, tonightDates),
     loadOpenFreezeWorkOrders(supabase, orgId, props),
     loadForecasts(orgId, props, forecastDates),
   ])
@@ -196,7 +213,7 @@ async function evaluateOrg(orgId: string, nowMs: number): Promise<PlanItem[]> {
       hasOpenFreezeWo: openWo.has(p.id),
     })
     if (!decision.fire || decision.low === null) continue
-    plan.push({ property: p, forecastDate: forecastDates.get(p.id)!, low: decision.low, threshold: decision.threshold })
+    plan.push({ property: p, forecastDate: forecastDates.get(p.id)!, tonight: tonightDates.get(p.id)!, low: decision.low, threshold: decision.threshold })
   }
   return plan
 }
@@ -228,13 +245,25 @@ async function loadFreezeVendors(
   return out
 }
 
-/** One insert per property; the partial unique index is the idempotency guard (23505 = already created). */
-async function insertFreezeWorkOrder(
+/**
+ * One insert per property; the partial unique index is the idempotency guard.
+ * A 23505 means a previous attempt of this step already created the row, so it
+ * is RECOVERED and returned like a fresh one: the audit row, the PM bell and the
+ * vendor dispatch event that followed it are keyed idempotently downstream, and
+ * dropping them here is exactly how a replayed step used to lose them. Any other
+ * error throws, so the caller records what did land and then fails the step.
+ */
+async function insertOrRecoverWorkOrder(
   supabase: ServiceClient, orgId: string, item: PlanItem, vendor: FreezeVendor | null,
-): Promise<CreatedWorkOrder | null> {
+): Promise<CreatedWorkOrder> {
   const copy = freezeWorkOrderCopy({
     propertyName: item.property.name, forecastDate: item.forecastDate, low: item.low, threshold: item.threshold,
   })
+  // A vendor with no portal is attached but never contacted: no dispatch email
+  // goes out for portal_enabled = false. Stamping vendor_dispatched_at for them
+  // would start the silence timer on someone nobody asked, and the chaser would
+  // nag about a job they do not know exists. The PM is told to contact them.
+  const dispatched = vendor?.portalEnabled === true
   const { data: wo, error } = await supabase
     .from('work_orders')
     .insert({
@@ -247,26 +276,56 @@ async function insertFreezeWorkOrder(
       priority:       'high',
       status:         vendor ? 'assigned' : 'pending',
       source:         'freeze_watch',
-      needed_by_date: item.forecastDate,
-      portal_enabled: vendor?.portalEnabled ?? false,
-      ...(vendor ? vendorDispatchFields() : {}),
+      needed_by_date: item.tonight,
+      portal_enabled: dispatched,
+      ...(dispatched ? vendorDispatchFields() : {}),
     })
     .select('id')
     .single()
-  if (error) {
-    if (error.code !== '23505') reportError(error, { site: 'inngest.freeze-watch.insert', orgId })
-    return null
-  }
-  return {
-    work_order_id: wo.id, property_id: item.property.id, vendor_id: vendor?.vendorId ?? null,
-    portal_enabled: vendor?.portalEnabled ?? false, forecast_date: item.forecastDate,
+
+  const base = {
+    property_id: item.property.id, forecast_date: item.forecastDate,
     property_name: item.property.name, low: item.low,
+  }
+  if (!error) {
+    return {
+      ...base, work_order_id: wo.id, vendor_id: vendor?.vendorId ?? null,
+      portal_enabled: dispatched, vendor_uncontacted: Boolean(vendor) && !dispatched,
+    }
+  }
+  if (error.code !== '23505') throw error
+  return recoverExisting(supabase, orgId, item, base)
+}
+
+async function recoverExisting(
+  supabase: ServiceClient, orgId: string, item: PlanItem,
+  base: Pick<CreatedWorkOrder, 'property_id' | 'forecast_date' | 'property_name' | 'low'>,
+): Promise<CreatedWorkOrder> {
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('id, vendor_id, portal_enabled')
+    .eq('org_id', orgId)
+    .eq('property_id', item.property.id)
+    .eq('source', 'freeze_watch')
+    .eq('needed_by_date', item.tonight)
+    .maybeSingle()
+  if (error || !data) throw error ?? new Error('freeze watch work order vanished after a duplicate-key conflict')
+  return {
+    ...base, work_order_id: data.id, vendor_id: data.vendor_id, portal_enabled: data.portal_enabled,
+    vendor_uncontacted: data.vendor_id !== null && !data.portal_enabled,
   }
 }
 
 function notificationTitle(propertyName: string | null): string {
   const where = propertyName ? ` at ${propertyName}` : ''
   return `Freeze prep needed${where}`
+}
+
+function notificationSubtitle(r: CreatedWorkOrder): string {
+  const base = `Forecast low ${Math.round(r.low)}°F on ${r.forecast_date}, property vacant tonight.`
+  return r.vendor_uncontacted
+    ? `${base} The assigned vendor has no portal access and was not notified. Contact them directly.`
+    : base
 }
 
 /** Audit rows and bell notifications, batched around the inserts rather than issued per property. */
@@ -280,7 +339,7 @@ async function recordCreated(supabase: ServiceClient, orgId: string, created: re
     orgId,
     type:      'work_order_created',
     title:     notificationTitle(r.property_name),
-    subtitle:  `Forecast low ${Math.round(r.low)}°F on ${r.forecast_date}, property vacant`,
+    subtitle:  notificationSubtitle(r),
     href:      `/maintenance?wo=${r.work_order_id}`,
     severity:  'amber' as const,
     dedupeKey: `freeze-watch-${r.property_id}-${r.forecast_date}`,
@@ -291,11 +350,22 @@ async function createWorkOrders(orgId: string, plan: readonly PlanItem[]): Promi
   const supabase = createServiceClient({ system: 'inngest:freeze-watch' })
   const vendorByProperty = await loadFreezeVendors(supabase, orgId, plan.map((p) => p.property.id))
   const results: CreatedWorkOrder[] = []
+  const failures: unknown[] = []
   for (const item of plan) {
-    const created = await insertFreezeWorkOrder(supabase, orgId, item, vendorByProperty.get(item.property.id) ?? null)
-    if (created) results.push(created)
+    try {
+      results.push(await insertOrRecoverWorkOrder(supabase, orgId, item, vendorByProperty.get(item.property.id) ?? null))
+    } catch (err) {
+      // One property's failure must not cost the others their work order. They
+      // are recorded below; the step then FAILS so Inngest retries, and the
+      // retry recovers every row that landed (23505) and re-attempts the rest.
+      reportError(err, { site: 'inngest.freeze-watch.insert', orgId })
+      failures.push(err)
+    }
   }
   await recordCreated(supabase, orgId, results)
+  if (failures.length > 0) {
+    throw new Error(`Freeze Watch could not create ${failures.length} of ${plan.length} work order(s)`)
+  }
   return results
 }
 
@@ -322,7 +392,7 @@ export const freezeWatchOrg = inngest.createFunction(
     // consumer, exactly as the maintenance cron does. Top level, never inside
     // step.run.
     const vendorEvents = created
-      .filter((r) => r.vendor_id)
+      .filter((r) => r.vendor_id && r.portal_enabled)
       .map((r) => ({
         name: 'work-order/created' as const,
         data: { work_order_id: r.work_order_id, property_id: r.property_id, org_id: orgId, vendor_id: r.vendor_id!, portal_enabled: r.portal_enabled },

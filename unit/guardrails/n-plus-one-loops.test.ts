@@ -138,25 +138,25 @@ const EXCEPTIONS: Record<string, string> = {
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
   'lib/evidence/timeline.ts:123':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
-  'lib/inngest/functions/cron/freeze-watch.ts:117':
+  'lib/inngest/functions/cron/freeze-watch.ts:133':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/inngest/functions/cron/freeze-watch.ts:143':
+  'lib/inngest/functions/cron/freeze-watch.ts:159':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/inngest/functions/cron/freeze-watch.ts:212':
+  'lib/inngest/functions/cron/freeze-watch.ts:229':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/evidence/packet/deadline-sweep.ts:61':
+  'lib/evidence/packet/deadline-sweep.ts:71':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:72':
+  'lib/evidence/packet/deadline-sweep.ts:82':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:76':
+  'lib/evidence/packet/deadline-sweep.ts:86':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:83':
+  'lib/evidence/packet/deadline-sweep.ts:93':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
   'lib/evidence/packet/model.ts:108':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
   'lib/evidence/packet/model.ts:123':
     'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'app/api/work-orders/[token]/photos/route.ts:150':
+  'app/api/work-orders/[token]/photos/route.ts:182':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:203':
     'Same per-photo storage-upload + row pattern, client-side.',

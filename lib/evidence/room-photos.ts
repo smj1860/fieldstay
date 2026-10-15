@@ -18,7 +18,11 @@ export { ROOM_CONDITION_TASK, ROOM_CONDITION_REASON, EVIDENCE_SECTION, EVIDENCE_
  */
 export const NON_ROOM_SECTIONS: readonly string[] = [
   'asset discovery', 'exterior', 'outside', 'arrival', 'departure',
-  'final walkthrough', 'walkthrough', 'supplies', 'inventory', 'restock',
+  'final walkthrough', 'walkthrough', 'final checks', 'final check', 'final inspection', 'final',
+  'supplies', 'inventory', 'restock',
+  // Spanish names, for a template an org wrote in Spanish.
+  'exteriores', 'llegada', 'salida', 'revisión final', 'revision final', 'recorrido final',
+  'inventario', 'suministros', 'reposición', 'reposicion',
   EVIDENCE_SECTION.toLowerCase(),
 ]
 

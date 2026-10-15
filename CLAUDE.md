@@ -703,6 +703,15 @@ evidence_events             — APPEND-ONLY ledger, one row per photo capture (p
                               photo_path) are UNCHANGED and remain the "current pointer"; the
                               ledger is the history, including retakes and withdrawals.
                               Storage objects are never deleted by this feature.
+                              Inside a trigger pg_trigger_depth() is ALWAYS >= 1: a direct
+                              DELETE arrives at depth 1 and an RI cascade at >= 2, so the
+                              delete guard is "<= 1". An earlier "= 0" rejected nothing and
+                              passed every text check; unit/evidence/ledger-triggers.test.ts
+                              runs the real migration on a scratch Postgres to pin it. The FK
+                              SET NULL exception is per column (exactly one FK non-null -> null,
+                              everything else identical), never "all four copied from NEW".
+                              No deny policies: authenticated holds only SELECT, and a policy
+                              on a command without a grant fails policies_without_grant.
 evidence_stay_brackets      — DERIVED and recomputable: which guest stay(s) an event brackets
                               (pre_stay / during_stay / post_stay). A pair turnover brackets TWO
                               stays. Single-column PK + UNIQUE pair, never a composite FK PK

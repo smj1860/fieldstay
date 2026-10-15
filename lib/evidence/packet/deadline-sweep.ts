@@ -27,6 +27,16 @@ import {
 export const DEADLINE_LOOKBACK_DAYS = 45
 const MAX_CANDIDATE_TURNOVERS = 500
 
+/**
+ * How long after a window closes the "closed" notice is still worth sending.
+ * The lookback reaches back 45 days and every platform window is at most 14, so
+ * without a floor the FIRST sweep after deploy, and every sweep that meets an
+ * old flagged turnover for the first time, would fire a "claim window closed"
+ * for each of them at once. A closure from last month is not news. (A PM who
+ * flags a turnover themselves still hears it: the on-flag path has no floor.)
+ */
+export const EXPIRED_NOTICE_GRACE_DAYS = 3
+
 interface TurnoverRow {
   id:               string
   property_id:      string
@@ -124,6 +134,7 @@ export async function sweepOrgDeadlines(
     const deadline = claimDeadline({ source: booking.source, checkoutDate: booking.checkout_date, nextCheckinDate, claimWindowDays })
     const daysLeft = daysBetween(today, deadline.deadlineDate)
     const stage = stageFor(daysLeft)
+    if (!input.onlyTurnoverId && stage === 'expired' && daysLeft < -EXPIRED_NOTICE_GRACE_DAYS) continue
     const notice = deadlineNotice({ stage, propertyName: property.name, deadlineDate: deadline.deadlineDate, daysLeft, basis: deadline.basis })
 
     out.push({

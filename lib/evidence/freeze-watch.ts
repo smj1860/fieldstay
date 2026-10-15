@@ -60,7 +60,7 @@ export function freezeWorkOrderCopy(input: {
   const where = input.propertyName ? ` at ${input.propertyName}` : ''
   const title = `Freeze prep${where}: forecast low ${Math.round(input.low)}°F on ${input.forecastDate}`
   const description = [
-    `The forecast low for ${input.forecastDate} is ${Math.round(input.low)}°F, at or below this property's ${input.threshold}°F threshold, and the home is vacant that night.`,
+    `The forecast low for ${input.forecastDate} is ${Math.round(input.low)}°F, at or below this property's ${input.threshold}°F threshold, and the home is vacant tonight, so the prep needs to be done today.`,
     '',
     'Complete the following and take the listed photos. The photos are the proof of care record for this property.',
     '',

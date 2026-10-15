@@ -67,6 +67,21 @@ describe('sweepOrgDeadlines', () => {
     expect(n.title).toContain('closed')
   })
 
+  it('does not flood the PM with old "window closed" notices on a sweep, but still tells them when they flag one', async () => {
+    const rows = {
+      organizations: [{ claim_window_days: 14 }],
+      turnovers: [standalone],
+      bookings: [{ id: 'b1', source: 'vrbo', checkout_date: '2026-09-01' }],   // closed Sep 15, a month ago
+      properties: [property],
+    }
+    expect(await sweepOrgDeadlines(fakeDb(rows), { orgId: 'o1', nowMs: NOW })).toEqual([])
+    const flagged = await sweepOrgDeadlines(fakeDb(rows), { orgId: 'o1', nowMs: NOW, onlyTurnoverId: 't1' })
+    expect(flagged).toHaveLength(1)
+    // A window that closed yesterday is still news on a sweep.
+    const recent = { ...rows, bookings: [{ id: 'b1', source: 'vrbo', checkout_date: '2026-09-29' }] }   // closed Oct 13
+    expect(await sweepOrgDeadlines(fakeDb(recent), { orgId: 'o1', nowMs: NOW })).toHaveLength(1)
+  })
+
   it('does not count down for a guest who has not left yet', async () => {
     const db = fakeDb({
       organizations: [{ claim_window_days: 14 }],

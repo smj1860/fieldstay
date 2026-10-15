@@ -20,6 +20,13 @@ import { createHash } from 'node:crypto'
  */
 
 const MAX_PHOTOS      = 5
+/**
+ * Photos EVER uploaded to one work order, withdrawn ones included. A vendor
+ * delete keeps the Storage object (evidence is never deleted), so counting only
+ * live rows against MAX_PHOTOS would let a public-token holder upload and delete
+ * in a loop and grow the bucket without bound.
+ */
+const MAX_LIFETIME_PHOTOS = 15
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 const EXT_BY_MIME: Record<string, string> = {
@@ -109,6 +116,40 @@ async function sealVendorPhoto(
   }
 }
 
+/**
+ * Per-request AND lifetime photo ceilings for one work order. Returns the
+ * rejecting response, or null when the upload may proceed.
+ */
+async function checkUploadAllowance(
+  supabase: PortalClient, workOrder: PortalWorkOrder, incoming: number,
+): Promise<NextResponse | null> {
+  // Count against the running total for this WO, not just this request:
+  // a vendor uploading one-at-a-time could otherwise exceed MAX_PHOTOS
+  // across several calls.
+  const { count: existingCount } = await supabase
+    .from('work_order_photos')
+    .select('id', { count: 'exact', head: true })
+    .eq('work_order_id', workOrder.id)
+  if ((existingCount ?? 0) + incoming > MAX_PHOTOS) {
+    return NextResponse.json({ error: `Maximum ${MAX_PHOTOS} photos allowed per work order` }, { status: 400 })
+  }
+
+  const { count: everSealed, error: everErr } = await supabase
+    .from('evidence_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', workOrder.org_id)
+    .eq('work_order_id', workOrder.id)
+    .eq('kind', 'photo_sealed')
+  if (everErr) {
+    reportError(everErr, { site: 'api.work-orders.photos.lifetimeCount', orgId: workOrder.org_id })
+    return NextResponse.json({ error: 'Failed to upload photo. Please try again.' }, { status: 500 })
+  }
+  if (Math.max(existingCount ?? 0, everSealed ?? 0) + incoming > MAX_LIFETIME_PHOTOS) {
+    return NextResponse.json({ error: 'This work order has reached its photo upload limit. Contact the property manager.' }, { status: 400 })
+  }
+  return null
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -133,17 +174,8 @@ export async function POST(
 
   const uploadedBy = (formData.get('uploadedBy') as string | null)?.trim() || 'vendor-portal'
 
-  // Count against the running total for this WO, not just this request —
-  // a vendor uploading one-at-a-time could otherwise exceed MAX_PHOTOS
-  // across several calls.
-  const { count: existingCount } = await supabase
-    .from('work_order_photos')
-    .select('id', { count: 'exact', head: true })
-    .eq('work_order_id', workOrder.id)
-
-  if ((existingCount ?? 0) + files.length > MAX_PHOTOS) {
-    return NextResponse.json({ error: `Maximum ${MAX_PHOTOS} photos allowed per work order` }, { status: 400 })
-  }
+  const blocked = await checkUploadAllowance(supabase, workOrder, files.length)
+  if (blocked) return blocked
 
   const uploaded: Array<{ id: string; storage_path: string }> = []
 
