@@ -36,7 +36,7 @@ A window that closed more than a few days ago does not produce a closed notice. 
 
 The deadline depends on where the booking came from:
 
-- **Airbnb and VRBO stays** use that platform's own rules for how long after checkout a host can file. FieldStay applies those rules and shows which one set the date. Platform rules change, and FieldStay's copy of them is reviewed, but the platform's own help center is the authority. If in doubt, file early.
+- **Airbnb and VRBO stays** count 14 days after checkout, and the notification says so. The window is the same whether or not another guest checks in right after. Platform rules change, and the platform's own help center is the authority. If in doubt, file early.
 - **Direct bookings and other sources** have no platform deadline. FieldStay uses your own **Claim window**, in days after checkout. Set it on any property's Evidence page in the **Claim window** card. The default is 14 days, and it applies to your whole account.
 
 ---

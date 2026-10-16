@@ -9,8 +9,8 @@
 // verified against the platforms' current host terms. Verify before relying on
 // a countdown, and change the constants here, nowhere else.
 //
-//   Airbnb: request within 14 days of checkout OR before the next guest checks
-//           in, whichever is sooner.
+//   Airbnb: 14 days after checkout. A flat window: the next guest's check-in does
+//           not shorten it (the owner confirmed 14 days is the correct countdown).
 //   VRBO:   14 days after checkout (the scope note marks this "confirm").
 //   Other:  no platform deadline; the org's own claim_window_days.
 //
@@ -22,7 +22,6 @@ export const VRBO_CLAIM_WINDOW_DAYS   = 14
 
 export type ClaimBasis =
   | 'airbnb_checkout_window'
-  | 'airbnb_before_next_checkin'
   | 'vrbo_checkout_window'
   | 'org_claim_window'
 
@@ -63,22 +62,12 @@ export function localDate(nowMs: number, timeZone: string): string {
 export function claimDeadline(input: {
   source:           string | null
   checkoutDate:     string
-  nextCheckinDate:  string | null
   claimWindowDays:  number
 }): ClaimDeadline {
-  const { source, checkoutDate, nextCheckinDate } = input
+  const { source, checkoutDate } = input
 
   if (source === 'airbnb') {
-    const windowEnd = addDays(checkoutDate, AIRBNB_CLAIM_WINDOW_DAYS)
-    if (nextCheckinDate) {
-      // "Before the next guest checks in": the day before is the last safe day,
-      // never earlier than checkout itself (a same-day turnover leaves exactly
-      // the checkout day).
-      const beforeNext = addDays(nextCheckinDate, -1)
-      const bound = beforeNext < checkoutDate ? checkoutDate : beforeNext
-      if (bound < windowEnd) return { deadlineDate: bound, basis: 'airbnb_before_next_checkin' }
-    }
-    return { deadlineDate: windowEnd, basis: 'airbnb_checkout_window' }
+    return { deadlineDate: addDays(checkoutDate, AIRBNB_CLAIM_WINDOW_DAYS), basis: 'airbnb_checkout_window' }
   }
 
   if (source === 'vrbo') {
@@ -105,7 +94,6 @@ export function deadlineDedupeKey(bookingId: string, stage: ClaimStage): string 
 
 const BASIS_TEXT: Record<ClaimBasis, string> = {
   airbnb_checkout_window:     `${AIRBNB_CLAIM_WINDOW_DAYS} days after checkout`,
-  airbnb_before_next_checkin: 'before the next guest checks in',
   vrbo_checkout_window:       `${VRBO_CLAIM_WINDOW_DAYS} days after checkout`,
   org_claim_window:           'your claim window after checkout',
 }
