@@ -58,7 +58,9 @@ describe.skipIf(!BIN)('evidence_events immutability (real Postgres)', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ev-pg-'))
     socketDir = mkdtempSync(join(tmpdir(), 'ev-sock-'))
     if (asRoot) { for (const d of [dataDir, socketDir]) { chmodSync(d, 0o777); execFileSync('chown', ['postgres', d]) } }
-    run(join(BIN!, 'initdb'), ['-D', dataDir, '-A', 'trust'])
+    // -U pins the superuser name. Without it initdb names the role after the OS user, which is
+    // 'postgres' locally (we su to it) but the runner's own user on CI, where every psql -U postgres then fails.
+    run(join(BIN!, 'initdb'), ['-D', dataDir, '-U', 'postgres', '-A', 'trust'])
     run(join(BIN!, 'pg_ctl'), ['-D', dataDir, '-o', `-p ${PORT} -k ${socketDir} -c listen_addresses=`, '-w', '-l', join(dataDir, 'log'), 'start'])
     execFileSync('psql', ['-h', socketDir, '-p', PORT, '-U', 'postgres', '-qc', 'CREATE DATABASE ledger'])
     execFileSync('psql', ['-h', socketDir, '-p', PORT, '-U', 'postgres', '-d', 'ledger', '-q', '-v', 'ON_ERROR_STOP=1',
