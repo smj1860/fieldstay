@@ -34,7 +34,7 @@ export const MAX_PACKET_LINE_ITEMS  = 200
 
 const PACKET_EVENT_COLUMNS =
   'id, kind, bucket, storage_path, sha256, hash_verified, byte_size, captured_at, captured_at_source, '
-  + 'device_captured_at, device_clock_offset_seconds, received_at, lat, lng, gps_accuracy_m, '
+  + 'device_captured_at, device_clock_offset_seconds, received_at, lat, lng, gps_accuracy_ft, '
   + 'captured_by_kind, captured_by_label, refers_to_event_id, work_order_id, metadata'
 
 export interface CustodyRow {
@@ -89,6 +89,18 @@ export interface PacketModel {
   custody:     CustodyRow[]
   repairs:         RepairRecord[]
   repairsCapNote:  string | null
+  /** The visit check-ins the packet's photographs inherit their place from, oldest first. */
+  visits:          VisitCheckin[]
+}
+
+export const MAX_PACKET_VISITS = 20
+
+export interface VisitCheckin {
+  capturedAt:       string
+  accuracyFt:       number | null
+  distanceFt:       number | null
+  offsite:          boolean
+  notGeocoded:      boolean
 }
 
 interface RawEvent {
@@ -106,7 +118,7 @@ interface RawEvent {
   received_at:                 string
   lat:                         number | null
   lng:                         number | null
-  gps_accuracy_m:              number | null
+  gps_accuracy_ft:              number | null
   captured_by_kind:            PacketEvent['captured_by_kind']
   captured_by_label:           string | null
   refers_to_event_id:          string | null
@@ -126,7 +138,7 @@ function toPacketEvent(raw: RawEvent, position: EvidenceBracketPosition): Packet
     hash_verified: raw.hash_verified, byte_size: raw.byte_size, captured_at: raw.captured_at,
     captured_at_source: raw.captured_at_source, device_captured_at: raw.device_captured_at,
     device_clock_offset_seconds: raw.device_clock_offset_seconds, received_at: raw.received_at,
-    lat: raw.lat, lng: raw.lng, gps_accuracy_m: raw.gps_accuracy_m,
+    lat: raw.lat, lng: raw.lng, gps_accuracy_ft: raw.gps_accuracy_ft,
     captured_by_kind: raw.captured_by_kind, captured_by_label: raw.captured_by_label,
     section_name: metaString(raw.metadata, 'section_name'),
     evidence_role: metaString(raw.metadata, 'evidence_role'),
@@ -159,6 +171,40 @@ function loadWithdrawals(supabase: DBClient, orgId: string, citedIds: readonly s
       .limit(chunk.length)
     return unwrapList(res, { site: 'lib.evidence.packet.withdrawals', orgId }) as unknown as RawEvent[]
   })
+}
+
+function numberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/**
+ * The check-ins the packet's photographs point at (refers_to_event_id), read as
+ * recorded: the distance was computed on the server at check-in time against the
+ * property's pin then, and is not recomputed here.
+ */
+async function loadVisits(supabase: DBClient, orgId: string, raws: readonly RawEvent[]): Promise<VisitCheckin[]> {
+  const ids = [...new Set(raws.map((r) => r.refers_to_event_id).filter((x): x is string => x !== null))].slice(0, MAX_PACKET_VISITS)
+  if (ids.length === 0) return []
+  const rows = await mapInChunks(ids, async (chunk) => {
+    const res = await supabase
+      .from('evidence_events')
+      .select('captured_at, gps_accuracy_ft, metadata')
+      .eq('org_id', orgId)
+      .eq('kind', 'checkin')
+      .in('id', chunk)
+      .limit(chunk.length)
+    return unwrapList(res, { site: 'lib.evidence.packet.visits', orgId })
+  })
+  return rows
+    .map((r) => {
+      const meta = (r.metadata ?? {}) as Record<string, unknown>
+      return {
+        capturedAt: r.captured_at, accuracyFt: r.gps_accuracy_ft,
+        distanceFt: numberOrNull(meta.distance_to_property_ft),
+        offsite: meta.offsite === true, notGeocoded: meta.property_not_geocoded === true,
+      }
+    })
+    .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
 }
 
 /**
@@ -361,6 +407,8 @@ export async function loadPacketModel(supabase: DBClient, input: LoadPacketInput
     supabase, orgId, { id: bookingId, property_id: booking.property_id }, raws,
   )
 
+  const visits = await loadVisits(supabase, orgId, raws)
+
   const address = [prop.address, prop.city, prop.state].filter(Boolean).join(', ')
   const ref = booking.external_id?.trim()
   return {
@@ -376,6 +424,6 @@ export async function loadPacketModel(supabase: DBClient, input: LoadPacketInput
     omittedCount: capped.omitted.length,
     capNote: capNote(capped.omitted.length),
     custody,
-    repairs, repairsCapNote,
+    repairs, repairsCapNote, visits,
   }
 }

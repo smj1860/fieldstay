@@ -32,7 +32,7 @@ export function TurnoverHub({
 }>) {
   const {
     completedCount, totalCount, inventoryItems, actionError, completing,
-    markInProgress, markComplete, flagLate, isCancelled,
+    markInProgress, checkInAgainNow, markComplete, flagLate, isCancelled,
   } = actions
 
   const alreadyFlaggedLate = Boolean(turnover.crew_running_late_at)
@@ -73,6 +73,15 @@ export function TurnoverHub({
       {turnover.status === 'assigned' && !isCancelled && (
         <Button variant="secondary" onClick={() => void markInProgress()} className="w-full py-4 text-base">
           Start Turnover
+        </Button>
+      )}
+
+      {/* Check in again: the first fix rides on Start; this re-records where the
+          crew is mid-visit (a poor first fix, or arriving at the unit after the
+          driveway). The newest check-in wins for the packet. */}
+      {turnover.status === 'in_progress' && !isCancelled && (
+        <Button variant="ghost" onClick={() => void checkInAgainNow()} className="w-full py-3 text-sm">
+          Check in again
         </Button>
       )}
 

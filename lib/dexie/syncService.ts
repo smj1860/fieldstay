@@ -641,7 +641,11 @@ function routedTurnoverWrite(payload: MutationPayload): RoutedTurnoverWrite | nu
     return { path: 'complete', failure: 'Failed to complete turnover' }
   }
   if (payload.status === 'in_progress') {
-    return { path: 'start', failure: 'Failed to start turnover' }
+    // The visit check-in travels in the body; the route refuses a start without one.
+    return { path: 'start', failure: 'Failed to start turnover', body: { checkin: payload.checkin } }
+  }
+  if ('checkin_again' in payload) {
+    return { path: 'checkin', failure: 'Failed to record check-in', body: { checkin: payload.checkin_again } }
   }
   if ('crew_running_late_at' in payload) {
     // The timestamp travels in the BODY rather than being re-derived

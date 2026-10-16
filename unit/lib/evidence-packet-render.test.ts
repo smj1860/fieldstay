@@ -13,7 +13,7 @@ function event(id: string, position: PacketEvent['position'], over: Partial<Pack
     id, storage_path: `o/${id}.png`, bucket: 'turnover-photos', sha256: 'b'.repeat(64), hash_verified: true,
     byte_size: PNG.length, captured_at: '2026-10-10T15:00:00Z', captured_at_source: 'device',
     device_captured_at: '2026-10-10T14:59:00Z', device_clock_offset_seconds: 60, received_at: '2026-10-10T15:01:00Z',
-    lat: 36.12, lng: -86.78, gps_accuracy_m: 12, captured_by_kind: 'crew', captured_by_label: null,
+    lat: 36.12, lng: -86.78, gps_accuracy_ft: 12, captured_by_kind: 'crew', captured_by_label: null,
     section_name: 'Kitchen', evidence_role: 'room_condition', evidence_spot_id: null, position, ...over,
   }
 }
@@ -26,7 +26,7 @@ function model(over: Partial<PacketModel> = {}): PacketModel {
     property: { name: 'Lake House', address: '1 Lake Rd, Nashville, TN', timezone: 'America/Chicago' },
     stay: { bookingId: 'b1', checkin: '2026-10-07', checkout: '2026-10-10', source: 'airbnb', reservationRef: 'HMABC123' },
     pairs: [{ key: 'k', sectionName: 'Kitchen', role: 'room_condition', label: 'Whole room', before, after }],
-    others: [], omittedCount: 0, capNote: null, repairs: [], repairsCapNote: null,
+    others: [], omittedCount: 0, capNote: null, repairs: [], repairsCapNote: null, visits: [],
     custody: [before, after].map((e) => ({
       id: e.id, kind: 'photo_sealed' as const, position: e.position, sha256: e.sha256, hash_verified: true,
       captured_at: e.captured_at, captured_at_source: e.captured_at_source, device_captured_at: e.device_captured_at,
@@ -84,7 +84,21 @@ describe('caption wording', () => {
     expect(timingNote({ captured_at_source: 'device', device_clock_offset_seconds: -30 })).toContain('30 seconds ahead of')
   })
   it('reports GPS honestly when absent', () => {
-    expect(gpsNote({ lat: null, lng: null, gps_accuracy_m: null })).toBe('No GPS recorded.')
-    expect(gpsNote({ lat: 36.12345, lng: -86.5, gps_accuracy_m: 12.4 })).toContain('accuracy 12 m')
+    expect(gpsNote({ lat: null, lng: null, gps_accuracy_ft: null })).toBe('No GPS recorded.')
+    expect(gpsNote({ lat: 36.12345, lng: -86.5, gps_accuracy_ft: 12.4 })).toContain('accuracy 12 ft')
+  })
+})
+
+describe('visitLine', () => {
+  const base = { capturedAt: '2026-10-10T15:00:00.000Z', accuracyFt: 40, distanceFt: 850, offsite: false, notGeocoded: false }
+  it('states distance and accuracy in feet and miles', async () => {
+    const { visitLine } = await import('@/lib/evidence/packet/render')
+    expect(visitLine(base, 'America/Chicago')).toContain('850 ft from the property, accuracy 40 ft')
+    expect(visitLine({ ...base, distanceFt: 6900 }, 'America/Chicago')).toContain('1.3 mi from the property')
+  })
+  it('flags an offsite check-in and an ungeocoded property', async () => {
+    const { visitLine } = await import('@/lib/evidence/packet/render')
+    expect(visitLine({ ...base, offsite: true }, 'America/Chicago')).toContain('outside the property')
+    expect(visitLine({ ...base, distanceFt: null, notGeocoded: true }, 'America/Chicago')).toContain('no map pin')
   })
 })

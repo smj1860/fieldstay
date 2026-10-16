@@ -1,4 +1,5 @@
 import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow, type TurnoverRow } from './schema'
+import type { CheckinFix } from '@/lib/evidence/capture'
 import { reportError } from '@/lib/observability/report-error'
 import { enqueueMutation, enqueueMutationTx, getSyncEngine } from './syncService'
 import { invalidateCursorsFor } from './sync/cursors'
@@ -276,10 +277,21 @@ export async function markInventoryStarted(userId: string, turnoverId: string): 
  * routes 'in_progress' through /api/crew/turnovers/[id]/start so started_at
  * is set authoritatively by the server, not the client clock.
  */
-export async function startTurnover(userId: string, turnoverId: string): Promise<void> {
-  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { status: 'in_progress' }, (db) =>
+export async function startTurnover(userId: string, turnoverId: string, checkin: CheckinFix): Promise<void> {
+  // The check-in rides in the SAME mutation as the status change: one outbox row,
+  // so the start and its location fix succeed, retry or dead-letter together.
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { status: 'in_progress', checkin }, (db) =>
     db.turnovers.update(turnoverId, { status: 'in_progress' }),
   )
+}
+
+/**
+ * A later "check in again" during a visit already under way. Nothing changes in
+ * the local cache; the mutation exists only to carry the fix to
+ * /api/crew/turnovers/[id]/checkin through the same durable outbox.
+ */
+export async function checkInAgain(userId: string, turnoverId: string, checkin: CheckinFix): Promise<void> {
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { checkin_again: checkin }, async () => {})
 }
 
 /**

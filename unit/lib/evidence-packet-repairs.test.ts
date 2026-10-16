@@ -17,7 +17,7 @@ const photo = (workOrderId: string | null) => ({
   id: 'e1', kind: 'photo_sealed', bucket: 'turnover-photos', storage_path: `${ORG}/a.jpg`, sha256: 'a'.repeat(64),
   hash_verified: true, byte_size: 10, captured_at: '2026-10-10T15:00:00Z', captured_at_source: 'server',
   device_captured_at: null, device_clock_offset_seconds: null, received_at: '2026-10-10T15:00:00Z',
-  lat: null, lng: null, gps_accuracy_m: null, captured_by_kind: 'crew', captured_by_label: null,
+  lat: null, lng: null, gps_accuracy_ft: null, captured_by_kind: 'crew', captured_by_label: null,
   refers_to_event_id: null, work_order_id: workOrderId, metadata: { section_name: 'Kitchen', evidence_role: 'room_condition' },
 })
 
@@ -115,7 +115,7 @@ describe('Repairs section rendering', () => {
     packetId: 'p1', generatedAt: '2026-10-14T12:00:00Z', org: { name: 'Acme Stays' },
     property: { name: 'Lake House', address: null, timezone: 'America/Chicago' },
     stay: { bookingId: BOOKING, checkin: '2026-10-07', checkout: '2026-10-10', source: 'airbnb', reservationRef: 'HMABC' },
-    pairs: [], others: [], omittedCount: 0, capNote: null, custody: [], repairs, repairsCapNote: null,
+    pairs: [], others: [], omittedCount: 0, capNote: null, custody: [], repairs, repairsCapNote: null, visits: [],
   })
   const repair = (over: Partial<RepairRecord> = {}): RepairRecord => ({
     work_order_id: wo(1), wo_number: 'WO-0001', title: 'Fix the oven', status: 'completed', vendor_name: 'Acme Appliance LLC',

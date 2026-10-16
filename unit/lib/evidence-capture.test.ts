@@ -15,7 +15,7 @@ describe('describeCapture', () => {
     const out = await describeCapture(new Blob(['abc']))
     expect(out.lat).toBeNull()
     expect(out.lng).toBeNull()
-    expect(out.gps_accuracy_m).toBeNull()
+    expect(out.gps_accuracy_ft).toBeNull()
     expect(out.byte_size).toBe(3)
     expect(out.sha256).toHaveLength(64)
   })
@@ -40,6 +40,6 @@ describe('describeCapture', () => {
     const out = await describeCapture(new Blob(['x']))
     expect(out.lat).toBe(36.123457)
     expect(out.lng).toBe(-86.765432)
-    expect(out.gps_accuracy_m).toBe(12.3)
+    expect(out.gps_accuracy_ft).toBe(40)   // the browser's 12.34 m, converted once to whole feet
   })
 })

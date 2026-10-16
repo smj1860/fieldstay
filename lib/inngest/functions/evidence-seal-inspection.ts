@@ -77,7 +77,7 @@ export const evidenceSealInspection = inngest.createFunction(
           byteSize:         null,
           deviceCapturedAt: item.answered_at,
           deviceNow,
-          lat: null, lng: null, gpsAccuracyM: null,
+          lat: null, lng: null, gpsAccuracyFt: null,
           capturedBy:       { kind: 'pm', id: inspection.completed_by_user_id ?? null, label: inspection.inspector_name ?? null },
           turnoverId:       null,
           workOrderId:      null,

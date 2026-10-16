@@ -183,7 +183,7 @@ export interface PendingPhotoUploadRow {
   captured_at?:         string
   lat?:                 number | null
   lng?:                 number | null
-  gps_accuracy_m?:      number | null
+  gps_accuracy_ft?:      number | null
   /** The turnover the photo was taken against, when known at capture. */
   turnover_id?:         string
 }

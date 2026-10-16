@@ -1412,7 +1412,7 @@ export type Database = {
           created_at: string
           device_captured_at: string | null
           device_clock_offset_seconds: number | null
-          gps_accuracy_m: number | null
+          gps_accuracy_ft: number | null
           hash_verified: boolean
           id: string
           inspection_id: string | null
@@ -1442,7 +1442,7 @@ export type Database = {
           created_at?: string
           device_captured_at?: string | null
           device_clock_offset_seconds?: number | null
-          gps_accuracy_m?: number | null
+          gps_accuracy_ft?: number | null
           hash_verified?: boolean
           id?: string
           inspection_id?: string | null
@@ -1472,7 +1472,7 @@ export type Database = {
           created_at?: string
           device_captured_at?: string | null
           device_clock_offset_seconds?: number | null
-          gps_accuracy_m?: number | null
+          gps_accuracy_ft?: number | null
           hash_verified?: boolean
           id?: string
           inspection_id?: string | null
@@ -4485,6 +4485,7 @@ export type Database = {
           external_missing_since: string | null
           external_source: string | null
           freeze_threshold_f: number | null
+          geofence_radius_ft: number | null
           has_security_system: boolean | null
           house_manual: string | null
           id: string
@@ -4534,6 +4535,7 @@ export type Database = {
           external_missing_since?: string | null
           external_source?: string | null
           freeze_threshold_f?: number | null
+          geofence_radius_ft?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -4583,6 +4585,7 @@ export type Database = {
           external_missing_since?: string | null
           external_source?: string | null
           freeze_threshold_f?: number | null
+          geofence_radius_ft?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string

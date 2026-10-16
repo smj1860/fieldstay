@@ -23,6 +23,7 @@ import {
 import { chunkArray } from '@/lib/inngest/chunk'
 import { toWinAnsi, wrapText } from '@/lib/inspections/report/text'
 import type { PacketModel, CustodyRow, RepairRecord } from './model'
+import { formatDistance } from '@/lib/evidence/geo'
 import type { PacketEvent, RoomPair } from './pairing'
 
 export type PhotoFormat = 'jpeg' | 'png'
@@ -77,9 +78,9 @@ export function timingNote(e: Pick<PacketEvent, 'captured_at_source' | 'device_c
   return `Device clock, corrected: it was ${Math.abs(off)} seconds ${dir} the server.`
 }
 
-export function gpsNote(e: Pick<PacketEvent, 'lat' | 'lng' | 'gps_accuracy_m'>): string {
+export function gpsNote(e: Pick<PacketEvent, 'lat' | 'lng' | 'gps_accuracy_ft'>): string {
   if (e.lat === null || e.lng === null) return 'No GPS recorded.'
-  const acc = e.gps_accuracy_m === null ? '' : `, accuracy ${Math.round(e.gps_accuracy_m)} m`
+  const acc = e.gps_accuracy_ft === null ? '' : `, accuracy ${Math.round(e.gps_accuracy_ft)} ft`
   return `GPS ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}${acc}`
 }
 
@@ -236,6 +237,23 @@ function drawSingle(cur: Cursor, e: PacketEvent, timeZone: string): void {
 
 // ── Cover, body, appendix ────────────────────────────────────────────────────
 
+/** One line per visit check-in. Says what was measured and no more: the phone's position when the visit started. */
+export function visitLine(v: PacketModel['visits'][number], tz: string): string {
+  const when = formatZoned(v.capturedAt, tz)
+  if (v.notGeocoded) return `${when}: location recorded; the property has no map pin to compare against`
+  if (v.distanceFt === null) return `${when}: location recorded`
+  const acc = v.accuracyFt === null ? '' : `, accuracy ${formatDistance(v.accuracyFt)}`
+  const flag = v.offsite ? ' (outside the property\'s check-in radius)' : ''
+  return `${when}: ${formatDistance(v.distanceFt)} from the property${acc}${flag}`
+}
+
+function drawVisits(cur: Cursor, model: PacketModel): void {
+  if (model.visits.length === 0) return
+  for (const [i, v] of model.visits.entries()) {
+    keyValue(cur, i === 0 ? 'Visit check-in' : '', visitLine(v, model.property.timezone))
+  }
+}
+
 function drawCover(cur: Cursor, model: PacketModel, shown: number): void {
   cur.y -= 22
   drawText(cur, 'Damage Claim Evidence Packet', { size: 20, bold: true })
@@ -251,6 +269,7 @@ function drawCover(cur: Cursor, model: PacketModel, shown: number): void {
   keyValue(cur, 'Prepared on', formatZoned(model.generatedAt, property.timezone))
   keyValue(cur, 'Photographs', `${shown} shown, ${model.custody.length} ledger entries cited`)
   if (model.repairs.length > 0) keyValue(cur, 'Repairs', `${model.repairs.length} work order(s) with line items`)
+  drawVisits(cur, model)
   cur.y -= 10
   rule(cur)
   paragraph(cur, 'How to read this packet. Each photograph was sealed in the FieldStay evidence ledger when it arrived. '

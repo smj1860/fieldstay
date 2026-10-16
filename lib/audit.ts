@@ -6,6 +6,8 @@ export type AuditAction =
   | 'evidence.photo_withdrawn'
   | 'evidence.packet_generated'
   | 'evidence.claim_window.updated'
+  | 'evidence.checkin'
+  | 'property.pin_set_from_checkin'
   | 'auth.invite.accepted'
   | 'auth.oauth.callback'
   | 'team.member.invited'

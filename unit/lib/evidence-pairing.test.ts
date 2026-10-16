@@ -8,7 +8,7 @@ function ev(over: Partial<PacketEvent>): PacketEvent {
     id: `e${n}`, storage_path: `o/${n}.jpg`, bucket: 'turnover-photos', sha256: 'a'.repeat(64),
     hash_verified: true, byte_size: 10, captured_at: `2026-10-10T10:${String(n % 60).padStart(2, '0')}:00Z`,
     captured_at_source: 'device', device_captured_at: null, device_clock_offset_seconds: 0,
-    received_at: '2026-10-10T11:00:00Z', lat: null, lng: null, gps_accuracy_m: null,
+    received_at: '2026-10-10T11:00:00Z', lat: null, lng: null, gps_accuracy_ft: null,
     captured_by_kind: 'crew', captured_by_label: null,
     section_name: 'Kitchen', evidence_role: 'room_condition', evidence_spot_id: null, position: 'pre_stay',
     ...over,

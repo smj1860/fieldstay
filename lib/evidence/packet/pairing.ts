@@ -27,7 +27,7 @@ export interface PacketEvent {
   received_at:                 string
   lat:                         number | null
   lng:                         number | null
-  gps_accuracy_m:              number | null
+  gps_accuracy_ft:              number | null
   captured_by_kind:            EvidenceCapturedByKind
   captured_by_label:           string | null
   section_name:                string | null

@@ -124,7 +124,7 @@ function sealPayloadFor(row: PendingPhotoUploadRow, bucket: 'turnover-photos'): 
     captured_at:    row.captured_at,
     lat:            row.lat ?? null,
     lng:            row.lng ?? null,
-    gps_accuracy_m: row.gps_accuracy_m ?? null,
+    gps_accuracy_ft: row.gps_accuracy_ft ?? null,
     source_table:   row.target_table,
     source_id:      row.target_id,
     turnover_id:    row.turnover_id ?? null,
