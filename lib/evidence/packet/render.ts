@@ -300,7 +300,7 @@ function drawBody(cur: Cursor, model: PacketModel): void {
 
 /** 1234.5 -> "$1,234.50". Plain text: this is customer-facing. */
 export function money(n: number): string {
-  return `$${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /** Shortens `body` with "..." until it fits `maxWidth`, so a long description never runs into the next column. */
