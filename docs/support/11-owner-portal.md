@@ -37,6 +37,8 @@ Not every expense needs to be visible to owners. Each transaction has a **Visibl
 
 You can change the visibility on any transaction from the same **Owner Portal** page by clicking the transaction and toggling visibility — there's no separate Financials page.
 
+When a charge you have marked Visible to Owner comes from a work order with sealed photos, the owner sees a **View photos** link on that line. It opens the before and after photos for that job and nothing else. Charges with no photos show no link.
+
 ---
 
 ## How Expenses Post Automatically

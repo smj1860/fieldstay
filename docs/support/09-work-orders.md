@@ -122,6 +122,8 @@ Add and manage vendor compliance documents under **Vendors → [Vendor Name] →
 
 **Crew path:** The crew member taps Mark Complete in their app, optionally adds notes, and you receive an email notification. The work order moves to Completed status.
 
+Every photo attached to a work order, by you or by a vendor, is sealed to the property's evidence record and can be included in a claim packet. Open the work order and click **Evidence** to see its photos with their capture times. See **Stay Evidence: Your Sealed Photo Record**.
+
 ---
 
 ## Connecting Work Orders to Assets

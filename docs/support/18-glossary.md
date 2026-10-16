@@ -234,3 +234,44 @@ The question the form asks when an item fails and a work order from a previous f
 
 FieldStay asks rather than deciding because both answers are wrong some of the time. Quarterly inspections make repeat failures normal, and one item can cover unrelated faults — "Refrigeration" failing for a water filter in one quarter and a compressor the next is one item and two jobs.
 
+---
+
+## Sealed
+
+A photo that has been fingerprinted, timestamped and attributed the moment it was captured, and filed to the guest stay it belongs to. Sealing is automatic for every photo taken through FieldStay. The record is never edited; a photo can be withdrawn, which adds a new dated entry pointing at the original. See **Stay Evidence: Your Sealed Photo Record**.
+
+---
+
+## Claim packet
+
+A PDF built from a property's sealed photos for one guest stay: before and after photos by room, plus a chain of custody page. It carries the booking platform's confirmation code and never a guest name, email or phone number. See **Building a Claim Packet**.
+
+---
+
+## Claim spot
+
+A place in a home that tends to be in damage claims, such as a mattress or the inside of the oven, that crew photograph on every turnover. Each property has its own list, which you can edit on the property's Evidence page. See **Room Photos and Claim Spots**.
+
+---
+
+## Room condition photo
+
+The one wide photo of a whole room, taken from the doorway, that ends each room section of a turnover checklist. It is the After for the guest who left and the Before for the guest arriving, so crew take it once per turnover.
+
+---
+
+## Proof of care
+
+An entry on a property's evidence record, written when a Freeze Watch work order is completed with at least two sealed photos. It references the photos, the date and the vendor, and shows that the home was winterized, when, and by whom. See **Freeze Watch**.
+
+---
+
+## Freeze Watch
+
+The automatic check that creates a prep work order when tomorrow's forecast low reaches a property's freeze threshold (28°F unless you set another) and nobody is checked in tonight. See **Freeze Watch**.
+
+---
+
+## Chain of custody
+
+The page of a claim packet that lists every photo it cites with its fingerprint, capture time, who took it and whether the fingerprint matched when it reached the server. Withdrawn photos are listed too, marked as withdrawn.
