@@ -42,6 +42,7 @@ interface TurnoverRow {
   property_id:      string
   booking_id:       string | null
   prev_booking_id:  string | null
+  checkin_datetime: string
 }
 interface BookingRow { id: string; source: string | null; checkout_date: string }
 interface PropertyRow { id: string; name: string; timezone: string }
@@ -68,7 +69,7 @@ async function candidateTurnoverIds(
 function loadTurnovers(supabase: DBClient, orgId: string, ids: readonly string[]): Promise<TurnoverRow[]> {
   return mapInChunks(ids, async (chunk) => {
     const res = await supabase
-      .from('turnovers').select('id, property_id, booking_id, prev_booking_id')
+      .from('turnovers').select('id, property_id, booking_id, prev_booking_id, checkin_datetime')
       .eq('org_id', orgId).in('id', chunk).limit(chunk.length)
     return unwrapList(res, { site: 'lib.evidence.deadlines.turnovers', orgId })
   })
@@ -124,7 +125,9 @@ export async function sweepOrgDeadlines(
     const today = localDate(nowMs, property.timezone)
     if (booking.checkout_date > today) continue   // the guest has not left yet
 
-    const deadline = claimDeadline({ source: booking.source, checkoutDate: booking.checkout_date, claimWindowDays })
+    // A pair turnover's check-in is the ARRIVING guest's; a standalone one has none to bound by.
+    const nextCheckinDate = t.prev_booking_id ? localDate(Date.parse(t.checkin_datetime), property.timezone) : null
+    const deadline = claimDeadline({ source: booking.source, checkoutDate: booking.checkout_date, nextCheckinDate, claimWindowDays })
     const daysLeft = daysBetween(today, deadline.deadlineDate)
     const stage = stageFor(daysLeft)
     if (!input.onlyTurnoverId && stage === 'expired' && daysLeft < -EXPIRED_NOTICE_GRACE_DAYS) continue

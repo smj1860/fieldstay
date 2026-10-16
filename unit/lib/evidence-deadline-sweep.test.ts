@@ -19,7 +19,7 @@ function fakeDb(rows: Rows) {
 
 const NOW = Date.parse('2026-10-14T15:00:00Z')   // Oct 14 in Chicago
 const property = { id: 'p1', name: 'Lake House', timezone: 'America/Chicago' }
-const standalone = { id: 't1', property_id: 'p1', booking_id: 'b1', prev_booking_id: null }
+const standalone = { id: 't1', property_id: 'p1', booking_id: 'b1', prev_booking_id: null, checkin_datetime: '2026-10-30T20:00:00Z' }
 
 describe('sweepOrgDeadlines', () => {
   it('opens a countdown for the departing guest of a flagged turnover, with the stage in the dedupe key', async () => {
@@ -40,8 +40,8 @@ describe('sweepOrgDeadlines', () => {
     expect(out[0].subtitle).toContain('2026-10-24')
   })
 
-  it('uses the departing booking of a PAIR turnover, and an arriving guest does not shorten the Airbnb window', async () => {
-    const pair = { id: 't2', property_id: 'p1', booking_id: 'arriving', prev_booking_id: 'departing' }
+  it('uses the departing booking of a PAIR turnover and bounds Airbnb by the arriving check-in', async () => {
+    const pair = { id: 't2', property_id: 'p1', booking_id: 'arriving', prev_booking_id: 'departing', checkin_datetime: '2026-10-16T20:00:00Z' }
     const db = fakeDb({
       organizations: [{ claim_window_days: 14 }],
       turnovers: [pair],
@@ -49,10 +49,10 @@ describe('sweepOrgDeadlines', () => {
       properties: [property],
     })
     const [n] = await sweepOrgDeadlines(db, { orgId: 'o1', nowMs: NOW, onlyTurnoverId: 't2' })
-    // Checkout Oct 13 plus a flat 14 days is Oct 27: 13 days left on Oct 14, so the window just opened.
-    expect(n.dedupeKey).toBe('evidence-deadline-departing-opened')
-    expect(n.severity).toBe('blue')
-    expect(n.subtitle).toContain('2026-10-27')
+    // Next guest arrives Oct 16 in Chicago, so the last safe day is Oct 15: one day left.
+    expect(n.dedupeKey).toBe('evidence-deadline-departing-d2')
+    expect(n.severity).toBe('red')
+    expect(n.subtitle).toContain('2026-10-15')
   })
 
   it('says the window closed once it has passed', async () => {

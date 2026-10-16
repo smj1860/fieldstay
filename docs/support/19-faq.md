@@ -391,7 +391,7 @@ A countdown opens only when you flag a turnover or your crew reports an issue fr
 
 ## Where does FieldStay get the claim deadline?
 
-Airbnb and VRBO stays count 14 days after checkout, and the notification says so. A guest checking in right after does not shorten it. Direct bookings and other sources use your account's **Claim window**, set on any property's Evidence page, default 14 days after checkout. Platform rules change and the platform's help center is the authority. When in doubt, file early.
+Airbnb and VRBO stays use that platform's own rules, and the notification names the rule. Direct bookings and other sources use your account's **Claim window**, set on any property's Evidence page, default 14 days after checkout. Platform rules change and the platform's help center is the authority. When in doubt, file early.
 
 ---
 

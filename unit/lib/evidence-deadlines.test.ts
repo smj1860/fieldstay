@@ -4,19 +4,27 @@ import {
 } from '@/lib/evidence/packet/deadlines'
 
 describe('claimDeadline', () => {
-  it('Airbnb: a flat 14 days after checkout, whatever the org window says', () => {
-    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', claimWindowDays: 30 }))
+  it('Airbnb: 14 days after checkout when no guest arrives sooner', () => {
+    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', nextCheckinDate: null, claimWindowDays: 30 }))
       .toEqual({ deadlineDate: '2026-10-24', basis: 'airbnb_checkout_window' })
-    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', claimWindowDays: 3 }).deadlineDate)
-      .toBe('2026-10-24')
+    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', nextCheckinDate: '2026-11-20', claimWindowDays: 30 }).basis)
+      .toBe('airbnb_checkout_window')
+  })
+  it('Airbnb: before the next check-in when that is sooner', () => {
+    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', nextCheckinDate: '2026-10-14', claimWindowDays: 30 }))
+      .toEqual({ deadlineDate: '2026-10-13', basis: 'airbnb_before_next_checkin' })
+  })
+  it('Airbnb: a same-day turnover leaves exactly the checkout day', () => {
+    expect(claimDeadline({ source: 'airbnb', checkoutDate: '2026-10-10', nextCheckinDate: '2026-10-10', claimWindowDays: 30 }))
+      .toEqual({ deadlineDate: '2026-10-10', basis: 'airbnb_before_next_checkin' })
   })
   it('VRBO uses its own window and ignores the org setting', () => {
-    expect(claimDeadline({ source: 'vrbo', checkoutDate: '2026-10-10', claimWindowDays: 3 }))
+    expect(claimDeadline({ source: 'vrbo', checkoutDate: '2026-10-10', nextCheckinDate: '2026-10-11', claimWindowDays: 3 }))
       .toEqual({ deadlineDate: '2026-10-24', basis: 'vrbo_checkout_window' })
   })
   it('everything else uses the org claim window', () => {
     for (const source of ['direct', 'manual', 'booking_com', 'ownerrez', 'other', null]) {
-      expect(claimDeadline({ source, checkoutDate: '2026-10-10', claimWindowDays: 21 }))
+      expect(claimDeadline({ source, checkoutDate: '2026-10-10', nextCheckinDate: null, claimWindowDays: 21 }))
         .toEqual({ deadlineDate: '2026-10-31', basis: 'org_claim_window' })
     }
   })
