@@ -109,7 +109,8 @@ test.describe('Crew logout guard', () => {
       // Both offline writes have to survive, so the count doubles as the
       // proof that the inferred start is queued durably rather than fired at
       // the network and lost. If this reads 1, the implicit start has stopped
-      // happening: check the funnel before relaxing the number.
+      // happening: check the funnel, and that the context grants geolocation
+      // (the start now carries a visit check-in and is skipped without a fix).
       await expect(page.getByText(/2 items.*haven.t reached FieldStay yet/)).toBeVisible()
 
       await page.getByRole('button', { name: 'Stay Logged In' }).click()
@@ -295,7 +296,14 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
     // back carrying a cookie seeded only via the project's storageState
     // config. Explicitly overriding it to undefined is the only way to get
     // a genuinely blank context.
-    context = await browser.newContext({ storageState: undefined })
+    // Geolocation is granted and fixed: the implicit start that follows a tick
+    // records a visit check-in, which needs a location fix, and an ungranted
+    // headless context never resolves one (so no start would be queued).
+    context = await browser.newContext({
+      storageState: undefined,
+      permissions: ['geolocation'],
+      geolocation: { latitude: 36.1627, longitude: -86.7816, accuracy: 20 },
+    })
     const page = await context.newPage()
 
     await page.goto('/login?next=/crew')

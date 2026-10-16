@@ -5,10 +5,10 @@ import { useDexieDb, useDexieUserId, useCrewMemberId } from '@/lib/dexie/context
 import { createClient } from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
-import { describeCapture } from '@/lib/evidence/capture'
+import { describeCapture, requestCheckinFix, type CheckinFixResult } from '@/lib/evidence/capture'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
-  updateChecklistItem, startTurnover, completeTurnover, flagRunningLate,
+  updateChecklistItem, startTurnover, checkInAgain, completeTurnover, flagRunningLate,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted,
   loadTurnoverInventoryCounts, saveTurnoverInventoryCounts, submitTurnoverInventoryCounts,
   type TurnoverInventoryCounts,
@@ -21,6 +21,13 @@ import { invalidateScope } from '@/lib/dexie/sync/scope'
 
 import { reportError } from '@/lib/observability/report-error'
 import { quantizeQuantity } from '@/lib/inventory/quantity'
+const CHECKIN_FAILURE_MESSAGES: Record<Extract<CheckinFixResult, { ok: false }>['reason'], string> = {
+  denied:      'Location is turned off for FieldStay. Allow location in your browser settings, then try again.',
+  timeout:     'We could not get your location in time. Step outside or toward a window and try again.',
+  unavailable: 'We could not find your location. Check that location services are on and try again.',
+  unsupported: 'This device cannot share its location, so the turnover cannot be started here.',
+}
+
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
   return asset.is_na === 1 || asset.make !== '' || asset.model !== '' || asset.photo_url !== ''
 }
@@ -248,7 +255,12 @@ export function useTurnoverActions(id: string) {
     startedRequestRef.current = true
 
     try {
-      await startTurnover(userId, id)
+      // A start needs a location fix (it becomes the visit's check-in). Without one
+      // the start is not inferred: the Start Turnover button still explains why.
+      // The ref stays set so a denied permission is not re-asked on every tick.
+      const fix = await requestCheckinFix(id)
+      if (!fix.ok) return
+      await startTurnover(userId, id, fix.fix)
     } catch (err) {
       // Deliberately NOT surfaced. The tick itself already succeeded and is
       // what the crew member was doing; an error toast about a start they
@@ -627,11 +639,36 @@ export function useTurnoverActions(id: string) {
     }
     setActionError(null)
     try {
-      await startTurnover(userId, id)
+      const fix = await requestCheckinFix(id)
+      if (!fix.ok) {
+        setActionError(CHECKIN_FAILURE_MESSAGES[fix.reason])
+        return
+      }
+      await startTurnover(userId, id, fix.fix)
     } catch (err) {
       console.error('[Crew] startTurnover failed:', err)
       reportError(err, { site: 'serverAction.crew.turnovers.Crew' })
       setActionError('Could not start this turnover. Please check your connection and try again.')
+    }
+  }
+
+  const checkInAgainNow = async () => {
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
+    setActionError(null)
+    try {
+      const fix = await requestCheckinFix(id, { again: true })
+      if (!fix.ok) {
+        setActionError(CHECKIN_FAILURE_MESSAGES[fix.reason])
+        return
+      }
+      await checkInAgain(userId, id, fix.fix)
+    } catch (err) {
+      console.error('[Crew] checkInAgain failed:', err)
+      reportError(err, { site: 'crew.turnovers.checkInAgain' })
+      setActionError('Could not record your check-in. Please try again.')
     }
   }
 
@@ -697,7 +734,7 @@ export function useTurnoverActions(id: string) {
     capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     handleCountChange, toggleChecklistConfirm, toggleInventoryConfirm,
-    getCount, countedSoFar, countedTotal, markInProgress, markComplete, flagLate,
+    getCount, countedSoFar, countedTotal, markInProgress, checkInAgainNow, markComplete, flagLate,
   }
 }
 

@@ -43,7 +43,7 @@ function stub(over: { uploadError?: unknown; ledgerError?: { code: string } } = 
   return state
 }
 
-const model = { omittedCount: 0, pairs: [{ before: { id: 'x' }, after: { id: 'y' } }], others: [], custody: [{ id: 'x' }, { id: 'y' }] }
+const model = { repairs: [], repairsCapNote: null, visits: [], omittedCount: 0, pairs: [{ before: { id: 'x' }, after: { id: 'y' } }], others: [], custody: [{ id: 'x' }, { id: 'y' }] }
 const run = () => invokeHandler(evidencePacket, { event: { data: DATA }, step: { run: async (_n: string, cb: () => unknown) => cb() } })
 
 describe('sniffFormat', () => {

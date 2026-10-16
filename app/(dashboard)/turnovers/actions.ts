@@ -1887,14 +1887,14 @@ function validateFlagSeal(input: FlagSealInput, orgId: string): string | null {
 interface FlagSealInput {
   turnoverId:   string
   storagePath:  string
-  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_m: number | null }
+  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_ft: number | null }
   deviceNow:    string
 }
 
 export async function sealFlagPhoto(input: {
   turnoverId:   string
   storagePath:  string
-  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_m: number | null }
+  capture:      { sha256: string; byte_size: number; captured_at: string; lat: number | null; lng: number | null; gps_accuracy_ft: number | null }
   deviceNow:    string
 }): Promise<{ success: boolean; error?: string }> {
   try {
@@ -1924,7 +1924,7 @@ export async function sealFlagPhoto(input: {
       deviceNow:        input.deviceNow,
       lat:              latOrNull(input.capture.lat),
       lng:              lngOrNull(input.capture.lng),
-      gpsAccuracyM:     finiteOrNull(input.capture.gps_accuracy_m),
+      gpsAccuracyFt:     finiteOrNull(input.capture.gps_accuracy_ft),
       capturedBy:       { kind: 'pm', id: user.id, label: null },
       turnoverId:       turnover.id,
       workOrderId:      null,

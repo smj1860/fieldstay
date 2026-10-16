@@ -44,7 +44,7 @@ export async function sealWorkOrderPhoto(input: {
       orgId, propertyId: wo.property_id, bucket: 'work-order-photos', storagePath: input.storagePath,
       sourceTable: 'work_order_photos', sourceId: photo.id,
       claimedSha256: null, byteSize: null, deviceCapturedAt: null, deviceNow: null,
-      lat: null, lng: null, gpsAccuracyM: null,
+      lat: null, lng: null, gpsAccuracyFt: null,
       capturedBy: { kind: 'pm', id: user.id, label: null },
       turnoverId: null, workOrderId: wo.id, inspectionId: null,
     })

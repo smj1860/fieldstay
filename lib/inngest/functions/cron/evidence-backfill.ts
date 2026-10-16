@@ -73,7 +73,7 @@ async function sealBatch(orgId: string, batch: readonly Pointer[]): Promise<{ se
         sourceTable: p.sourceTable, sourceId: p.sourceId,
         claimedSha256: null, byteSize: null,
         deviceCapturedAt: null, deviceNow: null, observedAt: p.observedAt,
-        lat: null, lng: null, gpsAccuracyM: null,
+        lat: null, lng: null, gpsAccuracyFt: null,
         capturedBy: { kind: 'system', id: null, label: 'backfill' },
         turnoverId: p.turnoverId, workOrderId: p.workOrderId, inspectionId: p.inspectionId,
         metadata: { backfill: true },

@@ -64,7 +64,8 @@ describe.skipIf(!BIN)('evidence_events immutability (real Postgres)', () => {
     run(join(BIN!, 'pg_ctl'), ['-D', dataDir, '-o', `-p ${PORT} -k ${socketDir} -c listen_addresses=`, '-w', '-l', join(dataDir, 'log'), 'start'])
     execFileSync('psql', ['-h', socketDir, '-p', PORT, '-U', 'postgres', '-qc', 'CREATE DATABASE ledger'])
     execFileSync('psql', ['-h', socketDir, '-p', PORT, '-U', 'postgres', '-d', 'ledger', '-q', '-v', 'ON_ERROR_STOP=1',
-      '-f', join(root, 'unit/evidence/ledger-harness.sql'), '-f', join(root, 'supabase/migrations/20261014090000_evidence_ledger.sql')],
+      '-f', join(root, 'unit/evidence/ledger-harness.sql'), '-f', join(root, 'supabase/migrations/20261014090000_evidence_ledger.sql'),
+      '-f', join(root, 'supabase/migrations/20261017090000_evidence_checkin.sql')],
     { stdio: 'ignore' })
     sql(`INSERT INTO organizations(id) VALUES ('${ORG}');
          INSERT INTO properties(id,org_id) VALUES ('${PROP}','${ORG}');
@@ -110,6 +111,50 @@ describe.skipIf(!BIN)('evidence_events immutability (real Postgres)', () => {
     expect(sql(`SELECT work_order_id IS NULL FROM evidence_events WHERE storage_path='casc-1'`).out).toBe('t')
     expect(sql(`DELETE FROM properties WHERE id = '${PROP}'`).ok).toBe(true)
     expect(sql(`SELECT count(*) FROM evidence_events`).out).toBe('0')
+  })
+
+  // The check-in migration, run for real on top of the ledger one, on the same cluster.
+  describe('evidence check-in', () => {
+  const CKORG = '66666666-6666-4666-8666-666666666666'
+  const CKPROP = '77777777-7777-4777-8777-777777777777'
+  const CKTURN = '88888888-8888-4888-8888-888888888888'
+  const checkin = (path: string, cols = 'lat,lng', vals = '36.1,-86.7') => sql(
+    `INSERT INTO evidence_events(org_id,property_id,kind,source_table,source_id,bucket,storage_path,sha256,captured_at,captured_by_kind,turnover_id,${cols})
+     VALUES ('${CKORG}','${CKPROP}','checkin','turnovers','${CKTURN}','turnover-photos','${path}',repeat('0',64),now(),'crew','${CKTURN}',${vals})`)
+
+  beforeAll(() => {
+    sql(`INSERT INTO organizations(id) VALUES ('${CKORG}');
+         INSERT INTO properties(id,org_id) VALUES ('${CKPROP}','${CKORG}');
+         INSERT INTO turnovers(id) VALUES ('${CKTURN}')`)
+  })
+
+  it('renames the accuracy column to feet', () => {
+    expect(sql(`SELECT column_name FROM information_schema.columns WHERE table_name='evidence_events' AND column_name LIKE 'gps_accuracy%'`).out).toBe('gps_accuracy_ft')
+  })
+
+  it('accepts a check-in against a turnover and refuses one with no fix', () => {
+    expect(checkin('ck/checkin').ok).toBe(true)
+    const noFix = sql(`INSERT INTO evidence_events(org_id,property_id,kind,source_table,source_id,bucket,storage_path,sha256,captured_at,captured_by_kind,turnover_id)
+      VALUES ('${CKORG}','${CKPROP}','checkin','turnovers','${CKTURN}','turnover-photos','ck/nofix',repeat('0',64),now(),'crew','${CKTURN}')`)
+    expect(noFix.ok).toBe(false)
+    expect(noFix.out).toContain('checkin_has_fix')
+  })
+
+  it('collides on a replayed check-in for the same attempt and allows a later attempt', () => {
+    expect(checkin('ck/checkin').ok).toBe(false)         // same path, same kind: the replay guard
+    expect(checkin('ck/checkin-2').ok).toBe(true)
+  })
+
+  it('still lets a turnover with a check-in be deleted (the FK nulls turnover_id)', () => {
+    expect(sql(`DELETE FROM turnovers WHERE id = '${CKTURN}'`).ok).toBe(true)
+    expect(sql(`SELECT count(*) FROM evidence_events WHERE kind='checkin' AND turnover_id IS NULL`).out).toBe('2')
+  })
+
+  it('bounds the per-property radius', () => {
+    expect(sql(`UPDATE properties SET geofence_radius_ft = 149 WHERE id='${CKPROP}'`).ok).toBe(false)
+    expect(sql(`UPDATE properties SET geofence_radius_ft = 16001 WHERE id='${CKPROP}'`).ok).toBe(false)
+    expect(sql(`UPDATE properties SET geofence_radius_ft = 3000 WHERE id='${CKPROP}'`).ok).toBe(true)
+  })
   })
 })
 

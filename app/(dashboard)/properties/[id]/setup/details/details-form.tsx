@@ -215,6 +215,23 @@ export function DetailsForm({
         </p>
       </div>
 
+      <div>
+        <label htmlFor="geofence_radius_ft" className="label">Crew check-in radius (feet)</label>
+        <Input
+          id="geofence_radius_ft"
+          name="geofence_radius_ft"
+          type="number"
+          min="150"
+          max="16000"
+          step="1"
+          defaultValue={property.geofence_radius_ft ?? ''}
+          placeholder="1640"
+        />
+        <p className="text-xs text-accent-400 mt-1">
+          When a crew member starts a turnover farther than this from the property pin, you get a heads-up and the packet notes it. Leave blank for the default (about a third of a mile). Widen it for a large property or a rural address.
+        </p>
+      </div>
+
       <label className="flex items-center gap-2 cursor-pointer select-none">
         <input
           type="checkbox"

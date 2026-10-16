@@ -287,6 +287,7 @@ export interface Property {
   same_day_premium_pct:    number | null
   /** Forecast low (F) at or below which Freeze Watch creates a prep work order while vacant. NULL = platform default (28). */
   freeze_threshold_f:      number | null
+  geofence_radius_ft:      number | null
   cleaning_cost_visible_to_owner: boolean
   square_footage:          number | null
   lat:                     number | null
@@ -1329,10 +1330,10 @@ export interface WorkOrderUpdate {
   dedupe_key:                string | null
 }
 
-export type EvidenceEventKind      = 'photo_sealed' | 'photo_withdrawn' | 'packet_generated' | 'proof_of_care'
+export type EvidenceEventKind      = 'photo_sealed' | 'photo_withdrawn' | 'packet_generated' | 'proof_of_care' | 'checkin'
 export type EvidenceSourceTable    =
   | 'checklist_instance_items' | 'checklist_instances' | 'property_assets'
-  | 'work_order_photos' | 'inspection_items' | 'turnover_flags' | 'evidence_packets'
+  | 'work_order_photos' | 'inspection_items' | 'turnover_flags' | 'evidence_packets' | 'turnovers'
 export type EvidenceBucket         = 'turnover-photos' | 'work-order-photos' | 'inspection-photos' | 'evidence-packets'
 export type EvidenceCapturedByKind = 'crew' | 'pm' | 'vendor' | 'system'
 export type EvidenceBracketPosition = 'pre_stay' | 'during_stay' | 'post_stay'
@@ -1356,7 +1357,7 @@ export interface EvidenceEvent {
   received_at:                 string
   lat:                         number | null
   lng:                         number | null
-  gps_accuracy_m:              number | null
+  gps_accuracy_ft:              number | null
   captured_by_kind:            EvidenceCapturedByKind
   captured_by_id:              string | null
   captured_by_label:           string | null

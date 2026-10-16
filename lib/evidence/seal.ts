@@ -37,7 +37,7 @@ export interface SealInput {
   deviceNow:      string | null
   lat:            number | null
   lng:            number | null
-  gpsAccuracyM:   number | null
+  gpsAccuracyFt:   number | null
   capturedBy:     { kind: EvidenceCapturedByKind; id: string | null; label: string | null }
   turnoverId:     string | null
   workOrderId:    string | null
@@ -49,6 +49,8 @@ export interface SealInput {
    * Never used to fabricate a device claim.
    */
   observedAt?:    string | null
+  /** The visit check-in this photo inherits its place from (kind 'checkin'). Crew photos only. */
+  refersToEventId?: string | null
   metadata?:      Record<string, string | number | boolean | null>
 }
 
@@ -170,13 +172,14 @@ export async function sealPhoto(
     device_clock_offset_seconds: timing.offsetSeconds,
     lat:                         input.lat,
     lng:                         input.lng,
-    gps_accuracy_m:              input.gpsAccuracyM,
+    gps_accuracy_ft:             input.gpsAccuracyFt,
     captured_by_kind:            input.capturedBy.kind,
     captured_by_id:              input.capturedBy.id,
     captured_by_label:           input.capturedBy.label,
     turnover_id:                 input.turnoverId,
     work_order_id:               input.workOrderId,
     inspection_id:               input.inspectionId,
+    refers_to_event_id:          input.refersToEventId ?? null,
     metadata:                    { ...input.metadata, claimed_sha256: input.claimedSha256 },
   }
 

@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { checkLimit, retryAfterSeconds, evidenceSealRatelimit } from '@/lib/rate-limit'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import { sealPhoto } from '@/lib/evidence/seal'
 import { pathMatchesTarget, type CrewSealTarget } from '@/lib/evidence/seal-paths'
 import { UUID_RE, SHA256_RE as SHA_RE, finiteOrNull as optionalNumber } from '@/lib/evidence/validate'
@@ -34,7 +35,7 @@ interface SealBody {
   device_now:     string
   lat:            number | null
   lng:            number | null
-  gps_accuracy_m: number | null
+  gps_accuracy_ft: number | null
   source_table:   EvidenceSourceTable
   source_id:      string
   turnover_id:    string | null
@@ -70,7 +71,7 @@ function parseBody(raw: unknown): Parsed {
       device_now:     b.device_now,
       lat:            optionalNumber(b.lat),
       lng:            optionalNumber(b.lng),
-      gps_accuracy_m: optionalNumber(b.gps_accuracy_m),
+      gps_accuracy_ft: optionalNumber(b.gps_accuracy_ft),
       source_table:   b.source_table as EvidenceSourceTable,
       source_id:      b.source_id,
       turnover_id,
@@ -127,6 +128,28 @@ function sealTargetOf(orgId: string, body: SealBody, target: SealTarget): CrewSe
   return { table: 'checklist_instance_items', orgId, turnoverId: target.turnoverId, itemId: body.source_id }
 }
 
+/**
+ * The newest check-in for this turnover, so a photo sealed during the visit
+ * points at where the crew said they were. Null before any check-in exists (a
+ * photo queued by a build that predates check-ins) and on a read error, which is
+ * reported: an unlinked photo is still sealed, just without the inherited place.
+ */
+async function latestCheckinId(
+  service: ReturnType<typeof createServiceClient>, orgId: string, turnoverId: string,
+): Promise<string | null> {
+  const { data, error } = await service
+    .from('evidence_events')
+    .select('id')
+    .eq('org_id', orgId).eq('turnover_id', turnoverId).eq('kind', 'checkin')
+    .order('captured_at', { ascending: false })
+    .limit(1)
+  if (error) {
+    reportError(error, { site: 'route.crew.evidence.seal.latestCheckin', orgId })
+    return null
+  }
+  return data?.[0]?.id ?? null
+}
+
 export async function POST(request: NextRequest) {
   // Auth first: an unauthenticated caller learns nothing about the body schema.
   const auth = await requireCrewMember()
@@ -160,6 +183,7 @@ export async function POST(request: NextRequest) {
   const turnoverId = target.turnoverId ?? body.turnover_id
 
   const service = createServiceClient({ crew })
+  const checkinId = turnoverId ? await latestCheckinId(service, crew.org_id, turnoverId) : null
   const result  = await sealPhoto(service, {
     orgId:            crew.org_id,
     propertyId:       target.propertyId,
@@ -173,11 +197,12 @@ export async function POST(request: NextRequest) {
     deviceNow:        body.device_now,
     lat:              body.lat,
     lng:              body.lng,
-    gpsAccuracyM:     body.gps_accuracy_m,
+    gpsAccuracyFt:    body.gps_accuracy_ft,
     capturedBy:       { kind: 'crew', id: crew.id, label: null },
     turnoverId,
     workOrderId:      null,
     inspectionId:     null,
+    refersToEventId:  checkinId,
     metadata: {
       client_seal_id:   body.client_seal_id,
       evidence_role:    target.evidenceRole ?? null,

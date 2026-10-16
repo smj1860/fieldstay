@@ -1,6 +1,7 @@
 'use server'
 
 import { parseFreezeThreshold } from '@/lib/evidence/freeze-watch'
+import { parseGeofenceRadius } from '@/lib/evidence/geo'
 import { toDbEnum } from '@/lib/db-enums'
 import { doorCodeArgs } from '@/lib/properties/door-code'
 import { revalidatePath } from 'next/cache'
@@ -127,6 +128,10 @@ export async function saveDetails(
     if ('error' in freezeThreshold) return { error: freezeThreshold.error }
     const freeze_threshold_f = freezeThreshold.value
 
+    const geofenceRadius = parseGeofenceRadius(formData.get('geofence_radius_ft'))
+    if ('error' in geofenceRadius) return { error: geofenceRadius.error }
+    const geofence_radius_ft = geofenceRadius.value
+
     if (!name) return { error: 'Property name is required' }
 
     const existingRes = await supabase
@@ -149,7 +154,7 @@ export async function saveDetails(
         bedrooms, bathrooms, max_guests, checkin_time,
         checkout_time, wifi_name, wifi_password, internal_notes,
         avg_nightly_rate, cleaning_cost, same_day_premium_pct, square_footage,
-        cleaning_cost_visible_to_owner, freeze_threshold_f,
+        cleaning_cost_visible_to_owner, freeze_threshold_f, geofence_radius_ft,
       })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
