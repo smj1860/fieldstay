@@ -70,15 +70,16 @@ async function signAll(supabase: DBClient, rows: readonly Row[]): Promise<Map<st
     const path = toStorageObjectPath(r.bucket, r.storage_path)
     if (path) byBucket.set(r.bucket, [...(byBucket.get(r.bucket) ?? []), { id: r.id, path }])
   }
-  for (const [bucket, entries] of byBucket) {
-    for (const chunk of chunkArray(entries, IN_CLAUSE_CHUNK_SIZE)) {
-      const { data, error } = await supabase.storage.from(bucket)
-        .createSignedUrls(chunk.map((e) => e.path), WORK_ORDER_PHOTO_URL_TTL_SECONDS)
-      // A failed sign costs those photos their thumbnails, not the page.
-      if (error) { reportError(error, { site: 'lib.evidence.woEvidence.sign', level: 'warning' }); continue }
-      chunk.forEach((e, i) => { const u = data?.[i]?.signedUrl; if (u) urls.set(e.id, u) })
-    }
+  const batches = [...byBucket].flatMap(([bucket, entries]) =>
+    chunkArray(entries, IN_CLAUSE_CHUNK_SIZE).map((chunk) => ({ bucket, chunk })))
+  const signBatch = async ({ bucket, chunk }: { bucket: string; chunk: { id: string; path: string }[] }) => {
+    const { data, error } = await supabase.storage.from(bucket)
+      .createSignedUrls(chunk.map((e) => e.path), WORK_ORDER_PHOTO_URL_TTL_SECONDS)
+    // A failed sign costs those photos their thumbnails, not the page.
+    if (error) { reportError(error, { site: 'lib.evidence.woEvidence.sign', level: 'warning' }); return }
+    chunk.forEach((e, i) => { const u = data?.[i]?.signedUrl; if (u) urls.set(e.id, u) })
   }
+  await Promise.all(batches.map(signBatch))
   return urls
 }
 

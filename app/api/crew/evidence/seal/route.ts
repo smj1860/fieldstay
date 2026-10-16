@@ -114,7 +114,7 @@ async function resolveTarget(
     .select('turnover_id, evidence_role, evidence_spot_id, section_name, turnovers!inner(property_id, org_id)').eq('id', body.source_id).maybeSingle()
   const data = unwrap(res, { site, orgId })
   const t = data?.turnovers
-  if (!data || !t || t.org_id !== orgId) return null
+  if (!data || t?.org_id !== orgId) return null
   return {
     propertyId: t.property_id, turnoverId: data.turnover_id,
     evidenceRole: data.evidence_role, evidenceSpotId: data.evidence_spot_id, sectionName: data.section_name,

@@ -161,7 +161,7 @@ export const evidencePacket = inngest.createFunction(
     id:   'evidence-packet',
     name: 'Evidence: Build Claim Packet',
     retries: 2,
-    onFailure: async ({ event }) => markPacketFailed(event),
+    onFailure: ({ event }) => markPacketFailed(event),
     concurrency: [{ limit: 3 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'evidence/packet.requested' },
@@ -170,7 +170,7 @@ export const evidencePacket = inngest.createFunction(
 
     // Rendering and uploading is one step so the (large) PDF bytes never cross
     // a step boundary: only the small BuiltPacket summary is memoized.
-    const built = await step.run('render-and-upload', async () => {
+    const built = await step.run('render-and-upload', () => {
       // A throw here is retried; the milestone is marked failed by onFailure
       // only once retries are exhausted, never while a retry may still succeed.
       return buildPacket(d)

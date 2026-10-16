@@ -130,36 +130,8 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
   'app/(dashboard)/properties/clone-actions.ts:123':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'lib/evidence/timeline.ts:39':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
-  'lib/evidence/timeline.ts:67':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
-  'lib/evidence/timeline.ts:87':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
-  'lib/evidence/timeline.ts:123':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300), which is 1 for any real stay-evidence page (a stay brackets tens of photos; the unbracketed read is capped at MAX_UNBRACKETED).',
-  'lib/inngest/functions/cron/freeze-watch.ts:133':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/inngest/functions/cron/freeze-watch.ts:159':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/inngest/functions/cron/freeze-watch.ts:229':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) property ids, not per property: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(properties / 300), bounded by the per-org MAX_PROPERTIES_PER_ORG read above it.',
-  'lib/evidence/packet/deadline-sweep.ts:71':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:82':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:86':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/deadline-sweep.ts:93':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/model.ts:108':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
-  'lib/evidence/packet/model.ts:123':
-    'One query per IN_CLAUSE_CHUNK_SIZE (300) ids, not per row: the batched form the rule asks for, chunked only because a .in() list travels in the URL. Round trips are ceil(ids / 300); the ids are the photos of one stay or the flagged turnovers of one org in a 45 day window, both capped by explicit limits above.',
   'app/api/work-orders/[token]/photos/route.ts:182':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:204':
-    'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:70':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',
   'lib/asset-discovery/seed-from-amenities.ts:184':

@@ -17,7 +17,7 @@ export async function workOrdersWithPhotos(
   workOrderIds: readonly (string | null)[],
 ): Promise<Set<string>> {
   const ids = [...new Set(workOrderIds.filter((id): id is string => typeof id === 'string'))]
-  const runChunk = async (chunk: string[]): Promise<{ work_order_id: string }[]> =>
+  const runChunk = (chunk: string[]): Promise<{ work_order_id: string }[]> =>
     fetchAllRows<{ work_order_id: string }>(
       (from, to) => supabase
         .from('work_order_photos')

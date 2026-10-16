@@ -13,7 +13,7 @@ export const evidenceBackfillCron = inngest.createFunction(
   { id: 'cron-evidence-backfill', name: 'Cron: Evidence Backfill', retries: 2 },
   { cron: '30 8 * * *' },   // 3:30am CT, after the nightly crew syncs have settled
   async ({ step, logger }) => {
-    const orgIds = await step.run('find-orgs', async () => {
+    const orgIds = await step.run('find-orgs', () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-backfill' })
       return fetchDistinctOrgIds(
         (from, to) => supabase.from('properties').select('org_id').eq('is_active', true)
@@ -45,7 +45,7 @@ export const evidenceBackfillOrg = inngest.createFunction(
   async ({ event, step }) => {
     const orgId = event.data.org_id
 
-    const pending = await step.run('find-unsealed', async () => {
+    const pending = await step.run('find-unsealed', () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-backfill' })
       return findUnsealed(supabase, orgId, Date.now())
     })
@@ -54,7 +54,7 @@ export const evidenceBackfillOrg = inngest.createFunction(
     let skipped = 0
     const batches = chunkArray(pending, SEAL_BATCH)
     for (let i = 0; i < batches.length; i++) {
-      const result = await step.run(`seal-batch-${i}`, () => sealBatch(orgId, batches[i]))
+      const result = await step.run(`seal-batch-${i}`, () => sealBatch(orgId, batches[i])) // NOSONAR -- one Inngest step per batch, run in order so each batch is its own retry boundary
       sealed += result.sealed
       skipped += result.skipped
     }
@@ -68,7 +68,7 @@ async function sealBatch(orgId: string, batch: readonly Pointer[]): Promise<{ se
   let skipped = 0
   for (const p of batch) {
     try {
-      const res = await sealPhoto(supabase, {
+      const res = await sealPhoto(supabase, { // NOSONAR -- sequential by design: each seal downloads and hashes a photo, so one at a time bounds memory
         orgId, propertyId: p.propertyId, bucket: p.bucket, storagePath: p.path,
         sourceTable: p.sourceTable, sourceId: p.sourceId,
         claimedSha256: null, byteSize: null,

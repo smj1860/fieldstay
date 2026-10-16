@@ -59,16 +59,17 @@ async function signThumbnails(
   // Signing needs the service role (storage RLS is org-prefix based and the
   // paths were just read through the session client for this org).
   const service = createServiceClient({ authorizedBy: membership })
-  for (const [bucket, entries] of byBucket) {
+  const signBucket = async ([bucket, entries]: [string, { id: string; path: string }[]]) => {
     const { data, error } = await service.storage
       .from(bucket)
       .createSignedUrls(entries.map((x) => x.path), SIGNED_URL_TTL_SECONDS)
-    if (error || !data) continue
+    if (error || !data) return
     entries.forEach((x, i) => {
       const url = data[i]?.signedUrl
       if (url) signed.set(x.id, url)
     })
   }
+  await Promise.all([...byBucket].map(signBucket))
   return signed
 }
 

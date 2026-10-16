@@ -13,7 +13,7 @@
 // exists because guest PII is purged on a schedule, and a packet must still make
 // sense after that has happened.
 import 'server-only'
-import { chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
+import { mapInChunks } from '@/lib/inngest/chunk'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import type { DBClient } from '@/lib/supabase/server'
 import type { EvidenceBracketPosition } from '@/types/database'
@@ -103,9 +103,8 @@ function toPacketEvent(raw: RawEvent, position: EvidenceBracketPosition): Packet
   }
 }
 
-async function loadRawEvents(supabase: DBClient, orgId: string, ids: readonly string[], kind: RawEvent['kind']): Promise<RawEvent[]> {
-  const out: RawEvent[] = []
-  for (const chunk of chunkArray(ids, IN_CLAUSE_CHUNK_SIZE)) {
+function loadRawEvents(supabase: DBClient, orgId: string, ids: readonly string[], kind: RawEvent['kind']): Promise<RawEvent[]> {
+  return mapInChunks(ids, async (chunk) => {
     const res = await supabase
       .from('evidence_events')
       .select(PACKET_EVENT_COLUMNS)
@@ -113,14 +112,12 @@ async function loadRawEvents(supabase: DBClient, orgId: string, ids: readonly st
       .eq('kind', kind)
       .in('id', chunk)
       .limit(chunk.length)
-    out.push(...(unwrapList(res, { site: 'lib.evidence.packet.events', orgId }) as unknown as RawEvent[]))
-  }
-  return out
+    return unwrapList(res, { site: 'lib.evidence.packet.events', orgId }) as unknown as RawEvent[]
+  })
 }
 
-async function loadWithdrawals(supabase: DBClient, orgId: string, citedIds: readonly string[]): Promise<RawEvent[]> {
-  const out: RawEvent[] = []
-  for (const chunk of chunkArray(citedIds, IN_CLAUSE_CHUNK_SIZE)) {
+function loadWithdrawals(supabase: DBClient, orgId: string, citedIds: readonly string[]): Promise<RawEvent[]> {
+  return mapInChunks(citedIds, async (chunk) => {
     const res = await supabase
       .from('evidence_events')
       .select(PACKET_EVENT_COLUMNS)
@@ -128,9 +125,8 @@ async function loadWithdrawals(supabase: DBClient, orgId: string, citedIds: read
       .eq('kind', 'photo_withdrawn')
       .in('refers_to_event_id', chunk)
       .limit(chunk.length)
-    out.push(...(unwrapList(res, { site: 'lib.evidence.packet.withdrawals', orgId }) as unknown as RawEvent[]))
-  }
-  return out
+    return unwrapList(res, { site: 'lib.evidence.packet.withdrawals', orgId }) as unknown as RawEvent[]
+  })
 }
 
 function describeCapturer(kind: string, label: string | null): string {

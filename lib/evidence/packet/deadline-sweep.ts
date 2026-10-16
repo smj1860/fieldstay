@@ -15,7 +15,7 @@
 // that is prev_booking_id; on a standalone turnover it is booking_id (see
 // lib/evidence/bracket.ts for the same flip).
 import 'server-only'
-import { chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
+import { mapInChunks } from '@/lib/inngest/chunk'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import type { DBClient } from '@/lib/supabase/server'
 import type { CreatePmNotificationInput } from '@/lib/inngest/helpers'
@@ -66,37 +66,33 @@ async function candidateTurnoverIds(
   return [...ids]
 }
 
-async function loadTurnovers(supabase: DBClient, orgId: string, ids: readonly string[]): Promise<TurnoverRow[]> {
-  const out: TurnoverRow[] = []
-  for (const chunk of chunkArray(ids, IN_CLAUSE_CHUNK_SIZE)) {
+function loadTurnovers(supabase: DBClient, orgId: string, ids: readonly string[]): Promise<TurnoverRow[]> {
+  return mapInChunks(ids, async (chunk) => {
     const res = await supabase
       .from('turnovers').select('id, property_id, booking_id, prev_booking_id, checkin_datetime')
       .eq('org_id', orgId).in('id', chunk).limit(chunk.length)
-    out.push(...unwrapList(res, { site: 'lib.evidence.deadlines.turnovers', orgId }))
-  }
-  return out
+    return unwrapList(res, { site: 'lib.evidence.deadlines.turnovers', orgId })
+  })
 }
 
 async function loadBookings(supabase: DBClient, orgId: string, ids: readonly string[]): Promise<Map<string, BookingRow>> {
-  const out = new Map<string, BookingRow>()
-  for (const chunk of chunkArray(ids, IN_CLAUSE_CHUNK_SIZE)) {
+  const rows = await mapInChunks(ids, async (chunk) => {
     const res = await supabase
       .from('bookings').select('id, source, checkout_date')
       .eq('org_id', orgId).in('id', chunk).limit(chunk.length)
-    for (const b of unwrapList(res, { site: 'lib.evidence.deadlines.bookings', orgId })) out.set(b.id, b)
-  }
-  return out
+    return unwrapList(res, { site: 'lib.evidence.deadlines.bookings', orgId })
+  })
+  return new Map(rows.map((b) => [b.id, b]))
 }
 
 async function loadProperties(supabase: DBClient, orgId: string, ids: readonly string[]): Promise<Map<string, PropertyRow>> {
-  const out = new Map<string, PropertyRow>()
-  for (const chunk of chunkArray(ids, IN_CLAUSE_CHUNK_SIZE)) {
+  const rows = await mapInChunks(ids, async (chunk) => {
     const res = await supabase
       .from('properties').select('id, name, timezone')
       .eq('org_id', orgId).in('id', chunk).limit(chunk.length)
-    for (const p of unwrapList(res, { site: 'lib.evidence.deadlines.properties', orgId })) out.set(p.id, p)
-  }
-  return out
+    return unwrapList(res, { site: 'lib.evidence.deadlines.properties', orgId })
+  })
+  return new Map(rows.map((p) => [p.id, p]))
 }
 
 export async function sweepOrgDeadlines(

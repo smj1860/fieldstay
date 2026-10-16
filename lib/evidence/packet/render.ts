@@ -132,7 +132,10 @@ function keyValue(cur: Cursor, key: string, value: string): void {
 
 function photoEvents(model: PacketModel): PacketEvent[] {
   const out: PacketEvent[] = []
-  for (const p of model.pairs) { if (p.before) out.push(p.before); if (p.after) out.push(p.after) }
+  for (const p of model.pairs) {
+    if (p.before) out.push(p.before)
+    if (p.after) out.push(p.after)
+  }
   out.push(...model.others)
   return out
 }
@@ -153,7 +156,7 @@ async function embedOne(pdf: PDFDocument, fetchPhoto: FetchPhoto, e: PacketEvent
 async function embedAll(pdf: PDFDocument, fetchPhoto: FetchPhoto, events: readonly PacketEvent[]): Promise<Map<string, PDFImage>> {
   const images = new Map<string, PDFImage>()
   for (const batch of chunkArray(events, EMBED_BATCH)) {
-    const done = await Promise.all(batch.map((e) => embedOne(pdf, fetchPhoto, e)))
+    const done = await Promise.all(batch.map((e) => embedOne(pdf, fetchPhoto, e))) // NOSONAR -- bounded concurrency by design: EMBED_BATCH photos at a time caps peak memory in the PDF render
     for (const d of done) if (d) images.set(d[0], d[1])
   }
   return images

@@ -40,10 +40,10 @@ export function decideFreezeWatch(input: {
   if (property.lat === null || property.lng === null || (property.lat === 0 && property.lng === 0)) {
     return { fire: false, reason: 'no_coordinates', threshold, low: null }
   }
-  if (!forecast || forecast.temperatureMin === null || forecast.temperatureMin === undefined) {
+  const low = forecast?.temperatureMin
+  if (low === null || low === undefined) {
     return { fire: false, reason: 'no_forecast', threshold, low: null }
   }
-  const low = forecast.temperatureMin
   if (low > threshold)      return { fire: false, reason: 'above_threshold', threshold, low }
   if (input.occupied)       return { fire: false, reason: 'occupied',        threshold, low }
   if (input.hasOpenFreezeWo) return { fire: false, reason: 'open_work_order', threshold, low }

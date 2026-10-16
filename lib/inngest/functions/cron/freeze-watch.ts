@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import { sendEventsChunked, IN_CLAUSE_CHUNK_SIZE, chunkArray } from '@/lib/inngest/chunk'
+import { sendEventsChunked, mapInChunks, chunkArray } from '@/lib/inngest/chunk'
 import { createPmNotifications } from '@/lib/inngest/helpers'
 import { logAuditEvents } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -39,7 +39,7 @@ export const freezeWatchCron = inngest.createFunction(
   { id: 'cron-freeze-watch', name: 'Cron: Freeze Watch', retries: 2 },
   { cron: '0 20 * * *' },   // 20:00 UTC = 2pm CDT / 3pm CST. Freeze season is mostly standard time, so 2pm CT in early fall and spring; 3pm CT Nov to Mar. See confirmation F3
   async ({ step, logger }) => {
-    const nowMs = await step.run('capture-now', async () => Date.now())
+    const nowMs = await step.run('capture-now', () => Date.now())
 
     const orgIds = await step.run('find-active-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:freeze-watch' })
@@ -126,11 +126,10 @@ async function loadProperties(supabase: ServiceClient, orgId: string): Promise<P
 async function loadOccupied(
   supabase: ServiceClient, orgId: string, props: readonly PropertyRow[], tonightDates: ReadonlyMap<string, string>,
 ): Promise<Set<string>> {
-  const sorted  = [...tonightDates.values()].sort()
+  const sorted  = [...tonightDates.values()].sort((a, b) => a.localeCompare(b))
   const minDate = sorted[0]
   const maxDate = sorted.at(-1) ?? minDate
-  const occupied = new Set<string>()
-  for (const chunk of chunkArray(props.map((p) => p.id), IN_CLAUSE_CHUNK_SIZE)) {
+  const stays = await mapInChunks(props.map((p) => p.id), async (chunk) => {
     const { data, error } = await supabase
       .from('bookings')
       .select('property_id, checkin_date, checkout_date')
@@ -143,10 +142,12 @@ async function loadOccupied(
       .gt('checkout_date', minDate)
       .limit(2000)
     if (error) { reportError(error, { site: 'inngest.freeze-watch.bookings', orgId }); throw error }
-    for (const s of data ?? []) {
-      const d = tonightDates.get(s.property_id)
-      if (d && s.checkin_date <= d && s.checkout_date > d) occupied.add(s.property_id)
-    }
+    return data ?? []
+  })
+  const occupied = new Set<string>()
+  for (const s of stays) {
+    const d = tonightDates.get(s.property_id)
+    if (d && s.checkin_date <= d && s.checkout_date > d) occupied.add(s.property_id)
   }
   return occupied
 }
@@ -155,8 +156,7 @@ async function loadOccupied(
 async function loadOpenFreezeWorkOrders(
   supabase: ServiceClient, orgId: string, props: readonly PropertyRow[],
 ): Promise<Set<string>> {
-  const open = new Set<string>()
-  for (const chunk of chunkArray(props.map((p) => p.id), IN_CLAUSE_CHUNK_SIZE)) {
+  const rows = await mapInChunks(props.map((p) => p.id), async (chunk) => {
     const { data, error } = await supabase
       .from('work_orders')
       .select('property_id')
@@ -166,9 +166,9 @@ async function loadOpenFreezeWorkOrders(
       .in('status', ['pending', 'quote_requested', 'assigned', 'in_progress'])
       .limit(2000)
     if (error) { reportError(error, { site: 'inngest.freeze-watch.open-wos', orgId }); throw error }
-    for (const w of data ?? []) open.add(w.property_id)
-  }
-  return open
+    return data ?? []
+  })
+  return new Set(rows.map((w) => w.property_id))
 }
 
 /** Bounded concurrency; a failed forecast is "no forecast" for that property only. */
@@ -177,7 +177,7 @@ async function loadForecasts(
 ): Promise<Map<string, DayForecast | null>> {
   const forecasts = new Map<string, DayForecast | null>()
   for (const chunk of chunkArray(props, FORECAST_CONCURRENCY)) {
-    await Promise.all(chunk.map(async (p) => {
+    await Promise.all(chunk.map(async (p) => { // NOSONAR -- bounded concurrency by design: FORECAST_CONCURRENCY requests at a time stays inside the weather API rate limit
       try {
         forecasts.set(p.id, await getTomorrowForecastForLocation(p.lat!, p.lng!, forecastDates.get(p.id)!))
       } catch (err) {
@@ -225,8 +225,7 @@ async function evaluateOrg(orgId: string, nowMs: number): Promise<PlanItem[]> {
 async function loadFreezeVendors(
   supabase: ServiceClient, orgId: string, propertyIds: readonly string[],
 ): Promise<Map<string, FreezeVendor>> {
-  const out = new Map<string, FreezeVendor>()
-  for (const chunk of chunkArray(propertyIds, IN_CLAUSE_CHUNK_SIZE)) {
+  const rows = await mapInChunks(propertyIds, async (chunk) => {
     const { data, error } = await supabase
       .from('maintenance_schedules')
       .select('property_id, assigned_vendor_id, vendors:assigned_vendor_id(portal_enabled)')
@@ -237,10 +236,13 @@ async function loadFreezeVendors(
       .not('assigned_vendor_id', 'is', null)
       .limit(chunk.length * 10)
     if (error) { reportError(error, { site: 'inngest.freeze-watch.vendors', orgId }); throw error }
-    for (const row of data ?? []) {
-      if (!row.assigned_vendor_id || out.has(row.property_id)) continue
-      out.set(row.property_id, { vendorId: row.assigned_vendor_id, portalEnabled: Boolean(unwrapJoin(row.vendors)?.portal_enabled) })
-    }
+    return data ?? []
+  })
+  // Chunk order is preserved, so "first schedule wins" stays deterministic.
+  const out = new Map<string, FreezeVendor>()
+  for (const row of rows) {
+    if (!row.assigned_vendor_id || out.has(row.property_id)) continue
+    out.set(row.property_id, { vendorId: row.assigned_vendor_id, portalEnabled: Boolean(unwrapJoin(row.vendors)?.portal_enabled) })
   }
   return out
 }
@@ -353,7 +355,7 @@ async function createWorkOrders(orgId: string, plan: readonly PlanItem[]): Promi
   const failures: unknown[] = []
   for (const item of plan) {
     try {
-      results.push(await insertOrRecoverWorkOrder(supabase, orgId, item, vendorByProperty.get(item.property.id) ?? null))
+      results.push(await insertOrRecoverWorkOrder(supabase, orgId, item, vendorByProperty.get(item.property.id) ?? null)) // NOSONAR -- sequential by design: one property's failure is recorded without costing the others, and retries recover rows in order
     } catch (err) {
       // One property's failure must not cost the others their work order. They
       // are recorded below; the step then FAILS so Inngest retries, and the

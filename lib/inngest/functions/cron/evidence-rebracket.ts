@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchDistinctOrgIds } from '@/lib/inngest/paginate'
-import { sendEventsChunked, chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
+import { sendEventsChunked, mapInChunks } from '@/lib/inngest/chunk'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import { bracketEvidenceEvent } from '@/lib/evidence/bracket'
 
@@ -14,7 +14,7 @@ export const evidenceRebracketCron = inngest.createFunction(
   { id: 'cron-evidence-rebracket', name: 'Cron: Evidence Re-bracket', retries: 2 },
   { cron: '45 8 * * *' },
   async ({ step, logger }) => {
-    const orgIds = await step.run('find-orgs', async () => {
+    const orgIds = await step.run('find-orgs', () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-rebracket' })
       return fetchDistinctOrgIds(
         (from, to) => supabase.from('properties').select('org_id').eq('is_active', true)
@@ -75,11 +75,7 @@ async function findStaleEvents(orgId: string, nowMs: number): Promise<StaleCheck
   const changedAt = new Map(unwrapList(turnoverRes, { site: 'inngest.evidence-rebracket.turnovers', orgId })
     .map((t) => [t.id, t.dates_changed_at as string]))
 
-  const stale: StaleCheck[] = []
-  for (const chunk of chunkArray([...changedAt.keys()], IN_CLAUSE_CHUNK_SIZE)) {
-    stale.push(...await staleInChunk(supabase, orgId, chunk, changedAt))
-  }
-  return stale
+  return mapInChunks([...changedAt.keys()], (chunk) => staleInChunk(supabase, orgId, chunk, changedAt))
 }
 
 /** Finds the stale evidence for one org and hands each to the single-event handler below. */

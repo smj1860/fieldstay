@@ -3,7 +3,7 @@
 // Read-side helpers for the PM evidence timeline (/properties/[id]/evidence).
 // Pure where it can be; the loaders take the caller's RLS client, so every read
 // is org-scoped twice (policy plus the explicit .eq('org_id')).
-import { chunkArray, IN_CLAUSE_CHUNK_SIZE } from '@/lib/inngest/chunk'
+import { mapInChunks } from '@/lib/inngest/chunk'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import type { DBClient } from '@/lib/supabase/server'
 import type { EvidenceBracketPosition, EvidenceEvent } from '@/types/database'
@@ -30,22 +30,20 @@ export function emptyCounts(): StayBracketCounts {
 
 interface BracketRow { booking_id: string; evidence_event_id: string; position: EvidenceBracketPosition }
 
-export async function loadBracketsForBookings(
+export function loadBracketsForBookings(
   supabase: DBClient,
   orgId:    string,
   bookingIds: readonly string[],
 ): Promise<BracketRow[]> {
-  const out: BracketRow[] = []
-  for (const chunk of chunkArray(bookingIds, IN_CLAUSE_CHUNK_SIZE)) {
+  return mapInChunks(bookingIds, async (chunk) => {
     const res = await supabase
       .from('evidence_stay_brackets')
       .select('booking_id, evidence_event_id, position')
       .eq('org_id', orgId)
       .in('booking_id', chunk)
       .limit(chunk.length * MAX_EVENTS_PER_STAY)
-    out.push(...((unwrapList(res, { site: 'lib.evidence.timeline.brackets', orgId }) ?? []) as BracketRow[]))
-  }
-  return out
+    return (unwrapList(res, { site: 'lib.evidence.timeline.brackets', orgId }) ?? []) as BracketRow[]
+  })
 }
 
 export function countByBooking(rows: readonly BracketRow[]): Map<string, StayBracketCounts> {
@@ -63,8 +61,7 @@ export async function loadEventsByIds(
   orgId:    string,
   eventIds: readonly string[],
 ): Promise<TimelineEvent[]> {
-  const out: TimelineEvent[] = []
-  for (const chunk of chunkArray(eventIds, IN_CLAUSE_CHUNK_SIZE)) {
+  const out = await mapInChunks(eventIds, async (chunk) => {
     const res = await supabase
       .from('evidence_events')
       .select(TIMELINE_EVENT_COLUMNS)
@@ -72,8 +69,8 @@ export async function loadEventsByIds(
       .in('id', chunk)
       .order('captured_at', { ascending: true })
       .limit(chunk.length)
-    out.push(...((unwrapList(res, { site: 'lib.evidence.timeline.events', orgId }) ?? []) as TimelineEvent[]))
-  }
+    return (unwrapList(res, { site: 'lib.evidence.timeline.events', orgId }) ?? []) as TimelineEvent[]
+  })
   return out.sort((a, b) => a.captured_at.localeCompare(b.captured_at))
 }
 
@@ -83,8 +80,7 @@ export async function loadWithdrawnOriginalIds(
   orgId:    string,
   eventIds: readonly string[],
 ): Promise<Set<string>> {
-  const withdrawn = new Set<string>()
-  for (const chunk of chunkArray(eventIds, IN_CLAUSE_CHUNK_SIZE)) {
+  const rows = await mapInChunks(eventIds, async (chunk) => {
     const res = await supabase
       .from('evidence_events')
       .select('refers_to_event_id')
@@ -92,9 +88,11 @@ export async function loadWithdrawnOriginalIds(
       .eq('kind', 'photo_withdrawn')
       .in('refers_to_event_id', chunk)
       .limit(chunk.length)
-    for (const r of unwrapList(res, { site: 'lib.evidence.timeline.withdrawn', orgId }) ?? []) {
-      if (r.refers_to_event_id) withdrawn.add(r.refers_to_event_id)
-    }
+    return unwrapList(res, { site: 'lib.evidence.timeline.withdrawn', orgId }) ?? []
+  })
+  const withdrawn = new Set<string>()
+  for (const r of rows) {
+    if (r.refers_to_event_id) withdrawn.add(r.refers_to_event_id)
   }
   return withdrawn
 }
@@ -119,18 +117,16 @@ export async function loadUnbracketedEvents(
   const events = (unwrapList(res, { site: 'lib.evidence.timeline.unbracketed', orgId }) ?? []) as TimelineEvent[]
   if (events.length === 0) return []
 
-  const claimed = new Set<string>()
-  for (const chunk of chunkArray(events.map((e) => e.id), IN_CLAUSE_CHUNK_SIZE)) {
+  const claims = await mapInChunks(events.map((e) => e.id), async (chunk) => {
     const b = await supabase
       .from('evidence_stay_brackets')
       .select('evidence_event_id')
       .eq('org_id', orgId)
       .in('evidence_event_id', chunk)
       .limit(chunk.length * 4)
-    for (const r of unwrapList(b, { site: 'lib.evidence.timeline.unbracketedClaims', orgId }) ?? []) {
-      claimed.add(r.evidence_event_id)
-    }
-  }
+    return unwrapList(b, { site: 'lib.evidence.timeline.unbracketedClaims', orgId }) ?? []
+  })
+  const claimed = new Set(claims.map((r) => r.evidence_event_id))
   return events.filter((e) => !claimed.has(e.id))
 }
 

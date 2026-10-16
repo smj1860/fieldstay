@@ -23,7 +23,7 @@ export const evidenceProofOfCare = inngest.createFunction(
     concurrency: { limit: 1, key: 'event.data.work_order_id' },
   },
   { event: 'work-order/completed' },
-  async ({ event, step }) => {
+  ({ event, step }) => {
     const { org_id: orgId, work_order_id: workOrderId, property_id: propertyId } = event.data
 
     return step.run('write-proof-of-care', async () => {
@@ -36,7 +36,7 @@ export const evidenceProofOfCare = inngest.createFunction(
         .eq('org_id', orgId)
         .maybeSingle()
       if (wErr) { reportError(wErr, { site: 'inngest.evidence-proof-of-care.load', orgId }); throw wErr }
-      if (!wo || wo.source !== 'freeze_watch') return { written: false, reason: 'not_freeze_watch' }
+      if (wo?.source !== 'freeze_watch') return { written: false, reason: 'not_freeze_watch' }
 
       const { data: seals, error: sErr } = await supabase
         .from('evidence_events')

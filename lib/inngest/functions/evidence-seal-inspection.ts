@@ -66,7 +66,7 @@ export const evidenceSealInspection = inngest.createFunction(
         const deviceNow = item.answered_at && offset !== null
           ? new Date(Date.now() - offset * 1000).toISOString()
           : null
-        const res = await sealPhoto(supabase, {
+        const res = await sealPhoto(supabase, { // NOSONAR -- sequential by design: each seal downloads and hashes a photo, so one at a time bounds memory
           orgId,
           propertyId:       inspection.property_id,
           bucket:           'inspection-photos',

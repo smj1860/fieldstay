@@ -177,7 +177,7 @@ export async function sealPhoto(
     turnover_id:                 input.turnoverId,
     work_order_id:               input.workOrderId,
     inspection_id:               input.inspectionId,
-    metadata:                    { ...(input.metadata ?? {}), claimed_sha256: input.claimedSha256 },
+    metadata:                    { ...input.metadata, claimed_sha256: input.claimedSha256 },
   }
 
   const { data: inserted, error: insErr } = await supabase

@@ -14,8 +14,8 @@ export const evidenceDeadlinesCron = inngest.createFunction(
   { id: 'cron-evidence-deadlines', name: 'Cron: Evidence Claim Deadlines', retries: 2 },
   { cron: '0 14 * * *' },   // 9am CT: the PM sees the countdown at the start of the day
   async ({ step, logger }) => {
-    const nowMs = await step.run('capture-now', async () => Date.now())
-    const orgIds = await step.run('find-orgs', async () => {
+    const nowMs = await step.run('capture-now', () => Date.now())
+    const orgIds = await step.run('find-orgs', () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-deadlines' })
       return fetchDistinctOrgIds(
         (from, to) => supabase.from('properties').select('org_id').eq('is_active', true)
@@ -41,7 +41,7 @@ export const evidenceDeadlinesOrg = inngest.createFunction(
     concurrency: [{ limit: 10 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'evidence/deadlines.requested' },
-  async ({ event, step }) => {
+  ({ event, step }) => {
     const { org_id: orgId, now_ms: nowMs } = event.data
     return step.run('sweep', async () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-deadlines' })
@@ -59,7 +59,7 @@ export const evidenceDeadlinesOrg = inngest.createFunction(
 export const evidenceDeadlineOnFlag = inngest.createFunction(
   { id: 'evidence-deadline-on-flag', name: 'Evidence: Claim Deadline on Flag', retries: 2 },
   { event: 'turnover/flagged' as const },
-  async ({ event, step }) => {
+  ({ event, step }) => {
     const { org_id: orgId, turnover_id: turnoverId } = event.data
     return step.run('open-countdown', async () => {
       const supabase = createServiceClient({ system: 'inngest:evidence-deadlines' })

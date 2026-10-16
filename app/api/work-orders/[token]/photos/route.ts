@@ -227,7 +227,7 @@ export async function POST(
 
     // Non-fatal to the vendor: the photo is stored and the row exists; the
     // backfill cron seals anything with a row and no ledger entry.
-    await sealVendorPhoto(supabase, workOrder, { path, uploadedBy, photoId: inserted.id, file })
+    await sealVendorPhoto(supabase, workOrder, { path, uploadedBy, photoId: inserted.id, file }) // NOSONAR -- sequential by design: files are processed in order so the per-request photo cap and the early 500 behave deterministically
 
     uploaded.push(inserted)
   }
