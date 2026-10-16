@@ -1,6 +1,7 @@
 import type { DBClient } from '@/lib/supabase/server'
 import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
+import { buildEvidencePhotoItems, loadOrSeedClaimSpots } from '@/lib/evidence/room-photos'
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
@@ -790,6 +791,7 @@ export async function snapshotChecklist(
         // failing the whole batch insert — whenever the same turnover also
         // had at least one asset-discovery item mixed into the same array.
         is_mandatory: false, non_deletable: false, asset_discovery_type: null as string | null,
+        evidence_role: null as string | null, evidence_spot_id: null as string | null,
       }
     })
   )
@@ -800,6 +802,12 @@ export async function snapshotChecklist(
   if (missingAssetTypes.length > 0) {
     items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
   }
+
+  // Evidence photos: one doorway shot per room section plus the property's
+  // claim spots, mandatory and photo-gated. Same injection shape as Asset
+  // Discovery. These are what a claim packet pairs across turnovers.
+  const claimSpots = await loadOrSeedClaimSpots(supabase, orgId, propertyId, sections)
+  items.push(...buildEvidencePhotoItems(instance.id, turnoverID, sections, claimSpots, items.length))
 
   if (items.length > 0) {
     const itemsRes = await supabase.from('checklist_instance_items').insert(items)

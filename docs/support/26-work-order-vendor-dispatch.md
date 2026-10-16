@@ -77,6 +77,12 @@ The board groups open work orders by where they are in this sequence, with anyth
 
 ---
 
+## Photos the Vendor Sees Before Starting
+
+If your team took photos on the work order before the vendor was sent, the vendor's portal page shows them under **Photos from the property manager**. They are read-only and are the only photos from the property the vendor can see. Photos the vendor uploads are sealed to the property's evidence record; a photo the vendor removes stays on the record marked as withdrawn. Each work order has a lifetime limit of 15 vendor uploads.
+
+---
+
 ## What Happens When the Vendor Signs Off
 
 When the vendor clicks Sign Off on their portal page, the work order status moves straight to **Completed** and the actual cost posts to the owner financial ledger automatically. There's no separate "pending review" or approval step in between — sign-off is the completion event. You get a notification once it's done, so review what the vendor submitted at that point rather than beforehand.

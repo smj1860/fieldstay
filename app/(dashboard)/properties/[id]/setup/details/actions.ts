@@ -1,5 +1,6 @@
 'use server'
 
+import { parseFreezeThreshold } from '@/lib/evidence/freeze-watch'
 import { toDbEnum } from '@/lib/db-enums'
 import { doorCodeArgs } from '@/lib/properties/door-code'
 import { revalidatePath } from 'next/cache'
@@ -80,6 +81,12 @@ function computeGuestAccessChanged(
 // (migration 20260731201000). `owner` passes automatically via requireOrgRole.
 const PROPERTY_WRITE_ROLES: MemberRole[] = ['admin', 'manager']
 
+/** A blank numeric field is NULL; anything else goes through the given parser. */
+function optionalNumber(formData: FormData, key: string, parse: (raw: string) => number): number | null {
+  const raw = formData.get(key)
+  return raw ? parse(raw as string) : null
+}
+
 export async function saveDetails(
   propertyId: string,
   _prev: DetailsState | null,
@@ -110,19 +117,15 @@ export async function saveDetails(
     // it outright is safe.
     const door_code_unchanged = formData.get('door_code_unchanged') === '1'
     const internal_notes    = (formData.get('internal_notes') as string)?.trim() || null
-    const avg_nightly_rate   = formData.get('avg_nightly_rate')
-      ? Number.parseFloat(formData.get('avg_nightly_rate') as string)
-      : null
-    const cleaning_cost      = formData.get('cleaning_cost')
-      ? Number.parseFloat(formData.get('cleaning_cost') as string)
-      : null
-    const same_day_premium_pct = formData.get('same_day_premium_pct')
-      ? Number.parseFloat(formData.get('same_day_premium_pct') as string)
-      : null
-    const square_footage     = formData.get('square_footage')
-      ? Number.parseInt(formData.get('square_footage') as string)
-      : null
+    const avg_nightly_rate     = optionalNumber(formData, 'avg_nightly_rate', Number.parseFloat)
+    const cleaning_cost        = optionalNumber(formData, 'cleaning_cost', Number.parseFloat)
+    const same_day_premium_pct = optionalNumber(formData, 'same_day_premium_pct', Number.parseFloat)
+    const square_footage       = optionalNumber(formData, 'square_footage', (v) => Number.parseInt(v, 10))
     const cleaning_cost_visible_to_owner = formData.get('cleaning_cost_visible_to_owner') === 'on'
+
+    const freezeThreshold = parseFreezeThreshold(formData.get('freeze_threshold_f'))
+    if ('error' in freezeThreshold) return { error: freezeThreshold.error }
+    const freeze_threshold_f = freezeThreshold.value
 
     if (!name) return { error: 'Property name is required' }
 
@@ -146,7 +149,7 @@ export async function saveDetails(
         bedrooms, bathrooms, max_guests, checkin_time,
         checkout_time, wifi_name, wifi_password, internal_notes,
         avg_nightly_rate, cleaning_cost, same_day_premium_pct, square_footage,
-        cleaning_cost_visible_to_owner,
+        cleaning_cost_visible_to_owner, freeze_threshold_f,
       })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)

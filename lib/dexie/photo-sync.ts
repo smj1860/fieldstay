@@ -107,42 +107,77 @@ export async function retryFailedPhotoUploads(
  * cache showing a photo the server would never learn about, with no outbox row
  * and so nothing in the failed-sync surface.
  */
+/**
+ * The seal payload for /api/crew/evidence/seal. Queued INSIDE the same Dexie
+ * transaction as the path write so the two cannot disagree: if the path
+ * reached the server, the seal request exists in the outbox too. Absent when
+ * the row predates capture metadata (older build), in which case the photo is
+ * still delivered, just unsealed, and the nightly backfill cron picks it up.
+ */
+function sealPayloadFor(row: PendingPhotoUploadRow, bucket: 'turnover-photos'): Record<string, unknown> | null {
+  if (!row.sha256 || !row.storage_path || !row.captured_at) return null
+  return {
+    bucket,
+    storage_path:   row.storage_path,
+    sha256:         row.sha256,
+    byte_size:      row.byte_size ?? null,
+    captured_at:    row.captured_at,
+    lat:            row.lat ?? null,
+    lng:            row.lng ?? null,
+    gps_accuracy_m: row.gps_accuracy_m ?? null,
+    source_table:   row.target_table,
+    source_id:      row.target_id,
+    turnover_id:    row.turnover_id ?? null,
+  }
+}
+
 async function applyUploadedPath(
   userId: string,
   row: PendingPhotoUploadRow,
 ): Promise<void> {
   const db = getDexieDb(userId)
+  const seal = sealPayloadFor(row, 'turnover-photos')
 
   await db.transaction('rw', db.mutations, db.checklist_instance_items,
     db.checklist_instances, db.property_assets, async () => {
-      if (row.target_table === 'checklist_instance_items') {
-        await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
-        await enqueueMutationTx(db, 'checklist_instance_items', row.target_id, 'PATCH', {
-          photo_storage_path: row.storage_path,
-        })
-        return
-      }
-
-      if (row.target_table === 'checklist_instances') {
-        await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
-        await enqueueMutationTx(db, 'checklist_instances', row.target_id, 'PATCH', {
-          section_photo_path: row.storage_path,
-        })
-        return
-      }
-
-      // property_assets.photo_url stores the BARE object key, same as the two
-      // targets above. It used to hold a getPublicUrl() result, but turnover-photos
-      // is a private bucket now: a public URL 400s and a signed one expires, so the
-      // stable key is what gets persisted and readers sign it on demand.
-      await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
-      await enqueueMutationTx(db, 'property_assets', row.target_id, 'PATCH', {
-        photo_url:   row.storage_path,
-        scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
-      })
+      await queuePointerWrite(db, row)
+      // Queued AFTER the pointer on purpose: the outbox drains in order and
+      // stops at the first failure, so a seal that 503s must not hold the
+      // pointer PATCH behind it. The seal's targetId is the queue row id:
+      // unique per capture, stable across retries, and never the storage path
+      // (paths are not valid mutation target ids on the failed-sync surface).
+      if (seal) await enqueueMutationTx(db, 'evidence_seals', row.id, 'PUT', seal)
     })
 
   void getSyncEngine(userId).processOutbox()
+}
+
+async function queuePointerWrite(db: ReturnType<typeof getDexieDb>, row: PendingPhotoUploadRow): Promise<void> {
+  if (row.target_table === 'checklist_instance_items') {
+    await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
+    await enqueueMutationTx(db, 'checklist_instance_items', row.target_id, 'PATCH', {
+      photo_storage_path: row.storage_path,
+    })
+    return
+  }
+
+  if (row.target_table === 'checklist_instances') {
+    await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
+    await enqueueMutationTx(db, 'checklist_instances', row.target_id, 'PATCH', {
+      section_photo_path: row.storage_path,
+    })
+    return
+  }
+
+  // property_assets.photo_url stores the BARE object key, same as the two
+  // targets above. It used to hold a getPublicUrl() result, but turnover-photos
+  // is a private bucket now: a public URL 400s and a signed one expires, so the
+  // stable key is what gets persisted and readers sign it on demand.
+  await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
+  await enqueueMutationTx(db, 'property_assets', row.target_id, 'PATCH', {
+    photo_url:   row.storage_path,
+    scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
+  })
 }
 
 /**

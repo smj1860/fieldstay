@@ -116,6 +116,7 @@ const CREW_DICT = {
   syncApplianceDetails:            { en: 'Appliance details', es: 'Detalles del electrodoméstico' },
   syncWorkOrderCompletion:         { en: 'Work order completion', es: 'Finalización de orden de trabajo' },
   syncMessageToOps:                { en: 'Message to your operations team', es: 'Mensaje a tu equipo de operaciones' },
+  syncPhotoSeal:                   { en: 'Photo record', es: 'Registro de foto' },
   syncSavedChange:                 { en: 'Saved change', es: 'Cambio guardado' },
   syncPhoto:                       { en: 'Photo', es: 'Foto' },
   syncStalledHint: {

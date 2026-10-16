@@ -193,6 +193,13 @@ import { handleSupportEscalation } from '@/lib/inngest/functions/support-convers
 import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
+import { evidenceSealInspection } from '@/lib/inngest/functions/evidence-seal-inspection'
+import { evidenceProofOfCare } from '@/lib/inngest/functions/evidence-proof-of-care'
+import { evidencePacket } from '@/lib/inngest/functions/evidence-packet'
+import { evidenceDeadlinesCron, evidenceDeadlinesOrg, evidenceDeadlineOnFlag } from '@/lib/inngest/functions/evidence-deadlines'
+import { evidenceBackfillCron, evidenceBackfillOrg } from '@/lib/inngest/functions/cron/evidence-backfill'
+import { evidenceRebracketCron, evidenceRebracketOrg, evidenceBracketOne } from '@/lib/inngest/functions/cron/evidence-rebracket'
+import { freezeWatchCron, freezeWatchOrg } from '@/lib/inngest/functions/cron/freeze-watch'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 
@@ -200,6 +207,19 @@ export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     inspectionCompleted,
+    evidenceSealInspection,
+    evidenceProofOfCare,
+    evidencePacket,
+    evidenceDeadlinesCron,
+    evidenceDeadlinesOrg,
+    evidenceDeadlineOnFlag,
+    evidenceBackfillCron,
+    evidenceBackfillOrg,
+    evidenceRebracketCron,
+    evidenceRebracketOrg,
+    evidenceBracketOne,
+    freezeWatchCron,
+    freezeWatchOrg,
     prospectingCrawlDispatch,
     prospectingCrawlProfile,
     inspectionOverdueEmailCron,

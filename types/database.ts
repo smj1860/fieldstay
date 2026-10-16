@@ -70,7 +70,7 @@ export type VendorProgress      = 'declined' | 'cancelled_by_vendor' | 'appointm
                                 | 'return_visit_scheduled' | 'job_completed'
 export type VendorDeclineReason = 'no_capacity' | 'outside_service_area' | 'not_my_trade'
                                 | 'price_below_minimum' | 'cannot_access_property' | 'other'
-export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection'
+export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection' | 'freeze_watch'
 // Inspections (docs/INSPECTIONS_SPEC.md phase 1).
 export type InspectionResult       = 'pass' | 'fail' | 'na'
 export type InspectionResponseType = 'yes_no' | 'count' | 'date' | 'text' | 'photo'
@@ -187,6 +187,8 @@ export interface Organization {
   plan_status:                  OrgPlanStatus
   trial_ends_at:                string | null
   max_properties:               number
+  /** Days after checkout a claim can be filed on platforms with no window of their own. Default 14. */
+  claim_window_days:            number
   onboarding_steps_completed:   Record<string, boolean>
   bedroom_room_template_id:        string | null
   bathroom_room_template_id:       string | null
@@ -283,6 +285,8 @@ export interface Property {
   avg_nightly_rate:        number | null
   cleaning_cost:           number | null
   same_day_premium_pct:    number | null
+  /** Forecast low (F) at or below which Freeze Watch creates a prep work order while vacant. NULL = platform default (28). */
+  freeze_threshold_f:      number | null
   cleaning_cost_visible_to_owner: boolean
   square_footage:          number | null
   lat:                     number | null
@@ -899,6 +903,9 @@ export interface ChecklistInstanceItem {
   is_mandatory:          boolean
   non_deletable:         boolean
   asset_discovery_type:  string | null
+  /** 'room_condition' | 'claim_spot' | null (ordinary task). Set only by snapshotChecklist's injection. */
+  evidence_role:         'room_condition' | 'claim_spot' | null
+  evidence_spot_id:      string | null
   created_at:            string
   updated_at:            string
   /**
@@ -1320,6 +1327,67 @@ export interface WorkOrderUpdate {
   // see work_order_updates_dedupe_key_idx (20260915211000), plain unique so
   // supabase-js's onConflict can name it as an arbiter.
   dedupe_key:                string | null
+}
+
+export type EvidenceEventKind      = 'photo_sealed' | 'photo_withdrawn' | 'packet_generated' | 'proof_of_care'
+export type EvidenceSourceTable    =
+  | 'checklist_instance_items' | 'checklist_instances' | 'property_assets'
+  | 'work_order_photos' | 'inspection_items' | 'turnover_flags' | 'evidence_packets'
+export type EvidenceBucket         = 'turnover-photos' | 'work-order-photos' | 'inspection-photos' | 'evidence-packets'
+export type EvidenceCapturedByKind = 'crew' | 'pm' | 'vendor' | 'system'
+export type EvidenceBracketPosition = 'pre_stay' | 'during_stay' | 'post_stay'
+
+export interface EvidenceEvent {
+  id:                          string
+  org_id:                      string
+  property_id:                 string
+  kind:                        EvidenceEventKind
+  source_table:                EvidenceSourceTable
+  source_id:                   string
+  bucket:                      EvidenceBucket
+  storage_path:                string
+  sha256:                      string
+  byte_size:                   number | null
+  hash_verified:               boolean
+  captured_at:                 string
+  captured_at_source:          'server' | 'device'
+  device_captured_at:          string | null
+  device_clock_offset_seconds: number | null
+  received_at:                 string
+  lat:                         number | null
+  lng:                         number | null
+  gps_accuracy_m:              number | null
+  captured_by_kind:            EvidenceCapturedByKind
+  captured_by_id:              string | null
+  captured_by_label:           string | null
+  turnover_id:                 string | null
+  work_order_id:               string | null
+  inspection_id:               string | null
+  refers_to_event_id:          string | null
+  metadata:                    Json
+  created_at:                  string
+}
+
+export interface PropertyEvidenceSpot {
+  id:           string
+  org_id:       string
+  property_id:  string
+  section_name: string
+  label:        string
+  label_es:     string | null
+  sort_order:   number
+  is_active:    boolean
+  created_at:   string
+  updated_at:   string
+}
+
+export interface EvidenceStayBracket {
+  id:                string
+  org_id:            string
+  evidence_event_id: string
+  booking_id:        string
+  position:          EvidenceBracketPosition
+  bracketed_at:      string
 }
 
 export interface WorkOrderPhoto {
@@ -2548,6 +2616,9 @@ export interface HandWrittenRowMap {
   maintenance_catalog_items:           MaintenanceCatalogItem
   maintenance_completions:             MaintenanceCompletion
   work_order_invoices:                 WorkOrderInvoice
+  evidence_events:                     EvidenceEvent
+  evidence_stay_brackets:              EvidenceStayBracket
+  property_evidence_spots:             PropertyEvidenceSpot
   reservation_messages:                ReservationMessage
   reviews:                             Review
   review_responses:                    ReviewResponse

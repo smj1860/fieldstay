@@ -8,6 +8,7 @@ import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { enqueueMutationTx, getSyncEngine } from '@/lib/dexie/syncService'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { compressPhoto } from '@/lib/images/compress'
+import { describeCapture } from '@/lib/evidence/capture'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { Dialog } from '@/components/ui/Dialog'
@@ -180,6 +181,7 @@ export function DiscoveryCaptureModal({
         photoPath = path
 
         const compressed = await compressPhoto(photoFile)
+        const capture    = await describeCapture(compressed)
         await savePendingPhotoBlob(userId, blobKey, compressed)
         await db.pending_photo_uploads.add({
           id:             crypto.randomUUID(),
@@ -188,9 +190,10 @@ export function DiscoveryCaptureModal({
           target_column:  'photo_url',
           storage_path:   path,
           local_blob_key: blobKey,
-          mime_type:      photoFile.type,
+          mime_type:      'image/jpeg',
           retry_count:    0,
-          created_at:     new Date().toISOString(),
+          created_at:     capture.captured_at,
+          ...capture,
         })
       }
 

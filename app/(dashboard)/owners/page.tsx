@@ -3,6 +3,7 @@ import { headers } from 'next/headers'
 import { requireOrgMember } from '@/lib/auth'
 import { OwnersManager } from './owners-manager'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { workOrdersWithPhotos } from '@/lib/evidence/wo-photo-presence'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
 export const metadata: Metadata = { title: 'Owner Portal' }
@@ -13,7 +14,7 @@ type OwnerTransactionRow = {
   id: string; property_id: string; transaction_type: 'revenue' | 'expense'
   category: string; amount: number; description: string
   transaction_date: string; notes: string | null
-  work_order_id: string | null; booking_id: string | null
+  work_order_id: string | null; booking_id: string | null; has_photos?: boolean
   visible_to_owner: boolean; source: string | null
 }
 
@@ -96,6 +97,9 @@ export default async function OwnersPage() {
   )
 
 
+  const withPhotos = await workOrdersWithPhotos(supabase, transactions.map((t) => t.work_order_id))
+  const txnsWithPhotoFlag = transactions.map((t) => ({ ...t, has_photos: t.work_order_id !== null && withPhotos.has(t.work_order_id) }))
+
   // Logs + reports, then throws so the segment's error.tsx renders a real
   // error state — a failed read must not render as an empty page.
     // Derive base URL for portal links
@@ -108,7 +112,7 @@ export default async function OwnersPage() {
     <OwnersManager
       owners={owners ?? []}
       properties={properties ?? []}
-      transactions={transactions ?? []}
+      transactions={txnsWithPhotoFlag}
       baseUrl={baseUrl}
     />
   )

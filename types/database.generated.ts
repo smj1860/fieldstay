@@ -575,6 +575,8 @@ export type Database = {
           completed_by_crew_id: string | null
           created_at: string
           crew_notes: string | null
+          evidence_role: string | null
+          evidence_spot_id: string | null
           id: string
           instance_id: string
           is_completed: boolean
@@ -599,6 +601,8 @@ export type Database = {
           completed_by_crew_id?: string | null
           created_at?: string
           crew_notes?: string | null
+          evidence_role?: string | null
+          evidence_spot_id?: string | null
           id?: string
           instance_id: string
           is_completed?: boolean
@@ -623,6 +627,8 @@ export type Database = {
           completed_by_crew_id?: string | null
           created_at?: string
           crew_notes?: string | null
+          evidence_role?: string | null
+          evidence_spot_id?: string | null
           id?: string
           instance_id?: string
           is_completed?: boolean
@@ -647,6 +653,13 @@ export type Database = {
             columns: ["completed_by_crew_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "checklist_instance_items_evidence_spot_id_fkey"
+            columns: ["evidence_spot_id"]
+            isOneToOne: false
+            referencedRelation: "property_evidence_spots"
             referencedColumns: ["id"]
           },
           {
@@ -1380,6 +1393,191 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "demo_activity_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      evidence_events: {
+        Row: {
+          bucket: string
+          byte_size: number | null
+          captured_at: string
+          captured_at_source: string
+          captured_by_id: string | null
+          captured_by_kind: string
+          captured_by_label: string | null
+          created_at: string
+          device_captured_at: string | null
+          device_clock_offset_seconds: number | null
+          gps_accuracy_m: number | null
+          hash_verified: boolean
+          id: string
+          inspection_id: string | null
+          kind: string
+          lat: number | null
+          lng: number | null
+          metadata: Json
+          org_id: string
+          property_id: string
+          received_at: string
+          refers_to_event_id: string | null
+          sha256: string
+          source_id: string
+          source_table: string
+          storage_path: string
+          turnover_id: string | null
+          work_order_id: string | null
+        }
+        Insert: {
+          bucket: string
+          byte_size?: number | null
+          captured_at: string
+          captured_at_source?: string
+          captured_by_id?: string | null
+          captured_by_kind: string
+          captured_by_label?: string | null
+          created_at?: string
+          device_captured_at?: string | null
+          device_clock_offset_seconds?: number | null
+          gps_accuracy_m?: number | null
+          hash_verified?: boolean
+          id?: string
+          inspection_id?: string | null
+          kind: string
+          lat?: number | null
+          lng?: number | null
+          metadata?: Json
+          org_id: string
+          property_id: string
+          received_at?: string
+          refers_to_event_id?: string | null
+          sha256: string
+          source_id: string
+          source_table: string
+          storage_path: string
+          turnover_id?: string | null
+          work_order_id?: string | null
+        }
+        Update: {
+          bucket?: string
+          byte_size?: number | null
+          captured_at?: string
+          captured_at_source?: string
+          captured_by_id?: string | null
+          captured_by_kind?: string
+          captured_by_label?: string | null
+          created_at?: string
+          device_captured_at?: string | null
+          device_clock_offset_seconds?: number | null
+          gps_accuracy_m?: number | null
+          hash_verified?: boolean
+          id?: string
+          inspection_id?: string | null
+          kind?: string
+          lat?: number | null
+          lng?: number | null
+          metadata?: Json
+          org_id?: string
+          property_id?: string
+          received_at?: string
+          refers_to_event_id?: string | null
+          sha256?: string
+          source_id?: string
+          source_table?: string
+          storage_path?: string
+          turnover_id?: string | null
+          work_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evidence_events_inspection_id_fkey"
+            columns: ["inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_events_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_events_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_events_refers_to_event_id_fkey"
+            columns: ["refers_to_event_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_events_turnover_id_fkey"
+            columns: ["turnover_id"]
+            isOneToOne: false
+            referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_events_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      evidence_stay_brackets: {
+        Row: {
+          booking_id: string
+          bracketed_at: string
+          evidence_event_id: string
+          id: string
+          org_id: string
+          position: string
+        }
+        Insert: {
+          booking_id: string
+          bracketed_at?: string
+          evidence_event_id: string
+          id?: string
+          org_id: string
+          position: string
+        }
+        Update: {
+          booking_id?: string
+          bracketed_at?: string
+          evidence_event_id?: string
+          id?: string
+          org_id?: string
+          position?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evidence_stay_brackets_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_stay_brackets_evidence_event_id_fkey"
+            columns: ["evidence_event_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_stay_brackets_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -3608,6 +3806,7 @@ export type Database = {
           bedroom_room_template_id: string | null
           billing_email: string | null
           capex_inflation_rate_pct: number
+          claim_window_days: number
           comms_log_retention_days: number
           created_at: string
           default_room_templates_seeded_at: string | null
@@ -3642,6 +3841,7 @@ export type Database = {
           bedroom_room_template_id?: string | null
           billing_email?: string | null
           capex_inflation_rate_pct?: number
+          claim_window_days?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null
@@ -3676,6 +3876,7 @@ export type Database = {
           bedroom_room_template_id?: string | null
           billing_email?: string | null
           capex_inflation_rate_pct?: number
+          claim_window_days?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null
@@ -4283,6 +4484,7 @@ export type Database = {
           external_id: string | null
           external_missing_since: string | null
           external_source: string | null
+          freeze_threshold_f: number | null
           has_security_system: boolean | null
           house_manual: string | null
           id: string
@@ -4331,6 +4533,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          freeze_threshold_f?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -4379,6 +4582,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          freeze_threshold_f?: number | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -4545,6 +4749,60 @@ export type Database = {
             columns: ["replaced_by_asset_id"]
             isOneToOne: false
             referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_evidence_spots: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          label_es: string | null
+          org_id: string
+          property_id: string
+          section_name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label: string
+          label_es?: string | null
+          org_id: string
+          property_id: string
+          section_name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          label_es?: string | null
+          org_id?: string
+          property_id?: string
+          section_name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_evidence_spots_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_evidence_spots_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]
@@ -7854,6 +8112,7 @@ export type Database = {
         | "guest_report"
         | "vacancy_gap_suggestion"
         | "inspection"
+        | "freeze_watch"
       wo_status:
         | "pending"
         | "quote_requested"
@@ -8233,6 +8492,7 @@ export const Constants = {
         "guest_report",
         "vacancy_gap_suggestion",
         "inspection",
+        "freeze_watch",
       ],
       wo_status: [
         "pending",

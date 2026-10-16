@@ -333,3 +333,110 @@ Cleaning items are rolled into one cleaning work order per walk rather than one 
 
 See *Running an Inspection* for the full detail.
 
+---
+
+## What is Stay evidence, and did I turn it on?
+
+Stay evidence is the sealed photo record FieldStay keeps on every property. Every photo taken through FieldStay gets a fingerprint, an honest capture time, and who took it, the moment it is captured, and is filed to the guest stay it belongs to. It is on for every property from day one and there is no switch. Open any property and click **Evidence** to see it. See **Stay Evidence: Your Sealed Photo Record**.
+
+---
+
+## What does "sealed" actually mean?
+
+The photo gets a unique fingerprint computed from its bytes the moment it is taken, and FieldStay computes it again when the photo reaches the server. If the two match, the record says so. If the file ever changes afterward, the fingerprint no longer matches and the record shows it. Nothing on the record is ever edited; a photo can be withdrawn, which adds a new dated entry pointing at the original.
+
+---
+
+## Why is there a "Room condition photo" at the end of every section on my checklist?
+
+That is the one photo per room that makes a before and after possible. Crew stand in the doorway and photograph the whole room. The photo from the turnover between two guests is the After for the guest who left and the Before for the guest arriving, so crew take it once. Sections that are not rooms, like Exterior or Final Checks, do not get one. See **Room Photos and Claim Spots**.
+
+---
+
+## My crew says the new photos are too much. What can I trim?
+
+Trim the claim spots, not the room photos. Open the property, click **Evidence**, and edit the **Claim photo spots** card. Five to eight photos per home, counting the room photos, is the right number. One doorway photo per room is the minimum that makes a claim packet possible.
+
+---
+
+## Can my crew still take photos with no signal?
+
+Yes. The photo is sealed on the phone with the real capture time and syncs when signal comes back. The record shows when the photo was taken, not when it uploaded. If the phone's clock is wrong, FieldStay records the correction rather than the wrong time.
+
+---
+
+## How do I build a claim packet?
+
+Open the property, click **Evidence**, select the stay, choose the photos in the **Claim packet** card, and click **Build packet**. You get a PDF with before and after photos by room and a chain of custody page listing every photo's fingerprint and times. The download link expires after five minutes; build again for a fresh one. See **Building a Claim Packet**.
+
+---
+
+## Does the claim packet include the guest's name?
+
+No. The cover shows the property, the stay dates, the booking platform, and the platform's confirmation code. No guest name, email, or phone number appears anywhere in the packet.
+
+---
+
+## Will Airbnb or my insurer accept the packet?
+
+FieldStay does not promise any outcome and does not file claims. What the packet gives you is a dated, sealed record with the chain of custody printed, which is more than a camera roll. The platform or adjuster decides.
+
+---
+
+## What starts a claim countdown, and why did I not get one for a normal stay?
+
+A countdown opens only when you flag a turnover or your crew reports an issue from the crew app. A normal stay never produces one. You get at most four notifications per stay: when it opens, at seven days left, at two days left, and when the window closes. See **Claim Countdown**.
+
+---
+
+## Where does FieldStay get the claim deadline?
+
+Airbnb and VRBO stays use that platform's own rules, and the notification names the rule. Direct bookings and other sources use your account's **Claim window**, set on any property's Evidence page, default 14 days after checkout. Platform rules change and the platform's help center is the authority. When in doubt, file early.
+
+---
+
+## Can a vendor delete a photo they uploaded?
+
+They can remove it from their view of the work order. The photo stays on the property's evidence record, marked as withdrawn with the date. Each work order also has a lifetime limit on vendor uploads, so a vendor cannot upload and remove photos indefinitely.
+
+---
+
+## Can a vendor see my crew's photos?
+
+A vendor sees the photos your team took on that work order before they arrived, labeled as such, on their vendor portal page. They see nothing else from the property. This is so "it was already like that" is answered before it is said.
+
+---
+
+## Can an owner see the evidence photos?
+
+Only the photos behind a charge on their statement, and only when you have marked that charge **Visible to Owner**. Owners see a "View photos" link on those charges in their portal. They cannot see the Evidence page or any other photos.
+
+---
+
+## What is Freeze Watch, and how do I set the temperature?
+
+Freeze Watch creates a prep work order when tomorrow's forecast low reaches your threshold and nobody is checked in tonight. The default threshold is 28°F. Set a different one per property under the property's details, **Freeze Watch threshold (°F)**. When the work order is completed with at least two photos, FieldStay writes a proof of care record. See **Freeze Watch**.
+
+---
+
+## Why did Freeze Watch not create a work order last night?
+
+In order of likelihood: the forecast low did not reach the threshold; a guest was checked in; a freeze prep work order was already open for that home; the property has no location on the map; or the weather service had no forecast for that day. FieldStay never guesses a temperature.
+
+---
+
+## Who gets a Freeze Watch work order?
+
+If the property has an active maintenance schedule with "freeze" in its name and a vendor assigned, that vendor. If the vendor has portal access they are notified the usual way; if not, the work order is assigned to them but nobody is contacted, and your notification says to reach them directly. With no such schedule, the work order is created unassigned.
+
+---
+
+## What is proof of care?
+
+An entry on the property's evidence record, written when a Freeze Watch work order is completed with two or more sealed photos. It references every photo, the date, and the vendor. It is what you show an insurer after a freeze loss to demonstrate the home was winterized, when, and by whom.
+
+---
+
+## Does any of this cost extra?
+
+No. Every FieldStay subscription includes the full platform, including Stay evidence, claim packets, the claim countdown, and Freeze Watch. See **Pricing and Plans**.

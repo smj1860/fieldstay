@@ -11,6 +11,7 @@ import type { AssetType } from '@/types/database'
 import { DiscoveryCaptureModal } from '@/app/crew/_components/discovery-capture-modal'
 import { useCrewContext } from '@/lib/crew/crew-context'
 import { localizedContent } from '@/lib/crew/content-locale'
+import { localizedPhotoReason } from '@/lib/evidence/room-photo-copy'
 import type { TurnoverActions } from './use-turnover-actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +363,7 @@ function ItemStatusLines({
   needsPhoto:  boolean
   photoQueued: boolean
 }>) {
+  const { crewLocale } = useCrewContext()
   return (
     <>
       {item.crew_notes && !noteOpen && (
@@ -382,7 +384,7 @@ function ItemStatusLines({
       )}
       {item.requires_photo && item.photo_reason && (
         <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
-          <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
+          <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {localizedPhotoReason(crewLocale, item.photo_reason)}
         </p>
       )}
     </>

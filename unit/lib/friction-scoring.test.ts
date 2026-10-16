@@ -14,6 +14,7 @@ import type { DayForecast } from '@/lib/weather/tomorrow'
 
 const forecast = (temperatureMax: number, precipitationProbability: number): DayForecast => ({
   temperatureMax,
+  temperatureMin: null,
   precipitationProbability,
   weatherCode:  1000,
   weatherLabel: 'Clear',

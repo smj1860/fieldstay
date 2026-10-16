@@ -41,6 +41,7 @@ export default async function VendorPortalPage({
       principalKind={data.principal.kind}
       technicianGrants={data.technicianGrants}
       access={data.access}
+      priorPhotos={data.priorPhotos}
     />
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useRef, useState } from 'react'
+import { sealWorkOrderPhoto } from './seal-work-order-photo'
 import { AlertTriangle, Camera, Info, ShieldOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createWorkOrder } from './actions'
@@ -10,6 +11,7 @@ import { distanceMiles } from '@/lib/geocoding'
 import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
+import { compressPhoto } from '@/lib/images/compress'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -51,6 +53,49 @@ function submitLabel({ offline, pending, queueing, assignMode, quoteCount }: {
  * maintenance-board.tsx, which used to conflate this ~470-line form with
  * the board itself in one 2618-line file.
  */
+type BrowserSupabase = ReturnType<typeof createClient>
+
+/**
+ * Compresses, uploads, attaches and seals one PM-supplied photo. Returns false
+ * when the photo could not be stored or attached (the caller counts those); a
+ * failed seal is not a failure, the nightly evidence backfill picks it up.
+ */
+async function attachWorkOrderPhoto(
+  supabase: BrowserSupabase, orgId: string, workOrderId: string, file: File,
+): Promise<boolean> {
+  // Downscale like every other capture surface. compressPhoto re-encodes to
+  // JPEG, or hands back the original untouched when it cannot, so the
+  // extension and content type follow what we actually upload.
+  const upload = await compressPhoto(file)
+  const isJpeg = upload.type === 'image/jpeg'
+  const ext    = isJpeg ? 'jpg' : (file.name.split('.').pop() ?? 'jpg')
+  // The leading `${orgId}/` segment is what the work-order-photos
+  // storage RLS policies match on — a path without it is denied on
+  // upload and can never be signed for reading.
+  const path = orgScopedStoragePath(orgId, workOrderId, `${Date.now()}-${crypto.randomUUID()}.${ext}`)
+  const { error: uploadErr } = await supabase.storage
+    .from('work-order-photos')
+    .upload(path, upload, { contentType: isJpeg ? 'image/jpeg' : file.type })
+  if (uploadErr) {
+    console.error('[CreateWorkOrderModal] Failed to upload photo:', uploadErr)
+    return false
+  }
+  // work_order_photos has NO org_id column (it is scoped through its work
+  // order); naming one here made every insert fail, so PM-uploaded photos
+  // never attached.
+  const { data: photoRow, error: photoError } = await supabase.from('work_order_photos').insert({
+    work_order_id: workOrderId,
+    storage_path:  path,
+  }).select('id').single()
+  if (photoError || !photoRow) {
+    console.error('[CreateWorkOrderModal] Failed to attach photos:', photoError)
+    return false
+  }
+  // Best effort: a failed seal is picked up by the nightly evidence backfill.
+  await sealWorkOrderPhoto({ workOrderId, photoId: photoRow.id, storagePath: path })
+  return true
+}
+
 export function CreateWorkOrderModal({
   properties,
   vendors,
@@ -200,28 +245,10 @@ export function CreateWorkOrderModal({
       const supabase = createClient()
       let photoFailures = 0
       for (const file of photoFiles) {
-        const ext  = file.name.split('.').pop() ?? 'jpg'
-        // The leading `${orgId}/` segment is what the work-order-photos
-        // storage RLS policies match on — a path without it is denied on
-        // upload and can never be signed for reading.
-        const path = orgScopedStoragePath(orgId, workOrderId, `${Date.now()}-${crypto.randomUUID()}.${ext}`)
-        const { error: uploadErr } = await supabase.storage
-          .from('work-order-photos')
-          .upload(path, file, { contentType: file.type })
-        if (uploadErr) {
-          console.error('[CreateWorkOrderModal] Failed to upload photo:', uploadErr)
-          photoFailures++
-          continue
-        }
-        const { error: photoError } = await supabase.from('work_order_photos').insert({
-          work_order_id: workOrderId,
-          org_id:        orgId,
-          storage_path:  path,
-        })
-        if (photoError) {
-          console.error('[CreateWorkOrderModal] Failed to attach photos:', photoError)
-          photoFailures++
-        }
+        // One at a time on purpose: compressPhoto decodes a full-size image on the
+        // main thread, and several at once can exhaust a phone's memory.
+        const attached = await attachWorkOrderPhoto(supabase, orgId, workOrderId, file) // NOSONAR -- sequential by design: bounds peak image-decode memory, see comment above
+        if (!attached) photoFailures++
       }
       // Non-fatal — the WO was created; only photo attachment failed. Surface a
       // non-blocking warning via the existing toast rather than failing the modal.

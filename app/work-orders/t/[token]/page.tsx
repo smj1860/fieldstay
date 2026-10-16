@@ -72,6 +72,7 @@ export default async function TechnicianWorkOrderPage({
       principalKind="technician"
       technicianGrants={[]}
       access={data.access}
+      priorPhotos={data.priorPhotos}
     />
   )
 }

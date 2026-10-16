@@ -2,6 +2,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 import { reportError } from '@/lib/observability/report-error'
 export type AuditAction =
+  | 'evidence.photo_sealed'
+  | 'evidence.photo_withdrawn'
+  | 'evidence.packet_generated'
+  | 'evidence.claim_window.updated'
   | 'auth.invite.accepted'
   | 'auth.oauth.callback'
   | 'team.member.invited'

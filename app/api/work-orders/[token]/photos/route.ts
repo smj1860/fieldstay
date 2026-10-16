@@ -3,6 +3,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
+import { sealPhoto } from '@/lib/evidence/seal'
+import { createHash } from 'node:crypto'
 
 /**
  * POST /api/work-orders/[token]/photos — upload completion photos, one call
@@ -17,6 +20,13 @@ import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
  */
 
 const MAX_PHOTOS      = 5
+/**
+ * Photos EVER uploaded to one work order, withdrawn ones included. A vendor
+ * delete keeps the Storage object (evidence is never deleted), so counting only
+ * live rows against MAX_PHOTOS would let a public-token holder upload and delete
+ * in a loop and grow the bucket without bound.
+ */
+const MAX_LIFETIME_PHOTOS = 15
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 const EXT_BY_MIME: Record<string, string> = {
@@ -44,7 +54,7 @@ async function loadOpenWorkOrder(token: string) {
 
   const { data: workOrder, error } = await supabase
     .from('work_orders')
-    .select('id, org_id, status, portal_enabled, completion_token_expires_at')
+    .select('id, org_id, property_id, vendor_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
     .single()
 
@@ -66,6 +76,78 @@ async function loadOpenWorkOrder(token: string) {
   }
 
   return { supabase, workOrder }
+}
+
+type PortalClient = ReturnType<typeof createServiceClient>
+interface PortalWorkOrder { id: string; org_id: string; property_id: string; vendor_id: string | null }
+
+/**
+ * Seals a just-uploaded vendor photo with server-only provenance: the vendor's
+ * browser gave us no device clock and no hash, recorded honestly as
+ * captured_at_source = 'server'. Never throws; a failed seal is reported.
+ */
+async function sealVendorPhoto(
+  supabase:  PortalClient,
+  workOrder: PortalWorkOrder,
+  photo:     { path: string; uploadedBy: string; photoId: string; file: File },
+): Promise<void> {
+  const bytes = await photo.file.arrayBuffer()
+  const sealResult = await sealPhoto(supabase, {
+    orgId:            workOrder.org_id,
+    propertyId:       workOrder.property_id,
+    bucket:           'work-order-photos',
+    storagePath:      photo.path,
+    sourceTable:      'work_order_photos',
+    sourceId:         photo.photoId,
+    claimedSha256:    createHash('sha256').update(Buffer.from(bytes)).digest('hex'),
+    byteSize:         bytes.byteLength,
+    deviceCapturedAt: null,
+    deviceNow:        null,
+    lat: null, lng: null, gpsAccuracyM: null,
+    capturedBy:       { kind: 'vendor', id: workOrder.vendor_id ?? null, label: photo.uploadedBy },
+    turnoverId:       null,
+    workOrderId:      workOrder.id,
+    inspectionId:     null,
+  })
+  if (!sealResult.ok) {
+    reportError(new Error(`vendor photo seal failed: ${sealResult.reason}`), {
+      site: 'api.work-orders.photos.seal', orgId: workOrder.org_id,
+    })
+  }
+}
+
+/**
+ * Per-request AND lifetime photo ceilings for one work order. Returns the
+ * rejecting response, or null when the upload may proceed.
+ */
+async function checkUploadAllowance(
+  supabase: PortalClient, workOrder: PortalWorkOrder, incoming: number,
+): Promise<NextResponse | null> {
+  // Count against the running total for this WO, not just this request:
+  // a vendor uploading one-at-a-time could otherwise exceed MAX_PHOTOS
+  // across several calls.
+  const { count: existingCount } = await supabase
+    .from('work_order_photos')
+    .select('id', { count: 'exact', head: true })
+    .eq('work_order_id', workOrder.id)
+  if ((existingCount ?? 0) + incoming > MAX_PHOTOS) {
+    return NextResponse.json({ error: `Maximum ${MAX_PHOTOS} photos allowed per work order` }, { status: 400 })
+  }
+
+  const { count: everSealed, error: everErr } = await supabase
+    .from('evidence_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', workOrder.org_id)
+    .eq('work_order_id', workOrder.id)
+    .eq('kind', 'photo_sealed')
+  if (everErr) {
+    reportError(everErr, { site: 'api.work-orders.photos.lifetimeCount', orgId: workOrder.org_id })
+    return NextResponse.json({ error: 'Failed to upload photo. Please try again.' }, { status: 500 })
+  }
+  if (Math.max(existingCount ?? 0, everSealed ?? 0) + incoming > MAX_LIFETIME_PHOTOS) {
+    return NextResponse.json({ error: 'This work order has reached its photo upload limit. Contact the property manager.' }, { status: 400 })
+  }
+  return null
 }
 
 export async function POST(
@@ -92,17 +174,8 @@ export async function POST(
 
   const uploadedBy = (formData.get('uploadedBy') as string | null)?.trim() || 'vendor-portal'
 
-  // Count against the running total for this WO, not just this request —
-  // a vendor uploading one-at-a-time could otherwise exceed MAX_PHOTOS
-  // across several calls.
-  const { count: existingCount } = await supabase
-    .from('work_order_photos')
-    .select('id', { count: 'exact', head: true })
-    .eq('work_order_id', workOrder.id)
-
-  if ((existingCount ?? 0) + files.length > MAX_PHOTOS) {
-    return NextResponse.json({ error: `Maximum ${MAX_PHOTOS} photos allowed per work order` }, { status: 400 })
-  }
+  const blocked = await checkUploadAllowance(supabase, workOrder, files.length)
+  if (blocked) return blocked
 
   const uploaded: Array<{ id: string; storage_path: string }> = []
 
@@ -152,10 +225,84 @@ export async function POST(
       return NextResponse.json({ error: 'Failed to save photo. Please try again.' }, { status: 500 })
     }
 
+    // Non-fatal to the vendor: the photo is stored and the row exists; the
+    // backfill cron seals anything with a row and no ledger entry.
+    await sealVendorPhoto(supabase, workOrder, { path, uploadedBy, photoId: inserted.id, file }) // NOSONAR -- sequential by design: files are processed in order so the per-request photo cap and the early 500 behave deterministically
+
     uploaded.push(inserted)
   }
 
   return NextResponse.json({ success: true, uploaded })
+}
+
+interface PhotoRow { id: string; storage_path: string; created_at: string }
+
+/** Seals the existing object when no seal exists, returning its event id (null on failure). */
+async function sealExistingPhoto(
+  supabase: PortalClient, workOrder: PortalWorkOrder, photo: PhotoRow,
+): Promise<string | null> {
+  const sealed = await sealPhoto(supabase, {
+    orgId: workOrder.org_id, propertyId: workOrder.property_id,
+    bucket: 'work-order-photos', storagePath: photo.storage_path,
+    sourceTable: 'work_order_photos', sourceId: photo.id,
+    claimedSha256: null, byteSize: null,
+    deviceCapturedAt: null, deviceNow: null,
+    lat: null, lng: null, gpsAccuracyM: null,
+    capturedBy: { kind: 'vendor', id: workOrder.vendor_id ?? null, label: null },
+    turnoverId: null, workOrderId: workOrder.id, inspectionId: null,
+    observedAt: photo.created_at,
+  })
+  return sealed.ok ? sealed.eventId : null
+}
+
+/**
+ * Records the withdrawal in the ledger. Returns an error response when the
+ * photo must NOT be deleted (lookup, seal or insert failed), else null.
+ */
+async function withdrawPhoto(
+  supabase: PortalClient, workOrder: PortalWorkOrder, photo: PhotoRow,
+): Promise<NextResponse | null> {
+  const fail = () => NextResponse.json({ error: 'Could not remove photo' }, { status: 503 })
+  const { data: original, error: originalErr } = await supabase
+    .from('evidence_events')
+    .select('id')
+    .eq('org_id', workOrder.org_id)
+    .eq('bucket', 'work-order-photos')
+    .eq('storage_path', photo.storage_path)
+    .eq('kind', 'photo_sealed')
+    .maybeSingle()
+  if (originalErr) {
+    reportError(originalErr, { site: 'api.work-orders.photos.withdrawLookup', orgId: workOrder.org_id })
+    return fail()
+  }
+  const originalId = original?.id ?? await sealExistingPhoto(supabase, workOrder, photo)
+  if (!originalId) {
+    reportError(new Error('vendor photo delete: no seal and sealing failed'), {
+      site: 'api.work-orders.photos.withdrawSeal', orgId: workOrder.org_id,
+    })
+    return fail()
+  }
+  const { error: wErr } = await supabase.from('evidence_events').insert({
+    org_id:             workOrder.org_id,
+    property_id:        workOrder.property_id,
+    kind:               'photo_withdrawn',
+    source_table:       'work_order_photos',
+    source_id:          photo.id,
+    bucket:             'work-order-photos',
+    storage_path:       photo.storage_path,
+    sha256:             '0'.repeat(64),   // a withdrawal carries no bytes; the original row has the hash
+    captured_at:        new Date().toISOString(),
+    captured_at_source: 'server',
+    captured_by_kind:   'vendor',
+    captured_by_id:     workOrder.vendor_id ?? null,
+    work_order_id:      workOrder.id,
+    refers_to_event_id: originalId,
+  })
+  if (wErr && wErr.code !== '23505') {
+    reportError(wErr, { site: 'api.work-orders.photos.withdraw', orgId: workOrder.org_id })
+    return fail()
+  }
+  return null
 }
 
 export async function DELETE(
@@ -177,7 +324,7 @@ export async function DELETE(
 
   const { data: photo, error: photoError } = await supabase
     .from('work_order_photos')
-    .select('id, storage_path, work_order_id')
+    .select('id, storage_path, work_order_id, created_at')
     .eq('id', photoId)
     .single()
 
@@ -192,11 +339,15 @@ export async function DELETE(
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
   }
 
-  const { error: storageErr } = await supabase.storage.from('work-order-photos').remove([photo.storage_path])
-  if (storageErr) {
-    console.error('[work-orders/photos] failed to remove storage object', storageErr)
-    return NextResponse.json({ error: 'Failed to delete photo. Please try again.' }, { status: 500 })
-  }
+  // The object is KEPT. Evidence is never deleted by this feature; the
+  // vendor's withdrawal is a new ledger row pointing at the original seal,
+  // and the work_order_photos pointer row goes away so the UI stops
+  // showing it. A withdrawn photo still appears, marked withdrawn, in a
+  // claim packet's chain of custody. The withdrawal is written BEFORE the
+  // pointer row goes: a photo with no seal is sealed here first, because the
+  // backfill walks pointer rows and would never see it once the row is gone.
+  const withdrawn = await withdrawPhoto(supabase, workOrder, photo)
+  if (withdrawn) return withdrawn
 
   const { error: deleteErr } = await supabase.from('work_order_photos').delete().eq('id', photo.id)
   if (deleteErr) {

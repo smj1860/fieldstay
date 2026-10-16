@@ -35,6 +35,19 @@ export const IN_CLAUSE_CHUNK_SIZE = 300
 export const SEND_EVENT_CHUNK_SIZE = 500
 
 /**
+ * Runs `run` on every IN-clause-sized chunk of `items` concurrently and returns
+ * the results flattened in chunk order. For reads only: a chunk's query does
+ * not depend on another's, so awaiting them one at a time just adds latency.
+ */
+export async function mapInChunks<T, R>(
+  items: readonly T[],
+  run:   (chunk: T[]) => Promise<readonly R[]>,
+): Promise<R[]> {
+  const results = await Promise.all(chunkArray(items, IN_CLAUSE_CHUNK_SIZE).map((chunk) => run(chunk)))
+  return results.flat()
+}
+
+/**
  * Splits `items` into consecutive chunks of at most `size` elements each.
  * The last chunk may be shorter. `size` must be a positive integer.
  */

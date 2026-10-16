@@ -682,6 +682,67 @@ Two rules the scoring library carries that are not obvious from the schema:
   that reason — either table keyed on the raw string silently scores 0 for most
   of the real portfolio.
 
+### Stay Evidence Ledger (added 2026-10-14, phases 1 to 3)
+```
+evidence_events             — APPEND-ONLY ledger, one row per photo capture (photo_sealed),
+                              vendor withdrawal (photo_withdrawn), generated claim packet
+                              (packet_generated) and Freeze Watch proof (proof_of_care).
+                              UPDATE and direct DELETE are rejected BY TRIGGER, so it holds for
+                              the service role too; only the FK ON DELETE SET NULL shape and
+                              org/property cascades pass. UNIQUE (org_id, bucket, storage_path,
+                              kind) is the replay guard. Written ONLY through
+                              lib/evidence/seal.ts sealPhoto(), which re-downloads the stored
+                              object and recomputes SHA-256: hash_verified is true only when it
+                              matches the hash taken on the device at capture. A mismatch is
+                              sealed anyway and reported (losing the record is worse).
+                              captured_at is the clock-corrected instant; the raw device claim
+                              and measured skew are kept beside it. A device with a >24h skew
+                              records provenance 'server' instead of a correction nobody
+                              should believe. Photo columns elsewhere (photo_storage_path,
+                              section_photo_path, photo_url, work_order_photos, inspection
+                              photo_path) are UNCHANGED and remain the "current pointer"; the
+                              ledger is the history, including retakes and withdrawals.
+                              Storage objects are never deleted by this feature.
+                              Inside a trigger pg_trigger_depth() is ALWAYS >= 1: a direct
+                              DELETE arrives at depth 1 and an RI cascade at >= 2, so the
+                              delete guard is "<= 1". An earlier "= 0" rejected nothing and
+                              passed every text check; unit/evidence/ledger-triggers.test.ts
+                              runs the real migration on a scratch Postgres to pin it. The FK
+                              SET NULL exception is per column (exactly one FK non-null -> null,
+                              everything else identical), never "all four copied from NEW".
+                              No deny policies: authenticated holds only SELECT, and a policy
+                              on a command without a grant fails policies_without_grant.
+evidence_stay_brackets      — DERIVED and recomputable: which guest stay(s) an event brackets
+                              (pre_stay / during_stay / post_stay). A pair turnover brackets TWO
+                              stays. Single-column PK + UNIQUE pair, never a composite FK PK
+                              (PostgREST junction trap). Re-derived by the rebracket cron when
+                              turnovers.dates_changed_at moves past bracketed_at.
+property_evidence_spots     — per-property high-claim photo spots (mattress, oven interior...),
+                              injected into every turnover checklist as mandatory photo items
+                              (lib/evidence/room-photos.ts) next to one "Room condition" doorway
+                              shot per room section. SOFT-DELETE ONLY (is_active = false): a
+                              claim_spot checklist item keeps its link to the spot. Items carry
+                              checklist_instance_items.evidence_role / evidence_spot_id so a
+                              packet pairs the same place across consecutive turnovers by role,
+                              not by task text. The injected rows MUST carry the identical key
+                              set as the regular item rows (PostgREST bulk-insert NULL-fills
+                              missing keys and breaks NOT NULL).
+organizations.claim_window_days — fallback claim window for platforms with no policy window of
+                              their own. Airbnb and VRBO rules live in
+                              lib/evidence/packet/deadlines.ts and are UNVERIFIED policy: confirm
+                              against current host terms before trusting a countdown.
+properties.freeze_threshold_f — Freeze Watch low (F); NULL = DEFAULT_FREEZE_THRESHOLD_F (28).
+                              work_orders.source = 'freeze_watch' is unique per
+                              (property_id, needed_by_date), which is what makes the cron's
+                              retried insert collide instead of duplicating.
+```
+
+Claim packets render in Inngest (`evidence-packet`), upload to the private `evidence-packets`
+bucket (service role only; members can SELECT) and record their own SHA-256 in the ledger. A
+countdown only opens on a stay with a reason to file (flagged turnover or a crew_flag work
+order), not on every Airbnb or VRBO stay. The packet cover carries the platform reservation
+reference and never the guest's name or email, so it survives `guest_pii_anonymized_at`.
+
 ### Supporting
 ```
 system_job_runs             — Inngest run ledger. Written ONLY by
@@ -1584,6 +1645,7 @@ never cause.
 | `MAX_ANSWER_ROWS` | **12,000** | `lib/inspections/report/model.ts` | The `fetchAllRows` drain over `inspection_items`. A 60-walk history is ~4,000 rows — already past `max_rows` |
 | `MAX_INSPECTIONS` | **24** | `lib/owner-portal/inspections.ts` | Walks rendered in the owner portal's history section |
 | `MAX_ITEM_ROWS` | **6,000** | `lib/owner-portal/inspections.ts` | That section's item drain |
+| `MAX_PACKET_PHOTOS` | **60** | `lib/evidence/packet/pairing.ts` | Photographs drawn in one claim packet PDF. Generation runs in Inngest (`evidence-packet`), not on the request path, so this bounds MEMORY and document size rather than request time: photos are fetched and embedded in batches of 8. Pairs are kept whole; anything over is listed in the chain of custody and the cover page says so (`capNote`) |
 | `MAX_HISTORY_EVENTS_PER_SOURCE` | **200** | `lib/history/loadPropertyHistory.ts` | Per-source cap ("Show me what happened" — checklist steps, WO updates, WO photos, crew assignments, inspections, inventory counts) on the property history view. A date window caps the days, not the rows — the ceiling is entities × period |
 
 Two rules go with them:

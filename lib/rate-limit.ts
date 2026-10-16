@@ -434,6 +434,29 @@ export const syncIncidentReportRatelimit = new Ratelimit({
 })
 
 /**
+ * Crew evidence seals. One per photo, so a busy turnover is 30-60 in a burst
+ * when the outbox drains after reconnecting. Generous on purpose; the route
+ * does a Storage download per call, which is the real cost being bounded.
+ */
+export const evidenceSealRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(120, '1 m'),
+  analytics: false,
+  prefix:    'rl:evidence-seal',
+})
+
+/**
+ * Claim packet builds. Each one downloads up to MAX_PACKET_PHOTOS photos and
+ * renders a PDF, so this bounds a PM mashing the button. Keyed by org.
+ */
+export const evidencePacketRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(6, '10 m'),
+  analytics: false,
+  prefix:    'rl:evidence-packet',
+})
+
+/**
  * AGGREGATE ceiling for one token-route resource, across every source IP.
  *
  * Every limiter above is keyed on the caller's IP, which bounds what any one

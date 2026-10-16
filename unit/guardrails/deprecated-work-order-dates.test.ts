@@ -39,9 +39,9 @@ const DEPRECATED = /\bscheduled_(date|time)\b/
 const EXCEPTIONS: Record<string, string> = {
   'app/api/work-orders/route.ts:196':
     'Backward compatibility, deliberately. A tablet can hold a work-order create queued in its outbox from before the date split shipped, and that payload carries scheduled_date. Reading only the new key would silently drop the deadline off every such replay.',
-  'lib/dexie/schema.ts:395':
+  'lib/dexie/schema.ts:407':
     'A HISTORICAL Dexie version (5). Dexie replays versions in order on an existing device, so editing a shipped stores() makes the upgrade path depend on which version that device last opened. Superseded by version 14, which indexes the new columns.',
-  'lib/dexie/schema.ts:432':
+  'lib/dexie/schema.ts:444':
     'The same, for version 8.',
 
   // ── scheduled_time only, and still LIVE ────────────────────────────────────
@@ -50,7 +50,7 @@ const EXCEPTIONS: Record<string, string> = {
   // rendered against the property's own zone when the dispatch email and SMS
   // are built, before any vendor has accepted and named their own window.
   // These retire together once vendor_scheduled_window covers the case.
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:424':
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:451':
     'The hard-time-limit input.',
   'app/(dashboard)/maintenance/actions.ts:181':
     'Reads that input off the create form.',

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen, Camera, X, Loader2, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { PriorPhotosPanel, type PriorPhoto } from './prior-photos-panel'
 import {
   saveVendorWoDraft,
   loadVendorWoDraft,
@@ -455,6 +456,7 @@ export function VendorPortal({
   principalKind = 'vendor',
   technicianGrants = [],
   access = { revealed: false, reason: 'not_accepted' },
+  priorPhotos = [],
 }: {
   token:                string
   workOrder:            WorkOrderInfo
@@ -476,6 +478,8 @@ export function VendorPortal({
    * reading the page source.
    */
   access?:              AccessRevealView
+  /** The property manager's sealed before photos, read-only. */
+  priorPhotos?:         PriorPhoto[]
 }) {
   const [notes,       setNotes]       = useState('')
   const [technicianName, setTechnicianName] = useState('')
@@ -807,6 +811,8 @@ export function VendorPortal({
       )}
 
       <AccessPanel access={access} />
+
+      <PriorPhotosPanel photos={priorPhotos} />
 
       {/* Vendor only: a forwarded link must not be able to mint further ones. */}
       {principalKind === 'vendor' && (
