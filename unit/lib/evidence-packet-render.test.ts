@@ -26,7 +26,7 @@ function model(over: Partial<PacketModel> = {}): PacketModel {
     property: { name: 'Lake House', address: '1 Lake Rd, Nashville, TN', timezone: 'America/Chicago' },
     stay: { bookingId: 'b1', checkin: '2026-10-07', checkout: '2026-10-10', source: 'airbnb', reservationRef: 'HMABC123' },
     pairs: [{ key: 'k', sectionName: 'Kitchen', role: 'room_condition', label: 'Whole room', before, after }],
-    others: [], omittedCount: 0, capNote: null,
+    others: [], omittedCount: 0, capNote: null, repairs: [], repairsCapNote: null,
     custody: [before, after].map((e) => ({
       id: e.id, kind: 'photo_sealed' as const, position: e.position, sha256: e.sha256, hash_verified: true,
       captured_at: e.captured_at, captured_at_source: e.captured_at_source, device_captured_at: e.device_captured_at,

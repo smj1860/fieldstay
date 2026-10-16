@@ -22,7 +22,7 @@ import {
 } from 'pdf-lib'
 import { chunkArray } from '@/lib/inngest/chunk'
 import { toWinAnsi, wrapText } from '@/lib/inspections/report/text'
-import type { PacketModel, CustodyRow } from './model'
+import type { PacketModel, CustodyRow, RepairRecord } from './model'
 import type { PacketEvent, RoomPair } from './pairing'
 
 export type PhotoFormat = 'jpeg' | 'png'
@@ -250,6 +250,7 @@ function drawCover(cur: Cursor, model: PacketModel, shown: number): void {
   keyValue(cur, 'Prepared by', model.org.name || 'Property manager')
   keyValue(cur, 'Prepared on', formatZoned(model.generatedAt, property.timezone))
   keyValue(cur, 'Photographs', `${shown} shown, ${model.custody.length} ledger entries cited`)
+  if (model.repairs.length > 0) keyValue(cur, 'Repairs', `${model.repairs.length} work order(s) with line items`)
   cur.y -= 10
   rule(cur)
   paragraph(cur, 'How to read this packet. Each photograph was sealed in the FieldStay evidence ledger when it arrived. '
@@ -273,6 +274,113 @@ function drawBody(cur: Cursor, model: PacketModel): void {
     newPage(cur)
     heading(cur, 'Other photographs', 13)
     for (const e of model.others) drawSingle(cur, e, tz)
+  }
+}
+
+// ── Repairs ──────────────────────────────────────────────────────────────────
+
+/** 1234.5 -> "$1,234.50". Plain text: this is customer-facing. */
+export function money(n: number): string {
+  return `$${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
+}
+
+/** Shortens `body` with "..." until it fits `maxWidth`, so a long description never runs into the next column. */
+function fit(body: string, font: PDFFont, size: number, maxWidth: number): string {
+  const text = t(body)
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text
+  let end = text.length
+  while (end > 1 && font.widthOfTextAtSize(`${text.slice(0, end)}...`, size) > maxWidth) end--
+  return `${text.slice(0, end)}...`
+}
+
+/** One row of a repairs table: advances the cursor first, then draws every cell on that baseline. */
+function tableRow(
+  cur: Cursor, cells: { text: string; x: number; width?: number; right?: boolean }[],
+  o: { size: number; bold?: boolean; color?: RGB },
+): void {
+  ensure(cur, o.size + 5)
+  cur.y -= o.size + 3
+  const font = o.bold ? cur.bold : cur.font
+  for (const c of cells) {
+    const text = c.width === undefined ? t(c.text) : fit(c.text, font, o.size, c.width)
+    const x = c.right ? c.x - font.widthOfTextAtSize(text, o.size) : c.x
+    cur.page.drawText(text, { x, y: cur.y, size: o.size, font, color: o.color ?? INK })
+  }
+}
+
+// Right edges of the numeric columns; the description gets the rest.
+const COL_QTY_R   = M + CW - 150
+const COL_UNIT_R  = M + CW - 75
+const COL_TOTAL_R = M + CW
+const COL_DESC_W  = COL_QTY_R - 70 - M
+
+function drawLineItems(cur: Cursor, r: RepairRecord): void {
+  if (r.line_items.length === 0) {
+    paragraph(cur, 'No line items recorded.', 9, MUTED)
+    return
+  }
+  tableRow(cur, [
+    { text: 'Description', x: M }, { text: 'Qty', x: COL_QTY_R, right: true },
+    { text: 'Unit cost', x: COL_UNIT_R, right: true }, { text: 'Total', x: COL_TOTAL_R, right: true },
+  ], { size: 8.5, bold: true, color: MUTED })
+  for (const li of r.line_items) {
+    const qty = li.unit ? `${li.quantity} ${li.unit}` : String(li.quantity)
+    tableRow(cur, [
+      { text: li.description, x: M, width: COL_DESC_W },
+      { text: qty, x: COL_QTY_R, right: true },
+      { text: money(li.unit_cost), x: COL_UNIT_R, right: true },
+      { text: money(li.line_total), x: COL_TOTAL_R, right: true },
+    ], { size: 9 })
+  }
+  const subtotal = r.line_items.reduce((s, li) => s + li.line_total, 0)
+  tableRow(cur, [
+    { text: 'Line items total', x: COL_UNIT_R, right: true }, { text: money(subtotal), x: COL_TOTAL_R, right: true },
+  ], { size: 9, bold: true })
+}
+
+function repairWhen(r: RepairRecord): string | null {
+  if (r.completed_date) return `Completed: ${r.completed_date}`
+  if (r.needed_by_date) return `Needed by: ${r.needed_by_date}`
+  return null
+}
+
+function repairMeta(r: RepairRecord): string {
+  const when = repairWhen(r)
+  return [
+    r.vendor_name ? `Vendor: ${r.vendor_name}` : 'Vendor: not assigned',
+    `Status: ${r.status}`,
+    when,
+    r.linked_via === 'photo' ? 'Linked through a sealed photograph' : 'Linked through the turnover after this stay',
+  ].filter((x): x is string => x !== null).join('   ')
+}
+
+function drawRepairs(cur: Cursor, model: PacketModel): void {
+  if (model.repairs.length === 0) return
+  newPage(cur)
+  heading(cur, 'Repairs tied to this stay', 13)
+  paragraph(cur, 'Work orders FieldStay links to this stay, with the line items and invoices as recorded. '
+    + 'Amounts are as entered by the vendor or the property manager; FieldStay does not recompute them.', 8.5, MUTED)
+  if (model.repairsCapNote) {
+    cur.y -= 4
+    paragraph(cur, model.repairsCapNote, 8.5, AMBER)
+  }
+  cur.y -= 6
+  const tz = model.property.timezone
+  for (const r of model.repairs) {
+    ensure(cur, 72)
+    cur.y -= 14
+    const titleLine = r.wo_number ? `${r.wo_number}  ${r.title}` : r.title
+    drawText(cur, titleLine, { size: 11, bold: true })
+    paragraph(cur, repairMeta(r), 8.5, MUTED)
+    cur.y -= 2
+    drawLineItems(cur, r)
+    if (r.invoice) {
+      const paid = r.invoice.paid_at ? `, paid ${formatZoned(r.invoice.paid_at, tz)}` : ''
+      paragraph(cur, `Invoice ${r.invoice.invoice_number ?? '(no number)'}: ${money(r.invoice.total)}, ${r.invoice.status}${paid}.`, 9)
+    }
+    paragraph(cur, `Source: FieldStay work order ${r.wo_number ?? r.work_order_id}`, 7.5, MUTED)
+    cur.y -= 6
+    rule(cur)
   }
 }
 
@@ -342,6 +450,7 @@ export async function renderClaimPacket(model: PacketModel, fetchPhoto: FetchPho
 
   drawCover(cur, model, events.length)
   drawBody(cur, model)
+  drawRepairs(cur, model)
   drawCustody(cur, model)
   drawFooters(pdf, font, model)
   return pdf.save()

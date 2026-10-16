@@ -35,6 +35,8 @@ const CAPS: { name: string; file: string }[] = [
   { name: 'MAX_ITEM_ROWS',           file: 'lib/owner-portal/inspections.ts' },
   { name: 'MAX_HISTORY_EVENTS_PER_SOURCE', file: 'lib/history/loadPropertyHistory.ts' },
   { name: 'MAX_PACKET_PHOTOS',       file: 'lib/evidence/packet/pairing.ts' },
+  { name: 'MAX_PACKET_WORK_ORDERS',  file: 'lib/evidence/packet/model.ts' },
+  { name: 'MAX_PACKET_LINE_ITEMS',   file: 'lib/evidence/packet/model.ts' },
 ]
 
 /**

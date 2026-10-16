@@ -1646,6 +1646,8 @@ never cause.
 | `MAX_INSPECTIONS` | **24** | `lib/owner-portal/inspections.ts` | Walks rendered in the owner portal's history section |
 | `MAX_ITEM_ROWS` | **6,000** | `lib/owner-portal/inspections.ts` | That section's item drain |
 | `MAX_PACKET_PHOTOS` | **60** | `lib/evidence/packet/pairing.ts` | Photographs drawn in one claim packet PDF. Generation runs in Inngest (`evidence-packet`), not on the request path, so this bounds MEMORY and document size rather than request time: photos are fetched and embedded in batches of 8. Pairs are kept whole; anything over is listed in the chain of custody and the cover page says so (`capNote`) |
+| `MAX_PACKET_WORK_ORDERS` | **20** | `lib/evidence/packet/model.ts` | Work orders listed in the Repairs section of one claim packet. Over the cap the section says how many were left out |
+| `MAX_PACKET_LINE_ITEMS` | **200** | `lib/evidence/packet/model.ts` | Line items across all work orders in one packet. Bounds the Repairs section's page count |
 | `MAX_HISTORY_EVENTS_PER_SOURCE` | **200** | `lib/history/loadPropertyHistory.ts` | Per-source cap ("Show me what happened" — checklist steps, WO updates, WO photos, crew assignments, inspections, inventory counts) on the property history view. A date window caps the days, not the rows — the ceiling is entities × period |
 
 Two rules go with them:
