@@ -28,6 +28,7 @@ type ExistingContentRow = {
   bedrooms:            number | null
   bathrooms:           number | null
   max_guests:          number | null
+  location_pinned_at:  string | null
 }
 
 /**
@@ -80,7 +81,7 @@ export async function upsertNormalizedProperties(
     existingRows = await fetchAllRows<ExistingContentRow>(
       (from, to) => supabase
         .from('properties')
-        .select('external_id, wifi_name, wifi_password, access_instructions, house_manual, bedrooms, bathrooms, max_guests')
+        .select('external_id, wifi_name, wifi_password, access_instructions, house_manual, bedrooms, bathrooms, max_guests, location_pinned_at')
         .eq('org_id', orgId)
         .eq('external_source', provider)
         .in('external_id', normalized.map((n) => n.external_id))
@@ -109,8 +110,12 @@ export async function upsertNormalizedProperties(
   // unit/guardrails/upload-payload-null-fields.test.ts exists for, and it is
   // no less real on the server side.
   type GeolocatedProperty = NormalizedProperty & { lat: number; lng: number }
+  // A pin a PM set from a crew check-in (properties.location_pinned_at) beats the
+  // provider's coordinates: otherwise the next sync puts the ZIP-level pin back.
+  // Such a row goes in the no-coordinates batch, which never names lat/lng.
   const hasCoords = (n: NormalizedProperty): n is GeolocatedProperty =>
     typeof n.lat === 'number' && typeof n.lng === 'number'
+    && !existingByExternalId.get(n.external_id)?.location_pinned_at
 
   // A room count the provider does not carry (null) keeps whatever FieldStay
   // already holds, and only falls back to FieldStay's own default for a row

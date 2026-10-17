@@ -371,6 +371,12 @@ A crew member started a turnover from farther away than the property's check-in 
 
 ---
 
+## Every check-in says my property is away, but the crew is there. How do I fix it?
+
+The map pin is probably in the wrong place. FieldStay places a property's pin from its ZIP code unless your PMS supplies exact coordinates, which can put a rural or large property on the wrong road. Open the property, click **Details**, and under the street address click **Use last check-in as map pin**. Confirm, and the pin moves to where your crew last checked in. The button needs a latest check-in accurate to under 100 feet; if it is greyed out it says why. Future check-ins are measured against the new pin, past ones keep the distance recorded at the time, and your PMS sync will not move a pin you set this way. If your property is simply large, widen the **Crew check-in radius** instead.
+
+---
+
 ## I got a notification asking me to add a map pin. Why?
 
 The property has no location on the map, so FieldStay cannot tell whether a crew check-in was at the property. Nothing is flagged and nothing is blocked. Open the property, click **Details**, and verify the address. You get this notification once per property.

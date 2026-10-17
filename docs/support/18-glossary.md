@@ -254,6 +254,12 @@ The location a crew member's phone shares when they start a turnover, recorded o
 
 ---
 
+## Map pin
+
+The location FieldStay holds for a property, used to measure how far a crew check-in was from it. It comes from the ZIP code unless your PMS sends exact coordinates. On the property's Details page, **Use last check-in as map pin** moves it to where your crew last checked in. See **Stay Evidence: Your Sealed Photo Record**.
+
+---
+
 ## Claim spot
 
 A place in a home that tends to be in damage claims, such as a mattress or the inside of the oven, that crew photograph on every turnover. Each property has its own list, which you can edit on the property's Evidence page. See **Room Photos and Claim Spots**.

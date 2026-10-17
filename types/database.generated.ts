@@ -4486,6 +4486,7 @@ export type Database = {
           external_source: string | null
           freeze_threshold_f: number | null
           geofence_radius_ft: number | null
+          location_pinned_at: string | null
           has_security_system: boolean | null
           house_manual: string | null
           id: string
@@ -4536,6 +4537,7 @@ export type Database = {
           external_source?: string | null
           freeze_threshold_f?: number | null
           geofence_radius_ft?: number | null
+          location_pinned_at?: string | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
@@ -4586,6 +4588,7 @@ export type Database = {
           external_source?: string | null
           freeze_threshold_f?: number | null
           geofence_radius_ft?: number | null
+          location_pinned_at?: string | null
           has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
