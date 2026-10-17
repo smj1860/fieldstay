@@ -4493,6 +4493,7 @@ export type Database = {
           is_active: boolean
           lat: number | null
           lng: number | null
+          location_pinned_at: string | null
           max_guests: number | null
           max_pets: number | null
           min_renter_age: number | null
@@ -4543,6 +4544,7 @@ export type Database = {
           is_active?: boolean
           lat?: number | null
           lng?: number | null
+          location_pinned_at?: string | null
           max_guests?: number | null
           max_pets?: number | null
           min_renter_age?: number | null
@@ -4593,6 +4595,7 @@ export type Database = {
           is_active?: boolean
           lat?: number | null
           lng?: number | null
+          location_pinned_at?: string | null
           max_guests?: number | null
           max_pets?: number | null
           min_renter_age?: number | null

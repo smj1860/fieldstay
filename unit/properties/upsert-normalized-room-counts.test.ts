@@ -145,3 +145,33 @@ describe('external_missing_since', () => {
     expect(row).toHaveProperty('external_missing_since', null)
   })
 })
+
+// A pin a PM set from a crew check-in (properties.location_pinned_at) must survive
+// a provider sync. Hostaway and Hostex send lat/lng on every run; without this the
+// ZIP-level pin comes back the next morning and every visit reads as away again.
+describe('upsertNormalizedProperties — a PM-set pin', () => {
+  const withCoords = (external_id: string) => normalized({ external_id, lat: 36.0, lng: -86.0 } as Partial<NormalizedProperty>)
+  const existingRow = (external_id: string, location_pinned_at: string | null) => ({
+    external_id, wifi_name: null, wifi_password: null, access_instructions: null, house_manual: null,
+    bedrooms: 2, bathrooms: 1, max_guests: 4, location_pinned_at,
+  })
+  const upsertedRows = () =>
+    upsertSpy.mock.calls.filter((c) => c[0] === 'properties').flatMap((c) => c[1] as Record<string, unknown>[])
+
+  it('does not write lat/lng for a pinned property, and still writes them for an unpinned one', async () => {
+    existingRows.push(existingRow('pinned', '2026-10-17T12:00:00.000Z'), existingRow('auto', null))
+
+    await upsertNormalizedProperties('org-1', 'hostex', [withCoords('pinned'), withCoords('auto')])
+
+    const rows = upsertedRows()
+    const pinned = rows.find((r) => r.external_id === 'pinned')!
+    const auto   = rows.find((r) => r.external_id === 'auto')!
+    expect('lat' in pinned || 'lng' in pinned).toBe(false)
+    expect(auto).toMatchObject({ lat: 36.0, lng: -86.0 })
+  })
+
+  it('writes provider coordinates for a brand-new property', async () => {
+    await upsertNormalizedProperties('org-1', 'hostex', [withCoords('new')])
+    expect(upsertedRows()[0]).toMatchObject({ lat: 36.0, lng: -86.0 })
+  })
+})

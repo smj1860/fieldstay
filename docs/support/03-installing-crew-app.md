@@ -25,6 +25,9 @@ Must use Safari — not Chrome.
 Allow notifications when prompted. This alerts crew the moment a turnover or
 work order is assigned without needing to open the app.
 
+## Location
+Starting a turnover asks for the phone's location once. That location is recorded as the visit check-in, which shows that the crew member was at the property. Tap **Allow** when the browser asks. If it was declined, open the browser's site settings for FieldStay, set Location to Allow, and try again. A turnover cannot be started without it. FieldStay never asks for location when a photo is taken.
+
 ## Offline Mode
 The app works without internet. Checklists, inventory counts, and photos all
 function normally with no signal. Everything syncs automatically when connectivity
@@ -35,3 +38,4 @@ is restored — no action needed from the crew member.
   turnovers in the dashboard; assignments sync within a few minutes
 - App not updating: close and reopen the app, or pull down to refresh
 - Install option not appearing on iPhone: must use Safari, not Chrome
+- Start Turnover says location is off: allow Location for FieldStay in the browser's site settings, then tap Start Turnover again

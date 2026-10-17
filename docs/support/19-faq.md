@@ -359,6 +359,42 @@ Trim the claim spots, not the room photos. Open the property, click **Evidence**
 
 ---
 
+## Why does my crew member have to share their location to start a turnover?
+
+Starting a turnover records a visit check-in: the phone's location, the time, and how far it was from the property. Every photo taken during the visit points back to it, which is what lets a claim packet show the crew was at the property. FieldStay asks for location once, when the crew member taps Start Turnover, and never during a photo. If they decline, the turnover cannot be started until they allow location for FieldStay in their browser settings. See **Stay Evidence: Your Sealed Photo Record**.
+
+---
+
+## What does "Turnover started away from the property" mean?
+
+A crew member started a turnover from farther away than the property's check-in radius, which is about a third of a mile unless you changed it. Nothing is blocked. Open the turnover to review. If the distance is normal for that property, such as a large lot or a rural address, widen the radius: open the property, click **Details**, and set **Crew check-in radius (feet)** between 150 and 16,000.
+
+---
+
+## Every check-in says my property is away, but the crew is there. How do I fix it?
+
+The map pin is probably in the wrong place. FieldStay places a property's pin from its ZIP code unless your PMS supplies exact coordinates, which can put a rural or large property on the wrong road. Open the property, click **Details**, and under the street address click **Use last check-in as map pin**. Confirm, and the pin moves to where your crew last checked in. The button needs a latest check-in accurate to under 100 feet; if it is greyed out it says why. Future check-ins are measured against the new pin, past ones keep the distance recorded at the time, and your PMS sync will not move a pin you set this way. If your property is simply large, widen the **Crew check-in radius** instead.
+
+---
+
+## I got a notification asking me to add a map pin. Why?
+
+The property has no location on the map, so FieldStay cannot tell whether a crew check-in was at the property. Nothing is flagged and nothing is blocked. Open the property, click **Details**, and verify the address. You get this notification once per property.
+
+---
+
+## Can a crew member check in again during a turnover?
+
+Yes. On an in-progress turnover, tap **Check in again** to record a fresh location. Use it when the first reading was poor or the crew member moved from the driveway to the unit. The first check-in is kept; photos taken afterward point to the newest one.
+
+---
+
+## Does the claim packet show repairs?
+
+Yes. The **Repairs tied to this stay** section lists the work orders linked to the stay, each with its line items, vendor, dates and totals. A work order is included when one of the packet's photos belongs to it, or when it was raised from the turnover after the stay. The section lists up to 20 work orders and 200 line items and says how many were left out if there are more. See **Building a Claim Packet**.
+
+---
+
 ## Can my crew still take photos with no signal?
 
 Yes. The photo is sealed on the phone with the real capture time and syncs when signal comes back. The record shows when the photo was taken, not when it uploaded. If the phone's clock is wrong, FieldStay records the correction rather than the wrong time.

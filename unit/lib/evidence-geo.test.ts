@@ -43,3 +43,14 @@ describe('parseGeofenceRadius', () => {
     expect('error' in parseGeofenceRadius('12.5')).toBe(true)
   })
 })
+
+import { pinBlockedReason } from '@/lib/evidence/geo'
+describe('pinBlockedReason', () => {
+  it('blocks with no check-in and with a missing or loose fix, and allows an accurate one', () => {
+    expect(pinBlockedReason(null)).toContain('No crew check-in')
+    expect(pinBlockedReason({ accuracyFt: null })).toContain('not accurate enough')
+    expect(pinBlockedReason({ accuracyFt: 100 })).toContain('not accurate enough')
+    expect(pinBlockedReason({ accuracyFt: 99 })).toBeNull()
+    expect(pinBlockedReason({ accuracyFt: 0 })).toBeNull()
+  })
+})

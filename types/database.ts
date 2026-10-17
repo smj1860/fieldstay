@@ -288,6 +288,8 @@ export interface Property {
   /** Forecast low (F) at or below which Freeze Watch creates a prep work order while vacant. NULL = platform default (28). */
   freeze_threshold_f:      number | null
   geofence_radius_ft:      number | null
+  /** When a PM moved the pin to a crew check-in. Non-NULL: provider syncs must not overwrite lat/lng. */
+  location_pinned_at:      string | null
   cleaning_cost_visible_to_owner: boolean
   square_footage:          number | null
   lat:                     number | null

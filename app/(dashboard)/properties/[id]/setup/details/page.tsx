@@ -3,6 +3,8 @@ import { requireProperty } from '@/lib/auth'
 import { DetailsForm } from './details-form'
 import { Card } from '@/components/ui/Card'
 import { reportError } from '@/lib/observability/report-error'
+import { latestPropertyCheckin } from '@/lib/evidence/pin'
+import { pinBlockedReason, distanceFeet } from '@/lib/evidence/geo'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property Details' }
@@ -44,6 +46,20 @@ export default async function DetailsPage({ params }: Props) {
     }
   }
 
+  // "Use last check-in": shown to the PM so the button can say what it will do
+  // and why it is unavailable. The server action re-reads it; this is display.
+  const checkin = await latestPropertyCheckin(supabase, membership.org_id, property.id)
+  const hasPin  = property.lat !== null && property.lng !== null
+  const pin = {
+    blockedReason: pinBlockedReason(checkin),
+    capturedAt:    checkin?.capturedAt ?? null,
+    accuracyFt:    checkin?.accuracyFt ?? null,
+    distanceFt:    checkin && hasPin
+      ? Math.round(distanceFeet({ lat: checkin.lat, lng: checkin.lng }, { lat: property.lat!, lng: property.lng! }))
+      : null,
+    pinnedByPm:    property.location_pinned_at !== null,
+  }
+
   return (
     <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Property Details</h2>
@@ -52,6 +68,7 @@ export default async function DetailsPage({ params }: Props) {
         property={withPropertyDefaults(property)}
         doorCode={doorCode}
         doorCodeReadFailed={doorCodeReadFailed}
+        pin={pin}
       />
     </Card>
   )

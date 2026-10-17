@@ -20,6 +20,19 @@ export const GEOFENCE_MAX_FT  = 16_000
 /** A check-in this accurate (or better) may be used to move the property's map pin. */
 export const CHECKIN_PIN_MAX_ACCURACY_FT = 100
 
+/**
+ * Why a check-in cannot move the property pin, or null when it can. Shared by the
+ * details page (to disable the button with a reason) and the server action (the
+ * authority), so the two cannot disagree.
+ */
+export function pinBlockedReason(checkin: { accuracyFt: number | null } | null): string | null {
+  if (!checkin) return 'No crew check-in yet. Start a turnover from the property and this will be available.'
+  if (checkin.accuracyFt === null || checkin.accuracyFt >= CHECKIN_PIN_MAX_ACCURACY_FT) {
+    return `The last check-in was not accurate enough (under ${CHECKIN_PIN_MAX_ACCURACY_FT} ft is required). Have your crew check in again outdoors.`
+  }
+  return null
+}
+
 /** A started turnover older than this asks for a fresh check-in on the next photo. */
 export const CHECKIN_STALE_MIN = 180
 

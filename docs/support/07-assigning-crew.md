@@ -106,7 +106,7 @@ The Turnovers Board updates in real time as crew members work through their chec
 
 If a turnover runs past its own check-in with items still open and that crew member has another job later the same day, FieldStay raises a running-late alert naming how far the delay is projected to run into the next job. See **Running-Late Alerts** in [Notifications](./32-notifications-and-digests.md).
 
-**A turnover also starts itself the moment the first checklist item is ticked.** Crew who open the checklist and get straight to work rarely remember to tap Start first, and before this the board showed nothing happening while the job was visibly underway. If you see a turnover go to In Progress without anyone tapping Start, that is why. The tick is the evidence.
+**A turnover also starts itself the moment the first checklist item is ticked.** Crew who open the checklist and get straight to work rarely remember to tap Start first, and before this the board showed nothing happening while the job was visibly underway. If you see a turnover go to In Progress without anyone tapping Start, that is why. The tick is the evidence. Either way, starting a turnover records the crew member's location as the visit check-in, so the phone has to be able to share it. If the crew member has location turned off, the turnover stays at Assigned until they allow it. See **Stay Evidence: Your Sealed Photo Record**.
 
 ---
 

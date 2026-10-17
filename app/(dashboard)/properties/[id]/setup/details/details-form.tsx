@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import { Dialog } from '@/components/ui/Dialog'
+import { PinFromCheckin, type PinState } from './pin-from-checkin'
 import type { Property } from '@/types/database'
 
 const PROPERTY_TYPES = [
@@ -22,7 +23,8 @@ export function DetailsForm({
   property,
   doorCode,
   doorCodeReadFailed = false,
-}: Readonly<{ property: Property; doorCode: string | null; doorCodeReadFailed?: boolean }>) {
+  pin,
+}: Readonly<{ property: Property; doorCode: string | null; doorCodeReadFailed?: boolean; pin: PinState }>) {
   const action = saveDetails.bind(null, property.id)
   const [state, formAction, pending] = useActionState(action, null)
 
@@ -93,6 +95,7 @@ export function DetailsForm({
       <div>
         <label htmlFor="address" className="label">Street Address</label>
         <Input id="address" name="address" type="text" defaultValue={property.address ?? ''} />
+        <PinFromCheckin propertyId={property.id} pin={pin} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">

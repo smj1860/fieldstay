@@ -1,7 +1,8 @@
 'use server'
 
 import { parseFreezeThreshold } from '@/lib/evidence/freeze-watch'
-import { parseGeofenceRadius } from '@/lib/evidence/geo'
+import { parseGeofenceRadius, pinBlockedReason } from '@/lib/evidence/geo'
+import { latestPropertyCheckin } from '@/lib/evidence/pin'
 import { toDbEnum } from '@/lib/db-enums'
 import { doorCodeArgs } from '@/lib/properties/door-code'
 import { revalidatePath } from 'next/cache'
@@ -244,6 +245,56 @@ export async function saveDetails(
     unstable_rethrow(err)
     console.error('[saveDetails]', err)
     reportError(err, { site: 'serverAction.properties.setup.details.saveDetails' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+/**
+ * Moves the property's map pin to where a crew member last checked in. The fix
+ * for a rural address the ZIP geocode puts on the wrong road: the cleaner stood
+ * at the door, so that is the pin.
+ *
+ * The check-in is re-read here rather than taken from the page, so a stale tab
+ * cannot pin to a fix that has since been superseded. Ledger rows are not
+ * rewritten: past check-ins keep the distance computed against the pin of the
+ * day. `location_pinned_at` stops provider syncs from putting the ZIP-level pin
+ * back.
+ */
+export async function setPinFromLastCheckin(propertyId: string): Promise<DetailsState> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(PROPERTY_WRITE_ROLES)
+
+    const checkin = await latestPropertyCheckin(supabase, membership.org_id, propertyId)
+    const blocked = pinBlockedReason(checkin)
+    if (blocked || !checkin) return { error: blocked ?? 'No crew check-in yet.' }
+
+    const { data: updated, error } = await supabase
+      .from('properties')
+      .update({ lat: checkin.lat, lng: checkin.lng, location_pinned_at: new Date().toISOString() })
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[setPinFromLastCheckin]', error)
+      reportError(error, { site: 'serverAction.properties.setup.details.setPinFromLastCheckin', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!updated) return { error: 'You do not have permission to make this change, or the property no longer exists.' }
+
+    await logAuditEvent({
+      orgId: membership.org_id, actorId: user.id, action: 'property.pin_set_from_checkin',
+      targetType: 'property', targetId: propertyId,
+      metadata: { pin_source: 'checkin', evidence_event_id: checkin.id },
+    })
+
+    revalidatePath(`/properties/${propertyId}/setup/details`)
+    return { success: true }
+  } catch (err) {
+    unstable_rethrow(err)
+    console.error('[setPinFromLastCheckin]', err)
+    reportError(err, { site: 'serverAction.properties.setup.details.setPinFromLastCheckin' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
