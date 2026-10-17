@@ -248,6 +248,12 @@ A PDF built from a property's sealed photos for one guest stay: before and after
 
 ---
 
+## Visit check-in
+
+The location a crew member's phone shares when they start a turnover, recorded on the evidence record with the time, the accuracy and the distance from the property's map pin. Photos taken during the visit point back to it. A crew member can record another with **Check in again**. If a check-in is farther from the property than the check-in radius, you get a notification. See **Stay Evidence: Your Sealed Photo Record**.
+
+---
+
 ## Claim spot
 
 A place in a home that tends to be in damage claims, such as a mattress or the inside of the oven, that crew photograph on every turnover. Each property has its own list, which you can edit on the property's Evidence page. See **Room Photos and Claim Spots**.

@@ -29,9 +29,22 @@ When a photo is taken, FieldStay records four things about it before anything el
 1. **A fingerprint.** A unique code computed from the photo's bytes. If the file is ever changed, even by one pixel, the code no longer matches. FieldStay computes it again when the photo reaches the server and records whether the two matched.
 2. **The capture time.** The time on the phone when the photo was taken, corrected for any difference between the phone's clock and the server's, with both values kept. A phone with the wrong clock does not produce a wrong record.
 3. **Who took it.** The crew member, vendor, or team member who captured it.
-4. **Where, when your crew allows it.** If the crew member has allowed location access on their phone, the location at the moment of capture. If not, nothing is recorded. FieldStay never asks for location during a photo.
+4. **Where, when your crew allows it.** If the crew member has allowed location access on their phone, the location at the moment of capture. If not, nothing is recorded. FieldStay never asks for location during a photo. The place a photo is tied to comes from the visit check-in described below.
 
 Each of these is written once and never edited. A photo can be withdrawn, which adds a new entry pointing at the original, but the original stays.
+
+---
+
+## The visit check-in
+
+Every turnover starts with a check-in. When a crew member taps **Start Turnover**, their phone shares its location once, and FieldStay records it on the evidence record with the time, the accuracy, and how far the phone was from the property's map pin. Every photo taken during that visit points back to that check-in, so the packet can show that the crew was at the property when the visit began.
+
+- **Location is required to start.** The phone asks the crew member for location permission the first time. If they decline, the turnover cannot be started from that phone until they allow it in their browser settings. Ticking the first checklist item also starts the turnover, and it does so only when the phone can share its location.
+- **Check in again.** Once a turnover is in progress, a **Check in again** button on the turnover screen records a fresh location. Use it when the first reading was poor or the crew member moved from the driveway to the unit. The newest check-in is the one new photos point to.
+- **Away from the property.** If a check-in is farther from the property than the check-in radius, you get a notification, "Turnover started away from the property", with the distance. Nothing is blocked. The default radius is about a third of a mile (1,640 feet). To change it, open the property, click **Details**, and set **Crew check-in radius (feet)** to a number from 150 to 16,000. Widen it for a large property or a rural address.
+- **No map pin.** If the property has no location on the map, FieldStay cannot measure the distance and does not flag anything. You get one notification asking you to verify the property's address.
+
+What it proves: the crew member's phone was at that location when the visit started. What it does not prove: where the phone was when each photo was taken. Distances and accuracy are shown in feet, or miles for longer distances.
 
 ---
 

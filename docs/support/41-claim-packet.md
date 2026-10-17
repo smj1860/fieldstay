@@ -24,13 +24,15 @@ You also get one email when the packet is ready, with a link to the same page.
 - **Cover.** The property name and address, the stay dates, the booking platform, and the platform's confirmation code for the stay. No guest name or email appears anywhere in the packet.
 - **Before and after, by room.** Each room where both a before and an after photo exist, side by side. Rooms with only one side show that one. Under each photo: the date and time it was taken in the property's local time, who took it, and whether its fingerprint was verified.
 - **Other photos.** Photos from during the stay, such as a mid-stay work order, and any claim spot photos without a pair.
+- **Visit check-in.** On the cover, one line for each visit check-in the packet's photos point to: when it happened, how far the phone was from the property, and the accuracy of the reading. A check-in outside the property's check-in radius says so. See **Stay Evidence: Your Sealed Photo Record**.
+- **Repairs tied to this stay.** The work orders linked to the stay, each with its line items, vendor, dates and totals. A work order is included when one of the packet's photos belongs to it, or when it was raised from the turnover after the stay. Up to 20 work orders and 200 line items appear. If more exist, the section says how many were left out.
 - **Chain of custody.** A table listing every photo in the packet with its fingerprint, the time the phone recorded, the time the server received it, the clock correction applied, and any withdrawals. This is the page an adjuster reads.
 
 ---
 
 ## Limits
 
-A packet holds up to 60 photos. If the stay has more than that, the packet includes the first 60 by room order and says on the cover how many were left out. Untick photos you do not need and build again to control which ones make the cut.
+A packet holds up to 60 photos, and its Repairs section lists up to 20 work orders and 200 line items. If the stay has more than that, the packet includes the first 60 by room order and says on the cover how many were left out. Untick photos you do not need and build again to control which ones make the cut.
 
 Photos are downsized for the PDF. The originals stay in storage at full resolution.
 
