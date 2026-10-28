@@ -55,6 +55,18 @@ describe('fetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('does not retry a 429 when retryRateLimit is false, but still retries a 5xx', async () => {
+    fetchMock.mockResolvedValue(S429())
+    const res = await fetchWithRetry('https://x.test', {}, { ...OPTS, retryRateLimit: false })
+    expect(res.status).toBe(429)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValueOnce(S503()).mockResolvedValueOnce(OK())
+    await fetchWithRetry('https://x.test', {}, { ...OPTS, retryRateLimit: false })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('does NOT retry a 4xx — our request is wrong and waiting cannot fix it', async () => {
     fetchMock.mockResolvedValue(S400())
 

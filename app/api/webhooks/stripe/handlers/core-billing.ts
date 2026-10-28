@@ -349,6 +349,10 @@ async function syncStatusForUnmappedPrice(
   reportError(new Error('Stripe subscription carries an unmapped price id'), {
     site:  'webhook.stripe.core-billing.unmapped-price',
     orgId: org.id,
+    // A signal, not a fault: the guard did the safe thing (status synced,
+    // entitlement columns left alone). Recurs every renewal for a legacy,
+    // Enterprise or dashboard-created subscription.
+    level: 'warning',
     extra: {
       subscription_id: ctx.subscription.id,
       price_id:        ctx.priceId,

@@ -181,6 +181,10 @@ async function fetchTomorrowIo<T>(
     }, {
       timeoutMs: WEATHER_TIMEOUT_MS,
       label:     `tomorrow-io-${kind}`,
+      // Tomorrow.io's limits are per second, per hour and per day. The helper's
+      // sub-second backoff cannot outwait any of them, so retrying a 429 here
+      // just burned three requests of quota per refusal.
+      retryRateLimit: false,
     })
   } catch (err) {
     if (isTimeoutError(err)) {
