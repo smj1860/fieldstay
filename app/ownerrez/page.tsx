@@ -7,6 +7,14 @@ import PricingSection from '@/components/ownerrez/PricingSection'
 import FaqSection from '@/components/ownerrez/faq-section'
 import { marketingUrl, marketingOrigin } from '@/lib/marketing'
 import { buildJsonLd, serializeJsonLd } from './json-ld'
+import { OwnerRezLaunchBanner } from './launch-banner'
+import { OWNERREZ_URL, isOwnerRezOfferActive } from './launch-offer'
+
+// The page is prerendered (PRERENDERED_ROUTES in proxy.ts). Revalidating hourly
+// re-runs isOwnerRezOfferActive() so the launch banner disappears on its own
+// after the offer ends. ISR output is still static, so the nonce-free CSP
+// variant for prerendered routes stays correct.
+export const revalidate = 3600
 
 export const metadata: Metadata = {
   // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
@@ -97,10 +105,22 @@ export default function OwnerRezPage() {
                 OR
               </span>
               <span className="text-xs font-semibold tracking-widest text-white/58 uppercase">
-                OwnerRez Integration Partner
+                <a
+                  href={OWNERREZ_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:no-underline"
+                >
+                  OwnerRez
+                </a>{' '}
+                Integration Partner
               </span>
             </div>
           </div>
+
+          {/* Launch banner: hidden automatically once the offer ends. The
+              revalidate export below re-runs this check hourly. */}
+          {isOwnerRezOfferActive() && <OwnerRezLaunchBanner />}
 
           {/* Hero — two equal columns */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start pb-20">
@@ -353,6 +373,30 @@ export default function OwnerRezPage() {
           SECTION 4b — FAQ
       ══════════════════════════════════════════ */}
       <FaqSection />
+
+      {/* About OwnerRez: permanent, independent of the launch offer date. */}
+      <div className="bg-white">
+        <div className="max-w-3xl mx-auto px-6 py-16 text-center">
+          <h2 className="text-2xl font-bold mb-3 text-[#0a1628] font-display">
+            About OwnerRez
+          </h2>
+          <p className="text-gray-500 leading-relaxed mb-5">
+            OwnerRez is an independent channel manager and property management
+            platform, built by property managers for property managers. They sync
+            bookings, rates, and availability across every major listing channel,
+            and FieldStay runs your turnovers, crews, and maintenance off that same
+            booking data.
+          </p>
+          <a
+            href={OWNERREZ_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#0a1628] font-semibold underline hover:no-underline"
+          >
+            Visit OwnerRez
+          </a>
+        </div>
+      </div>
 
       {/* ══════════════════════════════════════════
           SECTION 5 — YELLOW
