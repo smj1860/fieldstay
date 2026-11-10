@@ -57,6 +57,13 @@ export interface RetryOptions {
    * per-attempt budget with no outer bound.
    */
   overallDeadlineMs?: number
+  /**
+   * Retry a 429. Defaults to true. Set false for a provider whose limit window
+   * is far longer than this helper's backoff (hundreds of ms): retrying inside
+   * the window cannot succeed and only spends more of the quota that was just
+   * refused. The 429 is returned to the caller like any other final response.
+   */
+  retryRateLimit?: boolean
 }
 
 const DEFAULT_ATTEMPTS = 3
@@ -148,7 +155,8 @@ async function fetchWithRetryAttempts(
       })
 
       // Worth another go, but only if we have one left.
-      if ((res.status >= 500 || res.status === 429) && attempt < attempts) {
+      const retryable = res.status >= 500 || (res.status === 429 && opts.retryRateLimit !== false)
+      if (retryable && attempt < attempts) {
         await sleep(backoffMs(attempt, base))
         continue
       }

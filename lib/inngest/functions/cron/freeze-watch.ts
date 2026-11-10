@@ -13,7 +13,11 @@ import {
   decideFreezeWatch, freezeWorkOrderCopy, type FreezeCandidateProperty,
 } from '@/lib/evidence/freeze-watch'
 
-const FORECAST_CONCURRENCY = 15   // same ceiling as pre-flight-friction.ts
+// Tomorrow.io rate-limits per second, so this is a request RATE, not a memory
+// ceiling: 2 at a time with FORECAST_CHUNK_GAP_MS between chunks stays at about
+// 2 req/s. 15 at once tripped 429s for a 10-property org (CUSHION-1C).
+const FORECAST_CONCURRENCY = 2
+const FORECAST_CHUNK_GAP_MS = 1_000
 const MAX_PROPERTIES_PER_ORG = 500
 const DAY_MS = 86_400_000
 
@@ -176,7 +180,10 @@ async function loadForecasts(
   orgId: string, props: readonly PropertyRow[], forecastDates: ReadonlyMap<string, string>,
 ): Promise<Map<string, DayForecast | null>> {
   const forecasts = new Map<string, DayForecast | null>()
+  let first = true
   for (const chunk of chunkArray(props, FORECAST_CONCURRENCY)) {
+    if (!first) await new Promise((resolve) => setTimeout(resolve, FORECAST_CHUNK_GAP_MS))
+    first = false
     await Promise.all(chunk.map(async (p) => { // NOSONAR -- bounded concurrency by design: FORECAST_CONCURRENCY requests at a time stays inside the weather API rate limit
       try {
         forecasts.set(p.id, await getTomorrowForecastForLocation(p.lat!, p.lng!, forecastDates.get(p.id)!))
