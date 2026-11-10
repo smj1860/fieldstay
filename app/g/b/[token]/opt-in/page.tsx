@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { isRealQueryError, throwIfAnyQueryFailed, unwrap } from '@/lib/supabase/unwrap'
+import { isUuid } from '@/lib/validation/uuid'
 import { OptInClient } from './opt-in-client'
 
 export default async function GuestSmsOptInPage({
@@ -9,6 +10,8 @@ export default async function GuestSmsOptInPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
+  // guidebook_token is a uuid column; a malformed token would 500 (22P02).
+  if (!isUuid(token)) notFound()
   const supabase = createServiceClient({ publicSurface: 'g-b--token--opt-in' })
 
   const bookingRes = await supabase

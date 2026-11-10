@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrap } from '@/lib/supabase/unwrap'
+import { isUuid } from '@/lib/validation/uuid'
 import { resolveSponsorsForPropertyCached } from '@/lib/guidebook/resolve-property-sponsors'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asOfferType } from '@/lib/guidebook/offer'
@@ -62,6 +63,11 @@ const CONFIG_FIELDS = `
 `
 
 const getGuidebookData = cache(async (token: string) => {
+  // guidebook_token is a uuid column: a malformed token (a scanner, a
+  // truncated link) makes Postgres throw 22P02, which would otherwise surface
+  // as a 500 and a Sentry error instead of the 404 the guest should see.
+  if (!isUuid(token)) return null
+
   const supabase = createServiceClient({ publicSurface: 'g-b--token-' })
 
   const bookingRes = await supabase
