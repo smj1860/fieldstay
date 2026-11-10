@@ -1,6 +1,7 @@
 import localFont from 'next/font/local'
 import type { Metadata } from 'next'
 import { HomepageContent } from '@/components/landing/homepage-content'
+import OwnerRezLaunchBar from '@/components/landing/ownerrez-launch-bar'
 import { marketingUrl, marketingOrigin } from '@/lib/marketing'
 import { buildJsonLd, serializeJsonLd } from './json-ld'
 
@@ -60,10 +61,16 @@ export const metadata: Metadata = {
   },
 }
 
+// The homepage is prerendered. Revalidating hourly re-runs the launch bar's
+// isOwnerRezOfferActive() check so it disappears after the offer ends, with no
+// deploy. Same approach as app/ownerrez/page.tsx.
+export const revalidate = 3600
+
 export default function HomePage() {
   return (
     <div className={`${archivo.variable} ${sourceSerif4.variable}`}>
       <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
+      <OwnerRezLaunchBar />
       <HomepageContent />
     </div>
   )
