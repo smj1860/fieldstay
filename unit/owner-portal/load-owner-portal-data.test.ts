@@ -170,12 +170,21 @@ describe('loadOwnerPortalData', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    await loadOwnerPortalData('valid-token', '2026-05', undefined)
+    // Relative to today, never a literal: the picker is a rolling six-month
+    // window, so a hardcoded month silently falls out of it as the calendar
+    // turns over (this test started failing on the first of the month after
+    // its literal aged out) and the loader falls back to the current month.
+    const now      = new Date()
+    const selected = new Date(now.getFullYear(), now.getMonth() - 3, 1)
+    const next     = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+    const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+    await loadOwnerPortalData('valid-token', ym(selected), undefined)
 
     const gte = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'gte')
     const lt  = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'lt')
-    expect(gte?.args).toEqual(['transaction_date', '2026-05-01'])
-    expect(lt?.args).toEqual(['transaction_date',  '2026-06-01'])
+    expect(gte?.args).toEqual(['transaction_date', `${ym(selected)}-01`])
+    expect(lt?.args).toEqual(['transaction_date',  `${ym(next)}-01`])
   })
 
   it('rolls the half-open month window over a year boundary', async () => {
