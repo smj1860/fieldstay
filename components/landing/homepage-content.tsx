@@ -87,6 +87,22 @@ const INTEGRATIONS = [
   'Airbnb', 'VRBO', 'Hospitable', 'OwnerRez', 'Lodgify', 'Hostaway', 'Hostex', 'Stripe',
 ] as const
 
+// Integrations that have a page of their own on this site. Permanent; it does
+// not depend on the launch offer date.
+const INTEGRATION_HREFS: Readonly<Record<string, string>> = {
+  OwnerRez: '/ownerrez',
+}
+
+function IntegrationName({ name }: Readonly<{ name: string }>) {
+  const href = INTEGRATION_HREFS[name]
+  if (href === undefined) return <span>{name}</span>
+  return (
+    <Link href={href} className="hover:underline focus-visible:underline">
+      {name}
+    </Link>
+  )
+}
+
 type RoleKey = 'managers' | 'crew' | 'vendors' | 'owners' | 'guests'
 
 interface RolePanelContent {
@@ -354,7 +370,7 @@ export function HomepageContent() {
       <section className="flex items-center gap-6 lg:gap-11 flex-wrap" style={{ padding: 'clamp(24px, 5vw, 32px) clamp(20px, 5vw, 40px)', borderTop: '1px solid #E2DACB', borderBottom: '1px solid #E2DACB' }}>
         <span className="text-sm" style={{ color: '#5B6478', width: '100%', maxWidth: 180 }}>Syncs with the tools you already use</span>
         <div className="flex gap-6 sm:gap-9 flex-wrap font-bold" style={{ fontSize: 'clamp(16px, 3vw, 20px)', color: '#7A7466', letterSpacing: '-0.3px' }}>
-          {INTEGRATIONS.map((name) => <span key={name}>{name}</span>)}
+          {INTEGRATIONS.map((name) => <IntegrationName key={name} name={name} />)}
         </div>
       </section>
 
