@@ -1048,6 +1048,16 @@ export type FieldStayEvents = {
     }
   }
 
+  // A FieldStay staff member replied to a customer from the support inbox.
+  // The reply is already saved and shows in the customer's chat widget when it
+  // is open; this event is what reaches them when it is not.
+  'support/staff-reply.sent': {
+    data: {
+      conversationId: string
+      messageId:      string
+    }
+  }
+
   // Guest SMS nudges — fanned out from the morning/evening crons, one event
   // per eligible opt-in. Phone numbers deliberately stay OUT of the payload
   // (Inngest persists event data); the send handler refetches the opt-in row

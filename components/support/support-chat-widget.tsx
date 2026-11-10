@@ -2,54 +2,22 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { MessageCircle }               from 'lucide-react'
-import { createClient }                from '@/lib/supabase/client'
 import { Button }                      from '@/components/ui/Button'
-
-interface Message {
-  role: 'user' | 'assistant' | 'human'
-  content: string
-}
+import { useSupportConversation }      from '@/components/support/use-support-conversation'
+import type { SupportMessage }         from '@/lib/support/chat-history'
 
 export function SupportChatWidget() {
-  const [open, setOpen]                     = useState(false)
-  const [messages, setMessages]             = useState<Message[]>([])
-  const [input, setInput]                   = useState('')
-  const [loading, setLoading]               = useState(false)
-  const [error, setError]                   = useState<string | null>(null)
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [input, setInput]     = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const {
+    messages, conversationId, open, unread, openChat, closeChat, appendMessage, adoptConversation,
+  } = useSupportConversation()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, open])
-
-  // Subscribe to new human replies for this conversation
-  useEffect(() => {
-    if (!conversationId) return
-
-    const supabase = createClient()
-    const channel  = supabase
-      .channel(`support-widget-${conversationId}`)
-      .on('postgres_changes',
-        {
-          event:  'INSERT',
-          schema: 'public',
-          table:  'support_messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload: { new: Record<string, unknown> }) => {
-          const row = payload.new as { role: string; content: string }
-          // Only add human messages via realtime — user/assistant are already
-          // added locally during the send() flow to avoid duplicates
-          if (row.role === 'human') {
-            setMessages(prev => [...prev, { role: 'human', content: row.content }])
-          }
-        }
-      )
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [conversationId])
 
   async function send() {
     const text = input.trim()
@@ -57,7 +25,7 @@ export function SupportChatWidget() {
 
     setInput('')
     setError(null)
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
+    appendMessage({ role: 'user', content: text })
     setLoading(true)
 
     try {
@@ -77,8 +45,8 @@ export function SupportChatWidget() {
         reply:          string
       }
 
-      if (!conversationId) setConversationId(data.conversationId)
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.reply }])
+      adoptConversation(data.conversationId)
+      appendMessage({ role: 'assistant', content: data.reply })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong, please try again.')
     } finally {
@@ -93,7 +61,7 @@ export function SupportChatWidget() {
     }
   }
 
-  function bubbleStyle(role: Message['role']) {
+  function bubbleStyle(role: SupportMessage['role']) {
     if (role === 'user') {
       return {
         alignSelf:    'flex-end'  as const,
@@ -158,7 +126,7 @@ export function SupportChatWidget() {
               </div>
             </div>
             <button
-              onClick={() => setOpen(false)}
+              onClick={closeChat}
               style={{
                 background: 'none',
                 border:     'none',
@@ -287,8 +255,9 @@ export function SupportChatWidget() {
         </div>
       ) : (
         <button
-          onClick={() => setOpen(true)}
+          onClick={openChat}
           style={{
+            position:       'relative',
             width:          '52px',
             height:         '52px',
             borderRadius:   '50%',
@@ -301,9 +270,24 @@ export function SupportChatWidget() {
             boxShadow:      'var(--shadow-lg)',
             color:          'var(--text-inverse)',
           }}
-          aria-label="Open support chat"
+          aria-label={unread ? 'Open support chat, new reply from the FieldStay team' : 'Open support chat'}
         >
           <MessageCircle size={24} strokeWidth={2.25} />
+          {unread && (
+            <span
+              aria-hidden="true"
+              style={{
+                position:     'absolute',
+                top:          '0',
+                right:        '0',
+                width:        '14px',
+                height:       '14px',
+                borderRadius: '50%',
+                background:   'var(--accent-red)',
+                border:       '2px solid var(--bg-card)',
+              }}
+            />
+          )}
         </button>
       )}
     </div>

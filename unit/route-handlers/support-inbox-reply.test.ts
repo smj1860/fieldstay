@@ -4,9 +4,13 @@ import { NextRequest } from 'next/server'
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }))
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { POST } from '@/app/api/support-inbox/reply/route'
 import { createClient } from '@/lib/supabase/server'
+import { inngest } from '@/lib/inngest/client'
+import { reportError } from '@/lib/observability/report-error'
 
 const USER_ID = 'staff_1'
 
@@ -19,7 +23,10 @@ function makeAuthClient(user: { id: string } | null, byTable: Record<string, Res
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = vi.fn((...a: unknown[]) => { calls.push({ table, method: 'select', args: a }); return chain })
-    chain.insert = vi.fn((...a: unknown[]) => { calls.push({ table, method: 'insert', args: a }); return Promise.resolve(result) })
+    // Returns the chain, not a bare promise: the route reads the new row's id
+    // back with .select('id').single(). The chain is still awaitable via then().
+    chain.insert = vi.fn((...a: unknown[]) => { calls.push({ table, method: 'insert', args: a }); return chain })
+    chain.single = vi.fn(() => Promise.resolve(result))
     chain.update = vi.fn((...a: unknown[]) => { calls.push({ table, method: 'update', args: a }); return chain })
     chain.eq     = vi.fn((...a: unknown[]) => { calls.push({ table, method: 'eq', args: a }); return chain })
     chain.maybeSingle = vi.fn(() => Promise.resolve(result))
@@ -144,5 +151,59 @@ describe('POST /api/support-inbox/reply', () => {
     const insertCall = client.calls.find((c) => c.table === 'support_messages' && c.method === 'insert')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((insertCall!.args[0] as any).conversation_id).toBe('convo_in_some_other_org')
+  })
+
+  // A staff reply is saved and shows live in the customer's chat if it is open.
+  // A customer who is logged out never sees that push, so the saved reply also
+  // queues an email. Queuing is best effort: a reply that is already stored
+  // must not be reported as failed because the email could not be queued.
+  describe('notifying the customer', () => {
+    const savedReply = () => makeAuthClient(
+      { id: USER_ID },
+      {
+        platform_staff:   { data: { user_id: USER_ID }, error: null },
+        support_messages: { data: { id: 'msg_1' }, error: null },
+      },
+    )
+
+    it('queues one email event per saved reply, keyed on the message id', async () => {
+      vi.mocked(createClient).mockResolvedValue(savedReply() as never)
+
+      const res = await POST(postRequest({ conversationId: 'convo_1', content: 'Welcome!' }))
+
+      expect(res.status).toBe(200)
+      expect(inngest.send).toHaveBeenCalledWith({
+        name: 'support/staff-reply.sent',
+        id:   'support-staff-reply-msg_1',
+        data: { conversationId: 'convo_1', messageId: 'msg_1' },
+      })
+    })
+
+    it('still reports the reply as sent when queuing the email fails, and reports it as a warning', async () => {
+      vi.mocked(createClient).mockResolvedValue(savedReply() as never)
+      vi.mocked(inngest.send).mockRejectedValueOnce(new Error('inngest down'))
+
+      const res = await POST(postRequest({ conversationId: 'convo_1', content: 'Welcome!' }))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ sent: true })
+      expect(reportError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ level: 'warning' }))
+    })
+
+    it('queues nothing when the reply was not saved', async () => {
+      const client = makeAuthClient(
+        { id: USER_ID },
+        {
+          platform_staff:   { data: { user_id: USER_ID }, error: null },
+          support_messages: { data: null, error: { message: 'insert failed' } },
+        },
+      )
+      vi.mocked(createClient).mockResolvedValue(client as never)
+
+      const res = await POST(postRequest({ conversationId: 'convo_1', content: 'hi' }))
+
+      expect(res.status).toBe(500)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
   })
 })
