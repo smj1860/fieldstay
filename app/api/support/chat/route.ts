@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
 import { classifyIntent } from '@/lib/support/classify'
 import { generateResponse } from '@/lib/support/respond'
+import { isSupportMessageRole } from '@/lib/support/chat-history'
 import { inngest } from '@/lib/inngest/client'
 import { supportChatLimiter, supportChatDailyLimiter, checkLimit } from '@/lib/rate-limit'
 import type { createClient } from '@/lib/supabase/server'
@@ -45,6 +46,79 @@ async function resolveConversationId(
     return { error: 'Conversation not found', status: 404 }
   }
   return { id: conversationId }
+}
+
+// How many messages of one conversation the widget reloads. A support thread is
+// a handful of turns; this only exists so a runaway thread cannot make the
+// widget's first paint download an unbounded history.
+const HISTORY_LIMIT = 200
+
+interface HistoryRow {
+  id:         string
+  role:       string
+  content:    string
+  created_at: string
+}
+
+/**
+ * The caller's most recent conversation and its messages, so the widget can
+ * restore the thread after a reload or a fresh login. Without this the widget
+ * started empty every time, and a reply a staff member sent while the customer
+ * was away was saved but never shown to them.
+ *
+ * Reads go through the session-scoped client: the support tables' RLS already
+ * limits a customer to their own conversations, and the explicit user and org
+ * filters keep that true even if a policy were ever loosened.
+ */
+export async function GET() {
+  const { supabase, user, membership } = await requireOrgMember()
+  const noStore = { 'Cache-Control': 'no-store' }
+
+  const convoRes = await supabase
+    .from('support_conversations')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('org_id', membership.org_id)
+    .order('last_message_at', { ascending: false })
+    .limit(1)
+  const convoOut = tryUnwrapList<{ id: string }>(convoRes, {
+    site:  'api.support.chat.latest-conversation',
+    orgId: membership.org_id,
+  })
+  if (!convoOut.ok) {
+    return NextResponse.json({ error: 'Could not load your conversation.' }, { status: 500, headers: noStore })
+  }
+
+  const latest = convoOut.data[0]
+  if (!latest) {
+    return NextResponse.json({ conversationId: null, messages: [] }, { headers: noStore })
+  }
+
+  const messagesRes = await supabase
+    .from('support_messages')
+    .select('id, role, content, created_at')
+    .eq('conversation_id', latest.id)
+    .order('created_at', { ascending: false })
+    .limit(HISTORY_LIMIT)
+  const messagesOut = tryUnwrapList<HistoryRow>(messagesRes, {
+    site:  'api.support.chat.history-load',
+    orgId: membership.org_id,
+  })
+  if (!messagesOut.ok) {
+    return NextResponse.json({ error: 'Could not load your conversation.' }, { status: 500, headers: noStore })
+  }
+
+  const messages = messagesOut.data
+    .filter((row) => isSupportMessageRole(row.role))
+    .reverse()
+    .map((row) => ({
+      id:        row.id,
+      role:      row.role,
+      content:   row.content,
+      createdAt: row.created_at,
+    }))
+
+  return NextResponse.json({ conversationId: latest.id, messages }, { headers: noStore })
 }
 
 export async function POST(req: NextRequest) {
