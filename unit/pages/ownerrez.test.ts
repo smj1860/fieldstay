@@ -50,6 +50,16 @@ describe('/ownerrez page source', () => {
     expect(page + banner).not.toMatch(/nofollow|sponsored/)
   })
 
+  it('puts an account link in the nav, not only a login link', () => {
+    // The nav used to hold a single Log In link, so a first-time visitor's most
+    // visible way forward was a login form. Launch week showed 21 visitors on
+    // /login and one account created.
+    const nav = page.slice(page.indexOf('<nav'), page.indexOf('</nav>'))
+    expect(nav).toContain('href="/signup?provider=ownerrez&next=/onboarding"')
+    expect(nav).toContain('Create account')
+    expect(nav).toContain('href="/login?next=/api/integrations/ownerrez/connect"')
+  })
+
   it('revalidates so the banner can expire on a prerendered page', () => {
     expect(page).toMatch(/export const revalidate = 3600/)
   })
