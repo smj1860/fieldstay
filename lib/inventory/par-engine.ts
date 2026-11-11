@@ -234,3 +234,33 @@ export function normalizeParConfig(input: ParConfigInput): ParConfigInput {
   }
   return { par_mode: 'static', smart_group: null, base_qty }
 }
+
+/** The par columns of a catalog row, as the add-items flow reads them. */
+export interface CatalogParSource {
+  par_mode:    ParMode
+  smart_group: ParSmartGroup | null
+  base_qty:    number | string | null
+}
+
+/**
+ * The par columns for ONE hand-added inventory item, always as a COMPLETE set.
+ *
+ * A static item (a static catalog row, or a custom item with no catalog row)
+ * returns the explicit static values rather than nothing. The caller builds a
+ * bulk insert, and PostgREST makes the column list of a bulk insert from the
+ * UNION of every row's keys, then sends NULL for a key a given row lacks. That
+ * NULL is not the column default: `par_mode` is NOT NULL, so one submission
+ * mixing a smart catalog item (which carried the keys) with a static or custom
+ * item (which carried none) was rejected whole with 23502. Returning the same
+ * three keys for every item makes the rows uniform, whatever mix a PM selects.
+ */
+export function parConfigForNewItem(cat: CatalogParSource | undefined): ParConfigInput {
+  if (cat?.par_mode === 'smart') {
+    return normalizeParConfig({
+      par_mode:    'smart',
+      smart_group: cat.smart_group,
+      base_qty:    Number(cat.base_qty),
+    })
+  }
+  return { par_mode: 'static', smart_group: null, base_qty: 1 }
+}
