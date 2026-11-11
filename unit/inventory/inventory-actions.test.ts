@@ -175,6 +175,45 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ success: true })
     })
 
+    // SENTRY-CRAZY-CUSHION-1F. A bulk insert is built from the UNION of the rows'
+    // keys and PostgREST sends NULL, not the column default, for a key a row
+    // lacks. A smart catalog item carried par_mode/smart_group/base_qty while a
+    // static or custom item carried none, so a batch mixing the two sent NULL
+    // for par_mode on the static rows and was rejected whole with 23502.
+    it('gives every row the same par keys when a batch mixes smart, static and custom items', async () => {
+      const supabase = makeSupabase({
+        properties:        [{ data: { id: 'prop_1' } }],
+        inventory_catalog: [{ data: [
+          { id: 'cat_smart',  par_mode: 'smart',  smart_group: 'bathroom_essential', base_qty: 2 },
+          { id: 'cat_static', par_mode: 'static', smart_group: null,                 base_qty: 1 },
+        ] }],
+        inventory_items:   [{ error: null }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await addInventoryItems(null, fd({
+        property_id: 'prop_1',
+        item_count:  '3',
+        item_0_catalog_item_id: 'cat_smart',  item_0_name: 'Bath towels',  item_0_unit: 'each', item_0_par_level: '4',
+        item_1_catalog_item_id: 'cat_static', item_1_name: 'Light bulbs',  item_1_unit: 'each', item_1_par_level: '6',
+        item_2_name: 'Welcome basket', item_2_unit: 'each', item_2_par_level: '1',
+      }))
+
+      expect(result).toEqual({ success: true })
+
+      const idx = supabase.from.mock.calls.findIndex(([t]) => t === 'inventory_items')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = (supabase.from.mock.results[idx]!.value as any).insert.mock.calls[0]![0] as Record<string, unknown>[]
+
+      expect(rows).toHaveLength(3)
+      const keySets = new Set(rows.map((r) => Object.keys(r).sort().join(',')))
+      expect(keySets.size).toBe(1)
+      expect(rows.every((r) => r.par_mode !== undefined && r.par_mode !== null)).toBe(true)
+      expect(rows.map((r) => r.par_mode)).toEqual(['smart', 'static', 'static'])
+      expect(rows[0]).toMatchObject({ smart_group: 'bathroom_essential', base_qty: 2 })
+      expect(rows[2]).toMatchObject({ smart_group: null, base_qty: 1 })
+    })
+
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)

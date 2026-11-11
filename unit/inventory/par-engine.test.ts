@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   resolvePar,
   normalizeParConfig,
+  parConfigForNewItem,
   HISTORICAL_FLOOR,
   type ParItemConfig,
   type ParPropertyContext,
@@ -122,5 +123,48 @@ describe('normalizeParConfig', () => {
     expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: NaN }).base_qty).toBe(1)
     expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: 0 }).base_qty).toBe(1)
     expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: -3 }).base_qty).toBe(1)
+  })
+})
+
+// ============================================================================
+// A bulk insert into inventory_items is built from the UNION of the rows' keys,
+// and PostgREST sends NULL (not the column default) for a key a row lacks.
+// par_mode is NOT NULL, so every new item must carry the same par keys even
+// when it is static. SENTRY-CRAZY-CUSHION-1F: a batch mixing a smart catalog
+// item with a static or custom one was rejected whole with 23502.
+// ============================================================================
+describe('parConfigForNewItem', () => {
+  const KEYS = ['base_qty', 'par_mode', 'smart_group']
+
+  it('returns the explicit static values for a custom item with no catalog row', () => {
+    expect(parConfigForNewItem(undefined)).toEqual({ par_mode: 'static', smart_group: null, base_qty: 1 })
+  })
+
+  it('returns the explicit static values for a static catalog row, ignoring its base_qty', () => {
+    expect(parConfigForNewItem({ par_mode: 'static', smart_group: null, base_qty: 4 }))
+      .toEqual({ par_mode: 'static', smart_group: null, base_qty: 1 })
+  })
+
+  it('carries a smart catalog row through', () => {
+    expect(parConfigForNewItem({ par_mode: 'smart', smart_group: 'bathroom_essential', base_qty: 2 }))
+      .toEqual({ par_mode: 'smart', smart_group: 'bathroom_essential', base_qty: 2 })
+  })
+
+  it('accepts base_qty as the string a numeric column comes back as', () => {
+    expect(parConfigForNewItem({ par_mode: 'smart', smart_group: 'guest_consumable', base_qty: '1.5' }).base_qty).toBe(1.5)
+  })
+
+  it('degrades a smart row with no usable group to static instead of writing an invalid pair', () => {
+    expect(parConfigForNewItem({ par_mode: 'smart', smart_group: null, base_qty: 2 }).par_mode).toBe('static')
+  })
+
+  it('always returns the same three keys, so any mix of rows has uniform keys', () => {
+    const results = [
+      parConfigForNewItem(undefined),
+      parConfigForNewItem({ par_mode: 'static', smart_group: null, base_qty: 1 }),
+      parConfigForNewItem({ par_mode: 'smart', smart_group: 'bedroom_essential', base_qty: 1 }),
+      parConfigForNewItem({ par_mode: 'smart', smart_group: null, base_qty: Number.NaN }),
+    ]
+    for (const r of results) expect(Object.keys(r).sort()).toEqual(KEYS)
   })
 })

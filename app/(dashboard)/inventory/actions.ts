@@ -9,7 +9,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
-import { rebaseParFromTarget } from '@/lib/inventory/par-engine'
+import { rebaseParFromTarget, parConfigForNewItem } from '@/lib/inventory/par-engine'
 import type { InventoryCategory, ParMode, ParSmartGroup, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
 import { parseQuantityInput } from '@/lib/inventory/quantity'
@@ -230,12 +230,13 @@ export async function addInventoryItems(
 
       if (!name || !unit) continue
 
-      // A catalog row that is itself static, or a hand-typed custom item, keeps
-      // the static default — inheriting is not the same as forcing.
+      // Every row gets the SAME par keys, static or smart. A static item used
+      // to carry none and lean on the column default, but a bulk insert is built
+      // from the union of the rows' keys and sends NULL for a missing one, not
+      // the default, so a batch mixing smart and static items failed whole with
+      // a NOT NULL violation on par_mode (SENTRY-CRAZY-CUSHION-1F).
       const cat = catalog_item_id ? parByCatalogId.get(catalog_item_id) : undefined
-      const parConfig = cat?.par_mode === 'smart' && cat.smart_group
-        ? { par_mode: 'smart' as ParMode, smart_group: cat.smart_group, base_qty: Number(cat.base_qty) || 1 }
-        : {}
+      const parConfig = parConfigForNewItem(cat)
 
       rows.push({
         property_id,
