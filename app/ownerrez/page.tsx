@@ -87,12 +87,28 @@ export default function OwnerRezPage() {
               <span className="text-white">Field</span>
               <span className="text-gold-300">Stay</span>
             </span>
-            <Link
-              href="/login?next=/api/integrations/ownerrez/connect"
-              className="text-sm text-white/58 hover:text-white transition-colors"
-            >
-              Log In
-            </Link>
+            {/*
+              Two links, and the account one is the prominent one. This nav
+              used to hold a single "Log In" link, so a first-time visitor's
+              most visible way forward was a login form, while the signup
+              buttons sat only in the launch banner and at the foot of the
+              page. Launch week showed 21 visitors on /login and one account
+              created, which is what prompted the change.
+            */}
+            <div className="flex items-center gap-4">
+              <Link
+                href="/login?next=/api/integrations/ownerrez/connect"
+                className="text-sm text-white/58 hover:text-white transition-colors"
+              >
+                Log In
+              </Link>
+              <Link
+                href="/signup?provider=ownerrez&next=/onboarding"
+                className="text-sm font-bold px-4 py-2 rounded-lg bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
+              >
+                Create account
+              </Link>
+            </div>
           </nav>
 
           {/* OwnerRez Partner Badge */}

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { LoginForm } from './login-form'
+import { signupHrefForLoginNext } from '@/lib/auth/signup-href'
 
 export const metadata: Metadata = { title: 'Log In' }
 export const dynamic = 'force-dynamic'
@@ -18,7 +19,12 @@ function LoginFormSkeleton() {
   )
 }
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ next?: string | string[] }> }>) {
+  const { next } = await searchParams
+  const signupHref = signupHrefForLoginNext(typeof next === 'string' ? next : null)
+
   return (
     <>
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Welcome back</h2>
@@ -32,7 +38,7 @@ export default function LoginPage() {
 
       <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
         Don&apos;t have an account?{' '}
-        <Link href="/signup" className="font-medium hover:underline" style={{ color: 'var(--accent-blue)' }}>
+        <Link href={signupHref} className="font-medium hover:underline" style={{ color: 'var(--accent-blue)' }}>
           Start free trial
         </Link>
       </p>
