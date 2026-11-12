@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
@@ -10,6 +10,8 @@ import { freezeWatchOrg } from '@/lib/inngest/functions/cron/freeze-watch'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getTomorrowForecastForLocation } from '@/lib/weather/tomorrow'
 import { createPmNotifications } from '@/lib/inngest/helpers'
+import { reportError } from '@/lib/observability/report-error'
+import { TomorrowRateLimitError } from '@/lib/weather/rate-limit-error'
 import { invokeHandler } from './test-helpers'
 
 const NOW = Date.parse('2026-12-01T20:00:00Z')   // forecast date: 2026-12-02 in America/Chicago
@@ -170,5 +172,77 @@ describe('freezeWatchOrg', () => {
     expect(sendEvent).not.toHaveBeenCalled()
     const [notice] = vi.mocked(createPmNotifications).mock.calls[0][1]
     expect(notice.subtitle).toContain('was not notified')
+  })
+  // CUSHION-1K: Tomorrow.io's limit belongs to the API key. Each org paces itself
+  // at about 2 req/s, so N orgs running together made 2N requests in the first
+  // second, and the night a fifth org became eligible the fifth got a 429. The
+  // 429 was swallowed as "no forecast", so that property got no freeze check and
+  // nothing said so.
+  describe('Tomorrow.io rate limits', () => {
+    beforeEach(() => { vi.useFakeTimers(); vi.mocked(reportError).mockClear() })
+    afterEach(() => vi.useRealTimers())
+
+    async function runToCompletion() {
+      const { out } = run()
+      const settled = out.then((v) => v, (e: unknown) => { throw e })
+      await vi.advanceTimersByTimeAsync(30_000)
+      return settled
+    }
+
+    it('retries a rate-limited property once, and acts on the forecast it then gets', async () => {
+      vi.mocked(getTomorrowForecastForLocation)
+        .mockRejectedValueOnce(new TomorrowRateLimitError())
+        .mockResolvedValueOnce({ temperatureMin: 5 } as never)
+      const inserts = stub({ properties: [prop('a')], bookings: [], openWos: [], schedules: [] })
+      expect(await runToCompletion()).toEqual({ created: 1 })
+      expect(inserts).toHaveLength(1)
+      expect(getTomorrowForecastForLocation).toHaveBeenCalledTimes(2)
+      expect(reportError).not.toHaveBeenCalled()   // recovered, so there is nothing to report
+    })
+
+    it('retries only the rate-limited property, not the ones that already succeeded', async () => {
+      vi.mocked(getTomorrowForecastForLocation)
+        .mockResolvedValueOnce({ temperatureMin: 5 } as never)
+        .mockRejectedValueOnce(new TomorrowRateLimitError())
+        .mockResolvedValueOnce({ temperatureMin: 5 } as never)
+      const inserts = stub({ properties: [prop('a'), prop('b')], bookings: [], openWos: [], schedules: [] })
+      expect(await runToCompletion()).toEqual({ created: 2 })
+      expect(inserts.map((i) => i.property_id).sort()).toEqual(['a', 'b'])
+      expect(getTomorrowForecastForLocation).toHaveBeenCalledTimes(3)
+    })
+
+    it('gives up after ONE retry: still limited means no forecast, a warning, and no work order', async () => {
+      vi.mocked(getTomorrowForecastForLocation).mockRejectedValue(new TomorrowRateLimitError())
+      const inserts = stub({ properties: [prop('a')], bookings: [], openWos: [], schedules: [] })
+      expect(await runToCompletion()).toEqual({ created: 0 })
+      expect(inserts).toHaveLength(0)
+      expect(getTomorrowForecastForLocation).toHaveBeenCalledTimes(2)   // first try plus exactly one retry
+      expect(reportError).toHaveBeenCalledWith(
+        expect.any(TomorrowRateLimitError),
+        expect.objectContaining({ site: 'inngest.freeze-watch.forecast', level: 'warning' }),
+      )
+      // No PM alert for a night with no forecast. Nothing was created, so there is nothing to tell them.
+      expect(vi.mocked(createPmNotifications)).not.toHaveBeenCalled()
+    })
+
+    it('does not retry a failure that is not a rate limit', async () => {
+      vi.mocked(getTomorrowForecastForLocation).mockRejectedValue(new Error('provider down'))
+      stub({ properties: [prop('a')], bookings: [], openWos: [], schedules: [] })
+      expect(await runToCompletion()).toEqual({ created: 0 })
+      expect(getTomorrowForecastForLocation).toHaveBeenCalledTimes(1)
+    })
+
+    it('runs ONE org at a time across the whole function, since the limit belongs to the API key', () => {
+      // Asserted on the config rather than by simulating a race: the guarantee IS
+      // the config, and Inngest enforces it. With the old limit of 10, N orgs
+      // starting together at 20:00 made 2N requests in the first second.
+      const concurrency = (freezeWatchOrg as unknown as {
+        opts: { concurrency: Array<{ limit: number; key?: string }> }
+      }).opts.concurrency
+      const global = concurrency.find((c) => c.key === undefined)
+      expect(global?.limit).toBe(1)
+      // And an org is still never run twice at once.
+      expect(concurrency).toContainEqual({ limit: 1, key: 'event.data.org_id' })
+    })
   })
 })

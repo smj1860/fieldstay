@@ -2,6 +2,7 @@ import { getRedisIfConfigured } from '@/lib/redis'
 import { WEATHER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import { fetchWithRetry } from '@/lib/http/retry'
 import { singleFlight } from '@/lib/cache/single-flight'
+import { TomorrowRateLimitError } from '@/lib/weather/rate-limit-error'
 
 // Client comes from lib/redis.ts, which reads this project's
 // upstash_fieldstay_KV_REST_API_* names rather than the standard
@@ -194,7 +195,7 @@ async function fetchTomorrowIo<T>(
   }
 
   if (response.status === 429) {
-    throw new Error('Tomorrow.io rate limit exceeded. Check daily/hourly limits.')
+    throw new TomorrowRateLimitError()
   }
 
   if (!response.ok) {
