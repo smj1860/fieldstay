@@ -203,7 +203,7 @@ async function forecastPass(
   const rateLimited: PropertyRow[] = []
   let first = true
   for (const chunk of chunkArray(props, FORECAST_CONCURRENCY)) {
-    if (!first) await sleep(FORECAST_CHUNK_GAP_MS)
+    if (!first) await sleep(FORECAST_CHUNK_GAP_MS) // NOSONAR -- sequential by design: the gap between chunks IS the request-rate limit
     first = false
     await Promise.all(chunk.map(async (p) => { // NOSONAR -- bounded concurrency by design: FORECAST_CONCURRENCY requests at a time stays inside the weather API rate limit
       try {
