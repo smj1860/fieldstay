@@ -199,8 +199,8 @@ function TomorrowSection({ tomorrow, links }: Readonly<{ tomorrow: DailyWrapUpTo
   if (turnovers.items.length === 0 && arrivals.items.length === 0) return null
   return (
     <SectionWrapper heading="Tomorrow">
-      {turnovers.items.map((t, i) => (
-        <Text key={i} style={lineStyle}>
+      {turnovers.items.map((t) => (
+        <Text key={t.href} style={lineStyle}>
           <Linked href={t.href}>{t.property}</Linked>, checkout {t.time}
           {t.sameDay && <span style={flagStyle}> · same-day flip</span>}
           {', '}
@@ -221,8 +221,8 @@ function FreezeSection({ freeze, links }: Readonly<{ freeze: Capped<DailyWrapUpF
   if (freeze.items.length === 0) return null
   return (
     <SectionWrapper heading={`Freeze prep tonight (${total(freeze)})`}>
-      {freeze.items.map((f, i) => (
-        <Text key={i} style={lineStyle}><Linked href={f.href}>{f.title}</Linked></Text>
+      {freeze.items.map((f) => (
+        <Text key={f.href} style={lineStyle}><Linked href={f.href}>{f.title}</Linked></Text>
       ))}
       <More count={freeze.more} href={links.maintenance} />
     </SectionWrapper>
@@ -235,8 +235,8 @@ function UnassignedTurnoversSection(
   if (list.items.length === 0) return null
   return (
     <SectionWrapper heading={`Turnovers still unassigned (${total(list)})`}>
-      {list.items.map((t, i) => (
-        <Text key={i} style={lineStyle}>
+      {list.items.map((t) => (
+        <Text key={t.href} style={lineStyle}>
           <Linked href={t.href}>{t.property}</Linked>, checkout {new Date(t.checkout).toLocaleString('en-US', {
             month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
           })}
@@ -253,8 +253,8 @@ function EscalationsSection(
   if (list.items.length === 0) return null
   return (
     <SectionWrapper heading="Escalated to Urgent in the last 24h">
-      {list.items.map((e, i) => (
-        <Text key={i} style={lineStyle}>
+      {list.items.map((e) => (
+        <Text key={e.href} style={lineStyle}>
           <Linked href={e.href}>{e.woNumber ? `${e.woNumber}: ${e.title}` : e.title}</Linked>, {e.property}
         </Text>
       ))}
@@ -270,15 +270,15 @@ function MaintenanceSection(
   if (due.items.length === 0 && unassigned.items.length === 0) return null
   return (
     <SectionWrapper heading="Maintenance">
-      {unassigned.items.map((wo, i) => (
-        <Text key={`unassigned-${i}`} style={lineStyle}>
+      {unassigned.items.map((wo) => (
+        <Text key={`unassigned-${wo.href}`} style={lineStyle}>
           Unassigned: <Linked href={wo.href}>{wo.woNumber ? `${wo.woNumber} ${wo.title}` : wo.title}</Linked>, {wo.property}
           {wo.suggested ? ` (suggested: ${wo.suggested})` : ''}
         </Text>
       ))}
       <More count={unassigned.more} href={links.maintenance} />
-      {due.items.map((d, i) => (
-        <Text key={`due-${i}`} style={lineStyle}>Due today: {groupedText(d)}</Text>
+      {due.items.map((d) => (
+        <Text key={`due-${d.label}`} style={lineStyle}>Due today: {groupedText(d)}</Text>
       ))}
       <More count={due.more} href={links.maintenance} />
     </SectionWrapper>
@@ -291,8 +291,8 @@ function InventorySection(
   if (list.items.length === 0) return null
   return (
     <SectionWrapper heading="Inventory restock needed today">
-      {list.items.map((po, i) => (
-        <Text key={i} style={lineStyle}>{po.property}, {po.items.join(', ')}</Text>
+      {list.items.map((po) => (
+        <Text key={`${po.property}-${po.items.join("|")}`} style={lineStyle}>{po.property}, {po.items.join(', ')}</Text>
       ))}
       <More count={list.more} href={links.inventory} />
     </SectionWrapper>
@@ -305,8 +305,8 @@ function ComplianceSection(
   if (list.items.length === 0) return null
   return (
     <SectionWrapper heading="Vendor compliance docs expiring soon">
-      {list.items.map((c, i) => (
-        <Text key={i} style={lineStyle}>
+      {list.items.map((c) => (
+        <Text key={`${c.href}-${c.docType}-${c.expiryDate}`} style={lineStyle}>
           <Linked href={c.href}>{c.vendorName}</Linked>, {c.docType.replace(/_/g, ' ')}, expires {new Date(c.expiryDate).toLocaleDateString()}
           {c.isNew && <NewTag />}
         </Text>
@@ -322,8 +322,8 @@ function ChecklistSection(
   if (list.items.length === 0) return null
   return (
     <SectionWrapper heading="Open discovery checklist items">
-      {list.items.map((c, i) => (
-        <Text key={i} style={lineStyle}>
+      {list.items.map((c) => (
+        <Text key={c.openCount} style={lineStyle}>
           {nameList(c.properties, c.more)}, {plural(c.openCount, 'open item')}
           {c.count > 1 ? ' each' : ''}
           {c.isNew && <NewTag />}
@@ -340,8 +340,8 @@ function WatchSections({ props }: Readonly<{ props: DailyWrapUpEmailProps }>) {
     <>
       {repeatIssues.items.length > 0 && (
         <SectionWrapper heading="Repeat maintenance issues">
-          {repeatIssues.items.map((r, i) => (
-            <Text key={i} style={lineStyle}>
+          {repeatIssues.items.map((r) => (
+            <Text key={`${r.propertyName}-${r.category}`} style={lineStyle}>
               {r.propertyName}, {r.category.replace(/_/g, ' ')} ({r.count}x in 90 days)
             </Text>
           ))}
@@ -351,8 +351,8 @@ function WatchSections({ props }: Readonly<{ props: DailyWrapUpEmailProps }>) {
 
       {vacancy.items.length > 0 && (
         <SectionWrapper heading="Vacancy gaps in the week ahead">
-          {vacancy.items.map((v, i) => (
-            <Text key={i} style={lineStyle}>
+          {vacancy.items.map((v) => (
+            <Text key={`${v.propertyName}-${v.gapStart}`} style={lineStyle}>
               {v.propertyName}, {v.gapDays}-day gap starting {new Date(v.gapStart).toLocaleDateString()}
             </Text>
           ))}
@@ -362,8 +362,8 @@ function WatchSections({ props }: Readonly<{ props: DailyWrapUpEmailProps }>) {
 
       {assetHealth.items.length > 0 && (
         <SectionWrapper heading="Lowest asset health scores this week">
-          {assetHealth.items.map((a, i) => (
-            <Text key={i} style={lineStyle}>{a.propertyName}, {a.score}/100</Text>
+          {assetHealth.items.map((a) => (
+            <Text key={`${a.propertyName}-${a.score}`} style={lineStyle}>{a.propertyName}, {a.score}/100</Text>
           ))}
           <More count={assetHealth.more} href={links.assets} />
         </SectionWrapper>
