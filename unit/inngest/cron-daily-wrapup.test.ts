@@ -37,7 +37,7 @@ import { invokeHandler } from './test-helpers'
 // are queried twice per org run (tomorrow-section + unassigned-turnovers;
 // unassigned-WOs + repeat-issue WOs) so a fixed per-table response isn't
 // enough — order matters.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
+function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown; count?: number }[]>) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
 
@@ -224,16 +224,88 @@ describe('dailyWrapUpOrg (per-org handler)', () => {
     expect(result).toEqual({ orgId: 'org_1', sent: true })
     expect(renderDailyWrapUpEmail).toHaveBeenCalledWith(
       expect.objectContaining({
-        tomorrow: [{ property: 'Lakeview Cabin', time: expect.any(String), crew: 'Maria' }],
+        tomorrow: expect.objectContaining({
+          turnovers: {
+            items: [expect.objectContaining({ property: 'Lakeview Cabin', crew: 'Maria', needsCrew: false, sameDay: false, href: expect.stringContaining('/turnovers/t1') })],
+            more:  0,
+          },
+        }),
       }),
     )
+    // The subject says what is coming and whether it needs the PM, so it can be triaged from the inbox.
     expect(resend.emails.send).toHaveBeenCalledWith(
-      expect.objectContaining({ to: 'pm@example.com', subject: expect.stringContaining('wrap-up') }),
+      expect.objectContaining({ to: 'pm@example.com', subject: 'Tomorrow: 1 turnover, nothing needs attention' }),
       { idempotencyKey: 'daily-wrapup-org_1-2026-07-22' },
     )
     // No pending POs this run — the mark-as-sent update must not fire.
     const poUpdate = supabase.calls.find((c) => c.table === 'purchase_orders' && c.method === 'update')
     expect(poUpdate).toBeUndefined()
+  })
+
+  // Amy Merrill's first wrap-up listed 20 "unassigned" turnovers with checkouts back to
+  // September. The query had an upper bound (now + 2 days) and no lower one, so an
+  // import that backfilled past bookings as turnovers put every one of them in the
+  // email, on a customer's first day.
+  it('only counts unassigned turnovers from the last 24 hours forward, never weeks-old history', async () => {
+    const supabase = makeSupabase({ ...emptyOrgTables() })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    await invokeHandler(dailyWrapUpOrg, { event: wrapupEvent('org_1'), step: makeStep() })
+
+    const gtes = supabase.calls.filter((c) => c.table === 'turnovers' && c.method === 'gte' && c.args[0] === 'checkout_datetime')
+    // Two turnovers reads carry a checkout lower bound: tomorrow's window and this one.
+    const since24h = new Date(NOW_MS - 86_400_000).toISOString()
+    expect(gtes.map((c) => c.args[1])).toContain(since24h)
+  })
+
+  it('reports tomorrow\'s check-ins, freeze prep for tonight, and what was done today', async () => {
+    const supabase = makeSupabase({
+      ...emptyOrgTables(),
+      // The turnovers table is read three times: tomorrow, unassigned, then the done-today count.
+      turnovers: [
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: null, error: null, count: 4 },
+      ],
+      bookings: [{
+        data: [{ property_id: 'p1', properties: { name: 'Alpine Retreat' } }, { property_id: 'p2', properties: { name: 'Husky Hill' } }],
+        error: null,
+      }],
+      // work_orders: unassigned, repeat-issue, then freeze alerts, then the done-today count.
+      work_orders: [
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [{ id: 'wo-f1', title: 'Freeze prep at Alpine Retreat: forecast low 18°F on 2026-07-23' }], error: null },
+        { data: null, error: null, count: 2 },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
+
+    const result = await invokeHandler(dailyWrapUpOrg, { event: wrapupEvent('org_1'), step: makeStep() })
+    expect(result).toEqual({ orgId: 'org_1', sent: true })
+
+    const props = (renderDailyWrapUpEmail as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>
+    expect(props.tomorrow).toMatchObject({ arrivals: { items: [{ property: 'Alpine Retreat' }, { property: 'Husky Hill' }], more: 0 } })
+    expect(props.freeze).toMatchObject({ items: [{ title: expect.stringContaining('Freeze prep at Alpine Retreat'), href: expect.stringContaining('/maintenance/wo-f1') }] })
+    expect(props.doneToday).toEqual({ turnovers: 4, workOrders: 2 })
+    expect(resend.emails.send).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'Tomorrow: 2 check-ins, 1 thing needs attention' }),
+      expect.anything(),
+    )
+  })
+
+  it('does not send an email on a quiet day just because some work got done', async () => {
+    const supabase = makeSupabase({
+      ...emptyOrgTables(),
+      turnovers:   [{ data: [], error: null }, { data: [], error: null }, { data: null, error: null, count: 6 }],
+      work_orders: [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }, { data: null, error: null, count: 3 }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
+
+    const result = await invokeHandler(dailyWrapUpOrg, { event: wrapupEvent('org_1'), step: makeStep() })
+    expect(result).toEqual({ orgId: 'org_1', sent: false, reason: 'nothing_to_report' })
+    expect(resend.emails.send).not.toHaveBeenCalled()
   })
 
   it('skips sending when the org has content but no PM email can be resolved', async () => {
