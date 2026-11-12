@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+import { MAX_SELF_SERVE_PROPERTIES } from '@/lib/stripe/brackets'
+
 const mockRedirect = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`)
 })
@@ -92,6 +94,11 @@ describe('onboarding/actions — createOrganization', () => {
     expect(admin.rpc).toHaveBeenCalledWith(
       'create_organization_with_owner',
       expect.objectContaining({ p_user_id: 'user_1', p_name: 'Lake Martin Delivery' })
+    )
+    // A new trial org gets the self-serve ceiling, not the legacy 15-property
+    // Starter cap, which stopped larger OwnerRez imports partway.
+    expect(admin.rpc.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ p_max_properties: MAX_SELF_SERVE_PROPERTIES })
     )
     // ONE send with BOTH events, not two sends: a transient Inngest failure
     // between them would otherwise leave the drip scheduled but the inventory

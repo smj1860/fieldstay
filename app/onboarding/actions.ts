@@ -8,6 +8,7 @@ import { slugify } from '@/lib/utils'
 
 import { reportError } from '@/lib/observability/report-error'
 import { TRIAL_DAYS } from '@/lib/billing/trial'
+import { MAX_SELF_SERVE_PROPERTIES } from '@/lib/stripe/brackets'
 export type OnboardingState = { error?: string; success?: boolean }
 
 export async function createOrganization(
@@ -51,7 +52,12 @@ export async function createOrganization(
         p_slug:           slug,
         // organizations.billing_email is nullable and so is this parameter.
         p_billing_email:  nullableArg(user.email ?? null),
-        p_max_properties: 15,
+        // The structural self-serve ceiling, the same value a paid org gets from
+        // the Stripe webhook. This was a literal 15 (the old Starter tier cap),
+        // which a trial org hit as a hard wall: the property-limit trigger
+        // rejected the 16th insert, so an OwnerRez import of a larger portfolio
+        // stopped partway. 15 no longer corresponds to anything we sell.
+        p_max_properties: MAX_SELF_SERVE_PROPERTIES,
         p_trial_ends_at:  trialEndsAt,
       })
       .single()
