@@ -9,6 +9,7 @@ import { localDate } from '@/lib/evidence/packet/deadlines'
 import { vendorDispatchFields } from '@/lib/work-orders/vendor-response'
 import { reportError } from '@/lib/observability/report-error'
 import { getTomorrowForecastForLocation, type DayForecast } from '@/lib/weather/tomorrow'
+import { TomorrowRateLimitError } from '@/lib/weather/rate-limit-error'
 import {
   decideFreezeWatch, freezeWorkOrderCopy, type FreezeCandidateProperty,
 } from '@/lib/evidence/freeze-watch'
@@ -16,8 +17,18 @@ import {
 // Tomorrow.io rate-limits per second, so this is a request RATE, not a memory
 // ceiling: 2 at a time with FORECAST_CHUNK_GAP_MS between chunks stays at about
 // 2 req/s. 15 at once tripped 429s for a 10-property org (CUSHION-1C).
+//
+// That is the rate for ONE organization. The limit belongs to the API key, so
+// the per-org function below also runs one organization at a time: with the
+// old concurrency of 10, N organizations starting together at 20:00 made 2N
+// requests in the first second, and the fifth organization to become eligible
+// (the night Haven joined) tipped it over (CUSHION-1K).
 const FORECAST_CONCURRENCY = 2
 const FORECAST_CHUNK_GAP_MS = 1_000
+// How long to wait before the one retry of a rate-limited property. Enough for
+// a per-second window to clear; an hourly or daily limit cannot be outwaited,
+// and those properties simply stay "no forecast" after the retry as before.
+const RATE_LIMIT_RETRY_DELAY_MS = 3_000
 const MAX_PROPERTIES_PER_ORG = 500
 const DAY_MS = 86_400_000
 
@@ -175,23 +186,56 @@ async function loadOpenFreezeWorkOrders(
   return new Set(rows.map((w) => w.property_id))
 }
 
-/** Bounded concurrency; a failed forecast is "no forecast" for that property only. */
-async function loadForecasts(
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * One paced pass over `props`: FORECAST_CONCURRENCY at a time with a gap between
+ * chunks. A failed forecast is "no forecast" for that property only.
+ *
+ * With `deferRateLimited`, a property Tomorrow.io rate-limited is NOT recorded
+ * and not reported: it is returned so the caller can try it once more. Without
+ * it (the retry pass) a rate limit is final, like any other failure.
+ */
+async function forecastPass(
   orgId: string, props: readonly PropertyRow[], forecastDates: ReadonlyMap<string, string>,
-): Promise<Map<string, DayForecast | null>> {
-  const forecasts = new Map<string, DayForecast | null>()
+  forecasts: Map<string, DayForecast | null>, deferRateLimited: boolean,
+): Promise<PropertyRow[]> {
+  const rateLimited: PropertyRow[] = []
   let first = true
   for (const chunk of chunkArray(props, FORECAST_CONCURRENCY)) {
-    if (!first) await new Promise((resolve) => setTimeout(resolve, FORECAST_CHUNK_GAP_MS))
+    if (!first) await sleep(FORECAST_CHUNK_GAP_MS)
     first = false
     await Promise.all(chunk.map(async (p) => { // NOSONAR -- bounded concurrency by design: FORECAST_CONCURRENCY requests at a time stays inside the weather API rate limit
       try {
         forecasts.set(p.id, await getTomorrowForecastForLocation(p.lat!, p.lng!, forecastDates.get(p.id)!))
       } catch (err) {
+        if (deferRateLimited && err instanceof TomorrowRateLimitError) {
+          rateLimited.push(p)
+          return
+        }
         reportError(err, { site: 'inngest.freeze-watch.forecast', orgId, level: 'warning' })
         forecasts.set(p.id, null)
       }
     }))
+  }
+  return rateLimited
+}
+
+/**
+ * Forecasts for an org's properties. A property whose request was rate-limited
+ * is retried ONCE after a pause: the 429 is a "slow down", and dropping the
+ * property meant it got no freeze check that night with nothing to say so. The
+ * forecasts that did succeed are cached, so the retry only costs the failures.
+ * Whatever still fails is "no forecast" for that property, as before.
+ */
+async function loadForecasts(
+  orgId: string, props: readonly PropertyRow[], forecastDates: ReadonlyMap<string, string>,
+): Promise<Map<string, DayForecast | null>> {
+  const forecasts = new Map<string, DayForecast | null>()
+  const rateLimited = await forecastPass(orgId, props, forecastDates, forecasts, true)
+  if (rateLimited.length > 0) {
+    await sleep(RATE_LIMIT_RETRY_DELAY_MS)
+    await forecastPass(orgId, rateLimited, forecastDates, forecasts, false)
   }
   return forecasts
 }
@@ -383,7 +427,14 @@ export const freezeWatchOrg = inngest.createFunction(
     id:   'freeze-watch-org',
     name: 'Freeze Watch: per org',
     retries: 2,
-    concurrency: [{ limit: 10 }, { limit: 1, key: 'event.data.org_id' }],
+    // ONE org at a time across the whole function, not 10. The Tomorrow.io limit
+    // belongs to the API key, and each org already paces itself at about 2 req/s
+    // (see FORECAST_CONCURRENCY), so N orgs in parallel make 2N requests in the
+    // same second. Serial is cheap here: 26 properties is about 13 seconds, and
+    // even 500 would be a few minutes for a nightly job. A single org is still
+    // never run twice at once, which is what the old per-org key guaranteed; the
+    // keyed entry stays so that guarantee is explicit rather than implied.
+    concurrency: [{ limit: 1 }, { limit: 1, key: 'event.data.org_id' }],
   },
   { event: 'org/freeze_watch.requested' },
   async ({ event, step, logger }) => {
