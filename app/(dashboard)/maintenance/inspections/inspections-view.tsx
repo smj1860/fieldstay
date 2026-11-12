@@ -93,7 +93,17 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
   // refresh of the form library rather than accepting a 15-minute-old copy.
   useEffect(() => { void warmInspectionsForOffline(userId, orgId, { force: true }) }, [userId, orgId])
 
-  const properties  = useLiveQuery(() => db.properties.orderBy('name').toArray(), [db], [])
+  // Sorted here, not with orderBy('name'): `name` is not an index on the
+  // dashboard `properties` store, and Dexie throws a SchemaError for orderBy on
+  // an unindexed key. That error surfaced on every visit to this page (and as a
+  // "Rendered more hooks" crash after it). Same shape as the inspections sort
+  // below: the table is small, so sorting the rows is cheaper than a schema
+  // bump that every device would have to upgrade through.
+  const properties  = useLiveQuery(
+    () => db.properties.toArray().then((rows) => rows.sort((a, b) => a.name.localeCompare(b.name))),
+    [db],
+    [],
+  )
   const inspections = useLiveQuery(
     () => db.inspections.toArray().then((rows) =>
       rows.sort((a, b) => b.started_at.localeCompare(a.started_at))),
