@@ -6,6 +6,10 @@ import { fetchAllRows }                    from '@/lib/inngest/paginate'
 import { unwrap, unwrapList }              from '@/lib/supabase/unwrap'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { renderDailyWrapUpEmail }          from '@/lib/resend/emails/daily-wrapup'
+import { presentWrapUp, wrapUpHasContent, type WrapUpData } from '@/lib/wrapup/presentation'
+import {
+  loadArrivals, loadFreezeAlerts, loadDoneToday, DONE_TODAY_WINDOW_MS,
+} from '@/lib/inngest/functions/cron/daily-wrapup-loaders'
 import { unwrapJoin, unwrapJoinArray }     from '@/lib/utils/supabase-joins'
 import type { AssetType } from '@/types/database'
 
@@ -216,6 +220,8 @@ export const dailyWrapUpOrg = inngest.createFunction(
     const tomorrowStart    = new Date(now); tomorrowStart.setUTCHours(0, 0, 0, 0); tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1)
     const tomorrowEnd      = new Date(tomorrowStart); tomorrowEnd.setUTCDate(tomorrowEnd.getUTCDate() + 1)
     const since24h         = new Date(now.getTime() - MS_PER_DAY).toISOString()
+    const todayDate        = now.toISOString().split('T')[0]!
+    const tomorrowDate     = tomorrowStart.toISOString().split('T')[0]!
     const weekAheadIso     = new Date(now.getTime() + 7 * MS_PER_DAY).toISOString()
     const weekAheadDateStr = weekAheadIso.split('T')[0]!
     const appUrl           = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
@@ -260,14 +266,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // this small in practice, but "small in practice" is exactly the
       // assumption max_rows truncation punishes silently.
       const turnoversTomorrow = await fetchAllRows<{
-        id: string; checkout_datetime: string; status: string
+        id: string; checkout_datetime: string; status: string; is_same_day_turnover: boolean | null
         properties: { name: string }
         turnover_assignments: { crew_members: { name: string } }[]
       }>(
         (from, to) => supabase
           .from('turnovers')
           .select(`
-            id, checkout_datetime, status,
+            id, checkout_datetime, status, is_same_day_turnover,
             properties ( name ),
             turnover_assignments ( crew_members ( name ) )
           `)
@@ -286,9 +292,11 @@ export const dailyWrapUpOrg = inngest.createFunction(
         const assignment = unwrapJoin(t.turnover_assignments)
         const crew = unwrapJoin(assignment?.crew_members)
         return {
+          id:       t.id,
           property: property?.name ?? 'Property',
           time:     new Date(t.checkout_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
           crew:     crew?.name ?? 'Unassigned',
+          sameDay:  t.is_same_day_turnover === true,
         }
       })
 
@@ -379,12 +387,12 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // would write a SHORT snapshot, so the docs past the cap would be
       // announced as brand new the following day.
       const expiringDocs = await fetchAllRows<{
-        id: string; document_type: string; expiry_date: string | null
+        id: string; vendor_id: string | null; document_type: string; expiry_date: string | null
         vendors: { name: string }
       }>(
         (from, to) => supabase
           .from('vendor_compliance_documents')
-          .select('id, document_type, expiry_date, vendors ( name )')
+          .select('id, vendor_id, document_type, expiry_date, vendors ( name )')
           .eq('org_id', orgId).eq('is_active', true)
           .not('expiry_date', 'is', null)
           .lte('expiry_date', new Date(now.getTime() + 30 * MS_PER_DAY).toISOString())
@@ -401,6 +409,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       const complianceSection = (expiringDocs ?? []).map((d) => {
         const vendor = unwrapJoin(d.vendors)
         return {
+          vendorId:   d.vendor_id,
           vendorName: vendor?.name ?? 'Vendor',
           docType:    d.document_type as string,
           expiryDate: d.expiry_date as string,
@@ -448,6 +457,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
         unassigned: (unassignedWOs ?? []).map((wo) => {
           const property = unwrapJoin(wo.properties)
           return {
+            id:        wo.id,
             woNumber:  wo.wo_number ?? '',
             title:     wo.title as string,
             property:  property?.name ?? 'Property',
@@ -473,7 +483,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       const escalationSection = (escalations ?? []).map((e) => {
         const wo = unwrapJoin(e.work_orders)
         const property = unwrapJoin(wo?.properties)
-        return { woNumber: wo?.wo_number ?? '', title: wo?.title ?? '', property: property?.name ?? 'Property' }
+        return { workOrderId: e.work_order_id, woNumber: wo?.wo_number ?? '', title: wo?.title ?? '', property: property?.name ?? 'Property' }
       })
 
       // ── 7. Vacancy gap suggestions — Monday only, week ahead ───────────
@@ -525,6 +535,13 @@ export const dailyWrapUpOrg = inngest.createFunction(
           .select('id, checkout_datetime, status, properties ( name ), turnover_assignments ( id )')
           .eq('org_id', orgId)
           .neq('status', 'cancelled')
+          // A LOWER bound, not just an upper one. With only `<= now + 2 days` this
+          // listed every unassigned turnover ever created: an OwnerRez import
+          // backfills past bookings as turnovers, so a new customer's first
+          // wrap-up opened with weeks-old checkouts nobody could still act on
+          // (20 of them, back to September). A checkout from the last 24 hours
+          // is still real: the house is dirty and the next guest may be coming.
+          .gte('checkout_datetime', since24h)
           .lte('checkout_datetime', new Date(now.getTime() + 2 * MS_PER_DAY).toISOString())
           .order('id', { ascending: true })
           .range(from, to),
@@ -539,7 +556,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
         })
         .map((t) => {
           const property = unwrapJoin(t.properties)
-          return { property: property?.name ?? 'Property', checkout: t.checkout_datetime }
+          return { id: t.id, property: property?.name ?? 'Property', checkout: t.checkout_datetime }
         })
 
       // ── 10. Guidebook sponsors needed (diffed) ──────────────────────────
@@ -589,19 +606,25 @@ export const dailyWrapUpOrg = inngest.createFunction(
         }
       })
 
-      // ── Assemble — hand off to the send step below ──────────────────────
-      const hasContent = Boolean(
-        tomorrowSection.length || checklistSection.length || assetHealthSection.length ||
-        complianceSection.length || maintenanceSection.due.length || maintenanceSection.unassigned.length ||
-        escalationSection.length || vacancySection.length || repeatSection.length ||
-        unassignedTurnoverSection.length || sponsorsSection || inventorySection.length
-      )
+      // ── 12. Tomorrow's check-ins, tonight's freeze prep, what got done ──
+      // Read last on purpose: they only add to the sections above.
+      const [arrivalsSection, freezeSection, doneToday] = await Promise.all([
+        loadArrivals(supabase, orgId, tomorrowDate),
+        loadFreezeAlerts(supabase, orgId, todayDate),
+        loadDoneToday(supabase, orgId, new Date(now.getTime() - DONE_TODAY_WINDOW_MS).toISOString(), todayDate),
+      ])
 
-      return {
-        hasContent,
-        tomorrowSection, checklistSection, assetHealthSection, complianceSection,
+      // ── Assemble — hand off to the send step below ──────────────────────
+      const data: WrapUpData = {
+        tomorrowSection, arrivalsSection, freezeSection, doneToday,
+        checklistSection, assetHealthSection, complianceSection,
         maintenanceSection, escalationSection, vacancySection, repeatSection,
         unassignedTurnoverSection, sponsorsSection, inventorySection,
+      }
+
+      return {
+        ...data,
+        hasContent:   wrapUpHasContent(data),
         pendingPOIds: (pendingPOs ?? []).map((p) => p.id as string),
       }
     })
@@ -613,23 +636,13 @@ export const dailyWrapUpOrg = inngest.createFunction(
       const [pmEmail] = await getPmEmails(supabase, orgId)
       if (!pmEmail) return { orgId, sent: false, reason: 'no_pm_email' }
 
-      const html = await renderDailyWrapUpEmail({
-        tomorrow:            wrapup.tomorrowSection,
-        checklist:           wrapup.checklistSection,
-        assetHealth:         wrapup.assetHealthSection,
-        compliance:          wrapup.complianceSection,
-        maintenance:         wrapup.maintenanceSection,
-        escalations:         wrapup.escalationSection,
-        vacancy:             wrapup.vacancySection,
-        repeatIssues:        wrapup.repeatSection,
-        unassignedTurnovers: wrapup.unassignedTurnoverSection,
-        sponsors:            wrapup.sponsorsSection,
-        inventory:           wrapup.inventorySection,
-        dashboardUrl:        `${appUrl}/ops`,
-      })
+      // Capping, grouping, links and the subject are decided in one pure place
+      // (lib/wrapup/presentation.ts) so they can be tested without the cron.
+      const { subject, props } = presentWrapUp(wrapup, appUrl)
+      const html = await renderDailyWrapUpEmail(props)
 
       const { error } = await resend.emails.send(
-        { from: FROM, to: pmEmail, subject: `Your FieldStay daily wrap-up`, html },
+        { from: FROM, to: pmEmail, subject, html },
         { idempotencyKey: `daily-wrapup-${orgId}-${now.toISOString().split('T')[0]}` }
       )
 
