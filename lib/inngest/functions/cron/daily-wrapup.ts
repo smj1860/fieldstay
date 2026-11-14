@@ -364,11 +364,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // Reads property_assets.health_score directly (asset-health.ts's daily
       // scoring step writes there — see PART K note; there is no separate
       // property_asset_health_scores table).
-      let assetHealthSection: Array<{ propertyName: string; score: number }> = []
+      let assetHealthSection: WrapUpData['assetHealthSection'] = []
+      // The true number of scored assets, so "and N more" is honest: the read
+      // below is limited to 10 rows, which would otherwise read as the total.
+      let assetHealthTotal = 0
       if (isFriday) {
         const scoresRes = await supabase
           .from('property_assets')
-          .select('property_id, health_score, properties ( name )')
+          .select('id, name, health_score, properties ( name )', { count: 'exact' })
           .eq('org_id', orgId)
           .eq('is_active', true)
           .not('health_score', 'is', null)
@@ -378,8 +381,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
 
         assetHealthSection = (scores ?? []).map((s) => {
           const property = unwrapJoin(s.properties)
-          return { propertyName: property?.name ?? 'Property', score: s.health_score as number }
+          return {
+            assetId:      s.id as string,
+            assetName:    (s.name as string | null) ?? 'Asset',
+            propertyName: property?.name ?? 'Property',
+            score:        s.health_score as number,
+          }
         })
+        assetHealthTotal = Math.max(scoresRes.count ?? 0, assetHealthSection.length)
       }
 
       // ── 4. Expiring compliance docs (diffed) ───────────────────────────
@@ -617,7 +626,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // ── Assemble — hand off to the send step below ──────────────────────
       const data: WrapUpData = {
         tomorrowSection, arrivalsSection, freezeSection, doneToday,
-        checklistSection, assetHealthSection, complianceSection,
+        checklistSection, assetHealthSection, assetHealthTotal, complianceSection,
         maintenanceSection, escalationSection, vacancySection, repeatSection,
         unassignedTurnoverSection, sponsorsSection, inventorySection,
       }

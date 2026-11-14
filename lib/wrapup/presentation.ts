@@ -44,7 +44,9 @@ export interface WrapUpData {
   freezeSection:             Array<{ workOrderId: string; title: string }>
   doneToday:                 { turnovers: number; workOrders: number }
   checklistSection:          Array<{ propertyId: string; propertyName: string; openCount: number; isNew: boolean }>
-  assetHealthSection:        Array<{ propertyName: string; score: number }>
+  assetHealthSection:        Array<{ assetId: string; assetName: string; propertyName: string; score: number }>
+  /** Every scored asset, not just the rows fetched: "and N more" counts against this. */
+  assetHealthTotal:          number
   complianceSection:         Array<{ vendorId: string | null; vendorName: string; docType: string; expiryDate: string; isNew: boolean }>
   maintenanceSection: {
     due:        Array<{ name: string; property: string }>
@@ -220,6 +222,12 @@ function presentMaintenance(data: WrapUpData, appUrl: string): DailyWrapUpEmailP
   }
 }
 
+function presentAssetHealth(data: WrapUpData): DailyWrapUpEmailProps['assetHealth'] {
+  const shown = capList(data.assetHealthSection)
+  // The fetch is itself a short list, so what is left out is measured against the real total.
+  return { items: shown.items, more: Math.max(shown.more, data.assetHealthTotal - shown.items.length) }
+}
+
 /** Everything the email renders, capped, grouped and linked, plus its subject. */
 export function presentWrapUp(data: WrapUpData, appUrl: string): PresentedWrapUp {
   const attention = attentionCount(attentionCountsOf(data))
@@ -234,7 +242,7 @@ export function presentWrapUp(data: WrapUpData, appUrl: string): PresentedWrapUp
     }))),
     doneToday: data.doneToday.turnovers + data.doneToday.workOrders > 0 ? data.doneToday : null,
     checklist: groupChecklist(data.checklistSection),
-    assetHealth: capList(data.assetHealthSection),
+    assetHealth: presentAssetHealth(data),
     compliance: capList(data.complianceSection.map((c) => ({
       vendorName: c.vendorName, docType: c.docType, expiryDate: c.expiryDate, isNew: c.isNew,
       href: link(appUrl, c.vendorId ? `/vendors/${c.vendorId}` : '/vendors'),
