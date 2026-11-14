@@ -17,7 +17,7 @@ const APP = 'https://app.example.test'
 function emptyData(): WrapUpData {
   return {
     tomorrowSection: [], arrivalsSection: [], freezeSection: [], doneToday: { turnovers: 0, workOrders: 0 },
-    checklistSection: [], assetHealthSection: [], complianceSection: [],
+    checklistSection: [], assetHealthSection: [], assetHealthTotal: 0, complianceSection: [],
     maintenanceSection: { due: [], unassigned: [] },
     escalationSection: [], vacancySection: [], repeatSection: [], unassignedTurnoverSection: [],
     sponsorsSection: null, inventorySection: [],
@@ -133,6 +133,29 @@ describe('presentWrapUp', () => {
     expect(quiet.doneToday).toBeNull()
     const busy = emptyData(); busy.doneToday = { turnovers: 2, workOrders: 1 }
     expect(presentWrapUp(busy, APP).props.doneToday).toEqual({ turnovers: 2, workOrders: 1 })
+  })
+})
+
+describe('asset health', () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({
+    assetId: `a${i}`, assetName: i % 2 ? 'Water Heater' : 'Refrigerator', propertyName: 'Alpine Retreat', score: 50,
+  }))
+
+  it('carries each asset through with its own id, so same-property same-score rows stay distinct', () => {
+    const data = emptyData(); data.assetHealthSection = rows; data.assetHealthTotal = 10
+    const items = presentWrapUp(data, APP).props.assetHealth.items
+    expect(items.map((a) => a.assetId)).toEqual(['a0', 'a1', 'a2', 'a3', 'a4'])
+    expect(items[1]?.assetName).toBe('Water Heater')
+  })
+
+  it('measures "and N more" against the true total, not the 10 rows that were fetched', () => {
+    const data = emptyData(); data.assetHealthSection = rows; data.assetHealthTotal = 212
+    expect(presentWrapUp(data, APP).props.assetHealth.more).toBe(207)
+  })
+
+  it('never reports fewer left out than the cap itself cut', () => {
+    const data = emptyData(); data.assetHealthSection = rows; data.assetHealthTotal = 0
+    expect(presentWrapUp(data, APP).props.assetHealth.more).toBe(5)
   })
 })
 

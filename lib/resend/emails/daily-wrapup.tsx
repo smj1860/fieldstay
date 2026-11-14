@@ -33,6 +33,8 @@ export interface DailyWrapUpFreezeItem {
 export type DailyWrapUpChecklistGroup = GroupedRow & { openCount: number }
 
 export interface DailyWrapUpAssetHealthItem {
+  assetId:      string
+  assetName:    string
   propertyName: string
   score:        number
 }
@@ -363,7 +365,7 @@ function WatchSections({ props }: Readonly<{ props: DailyWrapUpEmailProps }>) {
       {assetHealth.items.length > 0 && (
         <SectionWrapper heading="Lowest asset health scores this week">
           {assetHealth.items.map((a) => (
-            <Text key={`${a.propertyName}-${a.score}`} style={lineStyle}>{a.propertyName}, {a.score}/100</Text>
+            <Text key={a.assetId} style={lineStyle}>{a.propertyName}, {a.assetName}, {a.score}/100</Text>
           ))}
           <More count={assetHealth.more} href={links.assets} />
         </SectionWrapper>

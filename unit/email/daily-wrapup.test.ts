@@ -8,7 +8,7 @@ const APP = 'https://app.example.test'
 function data(over: Partial<WrapUpData>): WrapUpData {
   return {
     tomorrowSection: [], arrivalsSection: [], freezeSection: [], doneToday: { turnovers: 0, workOrders: 0 },
-    checklistSection: [], assetHealthSection: [], complianceSection: [],
+    checklistSection: [], assetHealthSection: [], assetHealthTotal: 0, complianceSection: [],
     maintenanceSection: { due: [], unassigned: [] },
     escalationSection: [], vacancySection: [], repeatSection: [], unassignedTurnoverSection: [],
     sponsorsSection: null, inventorySection: [], ...over,
