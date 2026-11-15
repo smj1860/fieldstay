@@ -9,7 +9,9 @@
 - Responses are JSON. Dates/times are ISO 8601 and UTC unless noted; booking arrival/departure dates are in the property's local time.
 - Monetary amounts are decimals (e.g. `125.00`), not integer cents.
 - Entity IDs are integers, unique per entity type.
-- List endpoints paginate with `limit` (default 20, max 100) and `offset`.
+- List endpoints paginate with `limit` (default 20, max 100) and an opaque `cursor`. Request the first page without `offset`, then request `next_page_url` exactly as returned until it is `null`.
+- **`offset` is going away (OwnerRez notice, 2026-10-21).** Every list returns `next_page_url` as of 2026-11-16. From **2027-01-05 15:00 UTC** any list request with `offset` above 0 returns `400 offset_not_supported`, an unknown query parameter returns `400 unknown_parameter`, and a cursor that OwnerRez did not issue (or one sent with different filters) returns `400 invalid_cursor`. Brownouts return the same 400s on 2026-11-17 15:00-16:00 UTC, 2026-12-01 15:00-19:00 UTC, and 2026-12-08 15:00 UTC to 2026-12-09 15:00 UTC. FieldStay's client (`ownerrez-api.ts`) never builds an offset URL: a non-empty page with no `next_page_url` throws. Filters are every query parameter except `cursor`, `limit` and `offset`, so start a new walk when one changes.
+- Per-token rate limit from 2026-11-03: 1,000 requests per 5 minutes per access token, in addition to the per-IP limit. Over either limit returns 429 with `Retry-After`.
 - Where supported (e.g. bookings, messages), use `since_utc` for incremental sync and store the latest `updated_utc` you see as the next watermark.
 - Errors return JSON with a `messages` array of human-readable strings. Status codes: 400 = bad request / validation, 401 = authentication, 403 = permission, 404 = not found.
 - Prefer the current API (v2). Legacy versions remain documented below but should not be used for new integrations.

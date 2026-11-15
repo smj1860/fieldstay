@@ -348,7 +348,7 @@ export class OwnerRezApiClient {
       const items = Array.isArray(page?.items) ? page.items : []
       results.push(...items)
 
-      url = this.nextPageUrl(page, url, items.length, path)
+      url = this.nextPageUrl(page, items.length, path)
     }
 
     return results
@@ -357,45 +357,34 @@ export class OwnerRezApiClient {
   /**
    * Resolves the next page URL, or null when the collection is exhausted.
    *
-   * `next_page_url` is OwnerRez's documented mechanism and is authoritative
-   * when present — critically, it works even if `limit` is ignored, which
-   * matters because OwnerRez's OpenAPI spec declares `limit`/`offset` on ZERO
-   * operations even though the response echoes both back. If we trusted our
-   * requested page size instead, a server that quietly capped us at 20 while
-   * we asked for 100 would look like a short final page and we would stop
-   * early — the exact bug this replaces, in a new disguise.
+   * `next_page_url` is OwnerRez's documented mechanism and the ONLY one we
+   * use. OwnerRez rejects `offset` above 0 with 400 `offset_not_supported` from
+   * 2027-01-05 (brownouts 2026-11-17, 12-01, 12-08), and every list endpoint
+   * has returned a cursor link since 2026-11-16, so this function never builds
+   * a page URL itself.
    *
-   * The offset fallback covers the other direction: a response that omits
-   * next_page_url but is clearly full. Over-fetching one duplicate page is
-   * harmless (every caller upserts by OwnerRez id); stopping early is not.
+   * ABSENT and explicitly NULL are different answers: OwnerRez documents null
+   * as "there are no more pages", so a null on a FULL page still ends the
+   * collection. A field that is missing entirely on a non-empty page means the
+   * server is not telling us whether more records exist, and guessing would
+   * either stop early (a silently short list that callers reconcile against)
+   * or request an offset the API now rejects. Throw instead. An empty page
+   * with no field has nothing left to lose, so it simply ends the walk.
    */
   private nextPageUrl<T>(
     page: OwnerRezPagedResponse<T>,
-    current: URL,
     received: number,
     path: string
   ): URL | null {
-    // ABSENT and explicitly NULL are different answers, and collapsing them is
-    // a bug (caught by this function's own test): OwnerRez documents null as
-    // "there are no more pages", so a null on a FULL page still ends the
-    // collection. Only a field that is missing entirely means "this server
-    // doesn't tell me", which is what the offset fallback below is for.
     if (page?.next_page_url !== undefined) {
       return page.next_page_url ? this.assertOwnerRezUrl(page.next_page_url, path) : null
     }
+    if (received === 0) return null
 
-    // No continuation field at all: only keep going if the page came back full.
-    // Note the `?? PAGE_SIZE` sits INSIDE Number() — Number(null) is 0, which
-    // ?? would happily accept, and a pageSize of 0 makes `received < pageSize`
-    // permanently false and the loop unbounded.
-    const requested = Number(current.searchParams.get('limit') ?? PAGE_SIZE)
-    const pageSize  = page?.limit ?? (requested > 0 ? requested : PAGE_SIZE)
-    if (received === 0 || received < pageSize) return null
-
-    const offset = (page?.offset ?? Number(current.searchParams.get('offset') ?? 0)) + received
-    const next = new URL(current.toString())
-    next.searchParams.set('offset', String(offset))
-    return next
+    throw new Error(
+      `[OwnerRez:${this.userId}] ${path}: response omitted next_page_url on a non-empty page — ` +
+      'refusing to guess whether more records exist'
+    )
   }
 
   /**
@@ -495,7 +484,9 @@ export class OwnerRezApiClient {
 
   async getGuests(params: { sinceUtc?: string } = {}): Promise<OwnerRezGuest[]> {
     const queryParams: Record<string, string | number | undefined> = {}
-    if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
+    // /v2/guests has no since_utc: the documented filter is created_since_utc,
+    // and an unknown parameter is a 400 unknown_parameter from 2027-01-05.
+    if (params.sinceUtc) queryParams['created_since_utc'] = params.sinceUtc
     return this.fetchAllPages<OwnerRezGuest>('/v2/guests', queryParams)
   }
 

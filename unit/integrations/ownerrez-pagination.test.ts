@@ -148,41 +148,48 @@ describe('OwnerRez pagination', () => {
     expect(urls).toHaveLength(1)
   })
 
-  describe('offset fallback when next_page_url is absent', () => {
-    it('keeps paging while pages come back full', async () => {
-      const { urls } = mockPages([
-        { items: rows(100, 0),   limit: 100, offset: 0 },
-        { items: rows(40,  100), limit: 100, offset: 100 },
-      ])
+  describe('a missing next_page_url never falls back to offset', () => {
+    // OwnerRez answers offset > 0 with 400 offset_not_supported from 2027-01-05.
+    // A walk that cannot tell whether more records exist must fail loudly, not
+    // guess: a short list is read by callers as "everything else was deleted".
+    it('throws on a non-empty page that omits next_page_url, requesting nothing further', async () => {
+      const { urls } = mockPages([{ items: rows(100, 0), limit: 100, offset: 0 }])
 
-      const all = await new OwnerRezApiClient('user-1').getListings()
-
-      expect(all).toHaveLength(140)
-      expect(new URL(urls[1]).searchParams.get('offset')).toBe('100')
-    })
-
-    it('trusts the server-reported limit over the one we requested', async () => {
-      // If OwnerRez quietly caps us at 20 while we ask for 100, a short-page
-      // test against OUR requested size stops after one page — the original
-      // bug wearing a different hat. page.limit is what settles it.
-      const { urls } = mockPages([
-        { items: rows(20, 0),  limit: 20, offset: 0 },
-        { items: rows(20, 20), limit: 20, offset: 20 },
-        { items: rows(5,  40), limit: 20, offset: 40 },
-      ])
-
-      const all = await new OwnerRezApiClient('user-1').getBookings({})
-
-      expect(all).toHaveLength(45)
-      expect(urls).toHaveLength(3)
-    })
-
-    it('stops on a short page', async () => {
-      const { urls } = mockPages([{ items: rows(99), limit: 100, offset: 0 }])
-
-      await expect(new OwnerRezApiClient('user-1').getBookings({})).resolves.toHaveLength(99)
+      await expect(new OwnerRezApiClient('user-1').getListings())
+        .rejects.toThrow(/omitted next_page_url/)
       expect(urls).toHaveLength(1)
     })
+
+    it('throws even on a short page, since a short page proves nothing without the field', async () => {
+      const { urls } = mockPages([{ items: rows(99), limit: 100, offset: 0 }])
+
+      await expect(new OwnerRezApiClient('user-1').getBookings({}))
+        .rejects.toThrow(/omitted next_page_url/)
+      expect(urls).toHaveLength(1)
+    })
+
+    it('never sends offset above 0 when walking cursor pages', async () => {
+      const { urls } = mockPages([
+        { items: rows(100, 0),   limit: 100, offset: 0, next_page_url: '/v2/bookings?limit=100&cursor=abc' },
+        { items: rows(10,  100), limit: 100, offset: 0, next_page_url: null },
+      ])
+
+      await new OwnerRezApiClient('user-1').getBookings({})
+
+      for (const u of urls) {
+        expect(Number(new URL(u).searchParams.get('offset') ?? 0)).toBe(0)
+      }
+    })
+  })
+
+  it('sends only the documented created_since_utc filter on /v2/guests', async () => {
+    const { urls } = mockPages([{ items: [], next_page_url: null }])
+
+    await new OwnerRezApiClient('user-1').getGuests({ sinceUtc: '2026-11-01T00:00:00Z' })
+
+    const params = new URL(urls[0]).searchParams
+    expect(params.get('created_since_utc')).toBe('2026-11-01T00:00:00Z')
+    expect(params.has('since_utc')).toBe(false)
   })
 
   describe('next_page_url is response-supplied, so its origin is checked', () => {
