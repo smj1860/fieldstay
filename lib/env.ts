@@ -197,6 +197,10 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   RESEND_API_KEY:    { tier: 'production', schema: prefixed('re_'), why: 'every transactional email' },
   RESEND_FROM_EMAIL: { tier: 'production', schema: email,           why: 'the From address on every email' },
   RESEND_FROM_NAME:  { tier: 'production', schema: nonEmpty,        why: 'interpolated into FROM — unset renders the literal "undefined"' },
+  RESEND_WEBHOOK_SECRET: {
+    tier: 'optional', schema: prefixed('whsec_'),
+    why: 'verifies Resend delivery webhooks (bounces, spam complaints); unset fails CLOSED, rejecting every delivery event so a bounced email goes unreported',
+  },
   CREW_FEEDBACK_NOTIFY_EMAIL: {
     tier: 'optional', schema: email,
     why: 'lib/inngest/functions/notify-crew-feedback.ts — every crew feedback submission platform-wide '
