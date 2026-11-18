@@ -999,6 +999,11 @@ const NARROWED_UPDATE_GRANTS = {
   notifications:      ['read_at'],
   owner_transactions: ['visible_to_owner'],
   reviews:            ['response_status', 'updated_at'],
+  // GTM agent tables (20261118120000). The queue is a RECORD of what the agents
+  // produced: a person approving a draft may write the decision, never the draft.
+  // Settings keep their PRIMARY KEY (team) out of reach for the same reason.
+  agent_tasks:        ['decided_at', 'decided_by', 'decision_note', 'status'],
+  gtm_team_settings:  ['autonomy', 'daily_cost_cap_cents', 'daily_task_cap', 'enabled', 'updated_by'],
 }
 
 const narrowed = await rpc('db_narrowed_update_grants')

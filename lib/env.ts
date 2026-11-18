@@ -320,7 +320,7 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   // rather than silently leaving the feature off with nobody the wiser.
   LODGIFY_WEBHOOKS_ENABLED:  { tier: 'optional', schema: boolString, why: 'registers inbound webhooks on the PM Lodgify account; off until the webhook contract is verified' },
   TOMORROW_IO_API_KEY:       { tier: 'optional', schema: nonEmpty, why: 'weather signals for contextual guest SMS; throws when called unset' },
-  ANTHROPIC_API_KEY:         { tier: 'optional', schema: prefixed('sk-ant-'), why: 'data-plate OCR and RepuGuard generation' },
+  ANTHROPIC_API_KEY:         { tier: 'optional', schema: prefixed('sk-ant-'), why: 'data-plate OCR, RepuGuard generation and the GTM manager brief narration (absent = brief ships facts only)' },
   REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },
   OPENAI_API_KEY:            { tier: 'optional', schema: nonEmpty, why: 'support-bot knowledge base embeddings' },
 

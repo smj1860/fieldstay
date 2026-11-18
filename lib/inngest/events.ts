@@ -1490,4 +1490,49 @@ export type FieldStayEvents = {
       org_id: string
     }
   },
+
+  // ----------------------------------------------------------
+  // GTM agents — queue lifecycle + manager runs
+  // (20261118120000_gtm_agent_foundation.sql, lib/gtm/tasks.ts)
+  //
+  // Events here are wake-up HINTS. agent_tasks is the source of truth, so a
+  // team that misses one still finds the work on its next claim.
+  // ----------------------------------------------------------
+
+  /** A task was queued for a team. Sent by enqueueTask(). */
+  'gtm/task.created': {
+    data: {
+      task_id:           string
+      team:              string
+      task_type:         string
+      prospect_id:       string | null
+      requires_approval: boolean
+    }
+  },
+
+  /** A person approved a draft or proposal in the approval inbox. The owning team picks it up and carries it out. */
+  'gtm/task.approved': {
+    data: {
+      task_id:    string
+      team:       string
+      task_type:  string
+      decided_by: string
+    }
+  },
+
+  /** A task used its last attempt and is now failed for good. Not sent for a retry. */
+  'gtm/task.failed': {
+    data: {
+      task_id:   string
+      team:      string
+      task_type: string
+    }
+  },
+
+  /** "Run manager now" on the Agents dashboard. Produces a brief on request. */
+  'gtm/manager.run.requested': {
+    data: {
+      requested_by: string
+    }
+  },
 }

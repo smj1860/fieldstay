@@ -14,6 +14,143 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_tasks: {
+        Row: {
+          attempts: number
+          claimed_at: string | null
+          completed_at: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          dedupe_key: string | null
+          depth: number
+          error: string | null
+          id: string
+          input: Json
+          max_attempts: number
+          origin: string
+          output: Json | null
+          parent_task_id: string | null
+          priority: number
+          prospect_id: string | null
+          requires_approval: boolean
+          status: string
+          task_type: string
+          team: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          dedupe_key?: string | null
+          depth?: number
+          error?: string | null
+          id?: string
+          input?: Json
+          max_attempts?: number
+          origin?: string
+          output?: Json | null
+          parent_task_id?: string | null
+          priority?: number
+          prospect_id?: string | null
+          requires_approval?: boolean
+          status?: string
+          task_type: string
+          team: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          dedupe_key?: string | null
+          depth?: number
+          error?: string | null
+          id?: string
+          input?: Json
+          max_attempts?: number
+          origin?: string
+          output?: Json | null
+          parent_task_id?: string | null
+          priority?: number
+          prospect_id?: string | null
+          requires_approval?: boolean
+          status?: string
+          task_type?: string
+          team?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "agent_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_tasks_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospect_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_usage: {
+        Row: {
+          cost_cents: number
+          dedupe_key: string | null
+          id: string
+          input_tokens: number
+          model: string
+          occurred_at: string
+          output_tokens: number
+          task_id: string | null
+          team: string
+        }
+        Insert: {
+          cost_cents?: number
+          dedupe_key?: string | null
+          id?: string
+          input_tokens?: number
+          model: string
+          occurred_at?: string
+          output_tokens?: number
+          task_id?: string | null
+          team: string
+        }
+        Update: {
+          cost_cents?: number
+          dedupe_key?: string | null
+          id?: string
+          input_tokens?: number
+          model?: string
+          occurred_at?: string
+          output_tokens?: number
+          task_id?: string | null
+          team?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_usage_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "agent_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       asset_capex_recommendations: {
         Row: {
           asset_id: string
@@ -1584,6 +1721,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      gtm_team_settings: {
+        Row: {
+          autonomy: string
+          daily_cost_cap_cents: number
+          daily_task_cap: number
+          enabled: boolean
+          team: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          autonomy?: string
+          daily_cost_cap_cents?: number
+          daily_task_cap?: number
+          enabled?: boolean
+          team: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          autonomy?: string
+          daily_cost_cap_cents?: number
+          daily_task_cap?: number
+          enabled?: boolean
+          team?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
       }
       guidebook_configurations: {
         Row: {
@@ -3337,6 +3504,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      manager_decisions: {
+        Row: {
+          actions: Json
+          autonomy_at_run: string
+          brief: string
+          created_at: string
+          dedupe_key: string | null
+          id: string
+          kind: string
+          metrics: Json
+          model: string | null
+          requested_by: string | null
+        }
+        Insert: {
+          actions?: Json
+          autonomy_at_run: string
+          brief: string
+          created_at?: string
+          dedupe_key?: string | null
+          id?: string
+          kind: string
+          metrics?: Json
+          model?: string | null
+          requested_by?: string | null
+        }
+        Update: {
+          actions?: Json
+          autonomy_at_run?: string
+          brief?: string
+          created_at?: string
+          dedupe_key?: string | null
+          id?: string
+          kind?: string
+          metrics?: Json
+          model?: string | null
+          requested_by?: string | null
+        }
+        Relationships: []
       }
       messages: {
         Row: {
@@ -7608,6 +7814,11 @@ export type Database = {
         }[]
       }
       get_user_org_ids: { Args: never; Returns: string[] }
+      gtm_dashboard_counts: {
+        Args: { p_spend_since: string; p_touches_since: string }
+        Returns: Json
+      }
+      gtm_sweep_stalled_tasks: { Args: { p_claimed_before: string }; Returns: Json }
       inventory_below_par_for_org: {
         Args: { p_org_id: string }
         Returns: {

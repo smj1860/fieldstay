@@ -100,6 +100,11 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   { id: 'cron-evidence-backfill',                   maxSilentHours: 30 },
   { id: 'cron-evidence-rebracket',                  maxSilentHours: 30 },
   { id: 'cron-friction-grading',                    maxSilentHours: 30 },
+  // GTM agent crons. The sweep runs every 15 minutes; the manager crons run
+  // daily and record a run even when the switches are off and they skip.
+  { id: 'cron-gtm-stall-sweep',                     maxSilentHours: 3 },
+  { id: 'cron-gtm-manager-morning',                 maxSilentHours: 30 },
+  { id: 'cron-gtm-manager-evening',                 maxSilentHours: 30 },
 ]
 
 /**

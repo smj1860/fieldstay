@@ -2661,6 +2661,10 @@ export interface HandWrittenRowMap {
   prospect_touches:                    ProspectTouch
   prospect_imports:                    ProspectImport
   prospect_contacts:                   ProspectContact
+  gtm_team_settings:                   GtmTeamSetting
+  agent_tasks:                         AgentTask
+  agent_usage:                         AgentUsage
+  manager_decisions:                   ManagerDecision
   str_prospects:                       StrProspect
   travel_time_cache:                   TravelTimeCache
 }
@@ -3191,4 +3195,74 @@ export interface StrProspectIcp {
   last_seen:      string | null
   /** 'core' | 'gray' | 'unsized' | 'out_of_band', computed by the view. */
   icp_band:       string | null
+}
+
+// ── GTM agents (20261118120000_gtm_agent_foundation.sql) ─────────────────────
+// Platform-admin tooling, not tenant data: no org_id on any of these. The
+// string-literal unions mirror the CHECK constraints, which are what enforce
+// them; lib/gtm/constants.ts holds the runtime lists.
+
+/** One row per team plus a 'global' master switch. Every team ships disabled. */
+export interface GtmTeamSetting {
+  team:                 'global' | 'manager' | 'lead_gen' | 'content_brand' | 'sales_ops' | 'rev_ops'
+  enabled:              boolean
+  autonomy:             'propose_only' | 'auto_low_risk'
+  daily_task_cap:       number
+  daily_cost_cap_cents: number
+  updated_by:           string | null
+  updated_at:           string
+}
+
+/** The work queue and the approval inbox. depth is capped at 4 in the schema. */
+export interface AgentTask {
+  id:                string
+  team:              'lead_gen' | 'content_brand' | 'sales_ops' | 'rev_ops'
+  task_type:         string
+  prospect_id:       string | null
+  status:            'pending' | 'in_progress' | 'needs_approval' | 'approved' | 'rejected' | 'done' | 'failed' | 'cancelled'
+  priority:          number
+  input:             Json
+  output:            Json | null
+  requires_approval: boolean
+  origin:            'manager' | 'human' | 'lead_gen' | 'content_brand' | 'sales_ops' | 'rev_ops'
+  parent_task_id:    string | null
+  depth:             number
+  dedupe_key:        string | null
+  attempts:          number
+  max_attempts:      number
+  error:             string | null
+  decided_by:        string | null
+  decided_at:        string | null
+  decision_note:     string | null
+  claimed_at:        string | null
+  completed_at:      string | null
+  created_at:        string
+  updated_at:        string
+}
+
+/** Append-only model spend ledger. cost_cents is numeric(12,4): PostgREST returns it as a string. */
+export interface AgentUsage {
+  id:            string
+  team:          'manager' | 'lead_gen' | 'content_brand' | 'sales_ops' | 'rev_ops'
+  task_id:       string | null
+  model:         string
+  input_tokens:  number
+  output_tokens: number
+  cost_cents:    number | string
+  dedupe_key:    string | null
+  occurred_at:   string
+}
+
+/** Append-only log of every plan, review and brief the manager produced. */
+export interface ManagerDecision {
+  id:              string
+  kind:            'morning_plan' | 'evening_review' | 'stall_sweep' | 'manual'
+  autonomy_at_run: string
+  brief:           string
+  metrics:         Json
+  actions:         Json
+  model:           string | null
+  requested_by:    string | null
+  dedupe_key:      string | null
+  created_at:      string
 }
