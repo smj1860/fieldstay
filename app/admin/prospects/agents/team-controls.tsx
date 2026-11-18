@@ -15,7 +15,7 @@ import {
   type SettingsTeam,
 } from '@/lib/gtm/constants'
 import type { TeamSetting } from '@/lib/gtm/policy'
-import { updateTeamSettings } from '../agents-actions'
+import { requestRevOpsReport, updateTeamSettings } from '../agents-actions'
 
 type ActionResult = { error?: string }
 
@@ -78,6 +78,38 @@ const dollarsOf = (cents: number): string => (cents / 100).toFixed(2)
 function centsOf(dollars: string): number | null {
   const n = Number(dollars)
   return dollars.trim() !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null
+}
+
+/** Queues a Rev Ops report outside the Monday schedule. The result shows up in the approval inbox. */
+function RunReportButton({ disabled }: Readonly<{ disabled: boolean }>) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  function request() {
+    setMessage(null)
+    setError(null)
+    startTransition(async () => {
+      const result = await requestRevOpsReport()
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      setMessage('Requested. The report appears in the approval inbox in a minute or two.')
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="mt-3">
+      <Button type="button" variant="secondary" disabled={disabled || pending} onClick={request}>
+        Run report now
+      </Button>
+      {message && <p role="status" className="text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</p>}
+      {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
+    </div>
+  )
 }
 
 export function TeamCard({ setting, masterOn }: Readonly<{ setting: TeamSetting; masterOn: boolean }>) {
@@ -166,6 +198,7 @@ export function TeamCard({ setting, masterOn }: Readonly<{ setting: TeamSetting;
           </Button>
         )}
       </div>
+      {team === 'rev_ops' && <RunReportButton disabled={!setting.enabled || !masterOn} />}
       {(localError ?? error) && (
         <p role="alert" className="text-xs mt-3" style={{ color: 'var(--accent-red)' }}>{localError ?? error}</p>
       )}

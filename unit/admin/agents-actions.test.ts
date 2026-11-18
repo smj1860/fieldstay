@@ -9,7 +9,7 @@ vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
-import { decideAgentTask, requestManagerRun, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
+import { decideAgentTask, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
 import { fakeSupabase, type Scripted } from '../gtm/fake-supabase'
 
 function asAdmin(script: Record<string, Scripted[]>) {
@@ -119,5 +119,35 @@ describe('requestManagerRun', () => {
     asAdmin({})
     vi.mocked(inngest.send).mockRejectedValueOnce(new Error('down'))
     expect(await requestManagerRun()).toEqual({ error: 'Could not start the manager. Please try again.' })
+  })
+})
+
+describe('requestRevOpsReport', () => {
+  const settings = (rev: boolean, master = true) => ({
+    'gtm_team_settings:select': [{ data: [
+      { team: 'global', enabled: master, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+      { team: 'rev_ops', enabled: rev, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+    ], error: null }],
+  })
+
+  it('sends the request and audits it when Rev Ops can run', async () => {
+    asAdmin(settings(true))
+    expect(await requestRevOpsReport()).toEqual({})
+    expect(inngest.send).toHaveBeenCalledWith({ name: 'gtm/rev-ops.report.requested', data: { requested_by: 'admin_1' } })
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'platform_admin.gtm_rev_ops.report_requested' }))
+  })
+
+  // The queue would refuse the task, so the button would look like it worked and nothing would appear.
+  it.each([[false, true], [true, false]])('refuses up front, and sends nothing, when Rev Ops is %s and the master switch is %s', async (rev, master) => {
+    asAdmin(settings(rev, master))
+    expect(await requestRevOpsReport()).toEqual({ error: 'Turn on the master switch and Rev Ops first.' })
+    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('says so when the request could not be sent', async () => {
+    asAdmin(settings(true))
+    vi.mocked(inngest.send).mockRejectedValueOnce(new Error('down'))
+    expect(await requestRevOpsReport()).toEqual({ error: 'Could not request the report. Please try again.' })
   })
 })

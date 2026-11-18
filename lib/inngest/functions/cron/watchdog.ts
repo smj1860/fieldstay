@@ -105,6 +105,8 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   { id: 'cron-gtm-stall-sweep',                     maxSilentHours: 3 },
   { id: 'cron-gtm-manager-morning',                 maxSilentHours: 30 },
   { id: 'cron-gtm-manager-evening',                 maxSilentHours: 30 },
+  // Weekly: 2x the period, per the rule above. Records a run even when Rev Ops is off.
+  { id: 'cron-gtm-rev-ops-weekly',                  maxSilentHours: 340 },
 ]
 
 /**

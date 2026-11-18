@@ -7,10 +7,12 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn() }
 const decideAgentTask = vi.fn()
 const updateTeamSettings = vi.fn()
 const requestManagerRun = vi.fn()
+const requestRevOpsReport = vi.fn()
 vi.mock('@/app/admin/prospects/agents-actions', () => ({
   decideAgentTask:    (...a: unknown[]) => decideAgentTask(...a),
   updateTeamSettings: (...a: unknown[]) => updateTeamSettings(...a),
   requestManagerRun:  () => requestManagerRun(),
+  requestRevOpsReport: () => requestRevOpsReport(),
 }))
 
 import { ApprovalInbox } from '@/app/admin/prospects/agents/approval-inbox'
@@ -39,6 +41,7 @@ beforeEach(() => {
   decideAgentTask.mockResolvedValue({})
   updateTeamSettings.mockResolvedValue({})
   requestManagerRun.mockResolvedValue({})
+  requestRevOpsReport.mockResolvedValue({})
 })
 
 describe('ApprovalInbox', () => {
@@ -141,6 +144,37 @@ describe('TeamCard', () => {
     render(<TeamCard setting={setting({ team: 'manager' })} masterOn />)
     expect(screen.getByLabelText('Autonomy')).toBeDisabled()
     expect(screen.getByText(/Observe-only for now/)).toBeInTheDocument()
+  })
+})
+
+describe('Rev Ops "Run report now"', () => {
+  it('is offered only on the Rev Ops card', () => {
+    render(<TeamCard setting={setting({ team: 'lead_gen' })} masterOn />)
+    expect(screen.queryByRole('button', { name: 'Run report now' })).not.toBeInTheDocument()
+  })
+
+  // A button that looks like it worked when the queue would refuse the task is worse than no button.
+  it('is disabled while Rev Ops is off or the master switch is', () => {
+    const { unmount } = render(<TeamCard setting={setting({ team: 'rev_ops', enabled: false })} masterOn />)
+    expect(screen.getByRole('button', { name: 'Run report now' })).toBeDisabled()
+    unmount()
+    render(<TeamCard setting={setting({ team: 'rev_ops', enabled: true })} masterOn={false} />)
+    expect(screen.getByRole('button', { name: 'Run report now' })).toBeDisabled()
+  })
+
+  it('requests a report and says where it will appear', async () => {
+    render(<TeamCard setting={setting({ team: 'rev_ops', enabled: true })} masterOn />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run report now' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('approval inbox')
+    expect(requestRevOpsReport).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the server\'s refusal instead of pretending it started', async () => {
+    requestRevOpsReport.mockResolvedValue({ error: 'Turn on the master switch and Rev Ops first.' })
+    render(<TeamCard setting={setting({ team: 'rev_ops', enabled: true })} masterOn />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run report now' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Turn on the master switch')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })
 

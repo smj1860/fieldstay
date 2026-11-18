@@ -1535,4 +1535,11 @@ export type FieldStayEvents = {
       requested_by: string
     }
   },
+
+  /** "Run report now" on the Rev Ops card. Queues one weekly funnel report outside the schedule. */
+  'gtm/rev-ops.report.requested': {
+    data: {
+      requested_by: string
+    }
+  },
 }

@@ -1,0 +1,120 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/gtm/tasks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/gtm/tasks')>()),
+  enqueueTask: vi.fn(),
+}))
+
+import { enqueueTask } from '@/lib/gtm/tasks'
+import { loadReportInput, revOpsHandlers, REV_OPS_TASK_TYPES } from '@/lib/gtm/teams/rev-ops'
+import type { AgentTask } from '@/types/database'
+import { fakeSupabase } from './fake-supabase'
+
+const NOW = new Date('2026-11-16T13:00:00Z')
+const handler = revOpsHandlers[REV_OPS_TASK_TYPES.weeklyFunnelReport]
+
+const task = (over: Partial<AgentTask> = {}): AgentTask => ({
+  id: 'report-1', team: 'rev_ops', task_type: 'weekly_funnel_report', prospect_id: null, status: 'in_progress', priority: 50,
+  input: {}, output: { handoff: { lead_gen_enrich: ['a', 'b', 'c'] } }, requires_approval: true, origin: 'rev_ops',
+  parent_task_id: null, depth: 0, dedupe_key: null, attempts: 0, max_attempts: 3, error: null, decided_by: 'admin_1',
+  decided_at: '2026-11-16T14:00:00Z', decision_note: null, claimed_at: null, completed_at: null,
+  created_at: '2026-11-16T13:00:00Z', updated_at: '2026-11-16T14:00:00Z', ...over,
+})
+
+beforeEach(() => { vi.clearAllMocks() })
+
+describe('approving a Rev Ops report', () => {
+  const ctx = () => ({ supabase: fakeSupabase({}).client, setting: {} as never, now: NOW })
+
+  it('hands each account to Lead Gen as its own task, one level deeper, naming the report as the parent', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'x' })
+    const { output } = await handler.execute(task(), ctx())
+
+    expect(enqueueTask).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(enqueueTask).mock.calls[0][1]).toMatchObject({
+      team: 'lead_gen', taskType: 'enrich_account', origin: 'rev_ops', prospectId: 'a',
+      parent: { id: 'report-1', depth: 0 }, dedupeKey: 'lead_gen:enrich_account:a:2026-11',
+    })
+    expect(output).toEqual({ handoff: { requested: 3, queued: 3 } })
+  })
+
+  // Lead Gen being off or already asked about an account is an ordinary answer, never a failure.
+  it('records why an account was not queued instead of failing the report', async () => {
+    vi.mocked(enqueueTask)
+      .mockResolvedValueOnce({ ok: true, id: 'x' })
+      .mockResolvedValueOnce({ ok: false, reason: 'duplicate' })
+      .mockResolvedValueOnce({ ok: false, reason: 'team_off' })
+    const { output } = await handler.execute(task(), ctx())
+    expect(output).toEqual({ handoff: { requested: 3, queued: 1, duplicate: 1, team_off: 1 } })
+  })
+
+  it('queues Lead Gen work that still needs approval', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'x' })
+    await handler.execute(task(), ctx())
+    // requiresApproval is left to its default of true: it is never passed as false.
+    expect(vi.mocked(enqueueTask).mock.calls.every((c) => c[1].requiresApproval !== false)).toBe(true)
+  })
+
+  it('caps the handoff even if the stored report somehow lists more', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'x' })
+    const many = Array.from({ length: 50 }, (_, i) => `id${i}`)
+    await handler.execute(task({ output: { handoff: { lead_gen_enrich: many } } }), ctx())
+    expect(enqueueTask).toHaveBeenCalledTimes(10)
+  })
+
+  it('ignores anything in the stored output that is not an account id', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'x' })
+    await handler.execute(task({ output: { handoff: { lead_gen_enrich: ['ok', 7, null, { x: 1 }] } } }), ctx())
+    expect(enqueueTask).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([null, 'x', [], { handoff: null }, { handoff: { lead_gen_enrich: 'a' } }])('queues nothing for a malformed output: %j', async (output) => {
+    const res = await handler.execute(task({ output: output as never }), ctx())
+    expect(enqueueTask).not.toHaveBeenCalled()
+    expect(res.output).toEqual({ handoff: { requested: 0, queued: 0 } })
+  })
+})
+
+describe('loadReportInput', () => {
+  it('assembles the report from the rollup and the account counts, and drops accounts Lead Gen already looked at', async () => {
+    const { client } = fakeSupabase({
+      'prospect_accounts:select': [
+        { count: 14, error: null },                                                            // stale count
+        { data: [{ company: 'Acme', status: 'emailed', last_touch_at: '2026-10-26T13:00:00Z' }], error: null }, // stale examples
+        { count: 120, error: null }, { count: 6, error: null }, { count: 9, error: null },     // hygiene
+        { data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null },                        // candidate pool
+      ],
+      'agent_tasks:select': [{ data: [{ prospect_id: 'b' }], error: null }],                   // already asked about
+    }, [
+      { data: { funnel: { new: 5 }, touches: { emailed: 10 }, tasks: [], spend: [{ team: 'manager', cost_cents: 2, calls: 1 }] } },
+      { data: { funnel: { new: 5 }, touches: { emailed: 25 }, tasks: [], spend: [] } },
+    ])
+
+    const input = await loadReportInput(client, NOW)
+    expect(input.staleCount).toBe(14)
+    expect(input.staleExamples).toEqual([{ company: 'Acme', status: 'emailed', daysSinceTouch: 21 }])
+    expect([input.needsContactInfo, input.bouncedPrimary, input.queuedNoChannel]).toEqual([120, 6, 9])
+    expect(input.enrichCandidates).toEqual(['a', 'c'])
+    expect(input.touchesThisWeek).toEqual({ emailed: 10 })
+    expect(input.touchesPriorWeek).toEqual({ emailed: 15 })
+    expect(input.spendTodayCents).toBe(2)
+  })
+
+  it('fails loudly if the rollup cannot be read, instead of reporting zeros as fact', async () => {
+    const { client } = fakeSupabase({
+      'prospect_accounts:select': [{ count: 0, error: null }],
+      'agent_tasks:select': [{ data: [], error: null }],
+    }, [{ error: { message: 'permission denied' } }])
+    await expect(loadReportInput(client, NOW)).rejects.toThrow('rollup failed')
+  })
+
+  it('offers no candidates when none qualify, without asking about tasks', async () => {
+    const { client, calls } = fakeSupabase({
+      'prospect_accounts:select': [{ count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null }, { data: [], error: null }],
+    }, [{ data: {} }, { data: {} }])
+    expect((await loadReportInput(client, NOW)).enrichCandidates).toEqual([])
+    expect(calls.some((c) => c.table === 'agent_tasks')).toBe(false)
+  })
+})

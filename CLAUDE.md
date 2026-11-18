@@ -743,7 +743,7 @@ countdown only opens on a stay with a reason to file (flagged turnover or a crew
 order), not on every Airbnb or VRBO stay. The packet cover carries the platform reservation
 reference and never the guest's name or email, so it survives `guest_pii_anonymized_at`.
 
-### GTM Agent Teams (added 2026-11-18, foundation only)
+### GTM Agent Teams (added 2026-11-18: foundation, Rev Ops, Lead Gen)
 ```
 gtm_team_settings           — one row per team (manager, lead_gen, content_brand, sales_ops,
                               rev_ops) plus a 'global' master switch. EVERY ROW SHIPS DISABLED
@@ -791,11 +791,45 @@ admin's own RLS-enforced session, never the service role.
   applied. **Regenerate it (`pnpm types:supabase`) after `supabase db push`**; the real output
   replaces them.
 - Enforced by `unit/guardrails/gtm-agent-boundaries.test.ts`: agent code (`lib/gtm/**`,
-  `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table, never
-  deletes an account or sets won/lost/disqualified, and calls a model only from a file on the
-  billed list. A team that genuinely needs one of those adds its file to the matching allowlist,
+  `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table except
+  from `lead-gen-apply.ts` (which the test holds to its own rules: checks a decision, fills only
+  empty fields, names no status, deletes nothing), never calls a bare `fetch()`, never deletes an
+  account or sets won/lost/disqualified, and calls a model only from a file on the billed list. A team that genuinely needs one of those adds its file to the matching allowlist,
   with a reason, in the same change. Schema behaviour (depth cap, dedupe, append-only grants,
   non-admin sees nothing, the sweep) is pinned against a real Postgres by `unit/gtm/gtm-schema.test.ts`.
+
+**The two teams built so far, and the shape every later team follows.** A team is a
+`HandlerRegistry` (`lib/gtm/worker.ts`): per task type, `run()` does the work and returns a
+PROPOSAL, and `execute()` carries out a proposal a person has approved. `workOne()` is the one
+loop body they all share: it takes approved work before new work, and decides where output lands
+(`completeTask` -> the inbox, `finishTask` -> done), so no handler can route its own output past
+approval. `createTeamDrain()` (`lib/inngest/functions/gtm-team-drain.ts`) is the Inngest wrapper:
+three triggers (`gtm/task.created`, `gtm/task.approved`, a 15-minute cron backstop since events
+are hints), one step per unit of work, concurrency 1 per team. The step loop lives under
+`lib/inngest/` because step tooling is banned in `lib/` elsewhere.
+
+- **Rev Ops** (`lib/gtm/teams/rev-ops*.ts`) writes the Monday funnel report from numbers alone (no
+  model) and changes nothing about any account. **Approving the report IS the handoff**: only then
+  does it queue up to 10 Lead Gen tasks (`MAX_LEAD_GEN_HANDOFFS`), each itself propose-only, so
+  every cross-team handoff has a human gate and the second approval (what to actually save) is
+  still ahead. "Run report now" on its card refuses up front when it cannot run: a button that
+  looks like it worked while the queue refused the task is worse than none.
+- **Lead Gen** (`lib/gtm/teams/lead-gen*.ts`) reads a prospect's OWN website for public contact
+  details and proposes them. No vendor, no model: `robots.ts` + `lead-gen-extract.ts` are pure and
+  linear-time, because the input is a stranger's HTML and robots.txt (a regex built from either
+  can hang the worker). It obeys robots.txt, identifies itself, reads at most 3 pages one at a time,
+  never leaves the site, and goes through `safeFetch()`. A 5xx/429 throws so the task retries: a
+  struggling site has not said "no contact details". "Nothing found" closes as done, since an empty
+  proposal has nothing to approve.
+- **`lead-gen-apply.ts` is the ONLY file any agent writes prospect data from.** It refuses a task
+  with no recorded `decided_at`, fills only EMPTY email/phone with an `UPDATE ... IS NULL` (a person
+  can fill the field between approval and application, and theirs wins), never names a `status`,
+  and leaves a history note saying a person approved it, never the value itself.
+- **`failTask` takes `resumeTo`.** A task that fails while APPLYING an approved proposal goes back to
+  `approved`, not `pending`, or it would redo the research and ask for the same approval twice. The
+  stall sweep does the same via `decided_at` (migration `20261118130000`, which replaces the function
+  from the first migration: apply them in order, and never re-run the first one on its own after the
+  second, since its `CREATE OR REPLACE` would put the old sweep back).
 
 ### Supporting
 ```
@@ -2149,9 +2183,10 @@ following them stops being a memory test. Five layers, checked in CI via
      the dashboard layout, the outbox builds on the shared `OutboxEngine`, and
      the enqueue commits the local write and the outbox row in ONE transaction
      with the drain kick outside it.
-   - `gtm-agent-boundaries` — the GTM agents' three promises as structure: no email/SMS sender
-     imported, no prospect-table writes (allowlist empty), no account deletion or closed-stage
-     write, and every model call from a billed file. Carries fire-checks for each rule.
+   - `gtm-agent-boundaries` — the GTM agents' promises as structure: no email/SMS sender
+     imported, prospect-table writes only from the one approved-proposal applier (and held to its
+     own rules), no bare `fetch()`, no account deletion or closed-stage write, and every model call
+     from a billed file. Carries fire-checks for each rule.
    - `node-types-runtime-parity` — `@types/node`'s major equals
      `engines.node`'s and every `node-version:` in `.github/workflows/`.
      Types ahead of the runtime describe APIs that do not exist in

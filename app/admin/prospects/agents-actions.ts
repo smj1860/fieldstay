@@ -5,6 +5,8 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { inngest } from '@/lib/inngest/client'
+import { isTeamRunnable } from '@/lib/gtm/policy'
+import { loadTeamSettings } from '@/lib/gtm/tasks'
 import {
   DECISION_RULES,
   MAX_DECISION_NOTE_CHARS,
@@ -154,5 +156,36 @@ export async function requestManagerRun(): Promise<{ error?: string }> {
     console.error('[requestManagerRun]', err)
     reportError(err, { site: 'serverAction.admin.prospects.requestManagerRun' })
     return { error: 'Could not start the manager. Please try again.' }
+  }
+}
+
+/**
+ * "Run report now" on the Rev Ops card. Refused up front when Rev Ops cannot
+ * run, because the alternative is a button that looks like it worked: the task
+ * would be refused at the queue and nothing would ever appear.
+ */
+export async function requestRevOpsReport(): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const settings = await loadTeamSettings(supabase)
+    if (!isTeamRunnable(settings, 'rev_ops')) {
+      return { error: 'Turn on the master switch and Rev Ops first.' }
+    }
+
+    await inngest.send({ name: 'gtm/rev-ops.report.requested', data: { requested_by: user.id } })
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_rev_ops.report_requested',
+      targetType: 'gtm_team_settings',
+      targetId:   'rev_ops',
+    })
+
+    return {}
+  } catch (err) {
+    console.error('[requestRevOpsReport]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.requestRevOpsReport' })
+    return { error: 'Could not request the report. Please try again.' }
   }
 }

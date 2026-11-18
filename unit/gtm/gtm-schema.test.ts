@@ -71,6 +71,7 @@ describe.skipIf(!BIN)('GTM agent foundation (real Postgres)', () => {
     run(join(BIN!, 'pg_ctl'), ['-D', dataDir, '-o', `-p ${PORT} -k ${socketDir} -c listen_addresses=`, '-w', '-l', join(dataDir, 'log'), 'start'])
     execFileSync('psql', ['-h', socketDir, '-p', PORT, '-U', 'postgres', '-qc', 'CREATE DATABASE gtm'])
     psql(['-f', join(root, 'unit/gtm/gtm-harness.sql'), '-f', MIGRATION,
+      '-f', join(root, 'supabase/migrations/20261118130000_gtm_sweep_resumes_approved.sql'),
       '-f', join(root, 'supabase/migrations/20260824011348_db_narrowed_update_grants_report.sql')])
     sql(`INSERT INTO auth.users(id) VALUES ('${ADMIN}'), ('${NOBODY}');
          INSERT INTO platform_staff(user_id, role) VALUES ('${ADMIN}', 'admin'), ('${NOBODY}', 'support');
@@ -92,7 +93,7 @@ describe.skipIf(!BIN)('GTM agent foundation (real Postgres)', () => {
 
   it('is safe to run twice, and a re-run does not reset an admin-edited setting', () => {
     expect(sql(`UPDATE gtm_team_settings SET enabled = true, daily_task_cap = 7 WHERE team = 'lead_gen'`).ok).toBe(true)
-    psql(['-f', MIGRATION])
+    psql(['-f', MIGRATION, '-f', join(root, 'supabase/migrations/20261118130000_gtm_sweep_resumes_approved.sql')])
     expect(sql(`SELECT enabled::text || daily_task_cap FROM gtm_team_settings WHERE team = 'lead_gen'`).out).toBe('true7')
     expect(sql(`SELECT count(*) FROM gtm_team_settings`).out).toBe('6')
   })
@@ -218,6 +219,25 @@ describe.skipIf(!BIN)('GTM agent foundation (real Postgres)', () => {
       expect(sweep()).toEqual({ requeued: 1, failed: 1 })
       expect(sql(`SELECT status || attempts FROM agent_tasks WHERE id = '${retry}'`).out).toBe('pending1')
       expect(sql(`SELECT status || attempts || (completed_at IS NOT NULL) FROM agent_tasks WHERE id = '${spent}'`).out).toBe('failed3true')
+    })
+
+    // A task that died while CARRYING OUT an approved proposal must go back to
+    // 'approved'. Sent to 'pending' it would redo the research and ask for the
+    // same approval a second time.
+    it('puts an abandoned task back at the stage it was claimed from', () => {
+      const approved = stale('attempts|0')
+      sql(`UPDATE agent_tasks SET decided_at = now(), decided_by = '${ADMIN}' WHERE id = '${approved}'`)
+      const fresh = stale('attempts|0')
+      expect(sweep()).toEqual({ requeued: 2, failed: 0 })
+      expect(sql(`SELECT status FROM agent_tasks WHERE id = '${approved}'`).out).toBe('approved')
+      expect(sql(`SELECT status FROM agent_tasks WHERE id = '${fresh}'`).out).toBe('pending')
+    })
+
+    it('still fails an approved task for good once its attempts are spent', () => {
+      const spent = stale('attempts|2')
+      sql(`UPDATE agent_tasks SET decided_at = now() WHERE id = '${spent}'`)
+      expect(sweep()).toEqual({ requeued: 0, failed: 1 })
+      expect(sql(`SELECT status FROM agent_tasks WHERE id = '${spent}'`).out).toBe('failed')
     })
 
     it('leaves a task that was claimed recently alone, and a second sweep is a no-op', () => {

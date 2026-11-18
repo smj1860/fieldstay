@@ -181,31 +181,35 @@ export async function checkBudget(
 
 const CLAIM_ATTEMPTS = 3
 
+/** The two stages a worker takes work from: new work to do, or an approved proposal to carry out. */
+export type ClaimStage = 'pending' | 'approved'
+
 /**
- * Takes the team's next pending task, or null when the queue is empty.
+ * Takes the team's next task in `stage`, or null when there is none.
  *
  * The claim is the UPDATE, not the SELECT before it: two workers can both see
- * the same pending row, and only the one whose `WHERE status = 'pending'`
- * still matches gets it back. A worker that loses the race looks again rather
- * than reporting an empty queue.
+ * the same row, and only the one whose `WHERE status = <stage>` still matches
+ * gets it back. A worker that loses the race looks again rather than
+ * reporting an empty queue.
  */
 export async function claimNextTask(
   supabase: ServiceClient,
   team: WorkerTeam,
+  stage: ClaimStage = 'pending',
 ): Promise<AgentTask | null> {
   for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt++) {
     const { data: candidate, error: selectError } = await supabase
       .from('agent_tasks')
       .select('id')
       .eq('team', team)
-      .eq('status', 'pending')
+      .eq('status', stage)
       .order('priority', { ascending: false })
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle()
 
     if (selectError) {
-      reportError(selectError, { site: `${SITE}.claim.select`, extra: { team } })
+      reportError(selectError, { site: `${SITE}.claim.select`, extra: { team, stage } })
       throw selectError
     }
     if (!candidate) return null
@@ -214,12 +218,12 @@ export async function claimNextTask(
       .from('agent_tasks')
       .update({ status: 'in_progress', claimed_at: new Date().toISOString() })
       .eq('id', candidate.id)
-      .eq('status', 'pending')
+      .eq('status', stage)
       .select('*')
       .maybeSingle()
 
     if (error) {
-      reportError(error, { site: `${SITE}.claim.update`, extra: { team } })
+      reportError(error, { site: `${SITE}.claim.update`, extra: { team, stage } })
       throw error
     }
     if (data) return data as AgentTask
@@ -263,6 +267,46 @@ export async function completeTask(
 }
 
 /**
+ * Closes a task as done. For two cases only: carrying out a proposal a person
+ * already approved (the approval IS the gate, so there is nothing left to
+ * review), and a task whose honest result is "nothing to propose" (an empty
+ * proposal has nothing for a person to approve). Anything a team produces for a
+ * person to look at goes through completeTask() instead, so it cannot skip the
+ * inbox.
+ */
+export async function finishTask(
+  supabase: ServiceClient,
+  task: Pick<AgentTask, 'id'>,
+  output: JsonObject,
+): Promise<{ ok: boolean }> {
+  const { data, error } = await supabase
+    .from('agent_tasks')
+    .update({ status: 'done', output, error: null, completed_at: new Date().toISOString() })
+    .eq('id', task.id)
+    .eq('status', 'in_progress')
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    reportError(error, { site: `${SITE}.finish`, extra: { taskId: task.id } })
+    throw error
+  }
+  return { ok: data !== null }
+}
+
+export interface FailOptions {
+  /**
+   * Where a task goes back to while attempts remain. 'approved' for a task
+   * that failed while CARRYING OUT an approved proposal: sending it back to
+   * 'pending' would redo the research instead of retrying the application, and
+   * would ask for the same approval twice.
+   */
+  resumeTo?: ClaimStage
+  /** Fail for good now: the task can never succeed (an unknown type), so retrying only wastes attempts. */
+  terminal?: boolean
+}
+
+/**
  * One failed attempt. Back to the queue while attempts remain; failed for good
  * once they are spent, and only then is the failure announced.
  */
@@ -270,15 +314,16 @@ export async function failTask(
   supabase: ServiceClient,
   task: Pick<AgentTask, 'id' | 'team' | 'task_type' | 'attempts' | 'max_attempts'>,
   message: string,
+  options: FailOptions = {},
 ): Promise<{ terminal: boolean }> {
   const attempts = task.attempts + 1
-  const terminal = attempts >= task.max_attempts
+  const terminal = options.terminal === true || attempts >= task.max_attempts
 
   const { data, error } = await supabase
     .from('agent_tasks')
     .update({
       attempts,
-      status:       terminal ? 'failed' : 'pending',
+      status:       terminal ? 'failed' : (options.resumeTo ?? 'pending'),
       // The text is the caller's own summary. Truncated so a stack trace cannot bloat the row.
       error:        message.slice(0, 500),
       claimed_at:   null,
