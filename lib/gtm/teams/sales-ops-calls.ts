@@ -30,7 +30,7 @@ export const CALL_BRIEF_TASK_TYPE = 'call_brief'
 const SITE = 'gtm.sales-ops.calls'
 const DAY_MS = 86_400_000
 const RECENT_TOUCHES_READ = 5
-const CLOSED_STAGES = ['won', 'lost', 'disqualified']
+const CLOSED_STAGES: ReadonlySet<string> = new Set(['won', 'lost', 'disqualified'])
 
 interface CallProspectRow {
   id: string; company: string; city: string | null; state: string | null; market: string | null
@@ -99,7 +99,7 @@ async function runCallBrief(task: AgentTask, ctx: TaskContext): Promise<WorkOutc
 
   const prospect = await loadProspect(ctx.supabase, task.prospect_id)
   if (!prospect) return nothing('account_not_found', 'The account no longer exists.')
-  if (CLOSED_STAGES.includes(prospect.status)) return nothing('closed', 'The account is closed, so no call brief was prepared.')
+  if (CLOSED_STAGES.has(prospect.status)) return nothing('closed', 'The account is closed, so no call brief was prepared.')
 
   const touches = await loadTouches(ctx.supabase, prospect.id, ctx.now)
   const brief = buildCallBrief(factsFrom(prospect, touches))

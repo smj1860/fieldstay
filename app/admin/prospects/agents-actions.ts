@@ -9,7 +9,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { centralDayStart, isTeamRunnable } from '@/lib/gtm/policy'
 import { enqueueTask, loadTeamSettings, type EnqueueResult } from '@/lib/gtm/tasks'
 import { CALL_BRIEF_TASK_TYPE } from '@/lib/gtm/teams/sales-ops-calls'
-import { statusAfterManualCall, statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
+import { statusAfterManualCall, statusAfterManualSend, statusAfterReply } from '@/lib/gtm/teams/sales-ops-eligibility'
 import {
   DECISION_RULES,
   MAX_DECISION_NOTE_CHARS,
@@ -289,7 +289,7 @@ export async function markDraftSent(taskId: string): Promise<{ error?: string }>
   }
 }
 
-const CLOSED_STAGES = ['won', 'lost', 'disqualified']
+const CLOSED_STAGES: ReadonlySet<string> = new Set(['won', 'lost', 'disqualified'])
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const ENQUEUE_MESSAGES: Record<Extract<EnqueueResult, { ok: false }>['reason'], string> = {
@@ -318,7 +318,7 @@ export async function requestCallBrief(prospectId: string): Promise<{ error?: st
       .from('prospect_accounts').select('id, status').eq('id', prospectId).maybeSingle()
     if (readError) throw readError
     if (!account) return { error: 'That account no longer exists.' }
-    if (CLOSED_STAGES.includes(account.status)) return { error: 'That account is closed, so there is nothing to prepare.' }
+    if (CLOSED_STAGES.has(account.status)) return { error: 'That account is closed, so there is nothing to prepare.' }
 
     const day = centralDayStart(new Date()).toISOString().slice(0, 10)
     const queued = await enqueueTask(createServiceClient({ platformAdmin: { id: user.id } }), {
@@ -388,6 +388,119 @@ export async function markCallMade(taskId: string): Promise<{ error?: string }> 
   } catch (err) {
     console.error('[markCallMade]', err)
     reportError(err, { site: 'serverAction.admin.prospects.markCallMade' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+const MAX_REPLY_NOTE_CHARS = 500
+
+/**
+ * Stops every email draft still in flight for an account that just replied: queued,
+ * waiting in the inbox, or approved and sitting in "Ready to send". A person who
+ * answered needs a person's reply, and a templated follow-up they never asked for
+ * is worse than silence. Returns how many were stopped, or null when they could
+ * not be (the caller says so, since the account is already marked).
+ *
+ * A draft a worker is writing RIGHT NOW is not touched here: the handler re-checks
+ * the live account before it spends a model call, and the account is already
+ * marked, so it finds the account in conversation and writes nothing.
+ */
+async function cancelInFlightDrafts(supabase: AdminClient, actorId: string, prospectId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('agent_tasks')
+    .update({
+      status:        DECISION_RULES.cancel.to,
+      decided_by:    actorId,
+      decided_at:    new Date().toISOString(),
+      decision_note: 'The prospect replied.',
+    })
+    .eq('prospect_id', prospectId)
+    .eq('team', 'sales_ops')
+    .eq('task_type', 'draft_outreach')
+    .in('status', [...DECISION_RULES.cancel.from])
+    .select('id')
+  if (error) {
+    reportError(error, { site: 'serverAction.admin.prospects.markProspectReplied.cancel', extra: { prospectId } })
+    return null
+  }
+  return data?.length ?? 0
+}
+
+/** The account and its history, written in the order that matters: the account first, so nothing new is drafted. */
+async function recordReply(
+  supabase: AdminClient,
+  actorId: string,
+  prospectId: string,
+  currentStatus: string,
+  note: string | null,
+): Promise<boolean> {
+  const nextStatus = statusAfterReply(currentStatus)
+  const { error: updateError } = await supabase
+    .from('prospect_accounts')
+    .update({ last_touch_at: new Date().toISOString(), ...(nextStatus ? { status: nextStatus } : {}) })
+    .eq('id', prospectId)
+  if (updateError) {
+    reportError(updateError, { site: 'serverAction.admin.prospects.markProspectReplied.account', extra: { prospectId } })
+    return false
+  }
+
+  const { error: touchError } = await supabase.from('prospect_touches').insert({
+    prospect_id: prospectId,
+    touch_type:  'replied',
+    note,
+    actor_id:    actorId,
+  })
+  if (touchError) {
+    reportError(touchError, { site: 'serverAction.admin.prospects.markProspectReplied.touch', extra: { prospectId } })
+    return false
+  }
+  return true
+}
+
+/**
+ * "They replied": a person records that a prospect answered, by email or by phone.
+ * Moves the account out of the follow-up queue (unless it is already further along),
+ * logs the reply with an optional note of what they said, and stops any email draft
+ * still in flight for that account. Call briefs are left alone: an account that
+ * replied is exactly who a person is about to call.
+ */
+export async function markProspectReplied(
+  prospectId: string,
+  note?: string,
+): Promise<{ error?: string; stopped?: number }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+    if (!UUID.test(prospectId)) return { error: 'Unknown account.' }
+
+    const { data: account, error: readError } = await supabase
+      .from('prospect_accounts').select('id, status').eq('id', prospectId).maybeSingle()
+    if (readError) throw readError
+    if (!account) return { error: 'That account no longer exists.' }
+    if (CLOSED_STAGES.has(account.status)) return { error: 'That account is closed. Reopen it first if they have come back.' }
+
+    const cleanNote = note?.trim().slice(0, MAX_REPLY_NOTE_CHARS) || null
+    const recorded = await recordReply(supabase, user.id, prospectId, account.status, cleanNote)
+    if (!recorded) return { error: 'Could not record the reply. Please try again.' }
+
+    const stopped = await cancelInFlightDrafts(supabase, user.id, prospectId)
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.prospect_account.reply_marked',
+      targetType: 'prospect_accounts',
+      targetId:   prospectId,
+      // Counts only: never the note, which is the prospect's own words.
+      metadata:   { drafts_stopped: stopped ?? 0, had_note: cleanNote !== null },
+    })
+
+    revalidatePath(PATH)
+    if (stopped === null) {
+      return { error: 'Marked as replied, but queued drafts could not be stopped. Discard any for this account by hand.' }
+    }
+    return { stopped }
+  } catch (err) {
+    console.error('[markProspectReplied]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.markProspectReplied' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

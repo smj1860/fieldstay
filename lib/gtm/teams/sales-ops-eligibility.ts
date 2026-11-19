@@ -40,7 +40,7 @@ export const INELIGIBLE_SUMMARY: Record<IneligibleReason, string> = {
 }
 
 /** Stages where having just emailed someone changes where the account stands. */
-const BEFORE_FIRST_OUTREACH = ['new', 'researching', 'needs_contact_info', 'queued']
+const BEFORE_FIRST_OUTREACH: ReadonlySet<string> = new Set(['new', 'researching', 'needs_contact_info', 'queued'])
 
 /**
  * The status an account moves to once a person has sent it a drafted email, or
@@ -49,7 +49,7 @@ const BEFORE_FIRST_OUTREACH = ['new', 'researching', 'needs_contact_info', 'queu
  * be moved BACK to 'emailed' by a follow-up going out.
  */
 export function statusAfterManualSend(current: string): 'emailed' | null {
-  return BEFORE_FIRST_OUTREACH.includes(current) ? 'emailed' : null
+  return BEFORE_FIRST_OUTREACH.has(current) ? 'emailed' : null
 }
 
 /**
@@ -58,5 +58,18 @@ export function statusAfterManualSend(current: string): 'emailed' | null {
  * has a meeting must not move them back to an earlier stage.
  */
 export function statusAfterManualCall(current: string): 'called' | null {
-  return BEFORE_FIRST_OUTREACH.includes(current) ? 'called' : null
+  return BEFORE_FIRST_OUTREACH.has(current) ? 'called' : null
+}
+
+/** Stages from which "they replied" moves an account forward. Anything further along stays where it is. */
+const BEFORE_REPLY: ReadonlySet<string> = new Set([...BEFORE_FIRST_OUTREACH, 'emailed', 'called', 'texted', 'visited_no_contact'])
+
+/**
+ * The status an account moves to when a person records that the prospect replied,
+ * or null to leave it alone. A reply moves an account that was still waiting on
+ * an answer. One already in conversation (replied, meeting set, in trial) must not
+ * be moved BACK to 'replied', and a closed one is a person's call, never this.
+ */
+export function statusAfterReply(current: string): 'replied' | null {
+  return BEFORE_REPLY.has(current) ? 'replied' : null
 }
