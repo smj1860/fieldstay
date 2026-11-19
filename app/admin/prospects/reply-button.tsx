@@ -49,14 +49,11 @@ export function ReplyButton({ prospectId }: Readonly<{ prospectId: string }>) {
           {pending ? 'Recording…' : 'They replied'}
         </Button>
       </div>
-      {message && (
-        <p
-          role={message.kind === 'error' ? 'alert' : 'status'}
-          className="text-xs mt-2"
-          style={{ color: message.kind === 'error' ? 'var(--accent-red)' : 'var(--text-secondary)' }}
-        >
-          {message.text}
-        </p>
+      {message?.kind === 'error' && (
+        <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{message.text}</p>
+      )}
+      {message?.kind === 'ok' && (
+        <output className="block text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>{message.text}</output>
       )}
     </div>
   )

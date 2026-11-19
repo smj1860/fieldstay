@@ -289,7 +289,7 @@ export async function markDraftSent(taskId: string): Promise<{ error?: string }>
   }
 }
 
-const CLOSED_STAGES = ['won', 'lost', 'disqualified']
+const CLOSED_STAGES: ReadonlySet<string> = new Set(['won', 'lost', 'disqualified'])
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const ENQUEUE_MESSAGES: Record<Extract<EnqueueResult, { ok: false }>['reason'], string> = {
@@ -318,7 +318,7 @@ export async function requestCallBrief(prospectId: string): Promise<{ error?: st
       .from('prospect_accounts').select('id, status').eq('id', prospectId).maybeSingle()
     if (readError) throw readError
     if (!account) return { error: 'That account no longer exists.' }
-    if (CLOSED_STAGES.includes(account.status)) return { error: 'That account is closed, so there is nothing to prepare.' }
+    if (CLOSED_STAGES.has(account.status)) return { error: 'That account is closed, so there is nothing to prepare.' }
 
     const day = centralDayStart(new Date()).toISOString().slice(0, 10)
     const queued = await enqueueTask(createServiceClient({ platformAdmin: { id: user.id } }), {
@@ -476,7 +476,7 @@ export async function markProspectReplied(
       .from('prospect_accounts').select('id, status').eq('id', prospectId).maybeSingle()
     if (readError) throw readError
     if (!account) return { error: 'That account no longer exists.' }
-    if (CLOSED_STAGES.includes(account.status)) return { error: 'That account is closed. Reopen it first if they have come back.' }
+    if (CLOSED_STAGES.has(account.status)) return { error: 'That account is closed. Reopen it first if they have come back.' }
 
     const cleanNote = note?.trim().slice(0, MAX_REPLY_NOTE_CHARS) || null
     const recorded = await recordReply(supabase, user.id, prospectId, account.status, cleanNote)
