@@ -192,9 +192,11 @@ export async function claimNextTask(
   supabase: ServiceClient,
   team: WorkerTeam,
   stage: ClaimStage = 'pending',
+  /** Only take these task types. A type whose last step belongs to a person is never claimed from 'approved'. */
+  types?: readonly string[],
 ): Promise<AgentTask | null> {
   for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt++) {
-    const { data: candidate, error: selectError } = await supabase
+    let pick = supabase
       .from('agent_tasks')
       .select('id')
       .eq('team', team)
@@ -202,7 +204,11 @@ export async function claimNextTask(
       .order('priority', { ascending: false })
       .order('created_at', { ascending: true })
       .limit(1)
-      .maybeSingle()
+    // A filter added after the order and limit is the same query: both are URL
+    // parameters. The bound stays in the first chain so it is visible to read.
+    if (types) pick = pick.in('task_type', [...types])
+
+    const { data: candidate, error: selectError } = await pick.maybeSingle()
 
     if (selectError) {
       reportError(selectError, { site: `${SITE}.claim.select`, extra: { team, stage } })

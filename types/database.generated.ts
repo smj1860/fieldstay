@@ -7818,7 +7818,10 @@ export type Database = {
         Args: { p_spend_since: string; p_touches_since: string }
         Returns: Json
       }
-      gtm_sweep_stalled_tasks: { Args: { p_claimed_before: string }; Returns: Json }
+      gtm_sweep_stalled_tasks: {
+        Args: { p_claimed_before: string }
+        Returns: Json
+      }
       inventory_below_par_for_org: {
         Args: { p_org_id: string }
         Returns: {

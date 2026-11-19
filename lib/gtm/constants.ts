@@ -34,7 +34,7 @@ export const TEAM_BLURBS: Record<SettingsTeam, string> = {
   manager:       'Plans the day, routes work, watches for stalls and writes the daily brief.',
   lead_gen:      'Finds and enriches accounts, verifies contacts, scores fit.',
   content_brand: 'Outreach copy, sequences and brand-voice checks.',
-  sales_ops:     'Drafts follow-ups, triages replies, keeps the next action moving.',
+  sales_ops:     'Drafts follow-up emails and call briefs for you to use yourself. Sends nothing and calls no one.',
   rev_ops:       'Pipeline reporting, data hygiene and funnel conversion.',
 }
 

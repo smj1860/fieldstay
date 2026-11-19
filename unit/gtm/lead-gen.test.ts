@@ -4,11 +4,11 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 const researchSite = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/gtm/teams/lead-gen-fetch', () => ({ researchSite }))
 
-import { leadGenHandlers, siteUrlFor, LEAD_GEN_TASK_TYPES } from '@/lib/gtm/teams/lead-gen'
+import { enrichAccountHandler, siteUrlFor } from '@/lib/gtm/teams/lead-gen'
 import type { AgentTask } from '@/types/database'
 import { fakeSupabase } from './fake-supabase'
 
-const handler = leadGenHandlers[LEAD_GEN_TASK_TYPES.enrichAccount]
+const handler = enrichAccountHandler
 const task = (over: Partial<AgentTask> = {}): AgentTask => ({
   id: 't1', team: 'lead_gen', task_type: 'enrich_account', prospect_id: 'p1', status: 'in_progress', priority: 40,
   input: {}, output: null, requires_approval: true, origin: 'rev_ops', parent_task_id: 'r1', depth: 1, dedupe_key: null,

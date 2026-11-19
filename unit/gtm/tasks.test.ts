@@ -129,6 +129,21 @@ describe('claimNextTask', () => {
     expect(claim.payload).toMatchObject({ status: 'in_progress' })
   })
 
+  it('can be limited to task types, so a task whose last step is a person\'s is never claimed', async () => {
+    const { client, calls } = fakeSupabase({
+      'agent_tasks:select': [{ data: { id: 't1' }, error: null }],
+      'agent_tasks:update': [{ data: { id: 't1' }, error: null }],
+    })
+    await claimNextTask(client, 'rev_ops', 'approved', ['weekly_funnel_report'])
+    expect(calls.find((c) => c.op === 'select')!.filters).toContainEqual(['in', ['task_type', ['weekly_funnel_report']]])
+  })
+
+  it('takes any type when none is named', async () => {
+    const { client, calls } = fakeSupabase({ 'agent_tasks:select': [{ data: null, error: null }] })
+    await claimNextTask(client, 'rev_ops')
+    expect(calls.find((c) => c.op === 'select')!.filters.some(([f]) => f === 'in')).toBe(false)
+  })
+
   it('looks again after losing a race, rather than reporting an empty queue', async () => {
     const { client, calls } = fakeSupabase({
       'agent_tasks:select': [{ data: { id: 't1' }, error: null }, { data: { id: 't2' }, error: null }],

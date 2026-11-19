@@ -40,7 +40,7 @@ const OUTBOUND_SEND = [
 const PROSPECT_WRITERS = new Set<string>(['lib/gtm/teams/lead-gen-apply.ts'])
 
 /** The only agent files that may call a model. Each must bill it (see the pairing test). */
-const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts'])
+const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts', 'lib/gtm/teams/sales-ops-draft.ts'])
 
 const PROSPECT_TABLE = /\.from\(\s*['"](prospect_accounts|prospect_contacts|prospect_touches)['"]\s*\)\s*\.(insert|update|upsert|delete)\b/
 const PROSPECT_DELETE = /\.from\(\s*['"](prospect_accounts|prospect_contacts)['"]\s*\)\s*\.delete\b/
@@ -74,6 +74,45 @@ function applyWriterViolations(code: string): string[] {
   if (!/\.is\(\s*column\s*,\s*null\s*\)/.test(code)) problems.push('does not fill only empty fields')
   if (/\bstatus\s*:/.test(code)) problems.push('names a status')
   if (/\.delete\s*\(/.test(code)) problems.push('deletes')
+  return problems
+}
+
+/**
+ * Sales Ops' promises about its own drafts, as code: whatever the model returns
+ * passes checkDraft() before anyone is asked to read it, it is billed, and the
+ * draft handler has no `execute` step, so a worker can never "finish" an approved
+ * draft by doing something with it. Approval means "good to send"; sending is a
+ * person's, from their own mailbox.
+ */
+function draftHandlerViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/\bgenerateDraft\(/.test(code)) problems.push('does not call the drafting model')
+  if (!/\bcheckDraft\(/.test(code)) problems.push('never checks the draft against the voice')
+  if (!/\brecordUsage\(/.test(code)) problems.push('does not bill the model call')
+  if (/\bexecute\s*:/.test(code)) problems.push('has an execute step, so a worker would act on an approved draft')
+  return problems
+}
+
+/**
+ * Sales Ops' promises about its call briefs, as code: a brief is built from facts
+ * by the pure builder, no model writes it (so nothing is invented about a
+ * stranger's business), and the handler has no `execute` step, so a worker can
+ * never act on an approved brief. The call itself is a person on their own phone.
+ */
+function callBriefViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/\bbuildCallBrief\(/.test(code)) problems.push('does not build the brief with the pure builder')
+  if (LLM_IMPORT.test(code) || /\bgenerateDraft\(/.test(code)) problems.push('calls a model: a brief is built from facts, not generated')
+  if (/\bexecute\s*:/.test(code)) problems.push('has an execute step, so a worker would act on an approved brief')
+  return problems
+}
+
+/** The builder stays pure: no database, no network, no queue, nothing that could reach a person. */
+function briefBuilderViolations(code: string): string[] {
+  const problems: string[] = []
+  if (/\bsupabase\b|\binngest\b|@\/lib\/sms|@\/lib\/resend/i.test(code)) problems.push('reaches a database, a queue or a sender')
+  if (BARE_FETCH.test(code)) problems.push('makes a network call')
+  if (LLM_IMPORT.test(code)) problems.push('imports a model client')
   return problems
 }
 
@@ -128,6 +167,21 @@ describe('guardrail: GTM agent boundaries', () => {
     ).toEqual([])
   })
 
+  it('the Sales Ops draft handler checks the voice, bills the call, and has no execute step', () => {
+    const handler = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops.ts')
+    expect(handler, 'lib/gtm/teams/sales-ops.ts should be scanned').toBeDefined()
+    expect(draftHandlerViolations(handler!.code)).toEqual([])
+  })
+
+  it('the Sales Ops call brief is built from facts, never generated, and a worker never acts on one', () => {
+    const handler = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops-calls.ts')
+    expect(handler, 'lib/gtm/teams/sales-ops-calls.ts should be scanned').toBeDefined()
+    expect(callBriefViolations(handler!.code)).toEqual([])
+    const builder = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops-call-brief.ts')
+    expect(builder, 'lib/gtm/teams/sales-ops-call-brief.ts should be scanned').toBeDefined()
+    expect(briefBuilderViolations(builder!.code)).toEqual([])
+  })
+
   it('every function that triggers a model call also records its usage', () => {
     const manager = sources.find((s) => s.path === 'lib/inngest/functions/gtm-manager.ts')!
     expect(manager.code).toContain('narrateBrief(')
@@ -176,6 +230,32 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(applyWriterViolations(`task.decided_at; await q.update(p)`)).toContain('does not fill only empty fields')
       expect(applyWriterViolations(`${good}; update({ status: 'emailed' })`)).toContain('names a status')
       expect(applyWriterViolations(`${good}; q.delete()`)).toContain('deletes')
+    })
+
+    it('the draft handler rules', () => {
+      const good = `const c = await generateDraft(b); await recordUsage(s, u); const i = checkDraft(c.draft); export const h = { run }`
+      expect(draftHandlerViolations(good)).toEqual([])
+      expect(draftHandlerViolations(good.replace('checkDraft(', 'skip('))).toContain('never checks the draft against the voice')
+      expect(draftHandlerViolations(good.replace('recordUsage(', 'skip('))).toContain('does not bill the model call')
+      expect(draftHandlerViolations(good.replace('generateDraft(', 'skip('))).toContain('does not call the drafting model')
+      expect(draftHandlerViolations(`${good.replace('{ run }', '{ run, execute: send }')}`)).toContain('has an execute step, so a worker would act on an approved draft')
+    })
+
+    it('the call brief rules', () => {
+      const good = `const b = buildCallBrief(facts); export const h = { run }`
+      expect(callBriefViolations(good)).toEqual([])
+      expect(callBriefViolations(`const b = 1`)).toContain('does not build the brief with the pure builder')
+      expect(callBriefViolations(`${good}; await generateDraft(x)`)).toContain('calls a model: a brief is built from facts, not generated')
+      expect(callBriefViolations(`${good}; import Anthropic from '@anthropic-ai/sdk'`)).toContain('calls a model: a brief is built from facts, not generated')
+      expect(callBriefViolations(good.replace('{ run }', '{ run, execute: dial }'))).toContain('has an execute step, so a worker would act on an approved brief')
+    })
+
+    it('the brief builder stays pure', () => {
+      expect(briefBuilderViolations(`export const buildCallBrief = () => 1`)).toEqual([])
+      expect(briefBuilderViolations(`await supabase.from('x')`)).toContain('reaches a database, a queue or a sender')
+      expect(briefBuilderViolations(`import { sendSMS } from '@/lib/sms/telnyx'`)).toContain('reaches a database, a queue or a sender')
+      expect(briefBuilderViolations(`await fetch(u)`)).toContain('makes a network call')
+      expect(briefBuilderViolations(`import { getAnthropicClient } from '@/lib/support/anthropic-client'`)).toContain('imports a model client')
     })
 
     it('an unbilled model caller', () => {

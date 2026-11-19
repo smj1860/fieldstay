@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 
-import { FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } from '@/app/admin/prospects/agents/agents-panels'
+import { DraftQualityPanel, FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } from '@/app/admin/prospects/agents/agents-panels'
 import { buildMetrics } from '@/lib/gtm/manager/brief'
 import { parseRollup } from '@/lib/gtm/rollup'
 import type { RecentTask } from '@/lib/gtm/dashboard'
@@ -91,5 +91,41 @@ describe('RecentTasks', () => {
   it('tells a new install that nothing has happened yet, instead of rendering an empty box', () => {
     render(<RecentTasks tasks={[]} now={NOW} />)
     expect(screen.getByText(/No agent has done anything yet/)).toBeInTheDocument()
+  })
+})
+
+describe('DraftQualityPanel', () => {
+  const quality = (over: Partial<{ approved: number; rejected: number; sent: number; notes: { note: string; decidedAt: string }[] }> = {}) =>
+    ({ approved: 0, rejected: 0, sent: 0, notes: [], ...over })
+
+  it('shows the counts and the approval rate', () => {
+    render(<DraftQualityPanel quality={quality({ approved: 9, rejected: 3, sent: 7 })} />)
+    expect(screen.getByText('Approval rate').nextSibling).toHaveTextContent('75%')
+    expect(screen.getByText('Approved').nextSibling).toHaveTextContent('9')
+    expect(screen.getByText('Marked sent').nextSibling).toHaveTextContent('7')
+  })
+
+  it('does not invent a rate when nothing has been reviewed', () => {
+    render(<DraftQualityPanel quality={quality()} />)
+    expect(screen.getByText('no drafts reviewed yet')).toBeInTheDocument()
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument()
+  })
+
+  // So nobody mistakes the voice for approved just because drafts are flowing.
+  it('says the voice guide is a draft and not yet reviewed, and that sending is not built', () => {
+    render(<DraftQualityPanel quality={quality()} />)
+    expect(screen.getByText(/not yet reviewed by the founder/)).toBeInTheDocument()
+    expect(screen.getByText(/Sending from inside FieldStay is not built/)).toBeInTheDocument()
+  })
+
+  it('shows the founder\'s rejection notes and says they feed the next draft', () => {
+    render(<DraftQualityPanel quality={quality({ rejected: 1, notes: [{ note: 'too salesy', decidedAt: '2026-11-17T00:00:00Z' }] })} />)
+    expect(screen.getByText('too salesy')).toBeInTheDocument()
+    expect(screen.getByText(/passed to the next draft/)).toBeInTheDocument()
+  })
+
+  it('shows no notes section when there are none', () => {
+    render(<DraftQualityPanel quality={quality()} />)
+    expect(screen.queryByText(/Why recent drafts were rejected/)).not.toBeInTheDocument()
   })
 })

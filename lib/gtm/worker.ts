@@ -44,8 +44,13 @@ export type WorkOutcome =
 export interface TaskHandler {
   /** Do the work. Never write anything a person has not approved; return it as a proposal. */
   run:     (task: AgentTask, ctx: TaskContext) => Promise<WorkOutcome>
-  /** Carry out the proposal a person approved. Runs only for a task with a recorded decision. */
-  execute: (task: AgentTask, ctx: TaskContext) => Promise<{ output: JsonObject }>
+  /**
+   * Carry out the proposal a person approved. Runs only for a task with a recorded decision.
+   * Leave it out when the last step belongs to a PERSON: an approved draft that someone
+   * sends from their own mailbox has nothing for a worker to do, and a worker must not
+   * claim it (see executableTypes()).
+   */
+  execute?: (task: AgentTask, ctx: TaskContext) => Promise<{ output: JsonObject }>
 }
 
 export type HandlerRegistry = Record<string, TaskHandler>
@@ -62,8 +67,18 @@ async function overBudget(supabase: ServiceClient, setting: TeamSetting, team: W
   return spentTodayCents(rolled.rollup, team) >= setting.daily_cost_cap_cents
 }
 
-async function claimWork(supabase: ServiceClient, team: WorkerTeam): Promise<{ task: AgentTask; stage: ClaimStage } | null> {
-  const approved = await claimNextTask(supabase, team, 'approved')
+/** The task types a worker may take from 'approved': the ones with an execute step. */
+export function executableTypes(registry: HandlerRegistry): string[] {
+  return Object.entries(registry).filter(([, handler]) => handler.execute !== undefined).map(([type]) => type)
+}
+
+async function claimWork(
+  supabase: ServiceClient,
+  team: WorkerTeam,
+  registry: HandlerRegistry,
+): Promise<{ task: AgentTask; stage: ClaimStage } | null> {
+  const executable = executableTypes(registry)
+  const approved = executable.length > 0 ? await claimNextTask(supabase, team, 'approved', executable) : null
   if (approved) return { task: approved, stage: 'approved' }
   const pending = await claimNextTask(supabase, team, 'pending')
   return pending ? { task: pending, stage: 'pending' } : null
@@ -76,6 +91,8 @@ async function settle(
   handler: TaskHandler,
 ): Promise<'proposed' | 'nothing' | 'executed' | 'lost_claim'> {
   if (stage === 'approved') {
+    // Unreachable through claimWork(), which only takes types that have an execute step.
+    if (!handler.execute) throw new Error(`No execute step for ${task.task_type}`)
     const { output } = await handler.execute(task, ctx)
     return (await finishTask(ctx.supabase, task, output)).ok ? 'executed' : 'lost_claim'
   }
@@ -100,7 +117,7 @@ export async function workOne(
   if (!setting || !isTeamRunnable(settings, team)) return { worked: false, reason: 'team_off' }
   if (await overBudget(supabase, setting, team, now)) return { worked: false, reason: 'cost_cap' }
 
-  const claimed = await claimWork(supabase, team)
+  const claimed = await claimWork(supabase, team, registry)
   if (!claimed) return { worked: false, reason: 'empty' }
   const { task, stage } = claimed
 

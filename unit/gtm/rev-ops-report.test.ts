@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MAX_LEAD_GEN_HANDOFFS, buildWeeklyReport, priorWeekTouches, type ReportInput } from '@/lib/gtm/teams/rev-ops-report'
+import { MAX_LEAD_GEN_HANDOFFS, MAX_SALES_OPS_HANDOFFS, buildWeeklyReport, priorWeekTouches, type ReportInput } from '@/lib/gtm/teams/rev-ops-report'
 
 const base = (over: Partial<ReportInput> = {}): ReportInput => ({
   now: new Date('2026-11-16T13:00:00Z'),
@@ -10,6 +10,7 @@ const base = (over: Partial<ReportInput> = {}): ReportInput => ({
   staleExamples: [{ company: 'Acme Rentals', status: 'emailed', daysSinceTouch: 21 }, { company: 'Brook Stays', status: 'meeting_set', daysSinceTouch: null }],
   needsContactInfo: 120, bouncedPrimary: 6, queuedNoChannel: 9,
   enrichCandidates: ['a', 'b', 'c'],
+  draftCandidates: ['d1', 'd2'],
   spendTodayCents: 12.5,
   ...over,
 })
@@ -55,7 +56,7 @@ describe('buildWeeklyReport', () => {
   })
 
   it('puts the handoff ids in the output, which is what approval acts on', () => {
-    expect(report.handoff).toEqual({ lead_gen_enrich: ['a', 'b', 'c'] })
+    expect(report.handoff).toEqual({ lead_gen_enrich: ['a', 'b', 'c'], sales_ops_draft: ['d1', 'd2'] })
   })
 
   it('caps one approval\'s handoff, so a click cannot queue the whole backlog', () => {
@@ -64,9 +65,38 @@ describe('buildWeeklyReport', () => {
   })
 
   it('says there is nothing to hand off, rather than offering an empty handoff', () => {
-    const r = buildWeeklyReport(base({ enrichCandidates: [] }))
+    const r = buildWeeklyReport(base({ enrichCandidates: [], draftCandidates: [] }))
     expect(r.body).toContain('nothing to hand off')
-    expect(r.handoff.lead_gen_enrich).toEqual([])
+    expect(r.handoff).toEqual({ lead_gen_enrich: [], sales_ops_draft: [] })
+  })
+
+  describe('the Sales Ops handoff', () => {
+    it('offers drafts for review and says nothing is sent automatically', () => {
+      const r = buildWeeklyReport(base())
+      expect(r.body).toContain('Also: approving it asks Sales Ops to draft a follow-up for 2 accounts.')
+      expect(r.body).toContain('Drafts are for you to review and send yourself. Nothing is sent automatically.')
+    })
+
+    it('caps the drafts one approval can ask for, lower than Lead Gen, since each is something to read', () => {
+      const many = Array.from({ length: 30 }, (_, i) => `d${i}`)
+      expect(MAX_SALES_OPS_HANDOFFS).toBeLessThan(MAX_LEAD_GEN_HANDOFFS)
+      expect(buildWeeklyReport(base({ draftCandidates: many })).handoff.sales_ops_draft).toHaveLength(MAX_SALES_OPS_HANDOFFS)
+    })
+
+    it('leads with "Next step" when only Sales Ops has work, and does not claim there is nothing to hand off', () => {
+      const r = buildWeeklyReport(base({ enrichCandidates: [] }))
+      expect(r.body).toContain('Next step: approving it asks Sales Ops')
+      expect(r.body).not.toContain('nothing to hand off')
+      expect(r.body).not.toContain('Lead Gen to look')
+    })
+
+    it('uses the singular for one account', () => {
+      expect(buildWeeklyReport(base({ draftCandidates: ['d1'] })).body).toContain('follow-up for 1 account.')
+    })
+
+    it('offers no Sales Ops line when no account qualifies', () => {
+      expect(buildWeeklyReport(base({ draftCandidates: [] })).body).not.toContain('Sales Ops')
+    })
   })
 
   it('reads a quiet week as quiet, with no NaN, Infinity or divide-by-zero', () => {

@@ -8,17 +8,23 @@ const decideAgentTask = vi.fn()
 const updateTeamSettings = vi.fn()
 const requestManagerRun = vi.fn()
 const requestRevOpsReport = vi.fn()
+const markDraftSent = vi.fn()
+const markCallMade = vi.fn()
 vi.mock('@/app/admin/prospects/agents-actions', () => ({
   decideAgentTask:    (...a: unknown[]) => decideAgentTask(...a),
   updateTeamSettings: (...a: unknown[]) => updateTeamSettings(...a),
   requestManagerRun:  () => requestManagerRun(),
   requestRevOpsReport: () => requestRevOpsReport(),
+  markDraftSent:      (...a: unknown[]) => markDraftSent(...a),
+  markCallMade:       (...a: unknown[]) => markCallMade(...a),
 }))
 
 import { ApprovalInbox } from '@/app/admin/prospects/agents/approval-inbox'
 import { MasterSwitch, TeamCard } from '@/app/admin/prospects/agents/team-controls'
 import { ManagerPanel } from '@/app/admin/prospects/agents/manager-panel'
-import type { ApprovalItem, DecisionItem } from '@/lib/gtm/dashboard'
+import { ReadyToSend } from '@/app/admin/prospects/agents/ready-to-send'
+import { ReadyCalls } from '@/app/admin/prospects/agents/ready-calls'
+import type { ApprovalItem, DecisionItem, ReadyCall, ReadyDraft } from '@/lib/gtm/dashboard'
 import type { TeamSetting } from '@/lib/gtm/policy'
 
 // ============================================================================
@@ -42,6 +48,7 @@ beforeEach(() => {
   updateTeamSettings.mockResolvedValue({})
   requestManagerRun.mockResolvedValue({})
   requestRevOpsReport.mockResolvedValue({})
+  markDraftSent.mockResolvedValue({})
 })
 
 describe('ApprovalInbox', () => {
@@ -213,5 +220,138 @@ describe('ManagerPanel', () => {
   it('tucks earlier briefs away rather than stacking them', () => {
     render(<ManagerPanel latest={decision()} history={[decision(), decision({ id: 'd0', brief: 'Older brief' })]} ages={{ d1: '2h ago', d0: '1d ago' }} />)
     expect(screen.getByText('Earlier briefs (1)')).toBeInTheDocument()
+  })
+})
+
+describe('ReadyToSend', () => {
+  const draft = (over: Partial<ReadyDraft> = {}): ReadyDraft => ({
+    id: 'd1', company: 'Acme Rentals', contactName: 'Dana Smith', email: 'dana@acmerentals.com',
+    subject: 'Turnovers on Lake Martin', body: 'Hi Dana, text of the email', approvedAt: '2026-11-18T10:00:00Z', ...over,
+  })
+  const writeText = vi.fn()
+
+  beforeEach(() => {
+    writeText.mockReset().mockResolvedValue(undefined)
+    Object.defineProperty(globalThis.navigator, 'clipboard', { value: { writeText }, configurable: true })
+  })
+
+  it('shows the recipient, the subject and the body, and says FieldStay does not send', () => {
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    expect(screen.getByText('Acme Rentals')).toBeInTheDocument()
+    expect(screen.getByText('dana@acmerentals.com')).toBeInTheDocument()
+    expect(screen.getByText('Turnovers on Lake Martin')).toBeInTheDocument()
+    expect(screen.getByText(/Hi Dana, text of the email/)).toBeInTheDocument()
+    expect(screen.getByText(/FieldStay does not send email/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['Copy address', 'dana@acmerentals.com'],
+    ['Copy subject', 'Turnovers on Lake Martin'],
+    ['Copy body', 'Hi Dana, text of the email'],
+  ])('%s copies exactly that text', async (label, expected) => {
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expected))
+  })
+
+  it('says so, and offers the manual route, when the clipboard is not available', async () => {
+    writeText.mockRejectedValue(new Error('denied'))
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy body' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('copy it by hand')
+  })
+
+  it('records the send for THIS draft, then refreshes', async () => {
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'I sent this' }))
+    await waitFor(() => expect(markDraftSent).toHaveBeenCalledWith('d1'))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it('discards a draft with a cancel, not a send', async () => {
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(decideAgentTask).toHaveBeenCalledWith('d1', 'cancel'))
+    expect(markDraftSent).not.toHaveBeenCalled()
+  })
+
+  it('shows a refusal instead of swallowing it, and does not refresh as if it worked', async () => {
+    markDraftSent.mockResolvedValue({ error: 'That draft was already handled.' })
+    render(<ReadyToSend drafts={[draft()]} ages={{ d1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'I sent this' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('already handled')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('offers no address button when the account has no email, and still works', () => {
+    render(<ReadyToSend drafts={[draft({ email: null })]} ages={{ d1: '2h ago' }} />)
+    expect(screen.queryByRole('button', { name: 'Copy address' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy body' })).toBeInTheDocument()
+  })
+
+  it('says nothing is waiting when there are no approved drafts', () => {
+    render(<ReadyToSend drafts={[]} ages={{}} />)
+    expect(screen.getByText('No approved drafts are waiting.')).toBeInTheDocument()
+  })
+})
+
+describe('ReadyCalls', () => {
+  const call = (over: Partial<ReadyCall> = {}): ReadyCall => ({
+    id: 'c1', company: 'Acme Rentals', contactName: 'Dana Smith', phone: '256-555-0100',
+    headline: 'Call brief: Acme Rentals', brief: 'What we know\n- Acme Rentals.', approvedAt: '2026-11-19T10:00:00Z', ...over,
+  })
+  const writeText = vi.fn()
+
+  beforeEach(() => {
+    writeText.mockReset().mockResolvedValue(undefined)
+    markCallMade.mockReset().mockResolvedValue({})
+    Object.defineProperty(globalThis.navigator, 'clipboard', { value: { writeText }, configurable: true })
+  })
+
+  it('shows the account, the brief, and says FieldStay places no calls', () => {
+    render(<ReadyCalls calls={[call()]} ages={{ c1: '2h ago' }} />)
+    expect(screen.getByText('Acme Rentals')).toBeInTheDocument()
+    expect(screen.getByText('256-555-0100')).toBeInTheDocument()
+    expect(screen.getByText(/What we know/)).toBeInTheDocument()
+    expect(screen.getByText(/places no calls/)).toBeInTheDocument()
+  })
+
+  it.each([['Copy number', '256-555-0100'], ['Copy brief', 'What we know\n- Acme Rentals.']])('%s copies exactly that text', async (label, expected) => {
+    render(<ReadyCalls calls={[call()]} ages={{ c1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expected))
+  })
+
+  it('offers no number to copy when there is none', () => {
+    render(<ReadyCalls calls={[call({ phone: null })]} ages={{ c1: '2h ago' }} />)
+    expect(screen.queryByRole('button', { name: 'Copy number' })).not.toBeInTheDocument()
+  })
+
+  it('records the call for THIS brief, then refreshes', async () => {
+    render(<ReadyCalls calls={[call()]} ages={{ c1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'I called' }))
+    await waitFor(() => expect(markCallMade).toHaveBeenCalledWith('c1'))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it('discards with a cancel, not a call', async () => {
+    render(<ReadyCalls calls={[call()]} ages={{ c1: '2h ago' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(decideAgentTask).toHaveBeenCalledWith('c1', 'cancel'))
+    expect(markCallMade).not.toHaveBeenCalled()
+  })
+
+  it('shows a refusal instead of swallowing it', async () => {
+    markCallMade.mockResolvedValue({ error: 'That brief was already handled.' })
+    render(<ReadyCalls calls={[call()]} ages={{ c1: '2h ago' }} />)
+    refresh.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'I called' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('already handled')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('says so when nothing is waiting', () => {
+    render(<ReadyCalls calls={[]} ages={{}} />)
+    expect(screen.getByText(/No approved briefs are waiting/)).toBeInTheDocument()
   })
 })

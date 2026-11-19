@@ -205,6 +205,7 @@ import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 import { gtmManagerMorning, gtmManagerEvening, gtmManagerManual } from '@/lib/inngest/functions/gtm-manager'
 import { gtmTaskStallSweep } from '@/lib/inngest/functions/gtm-stall-sweep'
+import { gtmSalesOpsDrain } from '@/lib/inngest/functions/gtm-sales-ops'
 import { gtmLeadGenDrain } from '@/lib/inngest/functions/gtm-lead-gen'
 import { gtmRevOpsDrain, gtmRevOpsWeekly, gtmRevOpsManual } from '@/lib/inngest/functions/gtm-rev-ops'
 
@@ -235,6 +236,7 @@ export const { GET, POST, PUT } = serve({
     gtmRevOpsWeekly,
     gtmRevOpsManual,
     gtmLeadGenDrain,
+    gtmSalesOpsDrain,
     inspectionOverdueEmailCron,
     inspectionOverdueEmailHandler,
     // iCal sync pipeline

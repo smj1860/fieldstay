@@ -5,8 +5,11 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { inngest } from '@/lib/inngest/client'
-import { isTeamRunnable } from '@/lib/gtm/policy'
-import { loadTeamSettings } from '@/lib/gtm/tasks'
+import { createServiceClient } from '@/lib/supabase/server'
+import { centralDayStart, isTeamRunnable } from '@/lib/gtm/policy'
+import { enqueueTask, loadTeamSettings, type EnqueueResult } from '@/lib/gtm/tasks'
+import { CALL_BRIEF_TASK_TYPE } from '@/lib/gtm/teams/sales-ops-calls'
+import { statusAfterManualCall, statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
 import {
   DECISION_RULES,
   MAX_DECISION_NOTE_CHARS,
@@ -187,5 +190,204 @@ export async function requestRevOpsReport(): Promise<{ error?: string }> {
     console.error('[requestRevOpsReport]', err)
     reportError(err, { site: 'serverAction.admin.prospects.requestRevOpsReport' })
     return { error: 'Could not request the report. Please try again.' }
+  }
+}
+
+type AdminClient = Awaited<ReturnType<typeof requirePlatformAdmin>>['supabase']
+
+type ManualKind = 'emailed' | 'called'
+
+const MANUAL_TOUCH: Record<ManualKind, { note: string; next: (current: string) => 'emailed' | 'called' | null }> = {
+  emailed: { note: 'Follow-up sent (drafted by Sales Ops, sent by hand).', next: statusAfterManualSend },
+  called:  { note: 'Call made by hand (brief prepared by Sales Ops).',      next: statusAfterManualCall },
+}
+
+/**
+ * Puts a hand-made email or call on the account's record: the touch, the
+ * last-touch time the follow-up queue sorts on, and the stage if it had not been
+ * reached yet. Returns false if any of it could not be written, so the caller can
+ * say so.
+ */
+async function recordManualTouch(supabase: AdminClient, actorId: string, prospectId: string | null, kind: ManualKind): Promise<boolean> {
+  if (!prospectId) return true
+
+  const { data: current, error: readError } = await supabase
+    .from('prospect_accounts').select('status').eq('id', prospectId).maybeSingle()
+  if (readError || !current) {
+    reportError(readError ?? new Error('account missing'), { site: 'serverAction.admin.prospects.manualTouch.read', extra: { prospectId, kind } })
+    return false
+  }
+
+  const nextStatus = MANUAL_TOUCH[kind].next(current.status)
+  const { error: updateError } = await supabase
+    .from('prospect_accounts')
+    .update({ last_touch_at: new Date().toISOString(), ...(nextStatus ? { status: nextStatus } : {}) })
+    .eq('id', prospectId)
+  if (updateError) {
+    reportError(updateError, { site: 'serverAction.admin.prospects.manualTouch.account', extra: { prospectId, kind } })
+    return false
+  }
+
+  const { error: touchError } = await supabase.from('prospect_touches').insert({
+    prospect_id: prospectId,
+    touch_type:  kind,
+    note:        MANUAL_TOUCH[kind].note,
+    actor_id:    actorId,
+  })
+  if (touchError) {
+    reportError(touchError, { site: 'serverAction.admin.prospects.manualTouch.touch', extra: { prospectId, kind } })
+    return false
+  }
+  return true
+}
+
+/**
+ * "I sent this": a person tells FieldStay they sent an approved draft themselves.
+ * FieldStay sends nothing. This closes the task and puts the email on the record.
+ *
+ * The task is closed FIRST, by an UPDATE that only matches while it is still
+ * 'approved', so a double click (or two tabs) records one send. If the record
+ * then cannot be written, the person is told, because the task is already closed
+ * and the touch would otherwise be lost without anyone knowing.
+ */
+export async function markDraftSent(taskId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const { data: task, error } = await supabase
+      .from('agent_tasks')
+      .update({ status: 'done' })
+      .eq('id', taskId)
+      .eq('team', 'sales_ops')
+      .eq('task_type', 'draft_outreach')
+      .eq('status', 'approved')
+      .select('id, prospect_id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[markDraftSent]', error)
+      reportError(error, { site: 'serverAction.admin.prospects.markDraftSent' })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!task) return { error: 'That draft was already handled.' }
+
+    const recorded = await recordManualTouch(supabase, user.id, task.prospect_id, 'emailed')
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_draft.marked_sent',
+      targetType: 'agent_tasks',
+      targetId:   task.id,
+    })
+
+    revalidatePath(PATH)
+    return recorded ? {} : { error: 'Marked as sent, but the account could not be updated. Log the email on the account by hand.' }
+  } catch (err) {
+    console.error('[markDraftSent]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.markDraftSent' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+const CLOSED_STAGES = ['won', 'lost', 'disqualified']
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const ENQUEUE_MESSAGES: Record<Extract<EnqueueResult, { ok: false }>['reason'], string> = {
+  team_off:  'Turn on the master switch and Sales Ops first.',
+  too_deep:  'This task is too many handoffs deep.',
+  task_cap:  'Sales Ops has reached its daily task cap.',
+  cost_cap:  'Sales Ops has reached its daily spend cap.',
+  duplicate: 'A call brief for this account was already requested today. Check the approval inbox.',
+}
+
+/**
+ * Asks Sales Ops to prepare a call brief for one account. It refuses up front
+ * when the team is off or the account is closed, because a button that looks like
+ * it worked while the queue refused the task is worse than none. One per account
+ * per Central Time day (the dedupe key), so a double click queues one.
+ */
+export async function requestCallBrief(prospectId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+    if (!UUID.test(prospectId)) return { error: 'Unknown account.' }
+
+    const settings = await loadTeamSettings(supabase)
+    if (!isTeamRunnable(settings, 'sales_ops')) return { error: ENQUEUE_MESSAGES.team_off }
+
+    const { data: account, error: readError } = await supabase
+      .from('prospect_accounts').select('id, status').eq('id', prospectId).maybeSingle()
+    if (readError) throw readError
+    if (!account) return { error: 'That account no longer exists.' }
+    if (CLOSED_STAGES.includes(account.status)) return { error: 'That account is closed, so there is nothing to prepare.' }
+
+    const day = centralDayStart(new Date()).toISOString().slice(0, 10)
+    const queued = await enqueueTask(createServiceClient({ platformAdmin: { id: user.id } }), {
+      team:             'sales_ops',
+      taskType:         CALL_BRIEF_TASK_TYPE,
+      origin:           'human',
+      prospectId,
+      priority:         60,
+      requiresApproval: true,
+      dedupeKey:        `sales_ops:call_brief:${prospectId}:${day}`,
+    })
+    if (!queued.ok) return { error: ENQUEUE_MESSAGES[queued.reason] }
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_call_brief.requested',
+      targetType: 'agent_tasks',
+      targetId:   queued.id,
+    })
+    revalidatePath(PATH)
+    return {}
+  } catch (err) {
+    console.error('[requestCallBrief]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.requestCallBrief' })
+    return { error: 'Could not prepare the brief. Please try again.' }
+  }
+}
+
+/**
+ * "I called": a person tells FieldStay they made the call themselves. FieldStay
+ * dials nothing. Same shape as markDraftSent: the task is closed FIRST by an
+ * UPDATE that only matches while it is still 'approved', so a double click
+ * records one call.
+ */
+export async function markCallMade(taskId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const { data: task, error } = await supabase
+      .from('agent_tasks')
+      .update({ status: 'done' })
+      .eq('id', taskId)
+      .eq('team', 'sales_ops')
+      .eq('task_type', CALL_BRIEF_TASK_TYPE)
+      .eq('status', 'approved')
+      .select('id, prospect_id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[markCallMade]', error)
+      reportError(error, { site: 'serverAction.admin.prospects.markCallMade' })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!task) return { error: 'That brief was already handled.' }
+
+    const recorded = await recordManualTouch(supabase, user.id, task.prospect_id, 'called')
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_call.marked_made',
+      targetType: 'agent_tasks',
+      targetId:   task.id,
+    })
+
+    revalidatePath(PATH)
+    return recorded ? {} : { error: 'Marked as called, but the account could not be updated. Log the call on the account by hand.' }
+  } catch (err) {
+    console.error('[markCallMade]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.markCallMade' })
+    return { error: 'Operation failed. Please try again.' }
   }
 }
