@@ -82,7 +82,9 @@ function makeSupabase(
 }
 
 /** Recording has been live for ages — the steady state the old tests assumed. */
-const RECORDING_MATURE = { oldestStartedAt: hoursAgo(200), jobRunCount: 50 }
+// Must outlast the LONGEST silence budget in WATCHED_JOBS (the weekly Rev Ops cron is
+// 340h), or the watchdog's cold-start rule correctly declines to report that job.
+const RECORDING_MATURE = { oldestStartedAt: hoursAgo(400), jobRunCount: 50 }
 
 /** Every watched job reporting a run 1h ago — the healthy baseline. */
 const allJobsHealthy = () =>

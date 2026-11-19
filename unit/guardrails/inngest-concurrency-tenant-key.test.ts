@@ -73,6 +73,8 @@ const BASELINE = new Set([
 const BASELINE_JUSTIFIED: Record<string, string> = {
   'lib/inngest/functions/prospecting-crawl.ts':
     'prospect_accounts has no org_id — this is platform go-to-market data, not tenant data, so there is no tenant to key concurrency on. The limit:2 caps requests against the one genuinely global, singleton resource being protected (comparent.com itself, politeness budget), the same shape this guardrail\'s own header comment calls out as a legitimate unkeyed case.',
+  'lib/inngest/functions/gtm-team-drain.ts':
+    'The GTM agent teams are platform go-to-market tooling (agent_tasks, gtm_team_settings and the prospect tables have no org_id), so there is no tenant to key on. limit:1 is per FUNCTION, and each team is its own function, so it means one worker per team at a time: Lead Gen reads other people\'s websites and one worker is what keeps that to one request at a time against a host. The claim itself is atomic, so this is politeness, not correctness.',
 }
 
 /** Matching close-bracket index for the bracket opened at `openIdx`. */

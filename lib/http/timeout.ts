@@ -18,6 +18,16 @@
 // log lines and, for retrying callers, different decisions.
 // ============================================================================
 
+/**
+ * Lead Gen reading a prospect's own website (robots.txt, then up to three
+ * pages). Background step work, one request at a time, so a generous page
+ * budget is fine; robots.txt is a tiny file and gets the tighter one. A site
+ * that cannot answer in this time is treated as unavailable and retried later,
+ * not waited on.
+ */
+export const LEAD_GEN_ROBOTS_TIMEOUT_MS = 8_000
+export const LEAD_GEN_PAGE_TIMEOUT_MS = 12_000
+
 /** Mapbox geocode — runs inside the createProperty/updateProperty save. */
 export const GEOCODE_TIMEOUT_MS = 5_000
 
