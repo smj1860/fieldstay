@@ -106,7 +106,7 @@ function RunReportButton({ disabled }: Readonly<{ disabled: boolean }>) {
       <Button type="button" variant="secondary" disabled={disabled || pending} onClick={request}>
         Run report now
       </Button>
-      {message && <p role="status" className="text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</p>}
+      {message && <output className="block text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</output>}
       {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
     </div>
   )
@@ -138,7 +138,7 @@ function SuggestQueueButton({ disabled }: Readonly<{ disabled: boolean }>) {
       <Button type="button" variant="secondary" disabled={disabled || pending} onClick={request}>
         Suggest accounts to queue
       </Button>
-      {message && <p role="status" className="text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</p>}
+      {message && <output className="block text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</output>}
       {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
     </div>
   )
