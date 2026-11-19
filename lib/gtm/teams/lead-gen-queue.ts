@@ -5,6 +5,7 @@ import type { AgentTask } from '@/types/database'
 import type { JsonObject } from '../tasks'
 import type { TaskContext, TaskHandler, WorkOutcome } from '../worker'
 import { applyApprovedQueue } from './queue-apply'
+import { DRAFT_RECHECK_DAYS, handOff } from './handoff'
 import {
   CANDIDATE_READ_LIMIT, MAX_QUEUE_PROPOSAL, PRE_QUEUE_STATUSES, QUEUE_POOL_TARGET,
   LOW_COVERAGE_MARKETS, OWNERREZ, describeProposal, rankCandidates, type QueueCandidate,
@@ -101,8 +102,20 @@ async function runQueue(_task: AgentTask, ctx: TaskContext): Promise<WorkOutcome
   return { kind: 'propose', output: { ...text, account_ids: ranked.map((c) => c.id) } as JsonObject }
 }
 
+/**
+ * Applies the approved list, then asks Sales Ops for a first draft of each account
+ * that actually moved. That is what makes queueing a handoff rather than a dead end:
+ * without it the accounts wait for the next weekly report. Each draft is still
+ * propose-only and a person reads and sends it. Uses Rev Ops's dedupe key, so the
+ * weekly report cannot ask for the same account twice.
+ */
 async function executeQueue(task: AgentTask, ctx: TaskContext): Promise<{ output: JsonObject }> {
-  return { output: await applyApprovedQueue(ctx.supabase, task) }
+  const applied = await applyApprovedQueue(ctx.supabase, task)
+  const queued = Array.isArray(applied.queued) ? applied.queued.filter((id): id is string => typeof id === 'string') : []
+  const drafts = await handOff(task, ctx, queued, {
+    team: 'sales_ops', taskType: 'draft_outreach', origin: 'lead_gen', priority: 50, periodDays: DRAFT_RECHECK_DAYS,
+  })
+  return { output: { ...applied, drafts_requested: drafts } as JsonObject }
 }
 
 /** Queueing has an execute step (applying what a person approved), so it is typed as having one. */

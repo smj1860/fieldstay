@@ -890,6 +890,27 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   (every cross-team handoff has a human gate, and the manager is observe-only). The founder asked for "the
   manager" to approve queue moves; whether that means the manager AGENT is unresolved. See the note in the
   session that wrote this before changing the manager's role.
+- **The manager approves the low-risk steps, and agents keep a working day (2026-11-19, founder's
+  direction: "I'm not constantly having to go in and say keep going").** `managerApproves()` in
+  `lib/gtm/policy.ts` lets a task go straight to `approved` (`completeTask`'s `managerApproval`,
+  recorded as `decided_at` + `decision_note`, `decided_by` left NULL because no user decided) when ALL
+  hold: the type is in `AUTO_APPROVABLE` (`rev_ops/weekly_funnel_report`, `lead_gen/enrich_account`,
+  `lead_gen/queue_candidates`), the team's autonomy is `auto_low_risk` (a per-team switch, so turning
+  an agent on does not by itself turn this on; labelled "Manager approves low-risk steps"), and the
+  manager row plus the master switch are on. **Sales Ops is deliberately absent**: a draft or call
+  brief stays for a person, drafts are never claimed by a worker (no `execute`), and sending stays
+  manual. Pinned by `policy.test.ts`. This relaxes the earlier "every cross-team handoff has a human
+  gate" rule for exactly those three types; the human gate is now the DRAFT and the SEND. The
+  manager's own settings are unchanged (still observe-only in `buildSettingsUpdate`): it decides these
+  approvals by rule, it does not run a model.
+  **Queueing is a handoff, not a dead end:** `executeQueue` asks Sales Ops for a first draft of each
+  account that actually moved, using the same dedupe key as Rev Ops (`handoff.ts`), so the weekly
+  report cannot ask twice. **Enrichment** is 40 accounts per report (`MAX_LEAD_GEN_HANDOFFS`, was 10),
+  OwnerRez first, and pages past accounts already asked about (a fixed-size read stalled once its first
+  slice was all asked; found while raising the cap). **Working hours:** `workOne()` claims nothing
+  outside 8am to 6pm Central (`isWorkingHours`, daylight-saving aware, same clock as the spend caps),
+  returning `off_hours`. Only WORK is gated; tasks queue at any hour and wait. Every day of the week
+  is a working day until the founder says otherwise.
 - **Lead Gen does not read LinkedIn or Facebook, and should not.** Meta removed the Groups API for third
   parties on 2024-04-22, so there is no sanctioned way to read a group's feed or members, and LinkedIn's
   User Agreement (section 8.2) bans scraping and automation, public data included, with no groups API at

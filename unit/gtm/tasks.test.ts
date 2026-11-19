@@ -164,7 +164,7 @@ describe('claimNextTask', () => {
 })
 
 describe('completeTask', () => {
-  const task = { id: 't1', requires_approval: false }
+  const task = { id: 't1', team: 'lead_gen' as const, task_type: 'enrich_account', requires_approval: false }
 
   it('sends a propose-only team\'s output to the approval inbox even when the task did not ask', async () => {
     const { client, calls } = fakeSupabase({ 'agent_tasks:update': [{ data: { id: 't1' }, error: null }] })
@@ -176,6 +176,15 @@ describe('completeTask', () => {
     const { client, calls } = fakeSupabase({ 'agent_tasks:update': [{ data: { id: 't1' }, error: null }] })
     expect(await completeTask(client, task, {}, 'auto_low_risk')).toEqual({ ok: true, status: 'done' })
     expect(calls[0].payload).toMatchObject({ status: 'done', completed_at: expect.any(String) })
+  })
+
+  it('records a manager approval the way a person\'s is, with no user behind it, and wakes the team', async () => {
+    const { client, calls } = fakeSupabase({ 'agent_tasks:update': [{ data: { id: 't1' }, error: null }] })
+    const res = await completeTask(client, { ...task, requires_approval: true }, {}, 'auto_low_risk', { note: 'Approved by the manager.', now: NOW })
+    expect(res).toEqual({ ok: true, status: 'approved' })
+    expect(calls[0].payload).toMatchObject({ status: 'approved', decided_at: NOW.toISOString(), decision_note: 'Approved by the manager.' })
+    expect(calls[0].payload).not.toHaveProperty('decided_by')
+    expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({ name: 'gtm/task.approved' }))
   })
 
   // A task the stall sweep already took back must not be revived by a slow worker.

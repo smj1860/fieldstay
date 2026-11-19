@@ -75,6 +75,13 @@ describe('workOne: whether to work at all', () => {
     expect(await workOne(client, 'rev_ops', registry().reg, NOW)).toEqual({ worked: false, reason: 'cost_cap' })
   })
 
+  it('claims nothing outside 8am to 6pm Central, so the queue keeps until the window opens', async () => {
+    const { client, calls } = world({})
+    const lateEvening = new Date('2026-11-20T01:00:00Z') // 7pm CST
+    expect(await workOne(client, 'rev_ops', registry().reg, lateEvening)).toEqual({ worked: false, reason: 'off_hours' })
+    expect(calls.some((c) => c.table === 'agent_tasks')).toBe(false)
+  })
+
   it('reports an empty queue', async () => {
     const { client } = world({ selects: [{ data: null, error: null }] })
     expect(await workOne(client, 'rev_ops', registry().reg, NOW)).toEqual({ worked: false, reason: 'empty' })
@@ -92,6 +99,17 @@ describe('workOne: doing new work', () => {
     expect(run).toHaveBeenCalledTimes(1)
     const complete = calls.filter((c) => c.op === 'update')[1].payload
     expect(complete).toMatchObject({ status: 'needs_approval', output: { summary: 'draft' } })
+  })
+
+  it('approves it straight away when the manager is running and the team is set to auto, recording the decision', async () => {
+    const auto = [setting('global', true), setting('manager', true), setting('rev_ops', true, { autonomy: 'auto_low_risk' })]
+    const { reg } = registry()
+    const w = world({ settings: auto, selects: [{ data: null, error: null }, { data: { id: 't1' }, error: null }],
+      updates: [{ data: row(), error: null }, { data: { id: 't1' }, error: null }] })
+    expect(await workOne(w.client, 'rev_ops', reg, NOW)).toMatchObject({ worked: true, result: 'proposed' })
+    const complete = w.calls.filter((c) => c.op === 'update')[1].payload
+    expect(complete).toMatchObject({ status: 'approved', decided_at: NOW.toISOString() })
+    expect(complete).not.toHaveProperty('decided_by')
   })
 
   it('lets a team allowed to finish low-risk work finish it, but only when the task did not ask for review', async () => {

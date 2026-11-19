@@ -9,6 +9,7 @@ vi.mock('@/lib/gtm/tasks', async (importOriginal) => ({
 
 import { enqueueTask } from '@/lib/gtm/tasks'
 import { loadReportInput, weeklyReportHandler } from '@/lib/gtm/teams/rev-ops'
+import { MAX_LEAD_GEN_HANDOFFS } from '@/lib/gtm/teams/rev-ops-report'
 import type { AgentTask } from '@/types/database'
 import { fakeSupabase } from './fake-supabase'
 
@@ -67,8 +68,8 @@ describe('approving a Rev Ops report', () => {
     vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'x' })
     const many = Array.from({ length: 50 }, (_, i) => `id${i}`)
     await handler.execute(task({ output: { handoff: { lead_gen_enrich: many } } }), ctx())
-    // Ten accounts, plus the one queue proposal.
-    expect(enqueueTask).toHaveBeenCalledTimes(11)
+    // The handoff cap, plus the one queue proposal.
+    expect(enqueueTask).toHaveBeenCalledTimes(MAX_LEAD_GEN_HANDOFFS + 1)
   })
 
   it('ignores anything in the stored output that is not an account id', async () => {
@@ -156,8 +157,9 @@ describe('loadReportInput', () => {
         { count: 14, error: null },                                                            // stale count
         { data: [{ company: 'Acme', status: 'emailed', last_touch_at: '2026-10-26T13:00:00Z' }], error: null }, // stale examples
         { count: 120, error: null }, { count: 6, error: null }, { count: 9, error: null },     // hygiene
-        { data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null },                        // enrich candidate pool
-        { data: [{ id: 'd1' }, { id: 'd2' }], error: null },                                   // draft candidate pool
+        { data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null },                        // enrich pool: OwnerRez accounts
+        { data: [{ id: 'd1' }, { id: 'd2' }], error: null },                                   // draft candidate pool (starts alongside)
+        { data: [], error: null },                                                             // enrich pool: everything else
       ],
       'agent_tasks:select': [
         { data: [{ prospect_id: 'b' }], error: null },                                         // Lead Gen already looked at b
@@ -179,6 +181,28 @@ describe('loadReportInput', () => {
     expect(input.spendTodayCents).toBe(2)
   })
 
+  it('asks for OwnerRez accounts first, then the rest, and keeps paging past accounts already asked about', async () => {
+    const asked = Array.from({ length: 100 }, (_, i) => ({ id: `o${i}` }))
+    const { client, calls } = fakeSupabase({
+      'prospect_accounts:select': [
+        { count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null },
+        { data: asked, error: null },                              // OwnerRez page 1: all 100 already asked about
+        { data: [], error: null },                                 // draft pool (starts alongside)
+        { data: [{ id: 'fresh' }], error: null },                  // OwnerRez page 2: one new one
+        { data: [{ id: 'rest1' }], error: null },                  // everything else
+      ],
+      'agent_tasks:select': [
+        { data: asked.map((a) => ({ prospect_id: a.id })), error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+      ],
+    }, [{ data: {} }, { data: {} }])
+    const input = await loadReportInput(client, NOW)
+    expect(input.enrichCandidates).toEqual(['fresh', 'rest1'])
+    const groups = calls.filter((c) => c.table === 'prospect_accounts').flatMap((c) => c.filters).filter((f) => f[0] === 'or').map((f) => String((f[1] as unknown[])[0]))
+    expect(groups.some((g) => g.startsWith('pms.ilike.OwnerRez'))).toBe(true)
+  })
+
   it('fails loudly if the rollup cannot be read, instead of reporting zeros as fact', async () => {
     const { client } = fakeSupabase({
       'prospect_accounts:select': [{ count: 0, error: null }],
@@ -189,7 +213,7 @@ describe('loadReportInput', () => {
 
   it('offers no candidates when none qualify, without asking about tasks', async () => {
     const { client, calls } = fakeSupabase({
-      'prospect_accounts:select': [{ count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null }, { data: [], error: null }, { data: [], error: null }],
+      'prospect_accounts:select': [{ count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null }, { data: [], error: null }, { data: [], error: null }, { data: [], error: null }],
     }, [{ data: {} }, { data: {} }])
     const input = await loadReportInput(client, NOW)
     expect(input.enrichCandidates).toEqual([])

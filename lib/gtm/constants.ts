@@ -68,7 +68,7 @@ export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number]
 
 export const AUTONOMY_LABELS: Record<AutonomyLevel, string> = {
   propose_only:  'Propose only',
-  auto_low_risk: 'Auto-finish low risk',
+  auto_low_risk: 'Manager approves low-risk steps',
 }
 
 export const MANAGER_RUN_KINDS = ['morning_plan', 'evening_review', 'stall_sweep', 'manual'] as const

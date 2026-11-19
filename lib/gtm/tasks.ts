@@ -240,11 +240,13 @@ export async function claimNextTask(
  */
 export async function completeTask(
   supabase: ServiceClient,
-  task: Pick<AgentTask, 'id' | 'requires_approval'>,
+  task: Pick<AgentTask, 'id' | 'team' | 'task_type' | 'requires_approval'>,
   output: JsonObject,
   autonomy: AutonomyLevel,
-): Promise<{ ok: boolean; status: 'needs_approval' | 'done' }> {
-  const status = finishStatus({ requiresApproval: task.requires_approval, autonomy })
+  /** Set when the manager approves this task itself (see managerApproves()). The task goes straight to 'approved'. */
+  managerApproval?: { note: string; now: Date },
+): Promise<{ ok: boolean; status: 'needs_approval' | 'approved' | 'done' }> {
+  const status = managerApproval ? 'approved' : finishStatus({ requiresApproval: task.requires_approval, autonomy })
 
   const { data, error } = await supabase
     .from('agent_tasks')
@@ -253,6 +255,10 @@ export async function completeTask(
       output,
       error:        null,
       completed_at: status === 'done' ? new Date().toISOString() : null,
+      // An approval by the manager is recorded the way a person's is, so the
+      // executor's "no recorded decision, no write" rule holds unchanged. There
+      // is no user behind it: decided_by stays NULL and the note says who decided.
+      ...(managerApproval ? { decided_at: managerApproval.now.toISOString(), decision_note: managerApproval.note } : {}),
     })
     .eq('id', task.id)
     // Only the worker that still holds the claim may finish it. A task the
@@ -264,6 +270,12 @@ export async function completeTask(
   if (error) {
     reportError(error, { site: `${SITE}.complete`, extra: { taskId: task.id } })
     throw error
+  }
+  if (data !== null && managerApproval) {
+    await announce({
+      name: 'gtm/task.approved',
+      data: { task_id: task.id, team: task.team, task_type: task.task_type, decided_by: 'manager' },
+    })
   }
   return { ok: data !== null, status }
 }
