@@ -795,8 +795,9 @@ admin's own RLS-enforced session, never the service role.
   `db_type_shape_report()` and match.
 - Enforced by `unit/guardrails/gtm-agent-boundaries.test.ts`: agent code (`lib/gtm/**`,
   `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table except
-  from `lead-gen-apply.ts` (which the test holds to its own rules: checks a decision, fills only
-  empty fields, names no status, deletes nothing), never calls a bare `fetch()`, never deletes an
+  from `lead-gen-apply.ts` (checks a decision, fills only empty fields, names no status, deletes
+  nothing) and `queue-apply.ts` (checks a decision, names no stage but `queued`, guards its own UPDATE
+  with a stage precondition, deletes nothing), never calls a bare `fetch()`, never deletes an
   account or sets won/lost/disqualified, and calls a model only from a file on the billed list (`narrate.ts`, `sales-ops-draft.ts`), and the Sales Ops draft handler must check the voice, bill the call and have no `execute` step. A team that genuinely needs one of those adds its file to the matching allowlist,
   with a reason, in the same change. Schema behaviour (depth cap, dedupe, append-only grants,
   non-admin sees nothing, the sweep) is pinned against a real Postgres by `unit/gtm/gtm-schema.test.ts`.
@@ -825,7 +826,7 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   never leaves the site, and goes through `safeFetch()`. A 5xx/429 throws so the task retries: a
   struggling site has not said "no contact details". "Nothing found" closes as done, since an empty
   proposal has nothing to approve.
-- **`lead-gen-apply.ts` is the ONLY file any agent writes prospect data from.** It refuses a task
+- **`lead-gen-apply.ts` is the only file an agent writes prospect CONTACT data from, and `queue-apply.ts` is the only one that changes a STAGE** (see the queue bullet below). `lead-gen-apply.ts` refuses a task
   with no recorded `decided_at`, fills only EMPTY email/phone with an `UPDATE ... IS NULL` (a person
   can fill the field between approval and application, and theirs wins), never names a `status`,
   and leaves a history note saying a person approved it, never the value itself.
@@ -863,6 +864,42 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   open stage including `replied`, since that is who a person is about to call; only a closed account gets
   none. `sales-ops-calls.ts` has no `execute` step and `gtm-agent-boundaries` holds it, and the builder,
   to that (and to no database, network, sender or model). Stored output carries no phone or email.
+- **Queue proposals (`queue_candidates`, Lead Gen, 2026-11-19) are how an account becomes ready for a
+  first email.** Sales Ops drafts a first touch only for an account at `queued`, and nothing was moving
+  accounts there (3,624 of 3,632 sat at `new`). Lead Gen now PROPOSES up to 10 accounts to queue
+  (`lead-gen-queue.ts`, ranking in the pure `queue-candidates.ts`), Rev Ops asks for one proposal per
+  weekly report, and the Lead Gen card has "Suggest accounts to queue". It proposes nothing while 10
+  accounts are already queued. A person approves the list in the inbox; only then does `queue-apply.ts`
+  move the stage, to `queued` and nothing else, in ONE UPDATE that carries its own precondition (a
+  pre-queue stage, an email still present), so an account a person moved meanwhile is skipped. Queueing
+  sends nothing: it makes the account eligible for the next report to ask Sales Ops for a draft, which a
+  person still reviews and sends. **The criteria are the founder's (2026-11-19): an account qualifies only
+  if it runs OwnerRez, or sits in a market on `LOW_COVERAGE_MARKETS`.** Everything else is never proposed,
+  however well it ranks. Hygiene applies on top: a working, personal-looking email (a role inbox like
+  `info@` is excluded, and an unknown `email_is_generic` reads as generic), a portfolio in 1 to 150 (200,000
+  is a data error, past 150 is Enterprise), and a stage before `queued`. **`LOW_COVERAGE_MARKETS` ships
+  EMPTY on purpose**: no account carries coverage data and guessing which markets have patchy service
+  would put an unbackable claim in front of the approver, so it is a list the founder maintains, added on
+  a real basis, the same rule as `ZIP_SEASONAL_PROFILE`. While it is empty only OwnerRez matches, and the
+  proposal and the "nothing to propose" summary say so. The OwnerRez criterion is applied in the database
+  (`.ilike('pms', 'OwnerRez')`), because a bounded read of the oldest accounts would never reach the 32 that
+  match. Ranking within the qualifiers is by facts on the row (both criteria, a named contact, a size
+  near 10 to 50) because the offline scorer has written no fit score yet (`score_a`, `score_b`, `track`,
+  `bucket` and `gate` are all NULL). The proposal lists who, where and why and carries no email address.
+  **OPEN QUESTION: who approves.** Today a person approves in the inbox, which is the design's invariant
+  (every cross-team handoff has a human gate, and the manager is observe-only). The founder asked for "the
+  manager" to approve queue moves; whether that means the manager AGENT is unresolved. See the note in the
+  session that wrote this before changing the manager's role.
+- **Lead Gen does not read LinkedIn or Facebook, and should not.** Meta removed the Groups API for third
+  parties on 2024-04-22, so there is no sanctioned way to read a group's feed or members, and LinkedIn's
+  User Agreement (section 8.2) bans scraping and automation, public data included, with no groups API at
+  all. Third-party scrapers exist (several are reachable through Firecrawl) but they work by breaking
+  those terms, put the founder's own accounts and the product's name at risk, and cannot see private
+  groups without membership. It also conflicts with Lead Gen's rules (obey robots.txt, identify itself,
+  read a prospect's own site) and with the honest-voice rule: reading groups as a logged-in member and
+  reaching out from what was read is the opposite of "say who you are and why you are writing". What
+  fits instead: a person reads the groups they already belong to and pastes a post or a note onto the
+  account, which the call brief already quotes.
 - **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
   nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
   reaches FieldStay only when a person says so (a button in an account's edit window, with an optional

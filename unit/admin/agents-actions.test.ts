@@ -12,7 +12,7 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 import { enqueueTask } from '@/lib/gtm/tasks'
-import { decideAgentTask, markCallMade, markDraftSent, markProspectReplied, requestCallBrief, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
+import { decideAgentTask, markCallMade, markDraftSent, markProspectReplied, requestCallBrief, requestQueueProposal, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
 import { fakeSupabase, type Scripted } from '../gtm/fake-supabase'
 
 function asAdmin(script: Record<string, Scripted[]>) {
@@ -426,5 +426,50 @@ describe('markProspectReplied', () => {
   it('returns a generic message on a read error, not the raw one', async () => {
     replied('emailed', { 'prospect_accounts:select': [{ data: null, error: { message: 'permission denied' } }] })
     expect(await markProspectReplied(ID)).toEqual({ error: 'Operation failed. Please try again.' })
+  })
+})
+
+describe('requestQueueProposal', () => {
+  const settings = (leadGen: boolean, master = true) => ({
+    'gtm_team_settings:select': [{ data: [
+      { team: 'global', enabled: master, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+      { team: 'lead_gen', enabled: leadGen, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+    ], error: null }],
+  })
+
+  it('queues one human-origin, approval-required suggestion per day and audits it', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'task_7' })
+    asAdmin(settings(true))
+    expect(await requestQueueProposal()).toEqual({})
+    const input = vi.mocked(enqueueTask).mock.calls[0][1]
+    expect(input).toMatchObject({
+      team: 'lead_gen', taskType: 'queue_candidates', origin: 'human', requiresApproval: true,
+      dedupeKey: expect.stringMatching(/^lead_gen:queue_candidates:manual:\d{4}-\d{2}-\d{2}$/),
+    })
+    expect(input).not.toHaveProperty('prospectId')
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'platform_admin.gtm_queue.requested', targetId: 'task_7' }))
+  })
+
+  it.each([[false, true], [true, false]])('refuses up front when Lead Gen is %s and the master switch is %s', async (leadGen, master) => {
+    asAdmin(settings(leadGen, master))
+    expect(await requestQueueProposal()).toEqual({ error: 'Turn on the master switch and Lead Gen first.' })
+    expect(enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['duplicate', 'A queue suggestion was already requested today. Check the approval inbox.'],
+    ['task_cap', 'Lead Gen has reached its daily task cap.'],
+    ['cost_cap', 'Lead Gen has reached its daily spend cap.'],
+  ] as const)('says why the queue refused (%s), and audits nothing', async (reason, message) => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: false, reason })
+    asAdmin(settings(true))
+    expect(await requestQueueProposal()).toEqual({ error: message })
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('returns a generic message on a failure, not the raw one', async () => {
+    vi.mocked(enqueueTask).mockRejectedValue(new Error('db down'))
+    asAdmin(settings(true))
+    expect(await requestQueueProposal()).toEqual({ error: 'Could not request the suggestion. Please try again.' })
   })
 })

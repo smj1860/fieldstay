@@ -7,6 +7,7 @@ import type { HandlerRegistry, TaskContext, TaskHandler, WorkOutcome } from '../
 import { applyApprovedContacts } from './lead-gen-apply'
 import { buildEnrichmentOutcome, type ProspectContactState } from './lead-gen-proposal'
 import { researchSite } from './lead-gen-fetch'
+import { QUEUE_TASK_TYPE, queueCandidatesHandler } from './lead-gen-queue'
 
 /**
  * Lead Gen: looks for public contact details on a prospect's own website and
@@ -70,4 +71,5 @@ export const enrichAccountHandler: Required<TaskHandler> = { run: runEnrich, exe
 
 export const leadGenHandlers: HandlerRegistry = {
   [LEAD_GEN_TASK_TYPES.enrichAccount]: enrichAccountHandler,
+  [QUEUE_TASK_TYPE]:                   queueCandidatesHandler,
 }

@@ -32,7 +32,7 @@ export const TEAM_LABELS: Record<SettingsTeam, string> = {
 export const TEAM_BLURBS: Record<SettingsTeam, string> = {
   global:        'Pauses every agent at once. Nothing runs while this is off.',
   manager:       'Plans the day, routes work, watches for stalls and writes the daily brief.',
-  lead_gen:      'Finds and enriches accounts, verifies contacts, scores fit.',
+  lead_gen:      'Finds public contact details and proposes which accounts to queue for outreach.',
   content_brand: 'Outreach copy, sequences and brand-voice checks.',
   sales_ops:     'Drafts follow-up emails and call briefs for you to use yourself. Sends nothing and calls no one.',
   rev_ops:       'Pipeline reporting, data hygiene and funnel conversion.',

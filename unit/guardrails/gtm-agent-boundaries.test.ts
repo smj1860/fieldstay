@@ -37,7 +37,10 @@ const OUTBOUND_SEND = [
  * empty fields only, after the approval. A team that needs to write the funnel
  * adds its file here with the reason, in the same change.
  */
-const PROSPECT_WRITERS = new Set<string>(['lib/gtm/teams/lead-gen-apply.ts'])
+const PROSPECT_WRITERS = new Set<string>([
+  'lib/gtm/teams/lead-gen-apply.ts',   // fills EMPTY email/phone from an approved enrichment proposal
+  'lib/gtm/teams/queue-apply.ts',      // moves accounts to 'queued' (only) from an approved queue proposal
+])
 
 /** The only agent files that may call a model. Each must bill it (see the pairing test). */
 const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts', 'lib/gtm/teams/sales-ops-draft.ts'])
@@ -73,6 +76,23 @@ function applyWriterViolations(code: string): string[] {
   if (!/\.decided_at\b/.test(code)) problems.push('does not check that a person decided')
   if (!/\.is\(\s*column\s*,\s*null\s*\)/.test(code)) problems.push('does not fill only empty fields')
   if (/\bstatus\s*:/.test(code)) problems.push('names a status')
+  if (/\.delete\s*\(/.test(code)) problems.push('deletes')
+  return problems
+}
+
+/**
+ * The queue applier's rules. It is the one agent file that may change a stage, and
+ * the stage it may set is 'queued' and nothing else: emailed, replied, won, lost
+ * and the rest belong to a person. It also checks that a person decided, guards
+ * its own UPDATE with a stage precondition (so a person who moved the account
+ * meanwhile wins), and deletes nothing.
+ */
+function queueWriterViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/\.decided_at\b/.test(code)) problems.push('does not check that a person decided')
+  const named = [...code.matchAll(/\bstatus\s*:\s*['"](\w+)['"]/g)].map((m) => m[1])
+  if (named.some((status) => status !== 'queued')) problems.push('names a stage other than queued')
+  if (!/\.in\(\s*['"]status['"]/.test(code)) problems.push('does not guard its own update with a stage precondition')
   if (/\.delete\s*\(/.test(code)) problems.push('deletes')
   return problems
 }
@@ -146,10 +166,12 @@ describe('guardrail: GTM agent boundaries', () => {
   })
 
   it('only the approved-proposal applier writes prospects, and it is held to its own rules', () => {
-    const writers = sources.filter((x) => PROSPECT_TABLE.test(x.code)).map((x) => x.path)
-    expect(writers).toEqual(['lib/gtm/teams/lead-gen-apply.ts'])
+    const writers = sources.filter((x) => PROSPECT_TABLE.test(x.code)).map((x) => x.path).sort()
+    expect(writers).toEqual(['lib/gtm/teams/lead-gen-apply.ts', 'lib/gtm/teams/queue-apply.ts'])
     const apply = sources.find((x) => x.path === 'lib/gtm/teams/lead-gen-apply.ts')!
     expect(applyWriterViolations(apply.code)).toEqual([])
+    const queue = sources.find((x) => x.path === 'lib/gtm/teams/queue-apply.ts')!
+    expect(queueWriterViolations(queue.code)).toEqual([])
   })
 
   it('no agent code calls a bare fetch(): URLs from the database go through safeFetch()', () => {
@@ -230,6 +252,16 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(applyWriterViolations(`task.decided_at; await q.update(p)`)).toContain('does not fill only empty fields')
       expect(applyWriterViolations(`${good}; update({ status: 'emailed' })`)).toContain('names a status')
       expect(applyWriterViolations(`${good}; q.delete()`)).toContain('deletes')
+    })
+
+    it('the queue applier rules', () => {
+      const good = `if (!task.decided_at) throw new Error('x'); await q.update({ status: 'queued' }).in('id', ids).in('status', PRE)`
+      expect(queueWriterViolations(good)).toEqual([])
+      expect(queueWriterViolations(good.replace('task.decided_at', 'task.id'))).toContain('does not check that a person decided')
+      expect(queueWriterViolations(good.replace("'queued'", "'emailed'"))).toContain('names a stage other than queued')
+      expect(queueWriterViolations(`${good}; update({ status: "won" })`)).toContain('names a stage other than queued')
+      expect(queueWriterViolations(good.replace(".in('status', PRE)", ''))).toContain('does not guard its own update with a stage precondition')
+      expect(queueWriterViolations(`${good}; q.delete()`)).toContain('deletes')
     })
 
     it('the draft handler rules', () => {

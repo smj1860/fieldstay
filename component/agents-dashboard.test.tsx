@@ -8,6 +8,7 @@ const decideAgentTask = vi.fn()
 const updateTeamSettings = vi.fn()
 const requestManagerRun = vi.fn()
 const requestRevOpsReport = vi.fn()
+const requestQueueProposal = vi.fn()
 const markDraftSent = vi.fn()
 const markCallMade = vi.fn()
 vi.mock('@/app/admin/prospects/agents-actions', () => ({
@@ -15,6 +16,7 @@ vi.mock('@/app/admin/prospects/agents-actions', () => ({
   updateTeamSettings: (...a: unknown[]) => updateTeamSettings(...a),
   requestManagerRun:  () => requestManagerRun(),
   requestRevOpsReport: () => requestRevOpsReport(),
+  requestQueueProposal: () => requestQueueProposal(),
   markDraftSent:      (...a: unknown[]) => markDraftSent(...a),
   markCallMade:       (...a: unknown[]) => markCallMade(...a),
 }))
@@ -181,6 +183,38 @@ describe('Rev Ops "Run report now"', () => {
     render(<TeamCard setting={setting({ team: 'rev_ops', enabled: true })} masterOn />)
     fireEvent.click(screen.getByRole('button', { name: 'Run report now' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Turn on the master switch')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+})
+
+describe('Lead Gen "Suggest accounts to queue"', () => {
+  beforeEach(() => { requestQueueProposal.mockReset().mockResolvedValue({}) })
+
+  it('is offered only on the Lead Gen card', () => {
+    render(<TeamCard setting={setting({ team: 'rev_ops' })} masterOn />)
+    expect(screen.queryByRole('button', { name: 'Suggest accounts to queue' })).not.toBeInTheDocument()
+  })
+
+  it('is disabled while Lead Gen is off or the master switch is', () => {
+    const { unmount } = render(<TeamCard setting={setting({ team: 'lead_gen', enabled: false })} masterOn />)
+    expect(screen.getByRole('button', { name: 'Suggest accounts to queue' })).toBeDisabled()
+    unmount()
+    render(<TeamCard setting={setting({ team: 'lead_gen', enabled: true })} masterOn={false} />)
+    expect(screen.getByRole('button', { name: 'Suggest accounts to queue' })).toBeDisabled()
+  })
+
+  it('requests a suggestion and says where it will appear', async () => {
+    render(<TeamCard setting={setting({ team: 'lead_gen', enabled: true })} masterOn />)
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest accounts to queue' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('approval inbox')
+    expect(requestQueueProposal).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the server\'s refusal instead of pretending it started', async () => {
+    requestQueueProposal.mockResolvedValue({ error: 'Turn on the master switch and Lead Gen first.' })
+    render(<TeamCard setting={setting({ team: 'lead_gen', enabled: true })} masterOn />)
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest accounts to queue' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Lead Gen first')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })
