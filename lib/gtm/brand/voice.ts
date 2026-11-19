@@ -16,10 +16,10 @@
  * Pure: no I/O, so the rules are pinned by tests and safe to import anywhere.
  */
 
-export const VOICE_GUIDE_VERSION = 'draft-3'
+export const VOICE_GUIDE_VERSION = 'draft-4'
 
 /** What the guide has and has not been through. Shown on the dashboard, so nobody mistakes it for approved. */
-export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with honesty rules and the founder\'s tone notes; not yet reviewed by the founder in full, product facts unconfirmed.'
+export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with honesty rules, tone notes and founder-confirmed product facts; not yet reviewed by the founder in full.'
 
 /**
  * The only things a draft may say about the product. A model asked to write a
@@ -28,11 +28,11 @@ export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with h
  * the homepage. Add to the list deliberately; do not loosen the prompt instead.
  */
 export const PRODUCT_FACTS: readonly string[] = [
-  'FieldStay handles crew scheduling, turnovers, maintenance, inventory, vendor work orders and guest communications for short-term rental property managers.',
-  'Bookings sync in from the property management system and calendars, and the turnovers are created automatically.',
+  'FieldStay handles crew scheduling, turnovers, maintenance, inspections with immutable records, inventory, vendor work orders and invoicing, review responses and guest guidebooks for short-term rental managers.',
+  'Bookings sync in from the property management system and calendars, and turnovers are created automatically, with suggested scheduling or automatic scheduling of crew.',
   'FieldStay suggests who should take each turnover, and why, so the manager accepts instead of figuring it out.',
-  'Cleaners use a phone app with a room-by-room checklist. It works offline, and photos and counts upload later on their own.',
-  'A vendor gets a link to the job, sees the work order, and invoices from their phone. They never make an account.',
+  'Cleaners use a phone app with a room-by-room checklist. It works offline, and photos and counts upload later on their own. Photos are also timestamped and sealed for potential damage claims.',
+  'A vendor gets a link to the job, sees the work order, and invoices from their phone, with no account.',
   'Setting up a property takes about 15 minutes.',
   'Owners can see their own profit and loss.',
 ]
@@ -98,6 +98,8 @@ export const BANNED_PHRASES: readonly string[] = [
   'guarantee', 'guaranteed', '100%', 'risk-free', 'no obligation',
   'best in class', 'best-in-class', 'world-class', 'industry-leading', 'industry leading',
   '#1', 'number one', 'the best', 'leading provider',
+  // The sealed-photo fact is about records for a claim. Never promise what a claim will do.
+  'tamper-proof', 'tamper proof', 'admissible', 'legally binding', 'airtight', 'bulletproof',
 ]
 
 /**
@@ -179,11 +181,48 @@ function hasSignoffLine(body: string): boolean {
 
 const wordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length
 
-function hostOf(url: string): string | null {
-  try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.toLowerCase() } catch { return null }
-}
+/**
+ * The FieldStay marketing pages a draft may link to, by path on fieldstay.app.
+ * A draft is a model's output and a model will invent a plausible URL, so a link
+ * to a page that does not exist is refused the same as a link to another site.
+ * Add a page here when one is published. (Subdomains such as app.fieldstay.app
+ * are the product itself and are not path-checked.)
+ */
+export const LANDING_PATHS: readonly string[] = [
+  '/', '/about', '/faq', '/features', '/for-vendors', '/hospitable', '/hosts', '/integrations', '/ownerrez',
+  '/pricing', '/short-term-rental-operations-software', '/strops', '/why-fieldstay', '/enterprise',
+  '/breezeway-alternative', '/ezcare-alternative', '/operto-teams-alternative', '/properly-alternative', '/turno-alternative',
+]
 
 const isOwnHost = (host: string): boolean => host === 'fieldstay.app' || host.endsWith('.fieldstay.app')
+const isMarketingHost = (host: string): boolean => host === 'fieldstay.app' || host === 'www.fieldstay.app'
+const TRAILING_PUNCTUATION = '.,;:!?'
+
+/** Sentence punctuation that rode along with a URL. A loop, not a regex: a long run of dots must not rescan. */
+function trimTrailingPunctuation(url: string): string {
+  let end = url.length
+  while (end > 0 && TRAILING_PUNCTUATION.includes(url[end - 1])) end--
+  return url.slice(0, end)
+}
+
+function parseLink(url: string): URL | null {
+  const cleaned = trimTrailingPunctuation(url)
+  try { return new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`) } catch { return null }
+}
+
+function pathOf(link: URL): string {
+  const path = link.pathname.toLowerCase()
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
+}
+
+/** A link that goes to FieldStay, and to a page that exists. */
+function isAllowedLink(url: string): boolean {
+  const link = parseLink(url)
+  if (link === null) return false
+  const host = link.hostname.toLowerCase()
+  if (!isOwnHost(host)) return false
+  return isMarketingHost(host) ? LANDING_PATHS.includes(pathOf(link)) : true
+}
 
 function lengthIssues(draft: DraftText): VoiceIssue[] {
   const issues: VoiceIssue[] = []
@@ -213,9 +252,8 @@ function phraseIssues(text: string): VoiceIssue[] {
 }
 
 function linkIssues(text: string): VoiceIssue[] {
-  const hosts = (text.match(URL_LIKE) ?? []).map(hostOf)
-  const foreign = hosts.filter((h): h is string => h === null || !isOwnHost(h))
-  return foreign.length > 0 ? [{ rule: 'link', detail: 'Links to somewhere other than fieldstay.app.' }] : []
+  const bad = (text.match(URL_LIKE) ?? []).filter((u) => !isAllowedLink(u))
+  return bad.length > 0 ? [{ rule: 'link', detail: 'Links to somewhere other than a FieldStay page that exists. Use fieldstay.app or one of its listed landing pages.' }] : []
 }
 
 function greetingIssue(body: string, firstName: string | null | undefined): VoiceIssue[] {

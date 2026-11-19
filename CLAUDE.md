@@ -880,7 +880,12 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   the rule names in its error, never a rule quietly waived. Both calls are billed (`recordUsage`,
   keyed per attempt) because the money is spent either way. `PRODUCT_FACTS` is the only thing a draft
   may claim about the product, since a model will invent a feature and a sent email cannot be taken
-  back. Bump `VOICE_GUIDE_VERSION` when either half changes: every draft stores the version it was
+  back. `PRODUCT_FACTS` is order-sensitive: the call brief points at a fact by index. The founder
+  confirmed the facts on 2026-11-19 (inspections with immutable records, sealed photos for damage
+  claims, automatic or suggested crew scheduling). A draft may link only to a page in `LANDING_PATHS`
+  (the real marketing pages on fieldstay.app), because a model invents plausible URLs; add a page there
+  when one is published. The sender may claim only `SENDER_FACTS` (has done turnovers, nothing more).
+  Bump `VOICE_GUIDE_VERSION` when either half changes: every draft stores the version it was
   written under. The founder's rejection notes are fed back into the next draft's prompt.
 - **"Ready to send" and "Draft quality" on the dashboard.** An approved draft waits for a person to
   copy it into their own mailbox; "I sent this" (`markDraftSent`) closes the task with an UPDATE that

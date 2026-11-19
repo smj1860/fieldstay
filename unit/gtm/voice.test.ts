@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SENDER_FACTS, SENDER_OVERCLAIM, SOCIAL_PROOF, VOICE_GUIDE,
+  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, LANDING_PATHS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SENDER_FACTS, SENDER_OVERCLAIM, SOCIAL_PROOF, VOICE_GUIDE,
   VOICE_GUIDE_STATUS, checkDraft, describeIssues, type DraftText, type VoiceRule,
 } from '@/lib/gtm/brand/voice'
 
@@ -263,5 +263,59 @@ describe('checkDraft: hostile input stays fast', () => {
 
   it('does not call an ordinary closing line a sign-off', () => {
     expect(rules(withBody(`${GOOD_BODY} Thanks for reading this far.`))).not.toContain('signature')
+  })
+})
+
+describe('checkDraft: links go only to FieldStay pages that exist', () => {
+  const link = (url: string) => rules(withBody(`${GOOD_BODY} See ${url}`))
+
+  it.each(LANDING_PATHS)('allows the landing page %s', (path) => {
+    expect(link(`https://fieldstay.app${path}`)).not.toContain('link')
+    expect(link(`https://www.fieldstay.app${path}`)).not.toContain('link')
+  })
+
+  it('allows a trailing slash, any case, and sentence punctuation after the link', () => {
+    expect(link('https://fieldstay.app/hosts/')).not.toContain('link')
+    expect(link('https://fieldstay.app/HOSTS')).not.toContain('link')
+    expect(link('https://fieldstay.app/hosts.')).not.toContain('link')
+    expect(link('https://fieldstay.app/hosts, if useful')).not.toContain('link')
+  })
+
+  // A model will invent a plausible URL. A dead link in an outreach email is a small dishonesty.
+  it.each(['https://fieldstay.app/free-audit', 'https://fieldstay.app/hosts/secret', 'https://fieldstay.app/login'])('refuses an invented or non-landing path: %s', (url) => {
+    expect(link(url)).toContain('link')
+  })
+
+  it('does not path-check the product subdomain', () => {
+    expect(link('https://app.fieldstay.app/signup')).not.toContain('link')
+  })
+
+  it('stays fast on a long run of trailing punctuation', () => {
+    const start = performance.now()
+    link(`https://fieldstay.app/hosts${'.'.repeat(80_000)}`)
+    expect(performance.now() - start).toBeLessThan(1_500)
+  })
+})
+
+describe('checkDraft: the sealed-photo claim is not stretched', () => {
+  it.each(['tamper-proof', 'admissible', 'legally binding', 'airtight'])('refuses %s', (word) => {
+    expect(rules(withBody(`${GOOD_BODY} Photos are ${word}.`))).toContain('banned_phrase')
+  })
+})
+
+describe('the product facts', () => {
+  it('keep their order, because the call brief points at them by index', () => {
+    expect(PRODUCT_FACTS).toHaveLength(7)
+    expect(PRODUCT_FACTS[2]).toMatch(/suggests who should take each turnover/)
+    expect(PRODUCT_FACTS[3]).toMatch(/sealed for potential damage claims/)
+    expect(PRODUCT_FACTS[4]).toMatch(/with no account/)
+    expect(PRODUCT_FACTS[5]).toMatch(/15 minutes/)
+    expect(PRODUCT_FACTS[6]).toMatch(/profit and loss/)
+  })
+
+  it('carry the founder\'s confirmed wording', () => {
+    expect(PRODUCT_FACTS[0]).toMatch(/inspections with immutable records/)
+    expect(PRODUCT_FACTS[0]).toMatch(/review responses and guest guidebooks/)
+    expect(PRODUCT_FACTS[1]).toMatch(/automatic scheduling of crew/)
   })
 })
