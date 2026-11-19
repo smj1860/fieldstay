@@ -131,16 +131,50 @@ export const SOCIAL_PROOF: readonly string[] = [
   'customers say', 'customers love', 'thousands of', 'hundreds of', 'many managers', 'managers already',
 ]
 
-const UNBACKED_CLAIM = /\b\d+(?:\.\d+)?\s?%|\b(?:save|saves|saved|saving)\s+(?:you\s+)?(?:\w+\s+){0,3}(?:hours|time|money|days)\b|\b(?:cut|cuts|reduce|reduces|reduced)\s+(?:\w+\s+){0,3}by\s+\d/i
+const PERCENT = /\d+(?:\.\d+)?\s?%/
+const SAVE_WORDS: ReadonlySet<string> = new Set(['save', 'saves', 'saved', 'saving'])
+const CUT_WORDS: ReadonlySet<string> = new Set(['cut', 'cuts', 'reduce', 'reduces', 'reduced'])
+const SAVED_THINGS: ReadonlySet<string> = new Set(['hours', 'time', 'money', 'days'])
+/** How many words after "save" or "cut" still count as the same claim. */
+const CLAIM_WINDOW = 5
+
+const wordsOf = (text: string): string[] => text.toLowerCase().match(/[a-z0-9']+/g) ?? []
+
+/** "save you hours", "saves time": a saving nobody has measured. Word-based on purpose: no backtracking on a model's output. */
+function claimsSaving(words: readonly string[]): boolean {
+  return words.some((w, i) => SAVE_WORDS.has(w) && words.slice(i + 1, i + 1 + CLAIM_WINDOW).some((x) => SAVED_THINGS.has(x)))
+}
+
+/** "cuts turnover time by 30 minutes": a reduction with a number nobody has measured. */
+function claimsReduction(words: readonly string[]): boolean {
+  return words.some((w, i) => {
+    if (!CUT_WORDS.has(w)) return false
+    const window = words.slice(i + 1, i + 1 + CLAIM_WINDOW)
+    const by = window.indexOf('by')
+    return by >= 0 && /^\d/.test(window[by + 1] ?? '')
+  })
+}
+
+function hasUnbackedClaim(text: string): boolean {
+  if (PERCENT.test(text)) return true
+  const words = wordsOf(text)
+  return claimsSaving(words) || claimsReduction(words)
+}
+
 const OPT_OUT = /\b(?:tell me|let me know|say so|just say|reply)\b[^.?!]{0,80}\b(?:stop|won't|will not|not (?:useful|relevant|a fit|interested)|no thanks)\b/i
 
 const DASHES = /[—–]| -- /
 const EMOJI = /\p{Extended_Pictographic}/u
 const PRICE = /\$\s?\d|\b\d[\d,.]*\s?(?:dollars|usd)\b/i
 const URL_LIKE = /\bhttps?:\/\/[^\s)>\]]+|\bwww\.[^\s)>\]]+/gi
-const PLACEHOLDER = /\[[^\]\n]{1,40}\]|\{\{[^}]*\}\}|<[a-z][a-z _-]{1,30}>|\bTODO\b|\bXXX\b/i
-const SIGNOFF_LINE = /^\s*(?:best|best regards|regards|kind regards|sincerely|cheers|thanks|thank you|warmly)[,.!]?\s*$/im
+const PLACEHOLDER = /\[[^\]\n]{1,40}\]|\{\{[^}\n]{0,80}\}\}|<[a-z][a-z _-]{1,30}>|\bTODO\b|\bXXX\b/i
+const SIGNOFFS: ReadonlySet<string> = new Set(['best', 'best regards', 'regards', 'kind regards', 'sincerely', 'cheers', 'thanks', 'thank you', 'warmly'])
 const FAKE_THREAD = /^\s*(?:re|fwd?)\s*:/i
+
+/** A line that is only a sign-off. Line by line, because a multiline regex over blank lines can scan quadratically. */
+function hasSignoffLine(body: string): boolean {
+  return body.split('\n').some((line) => SIGNOFFS.has(line.trim().toLowerCase().replace(/[,.!]$/, '')))
+}
 
 const wordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length
 
@@ -205,7 +239,7 @@ function honestyIssues(all: string, body: string): VoiceIssue[] {
     ...phraseRule(all, PRESUMED_PROBLEM, 'presumed_problem', 'You do not know their problems. Ask a question instead of stating one.'),
     ...phraseRule(all, SOCIAL_PROOF, 'social_proof', 'Do not cite customers or other managers. Say only what the product does.'),
   ]
-  if (UNBACKED_CLAIM.test(all)) issues.push({ rule: 'unbacked_claim', detail: 'States a percentage or a saving nobody has measured. Say what the product does, not what it will save them.' })
+  if (hasUnbackedClaim(all)) issues.push({ rule: 'unbacked_claim', detail: 'States a percentage or a saving nobody has measured. Say what the product does, not what it will save them.' })
   if (!OPT_OUT.test(body)) issues.push({ rule: 'opt_out', detail: 'Add a sincere way out near the end, for example "If this is not useful, tell me and I will stop."' })
   return issues
 }
@@ -226,7 +260,7 @@ export function checkDraft(draft: DraftText, context: DraftContext = {}): VoiceI
   if (EMOJI.test(all)) issues.push({ rule: 'emoji', detail: 'Uses an emoji.' })
   if (PRICE.test(all)) issues.push({ rule: 'pricing', detail: 'Quotes a price. Drafts never state pricing.' })
   if (PLACEHOLDER.test(all)) issues.push({ rule: 'placeholder', detail: 'Contains a placeholder that was never filled in.' })
-  if (SIGNOFF_LINE.test(draft.body)) issues.push({ rule: 'signature', detail: 'Ends with a sign-off line. The sender adds their own.' })
+  if (hasSignoffLine(draft.body)) issues.push({ rule: 'signature', detail: 'Ends with a sign-off line. The sender adds their own.' })
   return issues
 }
 

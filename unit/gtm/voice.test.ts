@@ -227,3 +227,36 @@ describe('checkDraft: honesty', () => {
     }
   })
 })
+
+// A draft is a model's output, which is untrusted text. These patterns were quadratic or
+// super-linear before, so each is held to a time budget on its worst input.
+describe('checkDraft: hostile input stays fast', () => {
+  const timed = (body: string): number => {
+    const start = performance.now()
+    checkDraft({ subject: 'x', body: `Hi there, ${body}` })
+    return performance.now() - start
+  }
+
+  it.each([
+    ['an unclosed placeholder brace, repeated', '{{'.repeat(40_000)],
+    ['thousands of blank lines', '\n \t \n'.repeat(40_000)],
+    ['a long run of save words', 'save '.repeat(40_000)],
+    ['a long run of cut words', 'cuts by '.repeat(40_000)],
+    ['an unclosed bracket, repeated', '['.repeat(40_000)],
+  ])('handles %s without a stall', (_label, body) => {
+    expect(timed(body)).toBeLessThan(1_500)
+  })
+
+  it('still sees a sign-off line, a placeholder and a saving after the rewrite', () => {
+    for (const closer of ['Best', 'Kind regards,', 'cheers!', '  Thank you  ']) {
+      expect(rules(withBody(`${GOOD_BODY}\n\n${closer}`)), closer).toContain('signature')
+    }
+    expect(rules(withBody(GOOD_BODY.replace('Dana', '{{first_name}}')))).toContain('placeholder')
+    expect(rules(withBody(`${GOOD_BODY} It saves a few hours of time.`))).toContain('unbacked_claim')
+    expect(rules(withBody(`${GOOD_BODY} That cuts the work by 40 minutes.`))).toContain('unbacked_claim')
+  })
+
+  it('does not call an ordinary closing line a sign-off', () => {
+    expect(rules(withBody(`${GOOD_BODY} Thanks for reading this far.`))).not.toContain('signature')
+  })
+})
