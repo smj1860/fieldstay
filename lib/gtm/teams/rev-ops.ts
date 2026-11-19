@@ -83,27 +83,23 @@ async function loadHygiene(supabase: ServiceClient) {
  * be offered every week and the cap would never reach the next ones.
  */
 async function loadEnrichCandidates(supabase: ServiceClient, now: Date): Promise<string[]> {
-  const pool = unwrapList<{ id: string }>(
-    await supabase.from('prospect_accounts').select('id')
-      .in('status', ['new', 'researching', 'needs_contact_info'])
-      .is('email', null)
-      .or('website.not.is.null,domain.not.is.null')
-      .order('score_a', { ascending: false, nullsFirst: false })
-      .order('id', { ascending: true })
-      .limit(CANDIDATE_POOL),
-    { site: `${SITE}.candidates.pool` },
-  )
+  const poolRes = await supabase.from('prospect_accounts').select('id')
+    .in('status', ['new', 'researching', 'needs_contact_info'])
+    .is('email', null)
+    .or('website.not.is.null,domain.not.is.null')
+    .order('score_a', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: true })
+    .limit(CANDIDATE_POOL)
+  const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.candidates.pool` })
   if (pool.length === 0) return []
 
   const since = new Date(now.getTime() - ENRICH_RECHECK_DAYS * DAY_MS).toISOString()
-  const asked = unwrapList<{ prospect_id: string | null }>(
-    await supabase.from('agent_tasks').select('prospect_id')
-      .eq('task_type', 'enrich_account')
-      .in('prospect_id', pool.map((p) => p.id))
-      .gte('created_at', since)
-      .limit(CANDIDATE_POOL),
-    { site: `${SITE}.candidates.asked` },
-  )
+  const askedRes = await supabase.from('agent_tasks').select('prospect_id')
+    .eq('task_type', 'enrich_account')
+    .in('prospect_id', pool.map((p) => p.id))
+    .gte('created_at', since)
+    .limit(CANDIDATE_POOL)
+  const asked = unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.candidates.asked` })
   const skip = new Set(asked.map((a) => a.prospect_id))
   return pool.map((p) => p.id).filter((id) => !skip.has(id)).slice(0, MAX_LEAD_GEN_HANDOFFS)
 }

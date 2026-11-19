@@ -39,14 +39,12 @@ export type JsonObject = { [key: string]: Json | undefined }
 const SITE = 'gtm.tasks'
 
 export async function loadTeamSettings(supabase: ServiceClient): Promise<TeamSetting[]> {
-  const rows = unwrapList(
-    await supabase
-      .from('gtm_team_settings')
-      .select('team, enabled, autonomy, daily_task_cap, daily_cost_cap_cents')
-      // Six seeded rows. The limit is a ceiling, not a page size.
-      .limit(20),
-    { site: `${SITE}.loadTeamSettings` },
-  )
+  const settingsRes = await supabase
+    .from('gtm_team_settings')
+    .select('team, enabled, autonomy, daily_task_cap, daily_cost_cap_cents')
+    // Six seeded rows. The limit is a ceiling, not a page size.
+    .limit(20)
+  const rows = unwrapList(settingsRes, { site: `${SITE}.loadTeamSettings` })
 
   // CHECK constraints keep these inside their unions, but the generated types
   // see plain text. A row that somehow is not one of ours is dropped, and a
@@ -153,14 +151,12 @@ export async function checkBudget(
 
   const dayStart = centralDayStart(now)
 
-  const tasksToday = unwrapCount(
-    await supabase
-      .from('agent_tasks')
-      .select('id', { count: 'exact', head: true })
-      .eq('team', team)
-      .gte('created_at', dayStart.toISOString()),
-    { site: `${SITE}.checkBudget.tasks`, extra: { team } },
-  )
+  const tasksTodayRes = await supabase
+    .from('agent_tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('team', team)
+    .gte('created_at', dayStart.toISOString())
+  const tasksToday = unwrapCount(tasksTodayRes, { site: `${SITE}.checkBudget.tasks`, extra: { team } })
 
   const rolled = await fetchRollup(supabase, { touchesSince: dayStart, spendSince: dayStart })
   if (!rolled.ok) {
