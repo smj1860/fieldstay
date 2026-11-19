@@ -16,10 +16,10 @@
  * Pure: no I/O, so the rules are pinned by tests and safe to import anywhere.
  */
 
-export const VOICE_GUIDE_VERSION = 'draft-2'
+export const VOICE_GUIDE_VERSION = 'draft-4'
 
 /** What the guide has and has not been through. Shown on the dashboard, so nobody mistakes it for approved. */
-export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with honesty rules added; not yet reviewed by the founder.'
+export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with honesty rules, tone notes and founder-confirmed product facts; not yet reviewed by the founder in full.'
 
 /**
  * The only things a draft may say about the product. A model asked to write a
@@ -28,24 +28,37 @@ export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with h
  * the homepage. Add to the list deliberately; do not loosen the prompt instead.
  */
 export const PRODUCT_FACTS: readonly string[] = [
-  'FieldStay handles crew scheduling, turnovers, maintenance, inventory, vendor work orders and guest communications for short-term rental property managers.',
-  'Bookings sync in from the property management system and calendars, and the turnovers are created automatically.',
+  'FieldStay handles crew scheduling, turnovers, maintenance, inspections with immutable records, inventory, vendor work orders and invoicing, review responses and guest guidebooks for short-term rental managers.',
+  'Bookings sync in from the property management system and calendars, and turnovers are created automatically, with suggested scheduling or automatic scheduling of crew.',
   'FieldStay suggests who should take each turnover, and why, so the manager accepts instead of figuring it out.',
-  'Cleaners use a phone app with a room-by-room checklist. It works offline, and photos and counts upload later on their own.',
-  'A vendor gets a link to the job, sees the work order, and invoices from their phone. They never make an account.',
+  'Cleaners use a phone app with a room-by-room checklist. It works offline, and photos and counts upload later on their own. Photos are also timestamped and sealed for potential damage claims.',
+  'A vendor gets a link to the job, sees the work order, and invoices from their phone, with no account.',
   'Setting up a property takes about 15 minutes.',
   'Owners can see their own profit and loss.',
+]
+
+/**
+ * The only things a draft may claim about the SENDER. Narrow on purpose: the
+ * sender has done turnovers, not run a portfolio for years, and a draft that
+ * says more than that is claiming experience nobody has. Add to the list only
+ * with the sender's own word that it is true.
+ */
+export const SENDER_FACTS: readonly string[] = [
+  'The sender has done turnovers themselves. That is the whole of the operating experience that may be claimed. Never say or imply they ran a portfolio, managed properties, or worked in the business for years.',
 ]
 
 /** Advice to the drafting model. Not enforced: see checkDraft() for what is. */
 export const VOICE_GUIDE: readonly string[] = [
   'Be genuine and honest above everything else. If a sentence is not true, or cannot be shown to be, it does not go in, however well it would land.',
   'Say plainly that you are writing without having spoken before, or that you wrote before and have not heard back. Never imply a relationship, a conversation or a reply that did not happen.',
-  'You do not know their problems. Ask about them in a question; never tell someone what is going wrong in their business.',
+  'You do not know their problems. Ask about them in a question, or name one as something common in the trade; never tell someone what is going wrong in their own business.',
   'End with a sincere way out: if this is not useful, they can say so and you will stop.',
   'Write the way one working operator writes to another. Plain, specific and short.',
   'Lead with something true and concrete about their business (their market, the size of their portfolio, the system they use), only if it was given to you. Never invent a detail about them.',
   'One idea per email. Say what the problem is in their terms (turnovers, crew, vendors, owner reports), then one sentence on how FieldStay takes it off their plate.',
+  'Talk human to human, operator to operator, in their own terms (turnovers, crew, vendors, owner reports). That alone shows you know their time is short; when it comes naturally, say so plainly too.',
+  'Sound like you know the work, because the sender has done turnovers. Speak from knowing the routine, never from a claim about this person or about how much experience the sender has.',
+  'Say it straight. If a sentence is there to impress, cut it.',
   'Short sentences. No jargon, no hype, no exclamation marks, no emoji.',
   'Sound like a person with a calm view of the work, not a marketer. Never pressure. Never imply urgency that does not exist.',
   'End with one low-effort question or an offer to show them, and stop.',
@@ -57,7 +70,7 @@ export const VOICE_GUIDE: readonly string[] = [
 export type VoiceRule =
   | 'em_dash' | 'subject_length' | 'subject_style' | 'body_length' | 'banned_phrase' | 'pricing'
   | 'link' | 'placeholder' | 'greeting' | 'exclamation' | 'signature' | 'emoji'
-  | 'false_familiarity' | 'pressure' | 'presumed_problem' | 'social_proof' | 'unbacked_claim' | 'opt_out'
+  | 'false_familiarity' | 'sender_overclaim' | 'pressure' | 'presumed_problem' | 'social_proof' | 'unbacked_claim' | 'opt_out'
 
 export interface VoiceIssue { rule: VoiceRule; detail: string }
 
@@ -85,6 +98,8 @@ export const BANNED_PHRASES: readonly string[] = [
   'guarantee', 'guaranteed', '100%', 'risk-free', 'no obligation',
   'best in class', 'best-in-class', 'world-class', 'industry-leading', 'industry leading',
   '#1', 'number one', 'the best', 'leading provider',
+  // The sealed-photo fact is about records for a claim. Never promise what a claim will do.
+  'tamper-proof', 'tamper proof', 'admissible', 'legally binding', 'airtight', 'bulletproof',
 ]
 
 /**
@@ -100,6 +115,11 @@ export const FALSE_FAMILIARITY: readonly string[] = [
   'as discussed', 'as we discussed', 'per our conversation', 'our last conversation', 'we spoke', 'we talked',
   'great to meet', 'nice to meet', 'as promised', 'as a fellow',
 ]
+export const SENDER_OVERCLAIM: readonly string[] = [
+  'years of experience', 'years in the business', 'years in this business', 'decades', 'i managed', 'i\'ve managed',
+  'i have managed', 'i ran a', 'i\'ve run a', 'as a property manager', 'as an operator', 'i\'ve been there',
+  'i have been there', 'been in your shoes', 'walked in your shoes', 'i know exactly',
+]
 export const PRESSURE: readonly string[] = [
   'urgent', 'asap', 'today only', 'this week only', 'last chance', 'running out', 'spots left', 'only a few',
   'before it\'s too late', 'quick question', 'quick call', 'just a quick',
@@ -113,24 +133,96 @@ export const SOCIAL_PROOF: readonly string[] = [
   'customers say', 'customers love', 'thousands of', 'hundreds of', 'many managers', 'managers already',
 ]
 
-const UNBACKED_CLAIM = /\b\d+(?:\.\d+)?\s?%|\b(?:save|saves|saved|saving)\s+(?:you\s+)?(?:\w+\s+){0,3}(?:hours|time|money|days)\b|\b(?:cut|cuts|reduce|reduces|reduced)\s+(?:\w+\s+){0,3}by\s+\d/i
+/** A digit, an optional space, then %: "15%" and "2.5%" both end this way. No leading \d+, which would rescan a long digit run from every start. */
+const PERCENT = /\d\s?%/
+const SAVE_WORDS: ReadonlySet<string> = new Set(['save', 'saves', 'saved', 'saving'])
+const CUT_WORDS: ReadonlySet<string> = new Set(['cut', 'cuts', 'reduce', 'reduces', 'reduced'])
+const SAVED_THINGS: ReadonlySet<string> = new Set(['hours', 'time', 'money', 'days'])
+/** How many words after "save" or "cut" still count as the same claim. */
+const CLAIM_WINDOW = 5
+
+const wordsOf = (text: string): string[] => text.toLowerCase().match(/[a-z0-9']+/g) ?? []
+
+/** "save you hours", "saves time": a saving nobody has measured. Word-based on purpose: no backtracking on a model's output. */
+function claimsSaving(words: readonly string[]): boolean {
+  return words.some((w, i) => SAVE_WORDS.has(w) && words.slice(i + 1, i + 1 + CLAIM_WINDOW).some((x) => SAVED_THINGS.has(x)))
+}
+
+/** "cuts turnover time by 30 minutes": a reduction with a number nobody has measured. */
+function claimsReduction(words: readonly string[]): boolean {
+  return words.some((w, i) => {
+    if (!CUT_WORDS.has(w)) return false
+    const window = words.slice(i + 1, i + 1 + CLAIM_WINDOW)
+    const by = window.indexOf('by')
+    return by >= 0 && /^\d/.test(window[by + 1] ?? '')
+  })
+}
+
+function hasUnbackedClaim(text: string): boolean {
+  if (PERCENT.test(text)) return true
+  const words = wordsOf(text)
+  return claimsSaving(words) || claimsReduction(words)
+}
+
 const OPT_OUT = /\b(?:tell me|let me know|say so|just say|reply)\b[^.?!]{0,80}\b(?:stop|won't|will not|not (?:useful|relevant|a fit|interested)|no thanks)\b/i
 
 const DASHES = /[—–]| -- /
 const EMOJI = /\p{Extended_Pictographic}/u
 const PRICE = /\$\s?\d|\b\d[\d,.]*\s?(?:dollars|usd)\b/i
 const URL_LIKE = /\bhttps?:\/\/[^\s)>\]]+|\bwww\.[^\s)>\]]+/gi
-const PLACEHOLDER = /\[[^\]\n]{1,40}\]|\{\{[^}]*\}\}|<[a-z][a-z _-]{1,30}>|\bTODO\b|\bXXX\b/i
-const SIGNOFF_LINE = /^\s*(?:best|best regards|regards|kind regards|sincerely|cheers|thanks|thank you|warmly)[,.!]?\s*$/im
+const PLACEHOLDER = /\[[^\]\n]{1,40}\]|\{\{[^}\n]{0,80}\}\}|<[a-z][a-z _-]{1,30}>|\bTODO\b|\bXXX\b/i
+const SIGNOFFS: ReadonlySet<string> = new Set(['best', 'best regards', 'regards', 'kind regards', 'sincerely', 'cheers', 'thanks', 'thank you', 'warmly'])
 const FAKE_THREAD = /^\s*(?:re|fwd?)\s*:/i
+
+/** A line that is only a sign-off. Line by line, because a multiline regex over blank lines can scan quadratically. */
+function hasSignoffLine(body: string): boolean {
+  return body.split('\n').some((line) => SIGNOFFS.has(line.trim().toLowerCase().replace(/[,.!]$/, '')))
+}
 
 const wordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length
 
-function hostOf(url: string): string | null {
-  try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.toLowerCase() } catch { return null }
-}
+/**
+ * The FieldStay landing pages a draft may link to, by path on fieldstay.app: the
+ * segment pages (/ownerrez, /hospitable, /strops, /hosts) plus the product overview.
+ * Comparison pages and pricing are deliberately left out of cold outreach.
+ * A draft is a model's output and a model will invent a plausible URL, so a link
+ * to a page that does not exist is refused the same as a link to another site.
+ * Add a page here when one is published. (Subdomains such as app.fieldstay.app
+ * are the product itself and are not path-checked.)
+ */
+export const LANDING_PATHS: readonly string[] = [
+  '/', '/hosts', '/strops', '/ownerrez', '/hospitable', '/features', '/integrations',
+]
 
 const isOwnHost = (host: string): boolean => host === 'fieldstay.app' || host.endsWith('.fieldstay.app')
+const isMarketingHost = (host: string): boolean => host === 'fieldstay.app' || host === 'www.fieldstay.app'
+const TRAILING_PUNCTUATION = '.,;:!?'
+
+/** Sentence punctuation that rode along with a URL. A loop, not a regex: a long run of dots must not rescan. */
+function trimTrailingPunctuation(url: string): string {
+  let end = url.length
+  while (end > 0 && TRAILING_PUNCTUATION.includes(url[end - 1])) end--
+  return url.slice(0, end)
+}
+
+function parseLink(url: string): URL | null {
+  const cleaned = trimTrailingPunctuation(url)
+  try { return new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`) } catch { return null }
+}
+
+function pathOf(link: URL): string {
+  const path = link.pathname.toLowerCase()
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
+}
+
+/** A link that goes to FieldStay, and to a page that exists. */
+function isAllowedLink(url: string): boolean {
+  const link = parseLink(url)
+  if (link === null) return false
+  const host = link.hostname.toLowerCase()
+  if (!isOwnHost(host)) return false
+  return isMarketingHost(host) ? LANDING_PATHS.includes(pathOf(link)) : true
+}
 
 function lengthIssues(draft: DraftText): VoiceIssue[] {
   const issues: VoiceIssue[] = []
@@ -160,9 +252,8 @@ function phraseIssues(text: string): VoiceIssue[] {
 }
 
 function linkIssues(text: string): VoiceIssue[] {
-  const hosts = (text.match(URL_LIKE) ?? []).map(hostOf)
-  const foreign = hosts.filter((h): h is string => h === null || !isOwnHost(h))
-  return foreign.length > 0 ? [{ rule: 'link', detail: 'Links to somewhere other than fieldstay.app.' }] : []
+  const bad = (text.match(URL_LIKE) ?? []).filter((u) => !isAllowedLink(u))
+  return bad.length > 0 ? [{ rule: 'link', detail: 'Links to somewhere other than a FieldStay page that exists. Use fieldstay.app or one of its listed landing pages.' }] : []
 }
 
 function greetingIssue(body: string, firstName: string | null | undefined): VoiceIssue[] {
@@ -182,11 +273,12 @@ function phraseRule(text: string, list: readonly string[], rule: VoiceRule, why:
 function honestyIssues(all: string, body: string): VoiceIssue[] {
   const issues = [
     ...phraseRule(all, FALSE_FAMILIARITY, 'false_familiarity', 'Do not claim to have looked at their business or to know them. Only say what you were given.'),
+    ...phraseRule(all, SENDER_OVERCLAIM, 'sender_overclaim', 'The sender has done turnovers and may say so, but never claim more experience than that.'),
     ...phraseRule(all, PRESSURE, 'pressure', 'No urgency or "quick" framing. Nothing here is urgent.'),
     ...phraseRule(all, PRESUMED_PROBLEM, 'presumed_problem', 'You do not know their problems. Ask a question instead of stating one.'),
     ...phraseRule(all, SOCIAL_PROOF, 'social_proof', 'Do not cite customers or other managers. Say only what the product does.'),
   ]
-  if (UNBACKED_CLAIM.test(all)) issues.push({ rule: 'unbacked_claim', detail: 'States a percentage or a saving nobody has measured. Say what the product does, not what it will save them.' })
+  if (hasUnbackedClaim(all)) issues.push({ rule: 'unbacked_claim', detail: 'States a percentage or a saving nobody has measured. Say what the product does, not what it will save them.' })
   if (!OPT_OUT.test(body)) issues.push({ rule: 'opt_out', detail: 'Add a sincere way out near the end, for example "If this is not useful, tell me and I will stop."' })
   return issues
 }
@@ -207,7 +299,7 @@ export function checkDraft(draft: DraftText, context: DraftContext = {}): VoiceI
   if (EMOJI.test(all)) issues.push({ rule: 'emoji', detail: 'Uses an emoji.' })
   if (PRICE.test(all)) issues.push({ rule: 'pricing', detail: 'Quotes a price. Drafts never state pricing.' })
   if (PLACEHOLDER.test(all)) issues.push({ rule: 'placeholder', detail: 'Contains a placeholder that was never filled in.' })
-  if (SIGNOFF_LINE.test(draft.body)) issues.push({ rule: 'signature', detail: 'Ends with a sign-off line. The sender adds their own.' })
+  if (hasSignoffLine(draft.body)) issues.push({ rule: 'signature', detail: 'Ends with a sign-off line. The sender adds their own.' })
   return issues
 }
 

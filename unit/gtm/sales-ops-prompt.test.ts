@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, VOICE_GUIDE } from '@/lib/gtm/brand/voice'
+import { LANDING_PATHS, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, VOICE_GUIDE } from '@/lib/gtm/brand/voice'
 import { WRITE_DRAFT_TOOL, greetingFor, systemPrompt, userPrompt, type DraftBrief } from '@/lib/gtm/teams/sales-ops-prompt'
 
 const brief = (over: Partial<DraftBrief> = {}): DraftBrief => ({
@@ -27,7 +27,7 @@ describe('systemPrompt', () => {
     expect(prompt).toContain(`at most ${MAX_SUBJECT_CHARS} characters`)
     expect(prompt).toContain(`${MIN_BODY_WORDS} to ${MAX_BODY_WORDS} words`)
     expect(prompt).toContain('Never state a price')
-    expect(prompt).toContain('Never use a dash as punctuation')
+    expect(prompt).toContain('Never use an em dash, an en dash or a double hyphen')
     expect(prompt).toContain('Do not end with a sign-off')
   })
 
@@ -99,5 +99,22 @@ describe('systemPrompt: honesty', () => {
     expect(prompt).toMatch(/Honesty comes first/)
     expect(prompt).toMatch(/tell me and I will stop/)
     expect(prompt.indexOf('Be genuine and honest')).toBeLessThan(prompt.indexOf('Write the way'))
+  })
+})
+
+describe('systemPrompt: the sender', () => {
+  it('limits what may be claimed about the sender to the sender facts', () => {
+    const prompt = systemPrompt([])
+    expect(prompt).toContain('What you may say about the sender')
+    expect(prompt).toMatch(/done turnovers themselves/)
+    expect(prompt).toMatch(/Never say or imply they ran a portfolio/)
+  })
+})
+
+describe('systemPrompt: links', () => {
+  it('lists every landing page the checker allows, so the model is never left to invent one', () => {
+    const prompt = systemPrompt([])
+    for (const path of LANDING_PATHS) expect(prompt).toContain(path)
+    expect(prompt).toContain('Never invent a path')
   })
 })

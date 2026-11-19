@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SOCIAL_PROOF, VOICE_GUIDE,
+  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, LANDING_PATHS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SENDER_FACTS, SENDER_OVERCLAIM, SOCIAL_PROOF, VOICE_GUIDE,
   VOICE_GUIDE_STATUS, checkDraft, describeIssues, type DraftText, type VoiceRule,
 } from '@/lib/gtm/brand/voice'
 
@@ -163,6 +163,7 @@ describe('checkDraft: honesty', () => {
 
   it.each([
     ['false_familiarity', FALSE_FAMILIARITY],
+    ['sender_overclaim', SENDER_OVERCLAIM],
     ['pressure', PRESSURE],
     ['presumed_problem', PRESUMED_PROBLEM],
     ['social_proof', SOCIAL_PROOF],
@@ -204,6 +205,15 @@ describe('checkDraft: honesty', () => {
     expect(rules(noExit)).toContain('opt_out')
   })
 
+  it('lets the sender say they have done turnovers, and nothing more', () => {
+    expect(rules(swap('I have done turnovers myself'))).toEqual([])
+    expect(rules(swap('I\'ve done turnovers myself, so I know the Friday scramble'))).toEqual([])
+    for (const claim of ['I managed twelve cabins', 'After years of experience in this', 'I\'ve been there', 'As a property manager myself']) {
+      expect(rules(swap(claim)), claim).toContain('sender_overclaim')
+    }
+    expect(SENDER_FACTS.join(' ')).toMatch(/done turnovers/)
+  })
+
   it('carries the honesty directive first in the guidance a model reads', () => {
     expect(VOICE_GUIDE[0]).toMatch(/genuine and honest/i)
   })
@@ -215,5 +225,107 @@ describe('checkDraft: honesty', () => {
       expect(hits, fact).not.toContain('social_proof')
       expect(hits, fact).not.toContain('false_familiarity')
     }
+  })
+})
+
+// A draft is a model's output, which is untrusted text. These patterns were quadratic or
+// super-linear before, so each is held to a time budget on its worst input.
+describe('checkDraft: hostile input stays fast', () => {
+  const timed = (body: string): number => {
+    const start = performance.now()
+    checkDraft({ subject: 'x', body: `Hi there, ${body}` })
+    return performance.now() - start
+  }
+
+  it.each([
+    ['an unclosed placeholder brace, repeated', '{{'.repeat(40_000)],
+    ['thousands of blank lines', '\n \t \n'.repeat(40_000)],
+    ['a long run of save words', 'save '.repeat(40_000)],
+    ['a long run of cut words', 'cuts by '.repeat(40_000)],
+    ['an unclosed bracket, repeated', '['.repeat(40_000)],
+    ['a very long digit run with no percent sign', '1'.repeat(80_000)],
+  ])('handles %s without a stall', (_label, body) => {
+    expect(timed(body)).toBeLessThan(1_500)
+  })
+
+  it('still sees a sign-off line, a placeholder and a saving after the rewrite', () => {
+    for (const closer of ['Best', 'Kind regards,', 'cheers!', '  Thank you  ']) {
+      expect(rules(withBody(`${GOOD_BODY}\n\n${closer}`)), closer).toContain('signature')
+    }
+    expect(rules(withBody(GOOD_BODY.replace('Dana', '{{first_name}}')))).toContain('placeholder')
+    expect(rules(withBody(`${GOOD_BODY} It saves a few hours of time.`))).toContain('unbacked_claim')
+    expect(rules(withBody(`${GOOD_BODY} That cuts the work by 40 minutes.`))).toContain('unbacked_claim')
+  })
+
+  it.each(['15%', '2.5%', '40 %', 'by 100%'])('still sees a percentage: %s', (pct) => {
+    expect(rules(withBody(`${GOOD_BODY} It is ${pct} better.`))).toContain('unbacked_claim')
+  })
+
+  it('does not call an ordinary closing line a sign-off', () => {
+    expect(rules(withBody(`${GOOD_BODY} Thanks for reading this far.`))).not.toContain('signature')
+  })
+})
+
+describe('checkDraft: links go only to FieldStay pages that exist', () => {
+  const link = (url: string) => rules(withBody(`${GOOD_BODY} See ${url}`))
+
+  it.each(LANDING_PATHS)('allows the landing page %s', (path) => {
+    expect(link(`https://fieldstay.app${path}`)).not.toContain('link')
+    expect(link(`https://www.fieldstay.app${path}`)).not.toContain('link')
+  })
+
+  it('allows a trailing slash, any case, and sentence punctuation after the link', () => {
+    expect(link('https://fieldstay.app/hosts/')).not.toContain('link')
+    expect(link('https://fieldstay.app/HOSTS')).not.toContain('link')
+    expect(link('https://fieldstay.app/hosts.')).not.toContain('link')
+    expect(link('https://fieldstay.app/hosts, if useful')).not.toContain('link')
+  })
+
+  // A model will invent a plausible URL. A dead link in an outreach email is a small dishonesty.
+  it.each(['https://fieldstay.app/free-audit', 'https://fieldstay.app/hosts/secret', 'https://fieldstay.app/login'])('refuses an invented or non-landing path: %s', (url) => {
+    expect(link(url)).toContain('link')
+  })
+
+  // Cold outreach does not link a competitor comparison or the pricing page.
+  it.each(['/pricing', '/turno-alternative', '/breezeway-alternative', '/enterprise', '/faq', '/for-vendors'])('keeps %s out of outreach', (path) => {
+    expect(LANDING_PATHS).not.toContain(path)
+    expect(link(`https://fieldstay.app${path}`)).toContain('link')
+  })
+
+  it('offers the segment pages', () => {
+    for (const path of ['/ownerrez', '/strops', '/hospitable', '/hosts']) expect(LANDING_PATHS).toContain(path)
+  })
+
+  it('does not path-check the product subdomain', () => {
+    expect(link('https://app.fieldstay.app/signup')).not.toContain('link')
+  })
+
+  it('stays fast on a long run of trailing punctuation', () => {
+    const start = performance.now()
+    link(`https://fieldstay.app/hosts${'.'.repeat(80_000)}`)
+    expect(performance.now() - start).toBeLessThan(1_500)
+  })
+})
+
+describe('checkDraft: the sealed-photo claim is not stretched', () => {
+  it.each(['tamper-proof', 'admissible', 'legally binding', 'airtight'])('refuses %s', (word) => {
+    expect(rules(withBody(`${GOOD_BODY} Photos are ${word}.`))).toContain('banned_phrase')
+  })
+})
+
+describe('the product facts', () => {
+  it('keep their order, because the call brief points at them by index', () => {
+    expect(PRODUCT_FACTS).toHaveLength(7)
+    expect(PRODUCT_FACTS[2]).toMatch(/suggests who should take each turnover/)
+    expect(PRODUCT_FACTS[3]).toMatch(/sealed for potential damage claims/)
+    expect(PRODUCT_FACTS[4]).toMatch(/with no account/)
+    expect(PRODUCT_FACTS[5]).toMatch(/15 minutes/)
+    expect(PRODUCT_FACTS[6]).toMatch(/profit and loss/)
+  })
+
+  it('carry the founder\'s confirmed wording', () => {
+    expect(PRODUCT_FACTS[0]).toMatch(/inspections with immutable records/)
+    expect(PRODUCT_FACTS[0]).toMatch(/review responses and guest guidebooks/)
+    expect(PRODUCT_FACTS[1]).toMatch(/automatic scheduling of crew/)
   })
 })

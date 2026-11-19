@@ -1,5 +1,5 @@
 import {
-  MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, VOICE_GUIDE, describeIssues,
+  MAX_BODY_WORDS, MAX_SUBJECT_CHARS, LANDING_PATHS, MIN_BODY_WORDS, PRODUCT_FACTS, SENDER_FACTS, VOICE_GUIDE, describeIssues,
   type VoiceIssue,
 } from '../brand/voice'
 
@@ -45,9 +45,13 @@ export function systemPrompt(feedback: readonly string[]): string {
     'What you may say about FieldStay. Use only these. Never claim anything else about the product, a customer, a number or a result:',
     ...PRODUCT_FACTS.map((line) => `- ${line}`),
     '',
+    'What you may say about the sender. Use only this, and never claim more:',
+    ...SENDER_FACTS.map((line) => `- ${line}`),
+    '',
     'Hard rules, checked by software. A draft that breaks one is thrown away:',
-    '- Never use a dash as punctuation. Use a comma or a period.',
-    '- Never state a price. Never link anywhere except fieldstay.app. Never use a placeholder, an exclamation mark or an emoji.',
+    '- Never use an em dash, an en dash or a double hyphen. This is the rule models break most often. Use a comma or a period.',
+    '- Never state a price. Never use a placeholder, an exclamation mark or an emoji.',
+    `- A link is optional. If you add one, it is https://fieldstay.app followed by one of these paths and nothing else: ${LANDING_PATHS.join(' ')}. Never invent a path. When their system is OwnerRez or Hospitable, the page with that name is the natural link.`,
     `- The subject is at most ${MAX_SUBJECT_CHARS} characters and never starts with Re: or Fwd:.`,
     `- The body is ${MIN_BODY_WORDS} to ${MAX_BODY_WORDS} words.`,
     '- Do not end with a sign-off or a name.',
