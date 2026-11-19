@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SOCIAL_PROOF, VOICE_GUIDE,
+  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SENDER_FACTS, SENDER_OVERCLAIM, SOCIAL_PROOF, VOICE_GUIDE,
   VOICE_GUIDE_STATUS, checkDraft, describeIssues, type DraftText, type VoiceRule,
 } from '@/lib/gtm/brand/voice'
 
@@ -163,6 +163,7 @@ describe('checkDraft: honesty', () => {
 
   it.each([
     ['false_familiarity', FALSE_FAMILIARITY],
+    ['sender_overclaim', SENDER_OVERCLAIM],
     ['pressure', PRESSURE],
     ['presumed_problem', PRESUMED_PROBLEM],
     ['social_proof', SOCIAL_PROOF],
@@ -202,6 +203,15 @@ describe('checkDraft: honesty', () => {
   it('ignores a way out that is only in the subject', () => {
     const noExit = { subject: 'Tell me and I will stop', body: GOOD_BODY.replace(' If this is not useful, tell me and I will stop.', '') }
     expect(rules(noExit)).toContain('opt_out')
+  })
+
+  it('lets the sender say they have done turnovers, and nothing more', () => {
+    expect(rules(swap('I have done turnovers myself'))).toEqual([])
+    expect(rules(swap('I\'ve done turnovers myself, so I know the Friday scramble'))).toEqual([])
+    for (const claim of ['I managed twelve cabins', 'After years of experience in this', 'I\'ve been there', 'As a property manager myself']) {
+      expect(rules(swap(claim)), claim).toContain('sender_overclaim')
+    }
+    expect(SENDER_FACTS.join(' ')).toMatch(/done turnovers/)
   })
 
   it('carries the honesty directive first in the guidance a model reads', () => {

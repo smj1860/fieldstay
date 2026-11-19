@@ -101,3 +101,12 @@ describe('systemPrompt: honesty', () => {
     expect(prompt.indexOf('Be genuine and honest')).toBeLessThan(prompt.indexOf('Write the way'))
   })
 })
+
+describe('systemPrompt: the sender', () => {
+  it('limits what may be claimed about the sender to the sender facts', () => {
+    const prompt = systemPrompt([])
+    expect(prompt).toContain('What you may say about the sender')
+    expect(prompt).toMatch(/done turnovers themselves/)
+    expect(prompt).toMatch(/Never say or imply they ran a portfolio/)
+  })
+})

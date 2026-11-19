@@ -1,5 +1,5 @@
 import {
-  MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, VOICE_GUIDE, describeIssues,
+  MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, SENDER_FACTS, VOICE_GUIDE, describeIssues,
   type VoiceIssue,
 } from '../brand/voice'
 
@@ -44,6 +44,9 @@ export function systemPrompt(feedback: readonly string[]): string {
     '',
     'What you may say about FieldStay. Use only these. Never claim anything else about the product, a customer, a number or a result:',
     ...PRODUCT_FACTS.map((line) => `- ${line}`),
+    '',
+    'What you may say about the sender. Use only this, and never claim more:',
+    ...SENDER_FACTS.map((line) => `- ${line}`),
     '',
     'Hard rules, checked by software. A draft that breaks one is thrown away:',
     '- Never use a dash as punctuation. Use a comma or a period.',
