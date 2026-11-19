@@ -786,10 +786,13 @@ admin's own RLS-enforced session, never the service role.
 - **A spend cap fails CLOSED.** An unreadable ledger reads as over budget, a team with no settings
   row has no budget, a cap of 0 means "do nothing today" and an unknown model is priced at the
   dearest rate. Losing a usage row throws rather than under-counting.
-- `types/database.generated.ts` carries hand-added entries for these four tables and the two RPCs
-  (`gtm_dashboard_counts`, `gtm_sweep_stalled_tasks`) because the migration is written before it is
-  applied. **Regenerate it (`pnpm types:supabase`) after `supabase db push`**; the real output
-  replaces them.
+- `types/database.generated.ts` now holds the REAL generated output for these four tables and the
+  two RPCs (`gtm_dashboard_counts`, `gtm_sweep_stalled_tasks`): both migrations were applied to
+  production and E2E on 2026-11-19 and the file was regenerated from production. The entries
+  written ahead of the migration were line-for-line identical to the generator's, bar one line of
+  formatting. The hand-written `GtmTeamSetting`/`AgentTask`/`AgentUsage`/`ManagerDecision`
+  interfaces in `types/database.ts` were checked column-for-column against the live
+  `db_type_shape_report()` and match.
 - Enforced by `unit/guardrails/gtm-agent-boundaries.test.ts`: agent code (`lib/gtm/**`,
   `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table except
   from `lead-gen-apply.ts` (which the test holds to its own rules: checks a decision, fills only
