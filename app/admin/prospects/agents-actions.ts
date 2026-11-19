@@ -7,6 +7,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { inngest } from '@/lib/inngest/client'
 import { isTeamRunnable } from '@/lib/gtm/policy'
 import { loadTeamSettings } from '@/lib/gtm/tasks'
+import { statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
 import {
   DECISION_RULES,
   MAX_DECISION_NOTE_CHARS,
@@ -187,5 +188,93 @@ export async function requestRevOpsReport(): Promise<{ error?: string }> {
     console.error('[requestRevOpsReport]', err)
     reportError(err, { site: 'serverAction.admin.prospects.requestRevOpsReport' })
     return { error: 'Could not request the report. Please try again.' }
+  }
+}
+
+type AdminClient = Awaited<ReturnType<typeof requirePlatformAdmin>>['supabase']
+
+/**
+ * Puts a sent email on the account's record: the touch, the last-touch time the
+ * follow-up queue sorts on, and the stage if it had not been reached yet. Returns
+ * false if any of it could not be written, so the caller can say so.
+ */
+async function recordManualSend(supabase: AdminClient, actorId: string, prospectId: string | null): Promise<boolean> {
+  if (!prospectId) return true
+
+  const { data: current, error: readError } = await supabase
+    .from('prospect_accounts').select('status').eq('id', prospectId).maybeSingle()
+  if (readError || !current) {
+    reportError(readError ?? new Error('account missing'), { site: 'serverAction.admin.prospects.markDraftSent.read', extra: { prospectId } })
+    return false
+  }
+
+  const nextStatus = statusAfterManualSend(current.status)
+  const { error: updateError } = await supabase
+    .from('prospect_accounts')
+    .update({ last_touch_at: new Date().toISOString(), ...(nextStatus ? { status: nextStatus } : {}) })
+    .eq('id', prospectId)
+  if (updateError) {
+    reportError(updateError, { site: 'serverAction.admin.prospects.markDraftSent.account', extra: { prospectId } })
+    return false
+  }
+
+  const { error: touchError } = await supabase.from('prospect_touches').insert({
+    prospect_id: prospectId,
+    touch_type:  'emailed',
+    note:        'Follow-up sent (drafted by Sales Ops, sent by hand).',
+    actor_id:    actorId,
+  })
+  if (touchError) {
+    reportError(touchError, { site: 'serverAction.admin.prospects.markDraftSent.touch', extra: { prospectId } })
+    return false
+  }
+  return true
+}
+
+/**
+ * "I sent this": a person tells FieldStay they sent an approved draft themselves.
+ * FieldStay sends nothing. This closes the task and puts the email on the record.
+ *
+ * The task is closed FIRST, by an UPDATE that only matches while it is still
+ * 'approved', so a double click (or two tabs) records one send. If the record
+ * then cannot be written, the person is told, because the task is already closed
+ * and the touch would otherwise be lost without anyone knowing.
+ */
+export async function markDraftSent(taskId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const { data: task, error } = await supabase
+      .from('agent_tasks')
+      .update({ status: 'done' })
+      .eq('id', taskId)
+      .eq('team', 'sales_ops')
+      .eq('task_type', 'draft_outreach')
+      .eq('status', 'approved')
+      .select('id, prospect_id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[markDraftSent]', error)
+      reportError(error, { site: 'serverAction.admin.prospects.markDraftSent' })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!task) return { error: 'That draft was already handled.' }
+
+    const recorded = await recordManualSend(supabase, user.id, task.prospect_id)
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_draft.marked_sent',
+      targetType: 'agent_tasks',
+      targetId:   task.id,
+    })
+
+    revalidatePath(PATH)
+    return recorded ? {} : { error: 'Marked as sent, but the account could not be updated. Log the email on the account by hand.' }
+  } catch (err) {
+    console.error('[markDraftSent]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.markDraftSent' })
+    return { error: 'Operation failed. Please try again.' }
   }
 }

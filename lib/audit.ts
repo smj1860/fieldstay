@@ -201,6 +201,7 @@ export type AuditAction =
   | 'platform_admin.gtm_team.updated'
   | 'platform_admin.gtm_manager.run_requested'
   | 'platform_admin.gtm_rev_ops.report_requested'
+  | 'platform_admin.gtm_draft.marked_sent'
   | 'platform_admin.prospect_strscout.synced'
   | 'platform_admin.prospect_pms.normalized'
   | 'platform_admin.inventory_template.items_saved'

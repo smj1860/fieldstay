@@ -9,7 +9,7 @@ vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
-import { decideAgentTask, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
+import { decideAgentTask, markDraftSent, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
 import { fakeSupabase, type Scripted } from '../gtm/fake-supabase'
 
 function asAdmin(script: Record<string, Scripted[]>) {
@@ -149,5 +149,71 @@ describe('requestRevOpsReport', () => {
     asAdmin(settings(true))
     vi.mocked(inngest.send).mockRejectedValueOnce(new Error('down'))
     expect(await requestRevOpsReport()).toEqual({ error: 'Could not request the report. Please try again.' })
+  })
+})
+
+describe('markDraftSent', () => {
+  const sent = (status = 'queued', over: Record<string, Scripted[]> = {}) => asAdmin({
+    'agent_tasks:update':       [{ data: { id: 't1', prospect_id: 'p1' }, error: null }],
+    'prospect_accounts:select': [{ data: { status }, error: null }],
+    'prospect_accounts:update': [{ error: null }],
+    'prospect_touches:insert':  [{ error: null }],
+    ...over,
+  })
+
+  it('closes the draft, stamps the account and logs an emailed touch, then audits it', async () => {
+    const { calls } = sent('queued')
+    expect(await markDraftSent('t1')).toEqual({})
+
+    const closeIt = calls.find((c) => c.table === 'agent_tasks')!
+    expect(closeIt.payload).toEqual({ status: 'done' })
+    expect(calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload)
+      .toMatchObject({ status: 'emailed', last_touch_at: expect.any(String) })
+    expect(calls.find((c) => c.table === 'prospect_touches')!.payload)
+      .toMatchObject({ prospect_id: 'p1', touch_type: 'emailed', actor_id: 'admin_1' })
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'platform_admin.gtm_draft.marked_sent', targetId: 't1' }))
+  })
+
+  // A follow-up going out must never push an account that already replied back to "emailed".
+  it.each(['replied', 'meeting_set', 'in_trial', 'emailed', 'called'])('does not change the stage of an account that is %s, only its last-touch time', async (status) => {
+    const { calls } = sent(status)
+    await markDraftSent('t1')
+    const update = calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload as Record<string, unknown>
+    expect(update).not.toHaveProperty('status')
+    expect(update).toHaveProperty('last_touch_at')
+  })
+
+  // Two tabs, or a double click: the UPDATE only matches while the draft is still approved.
+  it('records one send only, and tells the second click it was already handled', async () => {
+    const { calls } = sent('queued', { 'agent_tasks:update': [{ data: null, error: null }] })
+    expect(await markDraftSent('t1')).toEqual({ error: 'That draft was already handled.' })
+    expect(calls.some((c) => c.table === 'prospect_touches')).toBe(false)
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('only ever closes a Sales Ops draft that is still approved', async () => {
+    const { calls } = sent()
+    await markDraftSent('t1')
+    const filters = calls.find((c) => c.table === 'agent_tasks')!.filters
+    expect(filters).toContainEqual(['eq', ['status', 'approved']])
+    expect(filters).toContainEqual(['eq', ['team', 'sales_ops']])
+    expect(filters).toContainEqual(['eq', ['task_type', 'draft_outreach']])
+  })
+
+  // The task is already closed by then, so silence would lose the touch without anyone knowing.
+  it('says so when the draft was closed but the account could not be updated', async () => {
+    sent('queued', { 'prospect_touches:insert': [{ error: { message: 'boom' } }] })
+    expect(await markDraftSent('t1')).toEqual({ error: 'Marked as sent, but the account could not be updated. Log the email on the account by hand.' })
+  })
+
+  it('returns a generic message on a database error, not the raw one', async () => {
+    sent('queued', { 'agent_tasks:update': [{ data: null, error: { code: '42501', message: 'permission denied' } }] })
+    expect(await markDraftSent('t1')).toEqual({ error: 'Operation failed. Please try again.' })
+  })
+
+  it('closes a draft that names no account without trying to write one', async () => {
+    const { calls } = sent('queued', { 'agent_tasks:update': [{ data: { id: 't1', prospect_id: null }, error: null }] })
+    expect(await markDraftSent('t1')).toEqual({})
+    expect(calls.some((c) => c.table === 'prospect_accounts')).toBe(false)
   })
 })

@@ -3,7 +3,7 @@ import { normalizeWebsite } from '@/lib/prospecting/normalize'
 import { reportError } from '@/lib/observability/report-error'
 import type { AgentTask } from '@/types/database'
 import type { JsonObject } from '../tasks'
-import type { HandlerRegistry, TaskContext, WorkOutcome } from '../worker'
+import type { HandlerRegistry, TaskContext, TaskHandler, WorkOutcome } from '../worker'
 import { applyApprovedContacts } from './lead-gen-apply'
 import { buildEnrichmentOutcome, type ProspectContactState } from './lead-gen-proposal'
 import { researchSite } from './lead-gen-fetch'
@@ -65,6 +65,9 @@ async function executeEnrich(task: AgentTask, ctx: TaskContext): Promise<{ outpu
   return { output: await applyApprovedContacts(ctx.supabase, task) }
 }
 
+/** Enrichment has an execute step (applying what a person approved), so it is typed as having one. */
+export const enrichAccountHandler: Required<TaskHandler> = { run: runEnrich, execute: executeEnrich }
+
 export const leadGenHandlers: HandlerRegistry = {
-  [LEAD_GEN_TASK_TYPES.enrichAccount]: { run: runEnrich, execute: executeEnrich },
+  [LEAD_GEN_TASK_TYPES.enrichAccount]: enrichAccountHandler,
 }

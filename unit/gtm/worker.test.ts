@@ -145,6 +145,27 @@ describe('workOne: carrying out an approved proposal', () => {
   })
 })
 
+describe('workOne: a team whose drafts a person finishes', () => {
+  const draftsOnly = (): HandlerRegistry => ({ draft_outreach: { run: vi.fn(async () => ({ kind: 'propose' as const, output: {} })) } })
+  const approvedClaims = (calls: { table: string; op: string; filters: [string, unknown[]][] }[]) =>
+    calls.filter((c) => c.table === 'agent_tasks' && c.op === 'select' && c.filters.some(([f, a]) => f === 'eq' && a[1] === 'approved'))
+
+  // An approved draft is waiting for a person to send it. A worker that claimed it would have nothing to do with it.
+  it('never looks for approved work when no task type has an execute step', async () => {
+    const { client, calls } = world({ selects: [{ data: null, error: null }] })
+    expect(await workOne(client, 'rev_ops', draftsOnly(), NOW)).toEqual({ worked: false, reason: 'empty' })
+    expect(approvedClaims(calls)).toHaveLength(0)
+  })
+
+  it('looks for approved work only among the types that can be executed', async () => {
+    const mixed: HandlerRegistry = { ...draftsOnly(), weekly_funnel_report: { run: vi.fn(), execute: vi.fn() } }
+    const { client, calls } = world({ selects: [{ data: null, error: null }] })
+    await workOne(client, 'rev_ops', mixed, NOW)
+    const approved = approvedClaims(calls)[0]
+    expect(approved.filters).toContainEqual(['in', ['task_type', ['weekly_funnel_report']]])
+  })
+})
+
 describe('workOne: failures', () => {
   it('retries a task whose work threw: back to pending, attempt counted, reported', async () => {
     const { reg } = registry({ run: (async () => { throw new Error('site down') }) as never })

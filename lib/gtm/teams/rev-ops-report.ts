@@ -19,6 +19,14 @@ export const STALE_TOUCH_DAYS = 7
 /** How many accounts one approval can hand to Lead Gen. A pace, so one click cannot queue the whole backlog. */
 export const MAX_LEAD_GEN_HANDOFFS = 10
 
+/**
+ * How many accounts one approval can hand to Sales Ops. Lower than Lead Gen's on
+ * purpose: Lead Gen's results are a line to glance at, while every one of these is
+ * a draft a person has to read and weigh against the voice. The pace is the reading,
+ * not the machine.
+ */
+export const MAX_SALES_OPS_HANDOFFS = 5
+
 export interface StaleExample { company: string; status: string; daysSinceTouch: number | null }
 
 export interface ReportInput {
@@ -33,6 +41,8 @@ export interface ReportInput {
   queuedNoChannel:  number
   /** accounts Lead Gen could look for contact details on, best first */
   enrichCandidates: string[]
+  /** accounts that have not answered and have an email, best first: Sales Ops could draft for them */
+  draftCandidates:  string[]
   /** today's spend across every team, in cents */
   spendTodayCents:  number
 }
@@ -43,7 +53,7 @@ export interface WeeklyReport {
   /** the figures behind the prose, so the report can be checked against a query */
   metrics: Record<string, number>
   /** what approving this report asks other teams to do */
-  handoff: { lead_gen_enrich: string[] }
+  handoff: { lead_gen_enrich: string[]; sales_ops_draft: string[] }
 }
 
 const sum = (values: Iterable<number>): number => {
@@ -89,10 +99,24 @@ function hygieneLine(input: ReportInput): string {
     + `${input.queuedNoChannel} are queued with no email or phone.`
 }
 
-function nextStepLine(count: number): string {
-  if (count === 0) return 'Next step: nothing to hand off. No account is missing contact details and has a website to read.'
+const plural = (n: number): string => (n === 1 ? 'account' : 'accounts')
+
+function leadGenLine(count: number): string {
   return `Next step: approving this report asks Lead Gen to look for public contact details on ${count} `
-    + `account${count === 1 ? '' : 's'}. Each result still comes back here for approval before anything is saved.`
+    + `${plural(count)}. Each result still comes back here for approval before anything is saved.`
+}
+
+function salesOpsLine(count: number, first: boolean): string {
+  return `${first ? 'Next step' : 'Also'}: approving it asks Sales Ops to draft a follow-up for ${count} ${plural(count)}. `
+    + 'Drafts are for you to review and send yourself. Nothing is sent automatically.'
+}
+
+function nextStepLines(leadGen: number, salesOps: number): string[] {
+  if (leadGen === 0 && salesOps === 0) return ['Next step: nothing to hand off. No account is missing contact details and has a website to read, and none is waiting on a follow-up.']
+  return [
+    ...(leadGen > 0 ? [leadGenLine(leadGen)] : []),
+    ...(salesOps > 0 ? [salesOpsLine(salesOps, leadGen === 0)] : []),
+  ]
 }
 
 export function weekLabel(now: Date): string {
@@ -103,6 +127,7 @@ export function buildWeeklyReport(input: ReportInput): WeeklyReport {
   const total = sum(Object.values(input.funnel))
   const closed = (input.funnel.won ?? 0) + (input.funnel.lost ?? 0) + (input.funnel.disqualified ?? 0)
   const handoff = input.enrichCandidates.slice(0, MAX_LEAD_GEN_HANDOFFS)
+  const drafts = input.draftCandidates.slice(0, MAX_SALES_OPS_HANDOFFS)
   const rate = replyRate(input.touchesThisWeek)
   const priorRate = replyRate(input.touchesPriorWeek)
 
@@ -114,7 +139,7 @@ export function buildWeeklyReport(input: ReportInput): WeeklyReport {
     ...stalledLines(input),
     hygieneLine(input),
     `Agent spend today: ${formatCents(input.spendTodayCents)}.`,
-    nextStepLine(handoff.length),
+    ...nextStepLines(handoff.length, drafts.length),
   ]
 
   return {
@@ -132,7 +157,7 @@ export function buildWeeklyReport(input: ReportInput): WeeklyReport {
       bounced_primary:    input.bouncedPrimary,
       queued_no_channel:  input.queuedNoChannel,
     },
-    handoff: { lead_gen_enrich: handoff },
+    handoff: { lead_gen_enrich: handoff, sales_ops_draft: drafts },
   }
 }
 

@@ -4,7 +4,8 @@ import { loadAgentsDashboard } from '@/lib/gtm/dashboard'
 import { timeAgo } from '@/lib/gtm/format'
 import { settingFor } from '@/lib/gtm/policy'
 import { ApprovalInbox } from './approval-inbox'
-import { FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } from './agents-panels'
+import { DraftQualityPanel, FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } from './agents-panels'
+import { ReadyToSend } from './ready-to-send'
 import { ManagerPanel } from './manager-panel'
 import { MasterSwitch, TeamCard } from './team-controls'
 
@@ -28,6 +29,7 @@ export async function AgentsDashboard() {
   const ages: Record<string, string> = {}
   for (const a of data.approvals) ages[a.id] = timeAgo(a.createdAt, now)
   for (const d of data.decisions) ages[d.id] = timeAgo(d.createdAt, now)
+  for (const r of data.readyDrafts) ages[r.id] = r.approvedAt ? timeAgo(r.approvedAt, now) : ''
 
   const master = settingFor(data.settings, 'global')
   const masterOn = master?.enabled === true
@@ -39,6 +41,11 @@ export async function AgentsDashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <ApprovalInbox items={data.approvals} totalWaiting={data.metrics.needsApproval} ages={ages} />
         <ManagerPanel latest={data.decisions[0] ?? null} history={data.decisions} ages={ages} />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ReadyToSend drafts={data.readyDrafts} ages={ages} />
+        <DraftQualityPanel quality={data.draftQuality} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

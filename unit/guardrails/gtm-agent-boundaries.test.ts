@@ -40,7 +40,7 @@ const OUTBOUND_SEND = [
 const PROSPECT_WRITERS = new Set<string>(['lib/gtm/teams/lead-gen-apply.ts'])
 
 /** The only agent files that may call a model. Each must bill it (see the pairing test). */
-const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts'])
+const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts', 'lib/gtm/teams/sales-ops-draft.ts'])
 
 const PROSPECT_TABLE = /\.from\(\s*['"](prospect_accounts|prospect_contacts|prospect_touches)['"]\s*\)\s*\.(insert|update|upsert|delete)\b/
 const PROSPECT_DELETE = /\.from\(\s*['"](prospect_accounts|prospect_contacts)['"]\s*\)\s*\.delete\b/
@@ -74,6 +74,22 @@ function applyWriterViolations(code: string): string[] {
   if (!/\.is\(\s*column\s*,\s*null\s*\)/.test(code)) problems.push('does not fill only empty fields')
   if (/\bstatus\s*:/.test(code)) problems.push('names a status')
   if (/\.delete\s*\(/.test(code)) problems.push('deletes')
+  return problems
+}
+
+/**
+ * Sales Ops' promises about its own drafts, as code: whatever the model returns
+ * passes checkDraft() before anyone is asked to read it, it is billed, and the
+ * draft handler has no `execute` step, so a worker can never "finish" an approved
+ * draft by doing something with it. Approval means "good to send"; sending is a
+ * person's, from their own mailbox.
+ */
+function draftHandlerViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/\bgenerateDraft\(/.test(code)) problems.push('does not call the drafting model')
+  if (!/\bcheckDraft\(/.test(code)) problems.push('never checks the draft against the voice')
+  if (!/\brecordUsage\(/.test(code)) problems.push('does not bill the model call')
+  if (/\bexecute\s*:/.test(code)) problems.push('has an execute step, so a worker would act on an approved draft')
   return problems
 }
 
@@ -128,6 +144,12 @@ describe('guardrail: GTM agent boundaries', () => {
     ).toEqual([])
   })
 
+  it('the Sales Ops draft handler checks the voice, bills the call, and has no execute step', () => {
+    const handler = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops.ts')
+    expect(handler, 'lib/gtm/teams/sales-ops.ts should be scanned').toBeDefined()
+    expect(draftHandlerViolations(handler!.code)).toEqual([])
+  })
+
   it('every function that triggers a model call also records its usage', () => {
     const manager = sources.find((s) => s.path === 'lib/inngest/functions/gtm-manager.ts')!
     expect(manager.code).toContain('narrateBrief(')
@@ -176,6 +198,15 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(applyWriterViolations(`task.decided_at; await q.update(p)`)).toContain('does not fill only empty fields')
       expect(applyWriterViolations(`${good}; update({ status: 'emailed' })`)).toContain('names a status')
       expect(applyWriterViolations(`${good}; q.delete()`)).toContain('deletes')
+    })
+
+    it('the draft handler rules', () => {
+      const good = `const c = await generateDraft(b); await recordUsage(s, u); const i = checkDraft(c.draft); export const h = { run }`
+      expect(draftHandlerViolations(good)).toEqual([])
+      expect(draftHandlerViolations(good.replace('checkDraft(', 'skip('))).toContain('never checks the draft against the voice')
+      expect(draftHandlerViolations(good.replace('recordUsage(', 'skip('))).toContain('does not bill the model call')
+      expect(draftHandlerViolations(good.replace('generateDraft(', 'skip('))).toContain('does not call the drafting model')
+      expect(draftHandlerViolations(`${good.replace('{ run }', '{ run, execute: send }')}`)).toContain('has an execute step, so a worker would act on an approved draft')
     })
 
     it('an unbilled model caller', () => {

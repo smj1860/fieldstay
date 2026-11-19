@@ -7,7 +7,8 @@ import {
   type TaskStatus,
 } from '@/lib/gtm/constants'
 import { formatCents, taskStatusTone, timeAgo } from '@/lib/gtm/format'
-import type { RecentTask } from '@/lib/gtm/dashboard'
+import { VOICE_GUIDE_STATUS, VOICE_GUIDE_VERSION } from '@/lib/gtm/brand/voice'
+import { DRAFT_QUALITY_WINDOW_DAYS, type DraftQuality, type RecentTask } from '@/lib/gtm/dashboard'
 import type { ManagerMetrics } from '@/lib/gtm/manager/brief'
 import { taskCount, type GtmRollup } from '@/lib/gtm/rollup'
 import { PROSPECT_STATUSES, PROSPECT_STATUS_LABELS } from '../constants'
@@ -138,6 +139,50 @@ export function RecentTasks({ tasks, now }: Readonly<{ tasks: RecentTask[]; now:
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * How the drafts have been received. This is the evidence for the question the
+ * founder asked: when would sending from inside FieldStay be safe? It reports
+ * only what happened (approved, rejected, sent) and the founder's own notes, and
+ * draws no conclusion of its own.
+ */
+export function DraftQualityPanel({ quality }: Readonly<{ quality: DraftQuality }>) {
+  const decided = quality.approved + quality.rejected
+  const rate = decided > 0 ? `${Math.round((quality.approved / decided) * 100)}%` : 'no drafts reviewed yet'
+
+  return (
+    <Card>
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Draft quality</h3>
+      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+        Last {DRAFT_QUALITY_WINDOW_DAYS} days. Sending from inside FieldStay is not built. This is the record to
+        judge the voice by before it is.
+      </p>
+
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+        <div><dt style={{ color: 'var(--text-muted)' }}>Approved</dt><dd className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{quality.approved}</dd></div>
+        <div><dt style={{ color: 'var(--text-muted)' }}>Rejected</dt><dd className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{quality.rejected}</dd></div>
+        <div><dt style={{ color: 'var(--text-muted)' }}>Approval rate</dt><dd className="text-sm" style={{ color: 'var(--text-primary)' }}>{rate}</dd></div>
+        <div><dt style={{ color: 'var(--text-muted)' }}>Marked sent</dt><dd className="text-sm" style={{ color: 'var(--text-primary)' }}>{quality.sent}</dd></div>
+      </dl>
+
+      <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+        Voice guide {VOICE_GUIDE_VERSION}. {VOICE_GUIDE_STATUS} Edit it in lib/gtm/brand/voice.ts.
+      </p>
+
+      {quality.notes.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Why recent drafts were rejected</p>
+          <ul className="mt-1 space-y-1">
+            {quality.notes.map((n) => (
+              <li key={`${n.decidedAt}-${n.note}`} className="text-xs" style={{ color: 'var(--text-muted)' }}>{n.note}</li>
+            ))}
+          </ul>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>These notes are passed to the next draft.</p>
+        </div>
       )}
     </Card>
   )

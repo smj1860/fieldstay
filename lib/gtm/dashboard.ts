@@ -1,7 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapCount, unwrapList } from '@/lib/supabase/unwrap'
 import type { Database } from '@/types/database'
 import type { Json } from '@/types/database.generated'
 import { isManagerKind, isTaskStatus, isWorkerTeam, type ManagerRunKind, type TaskStatus, type WorkerTeam } from './constants'
@@ -54,6 +54,31 @@ export interface DecisionItem {
   createdAt:     string
 }
 
+export interface ReadyDraft {
+  id:          string
+  company:     string | null
+  contactName: string | null
+  email:       string | null
+  subject:     string
+  body:        string
+  approvedAt:  string | null
+}
+
+/** How the drafts have been received, the evidence for whether sending could ever be trusted. */
+export interface DraftQuality {
+  /** drafts a person approved in the window, sent or not yet */
+  approved: number
+  rejected: number
+  /** approved drafts the person has since marked as sent */
+  sent:     number
+  /** the founder's own words on drafts they rejected, newest first */
+  notes:    { note: string; decidedAt: string }[]
+}
+
+export const DRAFT_QUALITY_WINDOW_DAYS = 30
+export const MAX_READY_DRAFTS = 25
+export const MAX_QUALITY_NOTES = 5
+
 export interface AgentsDashboardData {
   now:        string
   settings:   TeamSetting[]
@@ -62,6 +87,8 @@ export interface AgentsDashboardData {
   approvals:  ApprovalItem[]
   recent:     RecentTask[]
   decisions:  DecisionItem[]
+  readyDrafts:  ReadyDraft[]
+  draftQuality: DraftQuality
 }
 
 /** The embedded account, which PostgREST returns as an object or a one-element array. */
@@ -72,11 +99,64 @@ function companyOf(embed: unknown): string | null {
   return typeof company === 'string' ? company : null
 }
 
+function embedFields(embed: unknown): { company: string | null; email: string | null; contactName: string | null } {
+  const row = Array.isArray(embed) ? embed[0] : embed
+  const read = (key: string): string | null => {
+    const value = typeof row === 'object' && row !== null ? (row as Record<string, unknown>)[key] : null
+    return typeof value === 'string' ? value : null
+  }
+  return { company: read('company'), email: read('email'), contactName: read('contact_name') }
+}
+
+/** subject and body out of a stored draft, or null when the output is not one. */
+function draftText(output: Json | null): { subject: string; body: string } | null {
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) return null
+  const { subject, body } = output
+  return typeof subject === 'string' && typeof body === 'string' ? { subject, body } : null
+}
+
+export async function loadDraftReadiness(supabase: SupabaseClient<Database>, now: Date) {
+  const since = new Date(now.getTime() - DRAFT_QUALITY_WINDOW_DAYS * 86_400_000).toISOString()
+  const drafts = () => supabase.from('agent_tasks').select('id', { count: 'exact', head: true })
+    .eq('team', 'sales_ops').eq('task_type', 'draft_outreach').gte('decided_at', since)
+
+  const [ready, approved, sent, rejected, notes] = await Promise.all([
+    supabase.from('agent_tasks')
+      .select('id, output, decided_at, prospect_accounts(company, email, contact_name)')
+      .eq('team', 'sales_ops').eq('task_type', 'draft_outreach').eq('status', 'approved')
+      .order('decided_at', { ascending: true })
+      .limit(MAX_READY_DRAFTS),
+    drafts().in('status', ['approved', 'done']),
+    drafts().eq('status', 'done'),
+    drafts().eq('status', 'rejected'),
+    supabase.from('agent_tasks')
+      .select('decision_note, decided_at')
+      .eq('team', 'sales_ops').eq('task_type', 'draft_outreach').eq('status', 'rejected')
+      .not('decision_note', 'is', null)
+      .order('decided_at', { ascending: false })
+      .limit(MAX_QUALITY_NOTES),
+  ])
+
+  const readyDrafts = unwrapList(ready, { site: `${SITE}.readyDrafts` }).flatMap((r): ReadyDraft[] => {
+    const text = draftText(r.output)
+    return text ? [{ id: r.id, ...embedFields(r.prospect_accounts), ...text, approvedAt: r.decided_at }] : []
+  })
+
+  const draftQuality: DraftQuality = {
+    approved: unwrapCount(approved, { site: `${SITE}.quality.approved` }),
+    sent:     unwrapCount(sent, { site: `${SITE}.quality.sent` }),
+    rejected: unwrapCount(rejected, { site: `${SITE}.quality.rejected` }),
+    notes:    unwrapList(notes, { site: `${SITE}.quality.notes` }).flatMap((n) =>
+      n.decision_note && n.decided_at ? [{ note: n.decision_note, decidedAt: n.decided_at }] : []),
+  }
+  return { readyDrafts, draftQuality }
+}
+
 export async function loadAgentsDashboard(
   supabase: SupabaseClient<Database>,
   now: Date = new Date(),
 ): Promise<AgentsDashboardData> {
-  const [settings, rolled, approvalRows, recentRows, decisionRows] = await Promise.all([
+  const [settings, rolled, approvalRows, recentRows, decisionRows, readiness] = await Promise.all([
     loadTeamSettings(supabase),
     fetchRollup(supabase, {
       touchesSince: new Date(now.getTime() - SEVEN_DAYS_MS),
@@ -98,6 +178,7 @@ export async function loadAgentsDashboard(
       .select('id, kind, brief, model, autonomy_at_run, created_at')
       .order('created_at', { ascending: false })
       .limit(MAX_DECISIONS_SHOWN),
+    loadDraftReadiness(supabase, now),
   ])
 
   if (!rolled.ok) {
@@ -129,5 +210,7 @@ export async function loadAgentsDashboard(
     approvals,
     recent,
     decisions,
+    readyDrafts:  readiness.readyDrafts,
+    draftQuality: readiness.draftQuality,
   }
 }

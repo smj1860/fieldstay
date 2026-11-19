@@ -743,7 +743,7 @@ countdown only opens on a stay with a reason to file (flagged turnover or a crew
 order), not on every Airbnb or VRBO stay. The packet cover carries the platform reservation
 reference and never the guest's name or email, so it survives `guest_pii_anonymized_at`.
 
-### GTM Agent Teams (added 2026-11-18: foundation, Rev Ops, Lead Gen)
+### GTM Agent Teams (added 2026-11-18: foundation, Rev Ops, Lead Gen. 2026-11-19: Sales Ops)
 ```
 gtm_team_settings           — one row per team (manager, lead_gen, content_brand, sales_ops,
                               rev_ops) plus a 'global' master switch. EVERY ROW SHIPS DISABLED
@@ -797,7 +797,7 @@ admin's own RLS-enforced session, never the service role.
   `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table except
   from `lead-gen-apply.ts` (which the test holds to its own rules: checks a decision, fills only
   empty fields, names no status, deletes nothing), never calls a bare `fetch()`, never deletes an
-  account or sets won/lost/disqualified, and calls a model only from a file on the billed list. A team that genuinely needs one of those adds its file to the matching allowlist,
+  account or sets won/lost/disqualified, and calls a model only from a file on the billed list (`narrate.ts`, `sales-ops-draft.ts`), and the Sales Ops draft handler must check the voice, bill the call and have no `execute` step. A team that genuinely needs one of those adds its file to the matching allowlist,
   with a reason, in the same change. Schema behaviour (depth cap, dedupe, append-only grants,
   non-admin sees nothing, the sweep) is pinned against a real Postgres by `unit/gtm/gtm-schema.test.ts`.
 
@@ -813,9 +813,10 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
 
 - **Rev Ops** (`lib/gtm/teams/rev-ops*.ts`) writes the Monday funnel report from numbers alone (no
   model) and changes nothing about any account. **Approving the report IS the handoff**: only then
-  does it queue up to 10 Lead Gen tasks (`MAX_LEAD_GEN_HANDOFFS`), each itself propose-only, so
-  every cross-team handoff has a human gate and the second approval (what to actually save) is
-  still ahead. "Run report now" on its card refuses up front when it cannot run: a button that
+  does it queue up to 10 Lead Gen tasks (`MAX_LEAD_GEN_HANDOFFS`) and up to 5 Sales Ops draft
+  tasks (`MAX_SALES_OPS_HANDOFFS`, lower because each is something to READ), each itself
+  propose-only, so every cross-team handoff has a human gate and the second approval (what to
+  actually save, or whether the draft is any good) is still ahead. "Run report now" on its card refuses up front when it cannot run: a button that
   looks like it worked while the queue refused the task is worse than none.
 - **Lead Gen** (`lib/gtm/teams/lead-gen*.ts`) reads a prospect's OWN website for public contact
   details and proposes them. No vendor, no model: `robots.ts` + `lead-gen-extract.ts` are pure and
@@ -828,6 +829,43 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   with no recorded `decided_at`, fills only EMPTY email/phone with an `UPDATE ... IS NULL` (a person
   can fill the field between approval and application, and theirs wins), never names a `status`,
   and leaves a history note saying a person approved it, never the value itself.
+- **Sales Ops** (`lib/gtm/teams/sales-ops*.ts`) drafts outreach emails for a person to review and
+  SEND THEMSELVES. It cannot send: nothing it imports can contact a prospect. Its `draft_outreach`
+  handler has **no `execute` step on purpose**, and `claimNextTask()` takes a `types` filter so a
+  worker never claims an approved draft (`executableTypes()` in `worker.ts`). Approval means "good
+  to send"; the last step belongs to a person. A draft is only written for an account that has NOT
+  replied (`draftEligibility()`, re-checked on the live row before spending a model call): once they
+  answer, they need a person's reply, not a template. The model is never given an email address or a
+  phone number, only who it is writing to.
+- **Brand voice is code, in `lib/gtm/brand/voice.ts`, and it is a DRAFT.** It was derived from the
+  homepage copy and the house rules (no em dash, no stated pricing), NOT reviewed by the founder;
+  `VOICE_GUIDE_STATUS` says so and the dashboard shows it, so nobody mistakes drafts flowing for an
+  approved voice. Two halves: tone guidance goes into the prompt and can be ignored; `checkDraft()`
+  is the HARD gate and cannot. Every draft passes it before anyone is asked to read it. A draft that
+  fails gets ONE correction call with exactly what broke; one that still fails is a failed task with
+  the rule names in its error, never a rule quietly waived. Both calls are billed (`recordUsage`,
+  keyed per attempt) because the money is spent either way. `PRODUCT_FACTS` is the only thing a draft
+  may claim about the product, since a model will invent a feature and a sent email cannot be taken
+  back. Bump `VOICE_GUIDE_VERSION` when either half changes: every draft stores the version it was
+  written under. The founder's rejection notes are fed back into the next draft's prompt.
+- **"Ready to send" and "Draft quality" on the dashboard.** An approved draft waits for a person to
+  copy it into their own mailbox; "I sent this" (`markDraftSent`) closes the task with an UPDATE that
+  only matches while it is still `approved` (a double click records one send), stamps
+  `last_touch_at`, logs an `emailed` touch, and moves the account to `emailed` ONLY if it had not
+  been reached yet (`statusAfterManualSend`): a follow-up must never push an account that replied
+  back to `emailed`. Draft quality is the record of approved/rejected/sent and the founder's notes
+  over 30 days. It reports what happened and draws no conclusion: it is the evidence for the question
+  of when sending from inside FieldStay would be safe.
+- **OPEN DECISION: sending from inside FieldStay is NOT built, and is not just a code change.** The
+  founder wants it eventually, once the voice is satisfactory. Before it is built, decide: (1) the
+  stack table says Resend is "transactional only, never marketing", and cold outreach to people who
+  never signed up is not transactional, so either that rule changes deliberately or a different
+  sending path is chosen; the existing commercial emails (`onboarding-drip`, `email-trial-lifecycle`)
+  go to people who signed up and are a different obligation. (2) Prospecting email needs a
+  postal address, an unsubscribe that is honored (`lib/email/unsubscribe.ts` covers signed-up users
+  only), and a suppression list. (3) A track record on the Draft quality panel that the founder
+  actually trusts. When built, the send is a PERSON'S click through a Server Action, never an agent:
+  `gtm-agent-boundaries` forbids an agent from importing a sender, and that stays.
 - **`failTask` takes `resumeTo`.** A task that fails while APPLYING an approved proposal goes back to
   `approved`, not `pending`, or it would redo the research and ask for the same approval twice. The
   stall sweep does the same via `decided_at` (migration `20261118130000`, which replaces the function
@@ -2188,8 +2226,11 @@ following them stops being a memory test. Five layers, checked in CI via
      with the drain kick outside it.
    - `gtm-agent-boundaries` — the GTM agents' promises as structure: no email/SMS sender
      imported, prospect-table writes only from the one approved-proposal applier (and held to its
-     own rules), no bare `fetch()`, no account deletion or closed-stage write, and every model call
-     from a billed file. Carries fire-checks for each rule.
+     own rules), no bare `fetch()`, no account deletion or closed-stage write, every model call
+     from a billed file, and the Sales Ops draft handler checks the voice, bills the call and has no
+     `execute` step. Carries fire-checks for each rule, and the real-tree ones were run against a
+     deliberately violating tree (its first draft of the Sales Ops test never ran at all, which only
+     the fire-check showed).
    - `node-types-runtime-parity` — `@types/node`'s major equals
      `engines.node`'s and every `node-version:` in `.github/workflows/`.
      Types ahead of the runtime describe APIs that do not exist in
