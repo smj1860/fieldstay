@@ -8,6 +8,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { centralDayStart, isTeamRunnable } from '@/lib/gtm/policy'
 import { enqueueTask, loadTeamSettings, type EnqueueResult } from '@/lib/gtm/tasks'
+import { QUEUE_TASK_TYPE } from '@/lib/gtm/teams/lead-gen-queue'
 import { CALL_BRIEF_TASK_TYPE } from '@/lib/gtm/teams/sales-ops-calls'
 import { statusAfterManualCall, statusAfterManualSend, statusAfterReply } from '@/lib/gtm/teams/sales-ops-eligibility'
 import {
@@ -502,5 +503,53 @@ export async function markProspectReplied(
     console.error('[markProspectReplied]', err)
     reportError(err, { site: 'serverAction.admin.prospects.markProspectReplied' })
     return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+const QUEUE_REFUSALS: Record<Extract<EnqueueResult, { ok: false }>['reason'], string> = {
+  team_off:  'Turn on the master switch and Lead Gen first.',
+  too_deep:  'This task is too many handoffs deep.',
+  task_cap:  'Lead Gen has reached its daily task cap.',
+  cost_cap:  'Lead Gen has reached its daily spend cap.',
+  duplicate: 'A queue suggestion was already requested today. Check the approval inbox.',
+}
+
+/**
+ * Asks Lead Gen to suggest which accounts to move to queued, outside the weekly
+ * report. The list lands in the approval inbox; approving it only changes those
+ * accounts' stage. Refuses up front when Lead Gen is off, since a button that
+ * looks like it worked while the queue refused the task is worse than none. One
+ * per Central Time day, so a double click queues one.
+ */
+export async function requestQueueProposal(): Promise<{ error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const settings = await loadTeamSettings(supabase)
+    if (!isTeamRunnable(settings, 'lead_gen')) return { error: QUEUE_REFUSALS.team_off }
+
+    const day = centralDayStart(new Date()).toISOString().slice(0, 10)
+    const queued = await enqueueTask(createServiceClient({ platformAdmin: { id: user.id } }), {
+      team:             'lead_gen',
+      taskType:         QUEUE_TASK_TYPE,
+      origin:           'human',
+      priority:         60,
+      requiresApproval: true,
+      dedupeKey:        `lead_gen:${QUEUE_TASK_TYPE}:manual:${day}`,
+    })
+    if (!queued.ok) return { error: QUEUE_REFUSALS[queued.reason] }
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.gtm_queue.requested',
+      targetType: 'agent_tasks',
+      targetId:   queued.id,
+    })
+    revalidatePath(PATH)
+    return {}
+  } catch (err) {
+    console.error('[requestQueueProposal]', err)
+    reportError(err, { site: 'serverAction.admin.prospects.requestQueueProposal' })
+    return { error: 'Could not request the suggestion. Please try again.' }
   }
 }

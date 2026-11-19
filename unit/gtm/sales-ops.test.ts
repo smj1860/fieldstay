@@ -180,6 +180,6 @@ describe('Sales Ops never has a worker finish its drafts', () => {
 
   it('leaves the other teams\' execute steps alone', () => {
     expect(executableTypes(revOpsHandlers)).toEqual(['weekly_funnel_report'])
-    expect(executableTypes(leadGenHandlers)).toEqual(['enrich_account'])
+    expect(executableTypes(leadGenHandlers)).toEqual(['enrich_account', 'queue_candidates'])
   })
 })

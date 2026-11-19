@@ -6,6 +6,7 @@ import type { Json } from '@/types/database.generated'
 import { centralDayStart } from '../policy'
 import { fetchRollup, spentTodayCents } from '../rollup'
 import { enqueueTask, type JsonObject } from '../tasks'
+import { QUEUE_TASK_TYPE } from './lead-gen-queue'
 import { DRAFTABLE_STAGES } from './sales-ops-eligibility'
 import type { HandlerRegistry, TaskContext, TaskHandler } from '../worker'
 import {
@@ -38,6 +39,8 @@ const CANDIDATE_POOL = 50
 const ENRICH_RECHECK_DAYS = 30
 /** An account Sales Ops already drafted for is not offered again for this long. Also the length of one dedupe period. */
 const DRAFT_RECHECK_DAYS = 14
+/** One queue proposal per this many days from the weekly report. A manual request is separate. */
+const QUEUE_PROPOSAL_DAYS = 7
 
 function daysBetween(from: string | null, now: Date): number | null {
   if (!from) return null
@@ -235,7 +238,28 @@ async function executeReport(task: AgentTask, ctx: TaskContext) {
   const salesOps = await handOff(task, ctx, handoffIds(task.output, 'sales_ops_draft', MAX_SALES_OPS_HANDOFFS), {
     team: 'sales_ops', taskType: 'draft_outreach', priority: 50, periodDays: DRAFT_RECHECK_DAYS,
   })
-  return { output: { handoff: leadGen, sales_ops_handoff: salesOps } as JsonObject }
+  const queue = await requestQueueProposal(task, ctx)
+  return { output: { handoff: leadGen, sales_ops_handoff: salesOps, queue_handoff: queue } as JsonObject }
+}
+
+/**
+ * Asks Lead Gen which accounts to move to queued, so there are first drafts to
+ * ask Sales Ops for next week. One task, not one per account: the list is Lead
+ * Gen's to propose and a person's to approve. Lead Gen being off, or already asked
+ * this period, are ordinary answers recorded in the output.
+ */
+async function requestQueueProposal(task: AgentTask, ctx: TaskContext): Promise<Record<string, number>> {
+  const period = Math.floor(ctx.now.getTime() / (QUEUE_PROPOSAL_DAYS * DAY_MS))
+  const result = await enqueueTask(ctx.supabase, {
+    team:      'lead_gen',
+    taskType:  QUEUE_TASK_TYPE,
+    origin:    'rev_ops',
+    parent:    { id: task.id, depth: task.depth },
+    dedupeKey: `lead_gen:${QUEUE_TASK_TYPE}:${period}`,
+    priority:  45,
+    now:       ctx.now,
+  })
+  return { [result.ok ? 'queued' : result.reason]: 1 }
 }
 
 /** The weekly report. It has an execute step (the handoff), so it is typed as having one. */

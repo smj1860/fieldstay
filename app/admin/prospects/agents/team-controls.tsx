@@ -15,7 +15,7 @@ import {
   type SettingsTeam,
 } from '@/lib/gtm/constants'
 import type { TeamSetting } from '@/lib/gtm/policy'
-import { requestRevOpsReport, updateTeamSettings } from '../agents-actions'
+import { requestQueueProposal, requestRevOpsReport, updateTeamSettings } from '../agents-actions'
 
 type ActionResult = { error?: string }
 
@@ -106,7 +106,39 @@ function RunReportButton({ disabled }: Readonly<{ disabled: boolean }>) {
       <Button type="button" variant="secondary" disabled={disabled || pending} onClick={request}>
         Run report now
       </Button>
-      {message && <p role="status" className="text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</p>}
+      {message && <output className="block text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</output>}
+      {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
+    </div>
+  )
+}
+
+/** Asks Lead Gen which accounts to move to queued. The list appears in the approval inbox; approving only changes their stage. */
+function SuggestQueueButton({ disabled }: Readonly<{ disabled: boolean }>) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  function request() {
+    setMessage(null)
+    setError(null)
+    startTransition(async () => {
+      const result = await requestQueueProposal()
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      setMessage('Requested. The suggestion appears in the approval inbox shortly.')
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="mt-3">
+      <Button type="button" variant="secondary" disabled={disabled || pending} onClick={request}>
+        Suggest accounts to queue
+      </Button>
+      {message && <output className="block text-xs mt-2" style={{ color: 'var(--accent-green)' }}>{message}</output>}
       {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
     </div>
   )
@@ -199,6 +231,7 @@ export function TeamCard({ setting, masterOn }: Readonly<{ setting: TeamSetting;
         )}
       </div>
       {team === 'rev_ops' && <RunReportButton disabled={!setting.enabled || !masterOn} />}
+      {team === 'lead_gen' && <SuggestQueueButton disabled={!setting.enabled || !masterOn} />}
       {(localError ?? error) && (
         <p role="alert" className="text-xs mt-3" style={{ color: 'var(--accent-red)' }}>{localError ?? error}</p>
       )}
