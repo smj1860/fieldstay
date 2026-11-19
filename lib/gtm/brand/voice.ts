@@ -182,16 +182,16 @@ function hasSignoffLine(body: string): boolean {
 const wordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length
 
 /**
- * The FieldStay marketing pages a draft may link to, by path on fieldstay.app.
+ * The FieldStay landing pages a draft may link to, by path on fieldstay.app: the
+ * segment pages (/ownerrez, /hospitable, /strops, /hosts) plus the product overview.
+ * Comparison pages and pricing are deliberately left out of cold outreach.
  * A draft is a model's output and a model will invent a plausible URL, so a link
  * to a page that does not exist is refused the same as a link to another site.
  * Add a page here when one is published. (Subdomains such as app.fieldstay.app
  * are the product itself and are not path-checked.)
  */
 export const LANDING_PATHS: readonly string[] = [
-  '/', '/about', '/faq', '/features', '/for-vendors', '/hospitable', '/hosts', '/integrations', '/ownerrez',
-  '/pricing', '/short-term-rental-operations-software', '/strops', '/why-fieldstay', '/enterprise',
-  '/breezeway-alternative', '/ezcare-alternative', '/operto-teams-alternative', '/properly-alternative', '/turno-alternative',
+  '/', '/hosts', '/strops', '/ownerrez', '/hospitable', '/features', '/integrations',
 ]
 
 const isOwnHost = (host: string): boolean => host === 'fieldstay.app' || host.endsWith('.fieldstay.app')

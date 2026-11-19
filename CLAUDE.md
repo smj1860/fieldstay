@@ -883,7 +883,7 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   back. `PRODUCT_FACTS` is order-sensitive: the call brief points at a fact by index. The founder
   confirmed the facts on 2026-11-19 (inspections with immutable records, sealed photos for damage
   claims, automatic or suggested crew scheduling). A draft may link only to a page in `LANDING_PATHS`
-  (the real marketing pages on fieldstay.app), because a model invents plausible URLs; add a page there
+  (the segment pages /ownerrez, /hospitable, /strops, /hosts plus the overview; no comparison or pricing pages in cold outreach), because a model invents plausible URLs; add a page there
   when one is published. The sender may claim only `SENDER_FACTS` (has done turnovers, nothing more).
   Bump `VOICE_GUIDE_VERSION` when either half changes: every draft stores the version it was
   written under. The founder's rejection notes are fed back into the next draft's prompt.

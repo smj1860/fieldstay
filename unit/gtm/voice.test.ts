@@ -286,6 +286,16 @@ describe('checkDraft: links go only to FieldStay pages that exist', () => {
     expect(link(url)).toContain('link')
   })
 
+  // Cold outreach does not link a competitor comparison or the pricing page.
+  it.each(['/pricing', '/turno-alternative', '/breezeway-alternative', '/enterprise', '/faq', '/for-vendors'])('keeps %s out of outreach', (path) => {
+    expect(LANDING_PATHS).not.toContain(path)
+    expect(link(`https://fieldstay.app${path}`)).toContain('link')
+  })
+
+  it('offers the segment pages', () => {
+    for (const path of ['/ownerrez', '/strops', '/hospitable', '/hosts']) expect(LANDING_PATHS).toContain(path)
+  })
+
   it('does not path-check the product subdomain', () => {
     expect(link('https://app.fieldstay.app/signup')).not.toContain('link')
   })
