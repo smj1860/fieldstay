@@ -131,7 +131,8 @@ export const SOCIAL_PROOF: readonly string[] = [
   'customers say', 'customers love', 'thousands of', 'hundreds of', 'many managers', 'managers already',
 ]
 
-const PERCENT = /\d+(?:\.\d+)?\s?%/
+/** A digit, an optional space, then %: "15%" and "2.5%" both end this way. No leading \d+, which would rescan a long digit run from every start. */
+const PERCENT = /\d\s?%/
 const SAVE_WORDS: ReadonlySet<string> = new Set(['save', 'saves', 'saved', 'saving'])
 const CUT_WORDS: ReadonlySet<string> = new Set(['cut', 'cuts', 'reduce', 'reduces', 'reduced'])
 const SAVED_THINGS: ReadonlySet<string> = new Set(['hours', 'time', 'money', 'days'])

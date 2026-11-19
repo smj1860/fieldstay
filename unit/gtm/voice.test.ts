@@ -243,6 +243,7 @@ describe('checkDraft: hostile input stays fast', () => {
     ['a long run of save words', 'save '.repeat(40_000)],
     ['a long run of cut words', 'cuts by '.repeat(40_000)],
     ['an unclosed bracket, repeated', '['.repeat(40_000)],
+    ['a very long digit run with no percent sign', '1'.repeat(80_000)],
   ])('handles %s without a stall', (_label, body) => {
     expect(timed(body)).toBeLessThan(1_500)
   })
@@ -254,6 +255,10 @@ describe('checkDraft: hostile input stays fast', () => {
     expect(rules(withBody(GOOD_BODY.replace('Dana', '{{first_name}}')))).toContain('placeholder')
     expect(rules(withBody(`${GOOD_BODY} It saves a few hours of time.`))).toContain('unbacked_claim')
     expect(rules(withBody(`${GOOD_BODY} That cuts the work by 40 minutes.`))).toContain('unbacked_claim')
+  })
+
+  it.each(['15%', '2.5%', '40 %', 'by 100%'])('still sees a percentage: %s', (pct) => {
+    expect(rules(withBody(`${GOOD_BODY} It is ${pct} better.`))).toContain('unbacked_claim')
   })
 
   it('does not call an ordinary closing line a sign-off', () => {
