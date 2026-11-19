@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DRAFTABLE_STAGES, INELIGIBLE_SUMMARY, draftEligibility, statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
+import { DRAFTABLE_STAGES, INELIGIBLE_SUMMARY, draftEligibility, statusAfterManualCall, statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
 
 const target = (over: Partial<{ status: string; email: string | null; email_status: string | null }> = {}) =>
   ({ status: 'queued', email: 'dana@acmerentals.com', email_status: 'unknown', ...over })
@@ -49,5 +49,15 @@ describe('statusAfterManualSend', () => {
   // Moving these back to "emailed" would erase a reply, a meeting or a trial from the funnel.
   it.each(['emailed', 'called', 'texted', 'replied', 'meeting_set', 'in_trial', 'won', 'lost', 'disqualified', 'mystery'])('leaves %s alone', (status) => {
     expect(statusAfterManualSend(status)).toBeNull()
+  })
+})
+
+describe('statusAfterManualCall', () => {
+  it.each(['new', 'researching', 'needs_contact_info', 'queued'])('moves an account that had not been reached (%s) to called', (status) => {
+    expect(statusAfterManualCall(status)).toBe('called')
+  })
+
+  it.each(['emailed', 'called', 'texted', 'replied', 'meeting_set', 'in_trial', 'won', 'lost', 'disqualified'])('leaves %s alone', (status) => {
+    expect(statusAfterManualCall(status)).toBeNull()
   })
 })

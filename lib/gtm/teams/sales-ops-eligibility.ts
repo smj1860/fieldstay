@@ -51,3 +51,12 @@ const BEFORE_FIRST_OUTREACH = ['new', 'researching', 'needs_contact_info', 'queu
 export function statusAfterManualSend(current: string): 'emailed' | null {
   return BEFORE_FIRST_OUTREACH.includes(current) ? 'emailed' : null
 }
+
+/**
+ * The same rule for a call a person has made by hand: only an account that had
+ * not been reached yet becomes 'called'. A call to someone who already replied or
+ * has a meeting must not move them back to an earlier stage.
+ */
+export function statusAfterManualCall(current: string): 'called' | null {
+  return BEFORE_FIRST_OUTREACH.includes(current) ? 'called' : null
+}

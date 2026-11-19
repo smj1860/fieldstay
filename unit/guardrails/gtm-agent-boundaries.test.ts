@@ -93,6 +93,29 @@ function draftHandlerViolations(code: string): string[] {
   return problems
 }
 
+/**
+ * Sales Ops' promises about its call briefs, as code: a brief is built from facts
+ * by the pure builder, no model writes it (so nothing is invented about a
+ * stranger's business), and the handler has no `execute` step, so a worker can
+ * never act on an approved brief. The call itself is a person on their own phone.
+ */
+function callBriefViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/\bbuildCallBrief\(/.test(code)) problems.push('does not build the brief with the pure builder')
+  if (LLM_IMPORT.test(code) || /\bgenerateDraft\(/.test(code)) problems.push('calls a model: a brief is built from facts, not generated')
+  if (/\bexecute\s*:/.test(code)) problems.push('has an execute step, so a worker would act on an approved brief')
+  return problems
+}
+
+/** The builder stays pure: no database, no network, no queue, nothing that could reach a person. */
+function briefBuilderViolations(code: string): string[] {
+  const problems: string[] = []
+  if (/\bsupabase\b|\binngest\b|@\/lib\/sms|@\/lib\/resend/i.test(code)) problems.push('reaches a database, a queue or a sender')
+  if (BARE_FETCH.test(code)) problems.push('makes a network call')
+  if (LLM_IMPORT.test(code)) problems.push('imports a model client')
+  return problems
+}
+
 function unbilledModelCallers(files: readonly Source[]): string[] {
   return files.filter((f) => LLM_IMPORT.test(f.code) && !LLM_CALLERS.has(f.path)).map((f) => f.path)
 }
@@ -148,6 +171,15 @@ describe('guardrail: GTM agent boundaries', () => {
     const handler = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops.ts')
     expect(handler, 'lib/gtm/teams/sales-ops.ts should be scanned').toBeDefined()
     expect(draftHandlerViolations(handler!.code)).toEqual([])
+  })
+
+  it('the Sales Ops call brief is built from facts, never generated, and a worker never acts on one', () => {
+    const handler = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops-calls.ts')
+    expect(handler, 'lib/gtm/teams/sales-ops-calls.ts should be scanned').toBeDefined()
+    expect(callBriefViolations(handler!.code)).toEqual([])
+    const builder = sources.find((x) => x.path === 'lib/gtm/teams/sales-ops-call-brief.ts')
+    expect(builder, 'lib/gtm/teams/sales-ops-call-brief.ts should be scanned').toBeDefined()
+    expect(briefBuilderViolations(builder!.code)).toEqual([])
   })
 
   it('every function that triggers a model call also records its usage', () => {
@@ -207,6 +239,23 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(draftHandlerViolations(good.replace('recordUsage(', 'skip('))).toContain('does not bill the model call')
       expect(draftHandlerViolations(good.replace('generateDraft(', 'skip('))).toContain('does not call the drafting model')
       expect(draftHandlerViolations(`${good.replace('{ run }', '{ run, execute: send }')}`)).toContain('has an execute step, so a worker would act on an approved draft')
+    })
+
+    it('the call brief rules', () => {
+      const good = `const b = buildCallBrief(facts); export const h = { run }`
+      expect(callBriefViolations(good)).toEqual([])
+      expect(callBriefViolations(`const b = 1`)).toContain('does not build the brief with the pure builder')
+      expect(callBriefViolations(`${good}; await generateDraft(x)`)).toContain('calls a model: a brief is built from facts, not generated')
+      expect(callBriefViolations(`${good}; import Anthropic from '@anthropic-ai/sdk'`)).toContain('calls a model: a brief is built from facts, not generated')
+      expect(callBriefViolations(good.replace('{ run }', '{ run, execute: dial }'))).toContain('has an execute step, so a worker would act on an approved brief')
+    })
+
+    it('the brief builder stays pure', () => {
+      expect(briefBuilderViolations(`export const buildCallBrief = () => 1`)).toEqual([])
+      expect(briefBuilderViolations(`await supabase.from('x')`)).toContain('reaches a database, a queue or a sender')
+      expect(briefBuilderViolations(`import { sendSMS } from '@/lib/sms/telnyx'`)).toContain('reaches a database, a queue or a sender')
+      expect(briefBuilderViolations(`await fetch(u)`)).toContain('makes a network call')
+      expect(briefBuilderViolations(`import { getAnthropicClient } from '@/lib/support/anthropic-client'`)).toContain('imports a model client')
     })
 
     it('an unbilled model caller', () => {

@@ -51,6 +51,9 @@ export function systemPrompt(feedback: readonly string[]): string {
     `- The subject is at most ${MAX_SUBJECT_CHARS} characters and never starts with Re: or Fwd:.`,
     `- The body is ${MIN_BODY_WORDS} to ${MAX_BODY_WORDS} words.`,
     '- Do not end with a sign-off or a name.',
+    '- Honesty comes first. Never claim to have noticed, seen, read or followed anything about them. Never state a problem they have; ask about it. Never cite customers, other managers, percentages or savings. Never imply urgency.',
+    '- A first email says plainly that you are writing without having spoken before. A follow-up says you wrote before; it never implies they read it.',
+    '- Close with a sincere way out, for example: If this is not useful, tell me and I will stop.',
     ...(notes.length > 0
       ? ['', 'Notes from the founder on drafts they rejected. Follow them:', ...notes.map((n) => `- ${n}`)]
       : []),

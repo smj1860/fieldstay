@@ -64,6 +64,16 @@ export interface ReadyDraft {
   approvedAt:  string | null
 }
 
+export interface ReadyCall {
+  id:          string
+  company:     string | null
+  contactName: string | null
+  phone:       string | null
+  headline:    string
+  brief:       string
+  approvedAt:  string | null
+}
+
 /** How the drafts have been received, the evidence for whether sending could ever be trusted. */
 export interface DraftQuality {
   /** drafts a person approved in the window, sent or not yet */
@@ -77,6 +87,7 @@ export interface DraftQuality {
 
 export const DRAFT_QUALITY_WINDOW_DAYS = 30
 export const MAX_READY_DRAFTS = 25
+export const MAX_READY_CALLS = 25
 export const MAX_QUALITY_NOTES = 5
 
 export interface AgentsDashboardData {
@@ -88,6 +99,7 @@ export interface AgentsDashboardData {
   recent:     RecentTask[]
   decisions:  DecisionItem[]
   readyDrafts:  ReadyDraft[]
+  readyCalls:   ReadyCall[]
   draftQuality: DraftQuality
 }
 
@@ -99,13 +111,13 @@ function companyOf(embed: unknown): string | null {
   return typeof company === 'string' ? company : null
 }
 
-function embedFields(embed: unknown): { company: string | null; email: string | null; contactName: string | null } {
+function embedFields(embed: unknown): { company: string | null; email: string | null; contactName: string | null; phone: string | null } {
   const row = Array.isArray(embed) ? embed[0] : embed
   const read = (key: string): string | null => {
     const value = typeof row === 'object' && row !== null ? (row as Record<string, unknown>)[key] : null
     return typeof value === 'string' ? value : null
   }
-  return { company: read('company'), email: read('email'), contactName: read('contact_name') }
+  return { company: read('company'), email: read('email'), contactName: read('contact_name'), phone: read('phone') }
 }
 
 /** subject and body out of a stored draft, or null when the output is not one. */
@@ -139,7 +151,9 @@ export async function loadDraftReadiness(supabase: SupabaseClient<Database>, now
 
   const readyDrafts = unwrapList(ready, { site: `${SITE}.readyDrafts` }).flatMap((r): ReadyDraft[] => {
     const text = draftText(r.output)
-    return text ? [{ id: r.id, ...embedFields(r.prospect_accounts), ...text, approvedAt: r.decided_at }] : []
+    if (!text) return []
+    const { company, email, contactName } = embedFields(r.prospect_accounts)
+    return [{ id: r.id, company, email, contactName, ...text, approvedAt: r.decided_at }]
   })
 
   const draftQuality: DraftQuality = {
@@ -152,11 +166,27 @@ export async function loadDraftReadiness(supabase: SupabaseClient<Database>, now
   return { readyDrafts, draftQuality }
 }
 
+/** Approved call briefs a person has not yet used. */
+export async function loadReadyCalls(supabase: SupabaseClient<Database>): Promise<ReadyCall[]> {
+  const res = await supabase.from('agent_tasks')
+    .select('id, output, decided_at, prospect_accounts(company, contact_name, phone)')
+    .eq('team', 'sales_ops').eq('task_type', 'call_brief').eq('status', 'approved')
+    .order('decided_at', { ascending: true })
+    .limit(MAX_READY_CALLS)
+
+  return unwrapList(res, { site: `${SITE}.readyCalls` }).flatMap((r): ReadyCall[] => {
+    const text = draftText(r.output)
+    if (!text) return []
+    const { company, contactName, phone } = embedFields(r.prospect_accounts)
+    return [{ id: r.id, company, contactName, phone, headline: text.subject, brief: text.body, approvedAt: r.decided_at }]
+  })
+}
+
 export async function loadAgentsDashboard(
   supabase: SupabaseClient<Database>,
   now: Date = new Date(),
 ): Promise<AgentsDashboardData> {
-  const [settings, rolled, approvalRows, recentRows, decisionRows, readiness] = await Promise.all([
+  const [settings, rolled, approvalRows, recentRows, decisionRows, readiness, readyCalls] = await Promise.all([
     loadTeamSettings(supabase),
     fetchRollup(supabase, {
       touchesSince: new Date(now.getTime() - SEVEN_DAYS_MS),
@@ -179,6 +209,7 @@ export async function loadAgentsDashboard(
       .order('created_at', { ascending: false })
       .limit(MAX_DECISIONS_SHOWN),
     loadDraftReadiness(supabase, now),
+    loadReadyCalls(supabase),
   ])
 
   if (!rolled.ok) {
@@ -211,6 +242,7 @@ export async function loadAgentsDashboard(
     recent,
     decisions,
     readyDrafts:  readiness.readyDrafts,
+    readyCalls,
     draftQuality: readiness.draftQuality,
   }
 }

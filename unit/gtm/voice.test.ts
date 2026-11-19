@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  BANNED_PHRASES, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRODUCT_FACTS, VOICE_GUIDE,
+  BANNED_PHRASES, FALSE_FAMILIARITY, MAX_BODY_WORDS, MAX_SUBJECT_CHARS, MIN_BODY_WORDS, PRESSURE, PRESUMED_PROBLEM, PRODUCT_FACTS, SOCIAL_PROOF, VOICE_GUIDE,
   VOICE_GUIDE_STATUS, checkDraft, describeIssues, type DraftText, type VoiceRule,
 } from '@/lib/gtm/brand/voice'
 
-const GOOD_BODY = 'Hi Dana, running thirty cabins on Lake Martin means a lot of Friday turnovers. FieldStay creates each turnover from the booking, suggests who should take it, and lets the crew work from a phone checklist even with no signal. Setting up a property takes about 15 minutes. Would it help if I showed you how it works on one of your cabins?'
+const GOOD_BODY = 'Hi Dana, running thirty cabins on Lake Martin means a lot of Friday turnovers. FieldStay creates each turnover from the booking, suggests who should take it, and lets the crew work from a phone checklist even with no signal. Setting up a property takes about 15 minutes. Would it help if I showed you how it works on one of your cabins? If this is not useful, tell me and I will stop.'
 const GOOD: DraftText = { subject: 'Turnovers on Lake Martin', body: GOOD_BODY }
 const rules = (d: DraftText, first: string | null = 'Dana'): VoiceRule[] => checkDraft(d, { firstName: first }).map((i) => i.rule)
 const withBody = (body: string): DraftText => ({ ...GOOD, body })
@@ -152,6 +152,68 @@ describe('the voice guide itself', () => {
   it('states no price and no superlative in the product facts', () => {
     for (const fact of PRODUCT_FACTS) {
       expect(checkDraft({ subject: 'x', body: fact }).filter((i) => i.rule === 'pricing' || i.rule === 'banned_phrase')).toEqual([])
+    }
+  })
+})
+
+// The honesty rules. Every list is a way of saying something we cannot stand behind,
+// and a hit is a failed draft, so each one is pinned individually.
+describe('checkDraft: honesty', () => {
+  const swap = (phrase: string) => withBody(GOOD_BODY.replace('Setting up', `${phrase}. Setting up`))
+
+  it.each([
+    ['false_familiarity', FALSE_FAMILIARITY],
+    ['pressure', PRESSURE],
+    ['presumed_problem', PRESUMED_PROBLEM],
+    ['social_proof', SOCIAL_PROOF],
+  ] as const)('refuses every %s phrase, in any case', (rule, list) => {
+    for (const phrase of list) {
+      expect(rules(swap(phrase)), phrase).toContain(rule)
+      expect(rules(swap(phrase.toUpperCase())), phrase).toContain(rule)
+    }
+  })
+
+  it.each([
+    'Setting up takes 15% of the time',
+    'It will save you hours every week',
+    'FieldStay cuts turnover time by 30 minutes',
+  ])('refuses an unmeasured claim: %s', (claim) => {
+    expect(rules(withBody(GOOD_BODY.replace('Setting up a property takes about 15 minutes', claim)))).toContain('unbacked_claim')
+  })
+
+  it('allows the one number the product facts carry', () => {
+    expect(rules(GOOD)).not.toContain('unbacked_claim')
+  })
+
+  it('requires a sincere way out', () => {
+    const noExit = withBody(GOOD_BODY.replace(' If this is not useful, tell me and I will stop.', ''))
+    expect(rules(noExit)).toContain('opt_out')
+  })
+
+  it.each([
+    'If this is not relevant, say so and I will stop.',
+    'Let me know if this is not a fit and I will not write again.',
+    'If you are not interested, just say so and I won\'t follow up.',
+  ])('accepts the way out written as: %s', (line) => {
+    const body = GOOD_BODY.replace('If this is not useful, tell me and I will stop.', line)
+    expect(rules(withBody(body))).not.toContain('opt_out')
+  })
+
+  it('ignores a way out that is only in the subject', () => {
+    const noExit = { subject: 'Tell me and I will stop', body: GOOD_BODY.replace(' If this is not useful, tell me and I will stop.', '') }
+    expect(rules(noExit)).toContain('opt_out')
+  })
+
+  it('carries the honesty directive first in the guidance a model reads', () => {
+    expect(VOICE_GUIDE[0]).toMatch(/genuine and honest/i)
+  })
+
+  it('does not trip on the product facts themselves', () => {
+    for (const fact of PRODUCT_FACTS) {
+      const hits = checkDraft({ subject: 'x', body: `Hi there, ${fact}` }).map((i) => i.rule)
+      expect(hits, fact).not.toContain('unbacked_claim')
+      expect(hits, fact).not.toContain('social_proof')
+      expect(hits, fact).not.toContain('false_familiarity')
     }
   })
 })

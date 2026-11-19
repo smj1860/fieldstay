@@ -5,6 +5,7 @@ import { timeAgo } from '@/lib/gtm/format'
 import { settingFor } from '@/lib/gtm/policy'
 import { ApprovalInbox } from './approval-inbox'
 import { DraftQualityPanel, FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } from './agents-panels'
+import { ReadyCalls } from './ready-calls'
 import { ReadyToSend } from './ready-to-send'
 import { ManagerPanel } from './manager-panel'
 import { MasterSwitch, TeamCard } from './team-controls'
@@ -30,6 +31,7 @@ export async function AgentsDashboard() {
   for (const a of data.approvals) ages[a.id] = timeAgo(a.createdAt, now)
   for (const d of data.decisions) ages[d.id] = timeAgo(d.createdAt, now)
   for (const r of data.readyDrafts) ages[r.id] = r.approvedAt ? timeAgo(r.approvedAt, now) : ''
+  for (const c of data.readyCalls) ages[c.id] = c.approvedAt ? timeAgo(c.approvedAt, now) : ''
 
   const master = settingFor(data.settings, 'global')
   const masterOn = master?.enabled === true
@@ -47,6 +49,8 @@ export async function AgentsDashboard() {
         <ReadyToSend drafts={data.readyDrafts} ages={ages} />
         <DraftQualityPanel quality={data.draftQuality} />
       </div>
+
+      <ReadyCalls calls={data.readyCalls} ages={ages} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <FunnelSnapshot funnel={data.rollup.funnel} />

@@ -837,6 +837,40 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   replied (`draftEligibility()`, re-checked on the live row before spending a model call): once they
   answer, they need a person's reply, not a template. The model is never given an email address or a
   phone number, only who it is writing to.
+- **Honesty is the top rule of the brand voice (draft-2, 2026-11-19), above style.** The founder's
+  standing direction: the voice must be genuine and honest above all else. As code, in `checkDraft()`,
+  a draft FAILS (it is not warned about) for: false familiarity ("I noticed", "I saw your", "as we
+  discussed", any claim to have looked at their business or to know them), pressure ("urgent",
+  "quick question"), a presumed problem ("you're losing", "you probably": we do not know their
+  problems, so a draft asks and never tells), social proof ("our customers", "managers like you":
+  none is cleared for citing), an unbacked number or saving ("save you hours", any percentage), and
+  a missing sincere way out ("If this is not useful, tell me and I will stop"). Matching is on
+  phrases and is a floor, not a definition of honest: a model can still be dishonest in words the
+  lists do not name, so the founder's review of each draft stays the real gate. Add to the lists when
+  a rejected draft shows a new way to do it.
+- **Call briefs (`call_brief`, Sales Ops, 2026-11-19) prepare a person to phone a prospect; no agent
+  ever calls anyone.** Built by the PURE `lib/gtm/teams/sales-ops-call-brief.ts` with NO model, on
+  purpose: the temptation in a brief is to say what is wrong in someone's business, and the honest
+  position is that we do not know. So each guess comes from a fact we hold (portfolio size band, the
+  recorded system, a freeze-possible state, their title), states that fact as its `basis`, is worded as
+  a QUESTION to ask and listen to, and points at an approved line in `PRODUCT_FACTS` by index (or says
+  "listen only") rather than carrying free text about the product. The brief also lists what we do NOT
+  know (inferred system, estimated size, a shared inbox, no phone) and where the contact details came
+  from, so "how did you get my number?" has a true answer. Requested by a person ("Prepare call brief"
+  in an account's edit window, `requestCallBrief`, one per account per Central Time day), approved in the
+  inbox, then used from the Call briefs panel; "I called" (`markCallMade`) logs a `called` touch and
+  moves an account only if it had not been reached (`statusAfterManualCall`). A brief is built for any
+  open stage including `replied`, since that is who a person is about to call; only a closed account gets
+  none. `sales-ops-calls.ts` has no `execute` step and `gtm-agent-boundaries` holds it, and the builder,
+  to that (and to no database, network, sender or model). Stored output carries no phone or email.
+- **OPEN DECISION: AI voice calling is NOT built and is not recommended.** The FCC's February 2024
+  ruling treats an AI-generated voice as an "artificial or prerecorded voice" under the TCPA, which
+  needs the called party's prior express (written, for telemarketing) consent, and the B2B exemption
+  from the Do Not Call registry does not lift that for a small manager's cell phone. If voice is ever
+  added, the first step is a human click-to-call through Telnyx Call Control (the founder dials, FieldStay
+  bridges and logs), behind its own env gate and a single chokepoint file like `lib/sms/telnyx.ts`, and
+  the calling number needs STIR/SHAKEN attestation and Branded Calling first. Get legal review before
+  any AI-voice path, and never let agent code import a dialer.
 - **Brand voice is code, in `lib/gtm/brand/voice.ts`, and it is a DRAFT.** It was derived from the
   homepage copy and the house rules (no em dash, no stated pricing), NOT reviewed by the founder;
   `VOICE_GUIDE_STATUS` says so and the dashboard shows it, so nobody mistakes drafts flowing for an

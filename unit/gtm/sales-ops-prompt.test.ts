@@ -92,3 +92,12 @@ describe('WRITE_DRAFT_TOOL', () => {
     expect(WRITE_DRAFT_TOOL.input_schema.required).toEqual(['subject', 'body'])
   })
 })
+
+describe('systemPrompt: honesty', () => {
+  it('puts honesty ahead of style and asks for a sincere way out', () => {
+    const prompt = systemPrompt([])
+    expect(prompt).toMatch(/Honesty comes first/)
+    expect(prompt).toMatch(/tell me and I will stop/)
+    expect(prompt.indexOf('Be genuine and honest')).toBeLessThan(prompt.indexOf('Write the way'))
+  })
+})

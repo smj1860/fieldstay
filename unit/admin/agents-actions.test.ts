@@ -5,11 +5,14 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn(() => ({ service: true })) }))
+vi.mock('@/lib/gtm/tasks', async (importActual) => ({ ...(await importActual<typeof import('@/lib/gtm/tasks')>()), enqueueTask: vi.fn() }))
 
 import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
-import { decideAgentTask, markDraftSent, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
+import { enqueueTask } from '@/lib/gtm/tasks'
+import { decideAgentTask, markCallMade, markDraftSent, requestCallBrief, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
 import { fakeSupabase, type Scripted } from '../gtm/fake-supabase'
 
 function asAdmin(script: Record<string, Scripted[]>) {
@@ -215,5 +218,119 @@ describe('markDraftSent', () => {
     const { calls } = sent('queued', { 'agent_tasks:update': [{ data: { id: 't1', prospect_id: null }, error: null }] })
     expect(await markDraftSent('t1')).toEqual({})
     expect(calls.some((c) => c.table === 'prospect_accounts')).toBe(false)
+  })
+})
+
+describe('requestCallBrief', () => {
+  const ID = '5b0a8f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b'
+  const settings = (salesOps: boolean, master = true) => ({
+    'gtm_team_settings:select': [{ data: [
+      { team: 'global', enabled: master, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+      { team: 'sales_ops', enabled: salesOps, autonomy: 'propose_only', daily_task_cap: 50, daily_cost_cap_cents: 500 },
+    ], error: null }],
+  })
+  const ready = (status = 'emailed', over: Record<string, Scripted[]> = {}) => asAdmin({
+    ...settings(true),
+    'prospect_accounts:select': [{ data: { id: ID, status }, error: null }],
+    ...over,
+  })
+
+  it('queues a human-origin, approval-required brief, once per account per day, and audits it', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'task_9' })
+    ready()
+    expect(await requestCallBrief(ID)).toEqual({})
+    expect(enqueueTask).toHaveBeenCalledWith({ service: true }, expect.objectContaining({
+      team: 'sales_ops', taskType: 'call_brief', origin: 'human', prospectId: ID, requiresApproval: true,
+      dedupeKey: expect.stringMatching(new RegExp(`^sales_ops:call_brief:${ID}:\\d{4}-\\d{2}-\\d{2}$`)),
+    }))
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'platform_admin.gtm_call_brief.requested', targetId: 'task_9' }))
+  })
+
+  it.each([[false, true], [true, false]])('refuses up front when Sales Ops is %s and the master switch is %s', async (salesOps, master) => {
+    asAdmin(settings(salesOps, master))
+    expect(await requestCallBrief(ID)).toEqual({ error: 'Turn on the master switch and Sales Ops first.' })
+    expect(enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['won', 'lost', 'disqualified'])('refuses a closed account (%s) without queueing anything', async (status) => {
+    ready(status)
+    expect(await requestCallBrief(ID)).toEqual({ error: 'That account is closed, so there is nothing to prepare.' })
+    expect(enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it('refuses an id that is not a uuid, and an account that is gone', async () => {
+    asAdmin({})
+    expect(await requestCallBrief('not-an-id')).toEqual({ error: 'Unknown account.' })
+    ready('emailed', { 'prospect_accounts:select': [{ data: null, error: null }] })
+    expect(await requestCallBrief(ID)).toEqual({ error: 'That account no longer exists.' })
+    expect(enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['duplicate', 'A call brief for this account was already requested today. Check the approval inbox.'],
+    ['task_cap', 'Sales Ops has reached its daily task cap.'],
+    ['cost_cap', 'Sales Ops has reached its daily spend cap.'],
+  ] as const)('says why the queue refused (%s), and audits nothing', async (reason, message) => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: false, reason })
+    ready()
+    expect(await requestCallBrief(ID)).toEqual({ error: message })
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('returns a generic message on a failure, not the raw one', async () => {
+    ready('emailed', { 'prospect_accounts:select': [{ data: null, error: { message: 'permission denied' } }] })
+    expect(await requestCallBrief(ID)).toEqual({ error: 'Could not prepare the brief. Please try again.' })
+  })
+})
+
+describe('markCallMade', () => {
+  const called = (status = 'queued', over: Record<string, Scripted[]> = {}) => asAdmin({
+    'agent_tasks:update':       [{ data: { id: 't1', prospect_id: 'p1' }, error: null }],
+    'prospect_accounts:select': [{ data: { status }, error: null }],
+    'prospect_accounts:update': [{ error: null }],
+    'prospect_touches:insert':  [{ error: null }],
+    ...over,
+  })
+
+  it('closes the brief, logs a called touch and stamps the account, then audits it', async () => {
+    const { calls } = called('queued')
+    expect(await markCallMade('t1')).toEqual({})
+    expect(calls.find((c) => c.table === 'agent_tasks')!.payload).toEqual({ status: 'done' })
+    expect(calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload).toMatchObject({ status: 'called', last_touch_at: expect.any(String) })
+    expect(calls.find((c) => c.table === 'prospect_touches')!.payload).toMatchObject({ prospect_id: 'p1', touch_type: 'called', actor_id: 'admin_1' })
+    expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'platform_admin.gtm_call.marked_made', targetId: 't1' }))
+  })
+
+  // A call to someone who already replied must never move them back a stage.
+  it.each(['emailed', 'called', 'replied', 'meeting_set', 'in_trial'])('leaves the stage of an account that is %s alone', async (status) => {
+    const { calls } = called(status)
+    await markCallMade('t1')
+    expect(calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload).not.toHaveProperty('status')
+  })
+
+  it('only ever closes a Sales Ops call brief that is still approved', async () => {
+    const { calls } = called()
+    await markCallMade('t1')
+    const filters = calls.find((c) => c.table === 'agent_tasks')!.filters
+    expect(filters).toContainEqual(['eq', ['status', 'approved']])
+    expect(filters).toContainEqual(['eq', ['team', 'sales_ops']])
+    expect(filters).toContainEqual(['eq', ['task_type', 'call_brief']])
+  })
+
+  it('records one call only: a second click is told it was already handled', async () => {
+    const { calls } = called('queued', { 'agent_tasks:update': [{ data: null, error: null }] })
+    expect(await markCallMade('t1')).toEqual({ error: 'That brief was already handled.' })
+    expect(calls.some((c) => c.table === 'prospect_touches')).toBe(false)
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('says so when the brief closed but the account could not be updated', async () => {
+    called('queued', { 'prospect_touches:insert': [{ error: { message: 'boom' } }] })
+    expect(await markCallMade('t1')).toEqual({ error: 'Marked as called, but the account could not be updated. Log the call on the account by hand.' })
+  })
+
+  it('returns a generic message on a database error', async () => {
+    called('queued', { 'agent_tasks:update': [{ data: null, error: { code: '42501', message: 'permission denied' } }] })
+    expect(await markCallMade('t1')).toEqual({ error: 'Operation failed. Please try again.' })
   })
 })

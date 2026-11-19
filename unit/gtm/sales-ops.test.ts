@@ -30,7 +30,7 @@ const prospect = (over: Record<string, unknown> = {}) => ({
 
 const GOOD = {
   subject: 'Turnovers on Lake Martin',
-  body: 'Hi Dana, running thirty cabins on Lake Martin means a lot of Friday turnovers. FieldStay creates each turnover from the booking, suggests who should take it, and lets the crew work from a phone checklist even with no signal. Setting up a property takes about 15 minutes. Would it help if I showed you how it works on one of your cabins?',
+  body: 'Hi Dana, running thirty cabins on Lake Martin means a lot of Friday turnovers. FieldStay creates each turnover from the booking, suggests who should take it, and lets the crew work from a phone checklist even with no signal. Setting up a property takes about 15 minutes. Would it help if I showed you how it works on one of your cabins? If this is not useful, tell me and I will stop.',
 }
 const call = (draft: { subject: string; body: string } | null) => ({ model: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 200, draft })
 

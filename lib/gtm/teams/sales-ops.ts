@@ -7,6 +7,7 @@ import { VOICE_GUIDE_VERSION, checkDraft, type DraftText, type VoiceIssue } from
 import { recordUsage, type JsonObject } from '../tasks'
 import type { HandlerRegistry, TaskContext, TaskHandler, WorkOutcome } from '../worker'
 import { generateDraft } from './sales-ops-draft'
+import { CALL_BRIEF_TASK_TYPE, callBriefHandler } from './sales-ops-calls'
 import { INELIGIBLE_SUMMARY, draftEligibility } from './sales-ops-eligibility'
 import type { DraftBrief } from './sales-ops-prompt'
 
@@ -184,4 +185,5 @@ export const draftOutreachHandler: TaskHandler = { run: runDraft }
 
 export const salesOpsHandlers: HandlerRegistry = {
   [SALES_OPS_TASK_TYPES.draftOutreach]: draftOutreachHandler,
+  [CALL_BRIEF_TASK_TYPE]:               callBriefHandler,
 }
