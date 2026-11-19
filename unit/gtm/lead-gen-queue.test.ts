@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/gtm/tasks', async (importActual) => ({ ...(await importActual<typeof import('@/lib/gtm/tasks')>()), enqueueTask: vi.fn() }))
 
 // The market list ships empty, so a test that needs one swaps it in here.
 const markets = vi.hoisted(() => ({ list: [] as string[] }))
@@ -17,6 +18,7 @@ import { leadGenHandlers } from '@/lib/gtm/teams/lead-gen'
 import { QUEUE_POOL_TARGET } from '@/lib/gtm/teams/queue-candidates'
 import { executableTypes } from '@/lib/gtm/worker'
 import type { AgentTask } from '@/types/database'
+import { enqueueTask } from '@/lib/gtm/tasks'
 import { fakeSupabase } from './fake-supabase'
 
 const NOW = new Date('2026-11-19T21:00:00Z')
@@ -150,5 +152,31 @@ describe('queue_candidates: applying', () => {
     const fake = fakeSupabase({})
     await expect(queueCandidatesHandler.execute(task({ output: { account_ids: [] } }), { supabase: fake.client, setting: {} as never, now: NOW }))
       .rejects.toThrow(/no person approved/)
+  })
+})
+
+describe('queue_candidates: after applying, drafting is requested', () => {
+  const ID = '5b0a8f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b'
+  const approved = () => task({ decided_at: NOW.toISOString(), output: { account_ids: [ID] } })
+
+  it('asks Sales Ops for a draft of each account that actually moved, as a child task, with the shared dedupe key', async () => {
+    vi.mocked(enqueueTask).mockResolvedValue({ ok: true, id: 'd1' })
+    const fake = fakeSupabase({
+      'prospect_accounts:update': [{ data: [{ id: ID }], error: null }],
+      'prospect_touches:insert': [{ data: null, error: null }],
+    })
+    const { output } = await queueCandidatesHandler.execute(approved(), ctxOf(fake as never))
+    const call = vi.mocked(enqueueTask).mock.calls[0][1]
+    expect(call).toMatchObject({ team: 'sales_ops', taskType: 'draft_outreach', origin: 'lead_gen', prospectId: ID, parent: { id: 'q1', depth: 1 } })
+    expect(call.dedupeKey).toMatch(new RegExp(`^sales_ops:draft_outreach:${ID}:\\d+$`))
+    expect(call.requiresApproval).not.toBe(false)
+    expect(output).toMatchObject({ queued: [ID], drafts_requested: { requested: 1, queued: 1 } })
+  })
+
+  it('asks for no drafts when nothing moved (a person got there first)', async () => {
+    const fake = fakeSupabase({ 'prospect_accounts:update': [{ data: [], error: null }] })
+    const { output } = await queueCandidatesHandler.execute(approved(), ctxOf(fake as never))
+    expect(enqueueTask).not.toHaveBeenCalled()
+    expect(output).toMatchObject({ queued: [], drafts_requested: { requested: 0 } })
   })
 })

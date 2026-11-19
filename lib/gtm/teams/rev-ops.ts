@@ -6,6 +6,8 @@ import type { Json } from '@/types/database.generated'
 import { centralDayStart } from '../policy'
 import { fetchRollup, spentTodayCents } from '../rollup'
 import { enqueueTask, type JsonObject } from '../tasks'
+import { OWNERREZ } from './queue-candidates'
+import { DAY_MS, DRAFT_RECHECK_DAYS, ENRICH_RECHECK_DAYS, handOff } from './handoff'
 import { QUEUE_TASK_TYPE } from './lead-gen-queue'
 import { DRAFTABLE_STAGES } from './sales-ops-eligibility'
 import type { HandlerRegistry, TaskContext, TaskHandler } from '../worker'
@@ -31,14 +33,9 @@ type ServiceClient = ReturnType<typeof createServiceClient>
 export const REV_OPS_TASK_TYPES = { weeklyFunnelReport: 'weekly_funnel_report' } as const
 
 const SITE = 'gtm.rev-ops'
-const DAY_MS = 86_400_000
 const STALE_EXAMPLES_SHOWN = 5
-/** Candidates read before filtering out accounts already asked about. Bounded: the filter needs a short, known list. */
+/** Candidates read for the draft list before filtering out accounts already asked about. */
 const CANDIDATE_POOL = 50
-/** An account Lead Gen already looked at is not asked about again for this long. */
-const ENRICH_RECHECK_DAYS = 30
-/** An account Sales Ops already drafted for is not offered again for this long. Also the length of one dedupe period. */
-const DRAFT_RECHECK_DAYS = 14
 /** One queue proposal per this many days from the weekly report. A manual request is separate. */
 const QUEUE_PROPOSAL_DAYS = 7
 
@@ -90,25 +87,49 @@ async function loadHygiene(supabase: ServiceClient) {
  * be offered every week and the cap would never reach the next ones.
  */
 async function loadEnrichCandidates(supabase: ServiceClient, now: Date): Promise<string[]> {
-  const poolRes = await supabase.from('prospect_accounts').select('id')
-    .in('status', ['new', 'researching', 'needs_contact_info'])
-    .is('email', null)
-    .or('website.not.is.null,domain.not.is.null')
-    .order('score_a', { ascending: false, nullsFirst: false })
-    .order('id', { ascending: true })
-    .limit(CANDIDATE_POOL)
-  const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.candidates.pool` })
-  if (pool.length === 0) return []
+  // OwnerRez accounts first: they are the ones the queue criteria can actually use, so
+  // spending the weekly allowance on them gets accounts to the queue sooner.
+  const ownerRez = await collectUnasked(supabase, now, 'ownerrez', MAX_LEAD_GEN_HANDOFFS)
+  if (ownerRez.length >= MAX_LEAD_GEN_HANDOFFS) return ownerRez
+  const rest = await collectUnasked(supabase, now, 'rest', MAX_LEAD_GEN_HANDOFFS - ownerRez.length)
+  return [...ownerRez, ...rest]
+}
 
+const SCAN_PAGE = 100
+/** Pages scanned per group: bounded, so the read is. 1,000 accounts a group is far past one week's allowance. */
+const SCAN_PAGES = 10
+
+/**
+ * Up to `want` accounts Lead Gen has not looked at lately. Pages through the
+ * candidates in a stable order and drops the already-asked ones PER PAGE, because
+ * filtering after one fixed-size read would stall once that first slice was all
+ * asked about: the later weeks would be handed nothing while thousands waited.
+ */
+async function collectUnasked(supabase: ServiceClient, now: Date, group: 'ownerrez' | 'rest', want: number): Promise<string[]> {
   const since = new Date(now.getTime() - ENRICH_RECHECK_DAYS * DAY_MS).toISOString()
-  const askedRes = await supabase.from('agent_tasks').select('prospect_id')
-    .eq('task_type', 'enrich_account')
-    .in('prospect_id', pool.map((p) => p.id))
-    .gte('created_at', since)
-    .limit(CANDIDATE_POOL)
-  const asked = unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.candidates.asked` })
-  const skip = new Set(asked.map((a) => a.prospect_id))
-  return pool.map((p) => p.id).filter((id) => !skip.has(id)).slice(0, MAX_LEAD_GEN_HANDOFFS)
+  const found: string[] = []
+  for (let page = 0; page < SCAN_PAGES && found.length < want; page++) {
+    const poolRes = await supabase.from('prospect_accounts').select('id')
+      .in('status', ['new', 'researching', 'needs_contact_info'])
+      .is('email', null)
+      .or('website.not.is.null,domain.not.is.null')
+      .or(group === 'ownerrez' ? `pms.ilike.${OWNERREZ}` : `pms.is.null,pms.not.ilike.${OWNERREZ}`)
+      .order('score_a', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
+      .range(page * SCAN_PAGE, page * SCAN_PAGE + SCAN_PAGE - 1)
+    const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.candidates.pool` })
+    if (pool.length === 0) break
+
+    const askedRes = await supabase.from('agent_tasks').select('prospect_id')
+      .eq('task_type', 'enrich_account')
+      .in('prospect_id', pool.map((p) => p.id))
+      .gte('created_at', since)
+      .limit(SCAN_PAGE)
+    const asked = new Set(unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.candidates.asked` }).map((a) => a.prospect_id))
+    found.push(...pool.map((p) => p.id).filter((id) => !asked.has(id)))
+    if (pool.length < SCAN_PAGE) break
+  }
+  return found.slice(0, want)
 }
 
 /**
@@ -189,42 +210,6 @@ function handoffIds(output: Json | null, key: 'lead_gen_enrich' | 'sales_ops_dra
 }
 
 /**
- * Approving the report is the handoff. Each account becomes a Lead Gen task,
- * itself propose-only, so the second approval (what to actually save) is still
- * ahead. Lead Gen being off, over its cap or already asked about an account are
- * all ordinary answers recorded in the output, never failures.
- */
-interface HandoffSpec { team: 'lead_gen' | 'sales_ops'; taskType: string; priority: number; periodDays: number }
-
-/** One queued task per account, each carrying its own dedupe key so a replay cannot queue it twice. */
-async function handOff(
-  task: AgentTask,
-  ctx: TaskContext,
-  ids: readonly string[],
-  spec: HandoffSpec,
-): Promise<Record<string, number>> {
-  const period = Math.floor(ctx.now.getTime() / (spec.periodDays * DAY_MS))
-  const tally: Record<string, number> = { requested: ids.length, queued: 0 }
-
-  // At most a handful, each a single guarded insert.
-  for (const prospectId of ids) {
-    const result = await enqueueTask(ctx.supabase, {
-      team:       spec.team,
-      taskType:   spec.taskType,
-      origin:     'rev_ops',
-      prospectId,
-      parent:     { id: task.id, depth: task.depth },
-      dedupeKey:  `${spec.team}:${spec.taskType}:${prospectId}:${period}`,
-      priority:   spec.priority,
-      now:        ctx.now,
-    })
-    const key = result.ok ? 'queued' : result.reason
-    tally[key] = (tally[key] ?? 0) + 1
-  }
-  return tally
-}
-
-/**
  * Approving the report is the handoff. Each account becomes a task for the
  * receiving team, itself propose-only, so the second approval (what to actually
  * save, or whether the draft is any good) is still ahead. A team being off, over
@@ -233,10 +218,10 @@ async function handOff(
  */
 async function executeReport(task: AgentTask, ctx: TaskContext) {
   const leadGen = await handOff(task, ctx, handoffIds(task.output, 'lead_gen_enrich', MAX_LEAD_GEN_HANDOFFS), {
-    team: 'lead_gen', taskType: 'enrich_account', priority: 40, periodDays: ENRICH_RECHECK_DAYS,
+    team: 'lead_gen', taskType: 'enrich_account', origin: 'rev_ops', priority: 40, periodDays: ENRICH_RECHECK_DAYS,
   })
   const salesOps = await handOff(task, ctx, handoffIds(task.output, 'sales_ops_draft', MAX_SALES_OPS_HANDOFFS), {
-    team: 'sales_ops', taskType: 'draft_outreach', priority: 50, periodDays: DRAFT_RECHECK_DAYS,
+    team: 'sales_ops', taskType: 'draft_outreach', origin: 'rev_ops', priority: 50, periodDays: DRAFT_RECHECK_DAYS,
   })
   const queue = await requestQueueProposal(task, ctx)
   return { output: { handoff: leadGen, sales_ops_handoff: salesOps, queue_handoff: queue } as JsonObject }

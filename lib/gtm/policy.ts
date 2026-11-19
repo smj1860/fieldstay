@@ -61,6 +61,42 @@ export function finishStatus(input: {
   return input.requiresApproval || input.autonomy === 'propose_only' ? 'needs_approval' : 'done'
 }
 
+/**
+ * The task types the MANAGER may approve without a person (2026-11-19, founder's
+ * direction), as `team/task_type`. Each is a step that changes no outward-facing
+ * thing and sends nothing: the weekly report (its approval is only the handoff),
+ * Lead Gen's enrichment (fills EMPTY contact fields from a prospect's own site) and
+ * Lead Gen's queue proposal (moves a stage to 'queued', capped at 10, nothing sent).
+ *
+ * Sales Ops is deliberately absent: a drafted email, and the call brief, are read and
+ * used by a person. That absence is pinned by a test, and gtm-agent-boundaries keeps
+ * the executor of a draft out of any worker, so the last step stays a person's.
+ */
+export const AUTO_APPROVABLE: ReadonlySet<string> = new Set([
+  'rev_ops/weekly_funnel_report',
+  'lead_gen/enrich_account',
+  'lead_gen/queue_candidates',
+])
+
+/**
+ * Whether the manager approves this task itself. Three things must all hold: the
+ * task type is on the list above, the team has been set to 'auto_low_risk' (an
+ * explicit, per-team switch, so turning agents on does not by itself turn this on),
+ * and the manager is itself running (its own switch and the master switch), since
+ * the manager is the one deciding. A missing row reads as no, like everywhere else.
+ */
+export function managerApproves(
+  settings: readonly TeamSetting[],
+  team: SettingsTeam,
+  taskType: string,
+): boolean {
+  if (!AUTO_APPROVABLE.has(`${team}/${taskType}`)) return false
+  if (settingFor(settings, team)?.autonomy !== 'auto_low_risk') return false
+  return isTeamRunnable(settings, 'manager')
+}
+
+export const MANAGER_APPROVAL_NOTE = 'Approved by the manager (automatic for this kind of task).'
+
 export type BudgetVerdict = 'ok' | 'task_cap' | 'cost_cap'
 
 /**
@@ -134,6 +170,21 @@ export function centralDayStart(now: Date): Date {
   const p = partsOf(now)
   const sinceMidnightMs = ((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + now.getMilliseconds()
   return new Date(now.getTime() - sinceMidnightMs)
+}
+
+/** The agents' working day, in Central Time: 8am up to (not including) 6pm. Founder's direction, 2026-11-19. */
+export const WORK_START_HOUR_CT = 8
+export const WORK_END_HOUR_CT = 18
+
+/**
+ * Whether `now` is inside the agents' working hours. Only WORK is gated on this: a
+ * task can be queued at any hour and waits for the window, so a Monday 7am report
+ * is simply picked up at 8. It sits beside the spend caps, not instead of them.
+ * Uses the same Central Time clock as the caps, so daylight saving moves both together.
+ */
+export function isWorkingHours(now: Date): boolean {
+  const hour = partsOf(now).hour
+  return hour >= WORK_START_HOUR_CT && hour < WORK_END_HOUR_CT
 }
 
 /** YYYY-MM-DD for the Central Time day containing `now`: the stable half of a per-day dedupe key. */
