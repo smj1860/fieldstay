@@ -189,6 +189,7 @@ export type AuditAction =
   | 'platform_admin.inventory_template.deleted'
   | 'platform_admin.prospect_account.created'
   | 'platform_admin.prospect_account.updated'
+  | 'platform_admin.prospect_account.reply_marked'
   | 'platform_admin.prospect_account.bulk_status'
   | 'platform_admin.prospect_account.crawl_triggered'
   | 'platform_admin.prospect_import.started'

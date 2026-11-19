@@ -863,6 +863,19 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   open stage including `replied`, since that is who a person is about to call; only a closed account gets
   none. `sales-ops-calls.ts` has no `execute` step and `gtm-agent-boundaries` holds it, and the builder,
   to that (and to no database, network, sender or model). Stored output carries no phone or email.
+- **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
+  nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
+  reaches FieldStay only when a person says so (a button in an account's edit window, with an optional
+  note of what they said). It moves the account to `replied` only if it was still waiting on an answer
+  (`statusAfterReply`: a reply must not drag a meeting or a trial back a stage, and a closed account is
+  refused), stamps `last_touch_at`, logs a `replied` touch, and CANCELS every `draft_outreach` for that
+  account still pending, in the inbox or approved in "Ready to send" (`cancelInFlightDrafts`, using the
+  same statuses as the cancel decision). The account is written FIRST so nothing new is drafted, and a
+  failure to stop the drafts is reported rather than hidden. A draft a worker is writing at that moment is
+  not cancelled: the handler re-checks the live account before spending a model call and finds it in
+  conversation. Call briefs are deliberately left alone. The audit row carries counts only, never the
+  note, which is the prospect's own words. Setting the status to Replied in the edit dialog still works
+  but does none of the draft-stopping, which is why this exists.
 - **OPEN DECISION: AI voice calling is NOT built and is not recommended.** The FCC's February 2024
   ruling treats an AI-generated voice as an "artificial or prerecorded voice" under the TCPA, which
   needs the called party's prior express (written, for telemarketing) consent, and the B2B exemption

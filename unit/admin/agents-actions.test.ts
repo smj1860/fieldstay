@@ -12,7 +12,7 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 import { enqueueTask } from '@/lib/gtm/tasks'
-import { decideAgentTask, markCallMade, markDraftSent, requestCallBrief, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
+import { decideAgentTask, markCallMade, markDraftSent, markProspectReplied, requestCallBrief, requestManagerRun, requestRevOpsReport, updateTeamSettings } from '@/app/admin/prospects/agents-actions'
 import { fakeSupabase, type Scripted } from '../gtm/fake-supabase'
 
 function asAdmin(script: Record<string, Scripted[]>) {
@@ -332,5 +332,99 @@ describe('markCallMade', () => {
   it('returns a generic message on a database error', async () => {
     called('queued', { 'agent_tasks:update': [{ data: null, error: { code: '42501', message: 'permission denied' } }] })
     expect(await markCallMade('t1')).toEqual({ error: 'Operation failed. Please try again.' })
+  })
+})
+
+describe('markProspectReplied', () => {
+  const ID = '5b0a8f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b'
+  const replied = (status = 'emailed', over: Record<string, Scripted[]> = {}) => asAdmin({
+    'prospect_accounts:select': [{ data: { id: ID, status }, error: null }],
+    'prospect_accounts:update': [{ error: null }],
+    'prospect_touches:insert':  [{ error: null }],
+    'agent_tasks:update':       [{ data: [{ id: 'd1' }, { id: 'd2' }], error: null }],
+    ...over,
+  })
+
+  it('moves the account, logs the reply with the note, stops in-flight drafts and audits counts only', async () => {
+    const { calls } = replied('emailed')
+    expect(await markProspectReplied(ID, '  sounds interesting, call Friday  ')).toEqual({ stopped: 2 })
+
+    expect(calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload)
+      .toMatchObject({ status: 'replied', last_touch_at: expect.any(String) })
+    expect(calls.find((c) => c.table === 'prospect_touches')!.payload)
+      .toMatchObject({ prospect_id: ID, touch_type: 'replied', note: 'sounds interesting, call Friday', actor_id: 'admin_1' })
+
+    const audit = vi.mocked(logAuditEvent).mock.calls[0][0]
+    expect(audit).toMatchObject({ action: 'platform_admin.prospect_account.reply_marked', targetId: ID, metadata: { drafts_stopped: 2, had_note: true } })
+    // The prospect's own words never go in the audit row.
+    expect(JSON.stringify(audit)).not.toContain('call Friday')
+  })
+
+  it('only stops email drafts that are still in flight, never a call brief or a finished one', async () => {
+    const { calls } = replied()
+    await markProspectReplied(ID)
+    const cancel = calls.find((c) => c.table === 'agent_tasks')!
+    expect(cancel.payload).toMatchObject({ status: 'cancelled', decided_by: 'admin_1', decision_note: 'The prospect replied.' })
+    expect(cancel.filters).toContainEqual(['eq', ['prospect_id', ID]])
+    expect(cancel.filters).toContainEqual(['eq', ['team', 'sales_ops']])
+    expect(cancel.filters).toContainEqual(['eq', ['task_type', 'draft_outreach']])
+    expect(cancel.filters).toContainEqual(['in', ['status', ['pending', 'needs_approval', 'approved']]])
+  })
+
+  // A reply to a call, or a second reply, must never push an account back a stage.
+  it.each(['replied', 'meeting_set', 'in_trial'])('keeps the stage of an account that is already %s, and still logs the reply', async (status) => {
+    const { calls } = replied(status)
+    expect(await markProspectReplied(ID)).toEqual({ stopped: 2 })
+    const update = calls.find((c) => c.table === 'prospect_accounts' && c.op === 'update')!.payload as Record<string, unknown>
+    expect(update).not.toHaveProperty('status')
+    expect(update).toHaveProperty('last_touch_at')
+    expect(calls.some((c) => c.table === 'prospect_touches')).toBe(true)
+  })
+
+  it.each(['won', 'lost', 'disqualified'])('refuses a closed account (%s) and writes nothing', async (status) => {
+    const { calls } = replied(status)
+    expect(await markProspectReplied(ID)).toEqual({ error: 'That account is closed. Reopen it first if they have come back.' })
+    expect(calls.some((c) => c.op !== 'select')).toBe(false)
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses an id that is not a uuid and an account that is gone', async () => {
+    asAdmin({})
+    expect(await markProspectReplied('nope')).toEqual({ error: 'Unknown account.' })
+    replied('emailed', { 'prospect_accounts:select': [{ data: null, error: null }] })
+    expect(await markProspectReplied(ID)).toEqual({ error: 'That account no longer exists.' })
+  })
+
+  it('reports zero stopped when there was nothing in flight', async () => {
+    replied('emailed', { 'agent_tasks:update': [{ data: [], error: null }] })
+    expect(await markProspectReplied(ID)).toEqual({ stopped: 0 })
+  })
+
+  it('truncates an over-long note and stores none for a blank one', async () => {
+    const long = replied()
+    await markProspectReplied(ID, 'n'.repeat(2_000))
+    expect((long.calls.find((c) => c.table === 'prospect_touches')!.payload as { note: string }).note).toHaveLength(500)
+    const blank = replied()
+    await markProspectReplied(ID, '   ')
+    expect((blank.calls.find((c) => c.table === 'prospect_touches')!.payload as { note: unknown }).note).toBeNull()
+  })
+
+  // The account is marked first so nothing new is drafted; if the drafts cannot be stopped, say so.
+  it('says so when the account was marked but the queued drafts could not be stopped', async () => {
+    replied('emailed', { 'agent_tasks:update': [{ data: null, error: { message: 'boom' } }] })
+    expect(await markProspectReplied(ID)).toEqual({ error: 'Marked as replied, but queued drafts could not be stopped. Discard any for this account by hand.' })
+    expect(logAuditEvent).toHaveBeenCalled()
+  })
+
+  it('stops before cancelling anything when the account could not be updated', async () => {
+    const { calls } = replied('emailed', { 'prospect_accounts:update': [{ error: { message: 'boom' } }] })
+    expect(await markProspectReplied(ID)).toEqual({ error: 'Could not record the reply. Please try again.' })
+    expect(calls.some((c) => c.table === 'agent_tasks')).toBe(false)
+    expect(calls.some((c) => c.table === 'prospect_touches')).toBe(false)
+  })
+
+  it('returns a generic message on a read error, not the raw one', async () => {
+    replied('emailed', { 'prospect_accounts:select': [{ data: null, error: { message: 'permission denied' } }] })
+    expect(await markProspectReplied(ID)).toEqual({ error: 'Operation failed. Please try again.' })
   })
 })

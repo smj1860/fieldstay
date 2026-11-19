@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DRAFTABLE_STAGES, INELIGIBLE_SUMMARY, draftEligibility, statusAfterManualCall, statusAfterManualSend } from '@/lib/gtm/teams/sales-ops-eligibility'
+import { DRAFTABLE_STAGES, INELIGIBLE_SUMMARY, draftEligibility, statusAfterManualCall, statusAfterManualSend, statusAfterReply } from '@/lib/gtm/teams/sales-ops-eligibility'
 
 const target = (over: Partial<{ status: string; email: string | null; email_status: string | null }> = {}) =>
   ({ status: 'queued', email: 'dana@acmerentals.com', email_status: 'unknown', ...over })
@@ -59,5 +59,17 @@ describe('statusAfterManualCall', () => {
 
   it.each(['emailed', 'called', 'texted', 'replied', 'meeting_set', 'in_trial', 'won', 'lost', 'disqualified'])('leaves %s alone', (status) => {
     expect(statusAfterManualCall(status)).toBeNull()
+  })
+})
+
+describe('statusAfterReply', () => {
+  it.each(['new', 'researching', 'needs_contact_info', 'queued', 'emailed', 'called', 'texted', 'visited_no_contact'])(
+    'moves an account still waiting on an answer (%s) to replied', (status) => {
+      expect(statusAfterReply(status)).toBe('replied')
+    })
+
+  // Moving these back to "replied" would erase a meeting or a trial; closing is a person's own call.
+  it.each(['replied', 'meeting_set', 'in_trial', 'won', 'lost', 'disqualified', 'mystery'])('leaves %s alone', (status) => {
+    expect(statusAfterReply(status)).toBeNull()
   })
 })
