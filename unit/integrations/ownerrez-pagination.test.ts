@@ -148,39 +148,66 @@ describe('OwnerRez pagination', () => {
     expect(urls).toHaveLength(1)
   })
 
-  describe('offset fallback when next_page_url is absent', () => {
-    it('keeps paging while pages come back full', async () => {
+  describe('cursor links (OwnerRez, November 2026)', () => {
+    it('follows a cursor link exactly as returned and never adds an offset of its own', async () => {
+      const cursor2 = `${BASE}/v2/listings?cursor=abc123&limit=100`
+      const cursor3 = `${BASE}/v2/listings?cursor=def456&limit=100`
       const { urls } = mockPages([
-        { items: rows(100, 0),   limit: 100, offset: 0 },
-        { items: rows(40,  100), limit: 100, offset: 100 },
+        { items: rows(100, 0),   limit: 100, offset: 0, next_page_url: cursor2 },
+        { items: rows(100, 100), limit: 100, offset: 0, next_page_url: cursor3 },
+        { items: rows(20,  200), limit: 100, offset: 0, next_page_url: null },
       ])
 
       const all = await new OwnerRezApiClient('user-1').getListings()
 
-      expect(all).toHaveLength(140)
-      expect(new URL(urls[1]).searchParams.get('offset')).toBe('100')
+      expect(all).toHaveLength(220)
+      expect(urls[1]).toBe(cursor2)
+      expect(urls[2]).toBe(cursor3)
+      // Offset above 0 returns 400 from 2027-01-05: none of our requests may carry one.
+      expect(urls.some((u) => new URL(u).searchParams.has('offset'))).toBe(false)
     })
 
-    it('trusts the server-reported limit over the one we requested', async () => {
-      // If OwnerRez quietly caps us at 20 while we ask for 100, a short-page
-      // test against OUR requested size stops after one page — the original
-      // bug wearing a different hat. page.limit is what settles it.
+    it('reaches the end when EVERY cursor page reports offset 0', async () => {
+      // The reported offset of a cursor page is 0. An offset derived from it
+      // would re-request the same page until the page ceiling.
       const { urls } = mockPages([
-        { items: rows(20, 0),  limit: 20, offset: 0 },
-        { items: rows(20, 20), limit: 20, offset: 20 },
-        { items: rows(5,  40), limit: 20, offset: 40 },
+        { items: rows(100, 0),   limit: 100, offset: 0, next_page_url: `${BASE}/v2/properties?cursor=a` },
+        { items: rows(100, 100), limit: 100, offset: 0, next_page_url: `${BASE}/v2/properties?cursor=b` },
+        { items: rows(1,   200), limit: 100, offset: 0, next_page_url: null },
       ])
 
-      const all = await new OwnerRezApiClient('user-1').getBookings({})
+      const all = await new OwnerRezApiClient('user-1').getProperties()
 
-      expect(all).toHaveLength(45)
+      expect(all).toHaveLength(201)
       expect(urls).toHaveLength(3)
     })
+  })
 
+  describe('next_page_url absent', () => {
     it('stops on a short page', async () => {
       const { urls } = mockPages([{ items: rows(99), limit: 100, offset: 0 }])
 
       await expect(new OwnerRezApiClient('user-1').getBookings({})).resolves.toHaveLength(99)
+      expect(urls).toHaveLength(1)
+    })
+
+    it('trusts the server-reported limit over the one we requested', async () => {
+      // If OwnerRez quietly caps us at 20 while we ask for 100, a short-page
+      // test against OUR requested size would wrongly call a full page short.
+      // 20 records at a reported limit of 20 is a FULL page, so it must not be
+      // taken for the end.
+      mockPages([{ items: rows(20, 0), limit: 20, offset: 0 }])
+
+      await expect(new OwnerRezApiClient('user-1').getBookings({}))
+        .rejects.toThrow(/refusing to guess/)
+    })
+
+    it('THROWS on a full page with no continuation instead of guessing an offset', async () => {
+      const { urls } = mockPages([{ items: rows(100, 0), limit: 100, offset: 0 }])
+
+      await expect(new OwnerRezApiClient('user-1').getListings())
+        .rejects.toThrow(/omitted next_page_url on a full page, refusing to guess/)
+      // It did not go looking for a second page by offset.
       expect(urls).toHaveLength(1)
     })
   })
