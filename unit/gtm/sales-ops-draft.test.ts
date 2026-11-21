@@ -22,11 +22,14 @@ describe('generateDraft', () => {
     })
   })
 
-  it('forces the draft tool, passes a timeout, and puts the feedback in the system prompt', async () => {
+  it('never forces a tool (the model rejects it), asks for the draft tool in the system prompt, passes a timeout and carries the feedback', async () => {
     create.mockResolvedValue(reply([{ type: 'tool_use', name: 'write_draft', input: { subject: 's', body: 'b' } }]))
     await generateDraft(brief)
     const [params, options] = create.mock.calls[0]
-    expect(params.tool_choice).toEqual({ type: 'tool', name: WRITE_DRAFT_TOOL.name })
+    // A forced tool_choice ('tool' or 'any') is a 400 on this model, so every draft failed (SENTRY-CRAZY-CUSHION-1N).
+    expect(params.tool_choice).toEqual({ type: 'auto' })
+    expect(params.tools).toEqual([WRITE_DRAFT_TOOL])
+    expect(params.system).toContain(WRITE_DRAFT_TOOL.name)
     expect(params.model).toBe(SALES_DRAFT_MODEL)
     expect(params.system).toContain('be brief')
     expect(options).toMatchObject({ timeout: expect.any(Number) })
