@@ -5,7 +5,9 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
+import { CallBriefButton } from './call-brief-button'
 import { ContactsPanel } from './contacts-panel'
+import { ReplyButton } from './reply-button'
 import { HistoryPanel } from './history-panel'
 import {
   PROSPECT_STATUSES,
@@ -242,6 +244,8 @@ export function ProspectEditDialog({
           className="pt-4 border-t space-y-5"
           style={{ borderColor: 'var(--border)' }}
         >
+          <CallBriefButton prospectId={row.id} />
+          <ReplyButton prospectId={row.id} />
           <ContactsPanel prospectId={row.id} onPrimaryChanged={onPrimaryChanged} />
           <HistoryPanel prospectId={row.id} />
         </section>

@@ -2,6 +2,8 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { ProspectsClient } from './prospects-client'
+import { FunnelTabs, type FunnelView } from './funnel-tabs'
+import { AgentsDashboard } from './agents/agents-dashboard'
 import {
   PROSPECT_STATUSES,
   CONTACT_EMAIL_STATUSES,
@@ -45,7 +47,30 @@ function narrowEmailStatus(value: string): ProspectContactEmailStatus {
     : 'unknown'
 }
 
-export default async function ProspectsPage() {
+function viewOf(raw: string | string[] | undefined): FunnelView {
+  return raw === 'agents' ? 'agents' : 'accounts'
+}
+
+export default async function ProspectsPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ view?: string | string[] }> }>) {
+  const view = viewOf((await searchParams).view)
+  if (view === 'agents') {
+    return (
+      <Card>
+        <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+          Prospecting Funnel
+        </h2>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+          The agent teams working this funnel: what they are doing, what is waiting on you,
+          and the switches and limits that keep them in check.
+        </p>
+        <FunnelTabs active="agents" />
+        <AgentsDashboard />
+      </Card>
+    )
+  }
+
   const { supabase } = await requirePlatformAdmin()
 
   // Paginated, like the inventory catalog page: the list is a few thousand
@@ -90,6 +115,7 @@ export default async function ProspectsPage() {
         Scores, track and bucket are written by the offline scorer and are
         read-only here.
       </p>
+      <FunnelTabs active="accounts" />
       <ProspectsClient initialRows={initialRows} />
     </Card>
   )

@@ -203,6 +203,11 @@ import { evidenceRebracketCron, evidenceRebracketOrg, evidenceBracketOne } from 
 import { freezeWatchCron, freezeWatchOrg } from '@/lib/inngest/functions/cron/freeze-watch'
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
+import { gtmManagerMorning, gtmManagerEvening, gtmManagerManual } from '@/lib/inngest/functions/gtm-manager'
+import { gtmTaskStallSweep } from '@/lib/inngest/functions/gtm-stall-sweep'
+import { gtmSalesOpsDrain } from '@/lib/inngest/functions/gtm-sales-ops'
+import { gtmLeadGenDrain } from '@/lib/inngest/functions/gtm-lead-gen'
+import { gtmRevOpsDrain, gtmRevOpsWeekly, gtmRevOpsManual } from '@/lib/inngest/functions/gtm-rev-ops'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -223,6 +228,15 @@ export const { GET, POST, PUT } = serve({
     freezeWatchOrg,
     prospectingCrawlDispatch,
     prospectingCrawlProfile,
+    gtmManagerMorning,
+    gtmManagerEvening,
+    gtmManagerManual,
+    gtmTaskStallSweep,
+    gtmRevOpsDrain,
+    gtmRevOpsWeekly,
+    gtmRevOpsManual,
+    gtmLeadGenDrain,
+    gtmSalesOpsDrain,
     inspectionOverdueEmailCron,
     inspectionOverdueEmailHandler,
     // iCal sync pipeline

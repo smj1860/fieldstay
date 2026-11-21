@@ -743,6 +743,224 @@ countdown only opens on a stay with a reason to file (flagged turnover or a crew
 order), not on every Airbnb or VRBO stay. The packet cover carries the platform reservation
 reference and never the guest's name or email, so it survives `guest_pii_anonymized_at`.
 
+### GTM Agent Teams (added 2026-11-18: foundation, Rev Ops, Lead Gen. 2026-11-19: Sales Ops)
+```
+gtm_team_settings           — one row per team (manager, lead_gen, content_brand, sales_ops,
+                              rev_ops) plus a 'global' master switch. EVERY ROW SHIPS DISABLED
+                              and propose_only: turning an agent on is a deliberate admin act.
+                              A team runs only when its own row AND 'global' are on, and a
+                              MISSING row reads as off (isTeamRunnable in lib/gtm/policy.ts).
+agent_tasks                 — the work queue AND the approval inbox. Teams hand work to each
+                              other by writing rows here, never by calling each other.
+                              depth is capped at 4 by a CHECK (a team creating work from work
+                              another team created could otherwise do it forever). dedupe_key
+                              is unique where set. requires_approval DEFAULTS true. Claiming is
+                              the UPDATE (`WHERE status = 'pending'`), not the SELECT before it.
+agent_usage                 — append-only model spend ledger; what makes a daily cap
+                              enforceable. A retried step bills once via dedupe_key.
+manager_decisions           — append-only log of every brief the manager wrote, with the
+                              metrics it read. autonomy_at_run is stored so an observe-only
+                              record can never be misread as something that acted.
+```
+**Platform-admin tooling, not tenant data: no org_id anywhere.** Every policy is
+`is_platform_staff_admin()`, the same gate as `prospect_accounts`. `authenticated` holds
+SELECT+UPDATE on settings and tasks (an admin decides; nothing else), SELECT only on usage and
+decisions, and NO insert or delete anywhere: creation is the manager's and the teams' job,
+through the service role. The Agents dashboard (`/admin/prospects?view=agents`) reads through the
+admin's own RLS-enforced session, never the service role.
+
+- **The manager is observe-only and `buildSettingsUpdate()` refuses to set it otherwise.** It
+  reads the pipeline, queues and spend and writes a brief; it creates no tasks and touches no
+  account. A scheduled run does nothing at all unless the master switch AND the manager are on
+  (switching agents off stops the spend, full stop). A manual "Run manager now" always produces
+  the deterministic facts, free, and adds a model paragraph only when the manager is on, under
+  its cap, and keyed. **The facts are the brief; the narrative is optional decoration** and is
+  handed counts only (`narrationFacts()` is an allowlist, pinned by a test).
+- **Everything time-dependent is computed once inside the first Inngest step and passed along.**
+  The function body re-runs from the top on every step, so a bare `new Date()` outside one is a
+  different instant each pass. Caps reset on the Central Time day (`centralDayStart()`).
+- **Decisions live in `lib/gtm/policy.ts` as pure functions** (is a team runnable, is a task too
+  deep, is the budget spent, where does a finished task go). `finishStatus()` lets a propose-only
+  team finish nothing itself whatever the task says: autonomy is the team-wide ceiling and the
+  per-task flag can only ask for MORE review.
+- **A spend cap fails CLOSED.** An unreadable ledger reads as over budget, a team with no settings
+  row has no budget, a cap of 0 means "do nothing today" and an unknown model is priced at the
+  dearest rate. Losing a usage row throws rather than under-counting.
+- `types/database.generated.ts` now holds the REAL generated output for these four tables and the
+  two RPCs (`gtm_dashboard_counts`, `gtm_sweep_stalled_tasks`): both migrations were applied to
+  production and E2E on 2026-11-19 and the file was regenerated from production. The entries
+  written ahead of the migration were line-for-line identical to the generator's, bar one line of
+  formatting. The hand-written `GtmTeamSetting`/`AgentTask`/`AgentUsage`/`ManagerDecision`
+  interfaces in `types/database.ts` were checked column-for-column against the live
+  `db_type_shape_report()` and match.
+- Enforced by `unit/guardrails/gtm-agent-boundaries.test.ts`: agent code (`lib/gtm/**`,
+  `lib/inngest/functions/gtm-*.ts`) imports no email/SMS sender, writes no prospect table except
+  from `lead-gen-apply.ts` (checks a decision, fills only empty fields, names no status, deletes
+  nothing) and `queue-apply.ts` (checks a decision, names no stage but `queued`, guards its own UPDATE
+  with a stage precondition, deletes nothing), never calls a bare `fetch()`, never deletes an
+  account or sets won/lost/disqualified, and calls a model only from a file on the billed list (`narrate.ts`, `sales-ops-draft.ts`), and the Sales Ops draft handler must check the voice, bill the call and have no `execute` step. A team that genuinely needs one of those adds its file to the matching allowlist,
+  with a reason, in the same change. Schema behaviour (depth cap, dedupe, append-only grants,
+  non-admin sees nothing, the sweep) is pinned against a real Postgres by `unit/gtm/gtm-schema.test.ts`.
+
+**The two teams built so far, and the shape every later team follows.** A team is a
+`HandlerRegistry` (`lib/gtm/worker.ts`): per task type, `run()` does the work and returns a
+PROPOSAL, and `execute()` carries out a proposal a person has approved. `workOne()` is the one
+loop body they all share: it takes approved work before new work, and decides where output lands
+(`completeTask` -> the inbox, `finishTask` -> done), so no handler can route its own output past
+approval. `createTeamDrain()` (`lib/inngest/functions/gtm-team-drain.ts`) is the Inngest wrapper:
+three triggers (`gtm/task.created`, `gtm/task.approved`, a 15-minute cron backstop since events
+are hints), one step per unit of work, concurrency 1 per team. The step loop lives under
+`lib/inngest/` because step tooling is banned in `lib/` elsewhere.
+
+- **Rev Ops** (`lib/gtm/teams/rev-ops*.ts`) writes the Monday funnel report from numbers alone (no
+  model) and changes nothing about any account. **Approving the report IS the handoff**: only then
+  does it queue up to 10 Lead Gen tasks (`MAX_LEAD_GEN_HANDOFFS`) and up to 5 Sales Ops draft
+  tasks (`MAX_SALES_OPS_HANDOFFS`, lower because each is something to READ), each itself
+  propose-only, so every cross-team handoff has a human gate and the second approval (what to
+  actually save, or whether the draft is any good) is still ahead. "Run report now" on its card refuses up front when it cannot run: a button that
+  looks like it worked while the queue refused the task is worse than none.
+- **Lead Gen** (`lib/gtm/teams/lead-gen*.ts`) reads a prospect's OWN website for public contact
+  details and proposes them. No vendor, no model: `robots.ts` + `lead-gen-extract.ts` are pure and
+  linear-time, because the input is a stranger's HTML and robots.txt (a regex built from either
+  can hang the worker). It obeys robots.txt, identifies itself, reads at most 3 pages one at a time,
+  never leaves the site, and goes through `safeFetch()`. A 5xx/429 throws so the task retries: a
+  struggling site has not said "no contact details". "Nothing found" closes as done, since an empty
+  proposal has nothing to approve.
+- **`lead-gen-apply.ts` is the only file an agent writes prospect CONTACT data from, and `queue-apply.ts` is the only one that changes a STAGE** (see the queue bullet below). `lead-gen-apply.ts` refuses a task
+  with no recorded `decided_at`, fills only EMPTY email/phone with an `UPDATE ... IS NULL` (a person
+  can fill the field between approval and application, and theirs wins), never names a `status`,
+  and leaves a history note saying a person approved it, never the value itself.
+- **Sales Ops** (`lib/gtm/teams/sales-ops*.ts`) drafts outreach emails for a person to review and
+  SEND THEMSELVES. It cannot send: nothing it imports can contact a prospect. Its `draft_outreach`
+  handler has **no `execute` step on purpose**, and `claimNextTask()` takes a `types` filter so a
+  worker never claims an approved draft (`executableTypes()` in `worker.ts`). Approval means "good
+  to send"; the last step belongs to a person. A draft is only written for an account that has NOT
+  replied (`draftEligibility()`, re-checked on the live row before spending a model call): once they
+  answer, they need a person's reply, not a template. The model is never given an email address or a
+  phone number, only who it is writing to.
+- **Honesty is the top rule of the brand voice (draft-2, 2026-11-19), above style.** The founder's
+  standing direction: the voice must be genuine and honest above all else. As code, in `checkDraft()`,
+  a draft FAILS (it is not warned about) for: false familiarity ("I noticed", "I saw your", "as we
+  discussed", any claim to have looked at their business or to know them), pressure ("urgent",
+  "quick question"), a presumed problem ("you're losing", "you probably": we do not know their
+  problems, so a draft asks and never tells), social proof ("our customers", "managers like you":
+  none is cleared for citing), an unbacked number or saving ("save you hours", any percentage), and
+  a missing sincere way out ("If this is not useful, tell me and I will stop"). Matching is on
+  phrases and is a floor, not a definition of honest: a model can still be dishonest in words the
+  lists do not name, so the founder's review of each draft stays the real gate. Add to the lists when
+  a rejected draft shows a new way to do it.
+- **Call briefs (`call_brief`, Sales Ops, 2026-11-19) prepare a person to phone a prospect; no agent
+  ever calls anyone.** Built by the PURE `lib/gtm/teams/sales-ops-call-brief.ts` with NO model, on
+  purpose: the temptation in a brief is to say what is wrong in someone's business, and the honest
+  position is that we do not know. So each guess comes from a fact we hold (portfolio size band, the
+  recorded system, a freeze-possible state, their title), states that fact as its `basis`, is worded as
+  a QUESTION to ask and listen to, and points at an approved line in `PRODUCT_FACTS` by index (or says
+  "listen only") rather than carrying free text about the product. The brief also lists what we do NOT
+  know (inferred system, estimated size, a shared inbox, no phone) and where the contact details came
+  from, so "how did you get my number?" has a true answer. Requested by a person ("Prepare call brief"
+  in an account's edit window, `requestCallBrief`, one per account per Central Time day), approved in the
+  inbox, then used from the Call briefs panel; "I called" (`markCallMade`) logs a `called` touch and
+  moves an account only if it had not been reached (`statusAfterManualCall`). A brief is built for any
+  open stage including `replied`, since that is who a person is about to call; only a closed account gets
+  none. `sales-ops-calls.ts` has no `execute` step and `gtm-agent-boundaries` holds it, and the builder,
+  to that (and to no database, network, sender or model). Stored output carries no phone or email.
+- **Queue proposals (`queue_candidates`, Lead Gen, 2026-11-19) are how an account becomes ready for a
+  first email.** Sales Ops drafts a first touch only for an account at `queued`, and nothing was moving
+  accounts there (3,624 of 3,632 sat at `new`). Lead Gen now PROPOSES up to 10 accounts to queue
+  (`lead-gen-queue.ts`, ranking in the pure `queue-candidates.ts`), Rev Ops asks for one proposal per
+  weekly report, and the Lead Gen card has "Suggest accounts to queue". It proposes nothing while 10
+  accounts are already queued. A person approves the list in the inbox; only then does `queue-apply.ts`
+  move the stage, to `queued` and nothing else, in ONE UPDATE that carries its own precondition (a
+  pre-queue stage, an email still present), so an account a person moved meanwhile is skipped. Queueing
+  sends nothing: it makes the account eligible for the next report to ask Sales Ops for a draft, which a
+  person still reviews and sends. **The criteria are the founder's (2026-11-19): an account qualifies only
+  if it runs OwnerRez, or sits in a market on `LOW_COVERAGE_MARKETS`.** Everything else is never proposed,
+  however well it ranks. Hygiene applies on top: a working, personal-looking email (a role inbox like
+  `info@` is excluded, and an unknown `email_is_generic` reads as generic), a portfolio in 1 to 150 (200,000
+  is a data error, past 150 is Enterprise), and a stage before `queued`. **`LOW_COVERAGE_MARKETS` ships
+  EMPTY on purpose**: no account carries coverage data and guessing which markets have patchy service
+  would put an unbackable claim in front of the approver, so it is a list the founder maintains, added on
+  a real basis, the same rule as `ZIP_SEASONAL_PROFILE`. While it is empty only OwnerRez matches, and the
+  proposal and the "nothing to propose" summary say so. The OwnerRez criterion is applied in the database
+  (`.ilike('pms', 'OwnerRez')`), because a bounded read of the oldest accounts would never reach the 32 that
+  match. Ranking within the qualifiers is by facts on the row (both criteria, a named contact, a size
+  near 10 to 50) because the offline scorer has written no fit score yet (`score_a`, `score_b`, `track`,
+  `bucket` and `gate` are all NULL). The proposal lists who, where and why and carries no email address.
+  **OPEN QUESTION: who approves.** Today a person approves in the inbox, which is the design's invariant
+  (every cross-team handoff has a human gate, and the manager is observe-only). The founder asked for "the
+  manager" to approve queue moves; whether that means the manager AGENT is unresolved. See the note in the
+  session that wrote this before changing the manager's role.
+- **Lead Gen does not read LinkedIn or Facebook, and should not.** Meta removed the Groups API for third
+  parties on 2024-04-22, so there is no sanctioned way to read a group's feed or members, and LinkedIn's
+  User Agreement (section 8.2) bans scraping and automation, public data included, with no groups API at
+  all. Third-party scrapers exist (several are reachable through Firecrawl) but they work by breaking
+  those terms, put the founder's own accounts and the product's name at risk, and cannot see private
+  groups without membership. It also conflicts with Lead Gen's rules (obey robots.txt, identify itself,
+  read a prospect's own site) and with the honest-voice rule: reading groups as a logged-in member and
+  reaching out from what was read is the opposite of "say who you are and why you are writing". What
+  fits instead: a person reads the groups they already belong to and pastes a post or a note onto the
+  account, which the call brief already quotes.
+- **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
+  nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
+  reaches FieldStay only when a person says so (a button in an account's edit window, with an optional
+  note of what they said). It moves the account to `replied` only if it was still waiting on an answer
+  (`statusAfterReply`: a reply must not drag a meeting or a trial back a stage, and a closed account is
+  refused), stamps `last_touch_at`, logs a `replied` touch, and CANCELS every `draft_outreach` for that
+  account still pending, in the inbox or approved in "Ready to send" (`cancelInFlightDrafts`, using the
+  same statuses as the cancel decision). The account is written FIRST so nothing new is drafted, and a
+  failure to stop the drafts is reported rather than hidden. A draft a worker is writing at that moment is
+  not cancelled: the handler re-checks the live account before spending a model call and finds it in
+  conversation. Call briefs are deliberately left alone. The audit row carries counts only, never the
+  note, which is the prospect's own words. Setting the status to Replied in the edit dialog still works
+  but does none of the draft-stopping, which is why this exists.
+- **OPEN DECISION: AI voice calling is NOT built and is not recommended.** The FCC's February 2024
+  ruling treats an AI-generated voice as an "artificial or prerecorded voice" under the TCPA, which
+  needs the called party's prior express (written, for telemarketing) consent, and the B2B exemption
+  from the Do Not Call registry does not lift that for a small manager's cell phone. If voice is ever
+  added, the first step is a human click-to-call through Telnyx Call Control (the founder dials, FieldStay
+  bridges and logs), behind its own env gate and a single chokepoint file like `lib/sms/telnyx.ts`, and
+  the calling number needs STIR/SHAKEN attestation and Branded Calling first. Get legal review before
+  any AI-voice path, and never let agent code import a dialer.
+- **Brand voice is code, in `lib/gtm/brand/voice.ts`, and it is a DRAFT.** It was derived from the
+  homepage copy and the house rules (no em dash, no stated pricing), NOT reviewed by the founder;
+  `VOICE_GUIDE_STATUS` says so and the dashboard shows it, so nobody mistakes drafts flowing for an
+  approved voice. Two halves: tone guidance goes into the prompt and can be ignored; `checkDraft()`
+  is the HARD gate and cannot. Every draft passes it before anyone is asked to read it. A draft that
+  fails gets ONE correction call with exactly what broke; one that still fails is a failed task with
+  the rule names in its error, never a rule quietly waived. Both calls are billed (`recordUsage`,
+  keyed per attempt) because the money is spent either way. `PRODUCT_FACTS` is the only thing a draft
+  may claim about the product, since a model will invent a feature and a sent email cannot be taken
+  back. `PRODUCT_FACTS` is order-sensitive: the call brief points at a fact by index. The founder
+  confirmed the facts on 2026-11-19 (inspections with immutable records, sealed photos for damage
+  claims, automatic or suggested crew scheduling). A draft may link only to a page in `LANDING_PATHS`
+  (the segment pages /ownerrez, /hospitable, /strops, /hosts plus the overview; no comparison or pricing pages in cold outreach), because a model invents plausible URLs; add a page there
+  when one is published. The sender may claim only `SENDER_FACTS` (has done turnovers, nothing more).
+  Bump `VOICE_GUIDE_VERSION` when either half changes: every draft stores the version it was
+  written under. The founder's rejection notes are fed back into the next draft's prompt.
+- **"Ready to send" and "Draft quality" on the dashboard.** An approved draft waits for a person to
+  copy it into their own mailbox; "I sent this" (`markDraftSent`) closes the task with an UPDATE that
+  only matches while it is still `approved` (a double click records one send), stamps
+  `last_touch_at`, logs an `emailed` touch, and moves the account to `emailed` ONLY if it had not
+  been reached yet (`statusAfterManualSend`): a follow-up must never push an account that replied
+  back to `emailed`. Draft quality is the record of approved/rejected/sent and the founder's notes
+  over 30 days. It reports what happened and draws no conclusion: it is the evidence for the question
+  of when sending from inside FieldStay would be safe.
+- **OPEN DECISION: sending from inside FieldStay is NOT built, and is not just a code change.** The
+  founder wants it eventually, once the voice is satisfactory. Before it is built, decide: (1) the
+  stack table says Resend is "transactional only, never marketing", and cold outreach to people who
+  never signed up is not transactional, so either that rule changes deliberately or a different
+  sending path is chosen; the existing commercial emails (`onboarding-drip`, `email-trial-lifecycle`)
+  go to people who signed up and are a different obligation. (2) Prospecting email needs a
+  postal address, an unsubscribe that is honored (`lib/email/unsubscribe.ts` covers signed-up users
+  only), and a suppression list. (3) A track record on the Draft quality panel that the founder
+  actually trusts. When built, the send is a PERSON'S click through a Server Action, never an agent:
+  `gtm-agent-boundaries` forbids an agent from importing a sender, and that stays.
+- **`failTask` takes `resumeTo`.** A task that fails while APPLYING an approved proposal goes back to
+  `approved`, not `pending`, or it would redo the research and ask for the same approval twice. The
+  stall sweep does the same via `decided_at` (migration `20261118130000`, which replaces the function
+  from the first migration: apply them in order, and never re-run the first one on its own after the
+  second, since its `CREATE OR REPLACE` would put the old sweep back).
+
 ### Supporting
 ```
 system_job_runs             — Inngest run ledger. Written ONLY by
@@ -2095,6 +2313,13 @@ following them stops being a memory test. Five layers, checked in CI via
      the dashboard layout, the outbox builds on the shared `OutboxEngine`, and
      the enqueue commits the local write and the outbox row in ONE transaction
      with the drain kick outside it.
+   - `gtm-agent-boundaries` — the GTM agents' promises as structure: no email/SMS sender
+     imported, prospect-table writes only from the one approved-proposal applier (and held to its
+     own rules), no bare `fetch()`, no account deletion or closed-stage write, every model call
+     from a billed file, and the Sales Ops draft handler checks the voice, bills the call and has no
+     `execute` step. Carries fire-checks for each rule, and the real-tree ones were run against a
+     deliberately violating tree (its first draft of the Sales Ops test never ran at all, which only
+     the fire-check showed).
    - `node-types-runtime-parity` — `@types/node`'s major equals
      `engines.node`'s and every `node-version:` in `.github/workflows/`.
      Types ahead of the runtime describe APIs that do not exist in
