@@ -87,6 +87,25 @@ const activeOrg    = { data: { plan_status: 'active' }, error: null }
 const unchanged   = { data: { trial_ends_at: null }, error: null }
 const movedTo     = (iso: string) => ({ data: { trial_ends_at: iso }, error: null })
 
+type Row = { data?: unknown; error?: unknown }
+const noProperties = { data: null, error: null, count: 0 } as unknown as Row
+
+/**
+ * Wire the mocked service client for a whole sequence. `organizations` is the
+ * queue described above; everything else a full run reads defaults to "nothing
+ * connected, no properties, an opted-in recipient" (what the churn email needs).
+ */
+function mockDb(organizations: Row[], extra: Record<string, Row[]> = {}) {
+  const supabase = makeSupabase({
+    organizations,
+    integration_connections: [{ data: null, error: null }, { data: null, error: null }],
+    properties:              [noProperties, noProperties],
+    profiles:                [churnOptedIn],
+    ...extra,
+  })
+  ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+}
+
 // The churn/win-back email is COMMERCIAL (its P.S. links to /billing-wall), so
 // it resolves the recipient's CAN-SPAM opt-out state first. resolveEmailAudience
 // fails closed, so the profile must be readable AND carry a token or the send is
@@ -103,13 +122,10 @@ beforeEach(() => {
 
 describe('handleTrialLifecycle', () => {
   it('runs the full sequence and sends all three emails when the org never subscribes', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg],
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg], {
       integration_connections: [{ data: { provider_id: 'ownerrez' }, error: null }],
-      properties: [{ data: null, error: null, count: 4 } as unknown as { data: unknown; error: unknown }],
-      profiles: [churnOptedIn],
+      properties:              [{ data: null, error: null, count: 4 } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
     const result = await invokeHandler(handleTrialLifecycle, {
@@ -161,12 +177,9 @@ describe('handleTrialLifecycle', () => {
   })
 
   it('sends the trial-expiring email but stops before trial-expired if they subscribe in between', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, unchanged, activeOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: null } as unknown as { data: unknown; error: unknown }],
+    mockDb([trialingOrg, unchanged, activeOrg], {
+      properties: [{ data: null, error: null, count: null } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(handleTrialLifecycle, {
       event: trialEvent(),
@@ -183,12 +196,9 @@ describe('handleTrialLifecycle', () => {
   })
 
   it('sends both emails but skips the churn email if they subscribe late', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, unchanged, trialingOrg, unchanged, activeOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: 2 } as unknown as { data: unknown; error: unknown }],
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, activeOrg], {
+      properties: [{ data: null, error: null, count: 2 } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(handleTrialLifecycle, {
       event: trialEvent(),
@@ -250,13 +260,7 @@ describe('handleTrialLifecycle', () => {
 
 describe('handleTrialLifecycle idempotency keys', () => {
   it('keys every email idempotently per-org so a replayed step never double-sends', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown }],
-      profiles: [churnOptedIn],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg])
 
     await invokeHandler(handleTrialLifecycle, {
       event: trialEvent({ org_id: 'org_42' }),
@@ -277,17 +281,8 @@ describe('handleTrialLifecycle: an extended trial', () => {
   const OLD_END = '2026-08-01T00:00:00.000Z'
   const NEW_END = '2026-08-08T00:00:00.000Z'
 
-  function setup(organizations: { data?: unknown; error?: unknown }[]) {
-    const supabase = makeSupabase({
-      organizations,
-      integration_connections: [{ data: null, error: null }, { data: null, error: null }],
-      properties: [
-        { data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown },
-        { data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown },
-      ],
-      profiles: [churnOptedIn],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+  function setup(organizations: Row[]) {
+    mockDb(organizations)
     return makeStep()
   }
 
@@ -371,13 +366,7 @@ describe('handleTrialLifecycle: an extended trial', () => {
 // replaying run to its recorded history by id, so renaming one strands every sequence in flight.
 describe('handleTrialLifecycle: step ids of sequences already in flight', () => {
   it('keeps every original step id for the first round', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown }],
-      profiles: [churnOptedIn],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg])
     const step = makeStep()
     await invokeHandler(handleTrialLifecycle, { event: trialEvent(), step })
 
