@@ -43,7 +43,10 @@ export async function generateDraft(brief: DraftBrief, issues: readonly VoiceIss
       system:      systemPrompt(brief.feedback),
       messages:    [{ role: 'user', content: userPrompt(brief, issues) }],
       tools:       [WRITE_DRAFT_TOOL],
-      tool_choice: { type: 'tool', name: WRITE_DRAFT_TOOL.name },
+      // Never force the tool ({ type: 'tool' } or 'any'): claude-sonnet-5-5 rejects both with a 400
+      // (SENTRY-CRAZY-CUSHION-1N), so every draft failed. 'auto' plus the instruction in the system prompt
+      // does the same job, and readDraft() already treats an answer without the tool call as no draft.
+      tool_choice: { type: 'auto' },
     },
     { timeout: ANTHROPIC_TIMEOUT_MS },
   )
