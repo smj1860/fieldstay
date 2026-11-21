@@ -81,6 +81,30 @@ function trialEvent(overrides: Partial<{
 
 const trialingOrg = { data: { plan_status: 'trialing' }, error: null }
 const activeOrg    = { data: { plan_status: 'active' }, error: null }
+// The sequence also re-reads trial_ends_at each time it wakes (to notice an
+// extension). Per run, `organizations` is read in this order:
+//   warning: left? , extended? | expiry: left? , extended? | churn: left?
+const unchanged   = { data: { trial_ends_at: null }, error: null }
+const movedTo     = (iso: string) => ({ data: { trial_ends_at: iso }, error: null })
+
+type Row = { data?: unknown; error?: unknown }
+const noProperties = { data: null, error: null, count: 0 } as unknown as Row
+
+/**
+ * Wire the mocked service client for a whole sequence. `organizations` is the
+ * queue described above; everything else a full run reads defaults to "nothing
+ * connected, no properties, an opted-in recipient" (what the churn email needs).
+ */
+function mockDb(organizations: Row[], extra: Record<string, Row[]> = {}) {
+  const supabase = makeSupabase({
+    organizations,
+    integration_connections: [{ data: null, error: null }, { data: null, error: null }],
+    properties:              [noProperties, noProperties],
+    profiles:                [churnOptedIn],
+    ...extra,
+  })
+  ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+}
 
 // The churn/win-back email is COMMERCIAL (its P.S. links to /billing-wall), so
 // it resolves the recipient's CAN-SPAM opt-out state first. resolveEmailAudience
@@ -98,13 +122,10 @@ beforeEach(() => {
 
 describe('handleTrialLifecycle', () => {
   it('runs the full sequence and sends all three emails when the org never subscribes', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, trialingOrg, trialingOrg],
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg], {
       integration_connections: [{ data: { provider_id: 'ownerrez' }, error: null }],
-      properties: [{ data: null, error: null, count: 4 } as unknown as { data: unknown; error: unknown }],
-      profiles: [churnOptedIn],
+      properties:              [{ data: null, error: null, count: 4 } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
     const result = await invokeHandler(handleTrialLifecycle, {
@@ -156,12 +177,9 @@ describe('handleTrialLifecycle', () => {
   })
 
   it('sends the trial-expiring email but stops before trial-expired if they subscribe in between', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, activeOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: null } as unknown as { data: unknown; error: unknown }],
+    mockDb([trialingOrg, unchanged, activeOrg], {
+      properties: [{ data: null, error: null, count: null } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(handleTrialLifecycle, {
       event: trialEvent(),
@@ -178,12 +196,9 @@ describe('handleTrialLifecycle', () => {
   })
 
   it('sends both emails but skips the churn email if they subscribe late', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, trialingOrg, activeOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: 2 } as unknown as { data: unknown; error: unknown }],
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, activeOrg], {
+      properties: [{ data: null, error: null, count: 2 } as unknown as Row],
     })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(handleTrialLifecycle, {
       event: trialEvent(),
@@ -245,13 +260,7 @@ describe('handleTrialLifecycle', () => {
 
 describe('handleTrialLifecycle idempotency keys', () => {
   it('keys every email idempotently per-org so a replayed step never double-sends', async () => {
-    const supabase = makeSupabase({
-      organizations: [trialingOrg, trialingOrg, trialingOrg],
-      integration_connections: [{ data: null, error: null }],
-      properties: [{ data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown }],
-      profiles: [churnOptedIn],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg])
 
     await invokeHandler(handleTrialLifecycle, {
       event: trialEvent({ org_id: 'org_42' }),
@@ -265,5 +274,108 @@ describe('handleTrialLifecycle idempotency keys', () => {
       'trial-expired-org_42',
       'trial-churn-feedback-org_42',
     ])
+  })
+})
+
+describe('handleTrialLifecycle: an extended trial', () => {
+  const OLD_END = '2026-08-01T00:00:00.000Z'
+  const NEW_END = '2026-08-08T00:00:00.000Z'
+
+  function setup(organizations: Row[]) {
+    mockDb(organizations)
+    return makeStep()
+  }
+
+  const sentKeys = () => (resend.emails.send as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]?.idempotencyKey)
+
+  // The case that prompted this: the 3-day warning already went out, THEN the trial was extended.
+  // Without the re-check, "Your FieldStay trial has ended" arrives on the old date.
+  it('does not send "trial has ended" on the old date when the trial was extended after the warning', async () => {
+    const step = setup([
+      trialingOrg, unchanged,                  // round 0 warning: not extended yet
+      trialingOrg, movedTo(NEW_END),           // round 0 expiry: extended!
+      trialingOrg, unchanged,                  // round 1 warning
+      trialingOrg, unchanged,                  // round 1 expiry
+      trialingOrg,                             // churn
+    ])
+    await invokeHandler(handleTrialLifecycle, { event: trialEvent({ trial_ends_at: OLD_END }), step })
+
+    expect(sentKeys()).toEqual([
+      'trial-expiring-org_1',        // the original warning, sent before the extension
+      'trial-expiring-org_1-r1',     // a fresh warning for the NEW end date
+      'trial-expired-org_1-r1',      // the expiry email, on the new date only
+      'trial-churn-feedback-org_1',
+    ])
+    expect(sentKeys()).not.toContain('trial-expired-org_1')
+    // The expired email states the NEW end date plus its 30 days, not the old one.
+    expect(renderTrialExpiredEmail).toHaveBeenCalledTimes(1)
+    const shown = (renderTrialExpiredEmail as ReturnType<typeof vi.fn>).mock.calls[0][0].dataExpiresDate
+    expect(shown).toBe(new Date(new Date(NEW_END).getTime() + 30 * 86_400_000)
+      .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }))
+    // Sleeps: warning + expiry for round 0, then again for round 1.
+    expect((step.sleepUntil.mock.calls as unknown as [string, Date][]).map((c) => c[0])).toEqual([
+      'sleep-until-warning', 'sleep-until-expired', 'sleep-until-warning-r1', 'sleep-until-expired-r1',
+    ])
+  })
+
+  it('re-plans before the warning when the trial is extended before it fires', async () => {
+    const step = setup([
+      trialingOrg, movedTo(NEW_END),           // round 0 warning wake: extended, so no warning yet
+      trialingOrg, unchanged,
+      trialingOrg, unchanged,
+      trialingOrg,
+    ])
+    await invokeHandler(handleTrialLifecycle, { event: trialEvent({ trial_ends_at: OLD_END }), step })
+
+    expect(sentKeys()).toEqual(['trial-expiring-org_1-r1', 'trial-expired-org_1-r1', 'trial-churn-feedback-org_1'])
+    expect(sentKeys()).not.toContain('trial-expiring-org_1')
+  })
+
+  it('still stops the whole sequence if they subscribe after being extended', async () => {
+    setup([trialingOrg, unchanged, trialingOrg, movedTo(NEW_END), activeOrg])
+    const result = await invokeHandler(handleTrialLifecycle, { event: trialEvent({ trial_ends_at: OLD_END }), step: makeStep() })
+    expect(result).toEqual({ cancelled: true, reason: 'subscribed-before-warning' })
+    expect(sentKeys()).toEqual(['trial-expiring-org_1'])
+  })
+
+  it('ignores a trial that was shortened or not moved: nothing re-plans', async () => {
+    setup([
+      trialingOrg, movedTo('2026-07-30T00:00:00.000Z'),
+      trialingOrg, movedTo(OLD_END),
+      trialingOrg,
+    ])
+    await invokeHandler(handleTrialLifecycle, { event: trialEvent({ trial_ends_at: OLD_END }), step: makeStep() })
+    expect(sentKeys()).toEqual(['trial-expiring-org_1', 'trial-expired-org_1', 'trial-churn-feedback-org_1'])
+  })
+
+  // A bug that kept moving the date must not make one run schedule steps forever.
+  it('stops re-planning after the cap and sends the emails for the date it has', async () => {
+    const day = 86_400_000
+    const orgs: { data?: unknown; error?: unknown }[] = []
+    for (let round = 0; round < 5; round++) {
+      orgs.push(trialingOrg, movedTo(new Date(new Date(OLD_END).getTime() + (round + 1) * day).toISOString()))
+    }
+    orgs.push(trialingOrg, movedTo('2030-01-01T00:00:00.000Z'), trialingOrg, movedTo('2030-01-01T00:00:00.000Z'), trialingOrg)
+    setup(orgs)
+    await invokeHandler(handleTrialLifecycle, { event: trialEvent({ trial_ends_at: OLD_END }), step: makeStep() })
+    expect(sentKeys()).toEqual(['trial-expiring-org_1-r5', 'trial-expired-org_1-r5', 'trial-churn-feedback-org_1'])
+  })
+})
+
+// Sequences already asleep were started under these exact step ids. Inngest matches a
+// replaying run to its recorded history by id, so renaming one strands every sequence in flight.
+describe('handleTrialLifecycle: step ids of sequences already in flight', () => {
+  it('keeps every original step id for the first round', async () => {
+    mockDb([trialingOrg, unchanged, trialingOrg, unchanged, trialingOrg])
+    const step = makeStep()
+    await invokeHandler(handleTrialLifecycle, { event: trialEvent(), step })
+
+    const runs = step.run.mock.calls.map((c) => c[0])
+    for (const id of [
+      'check-subscription-before-warning', 'send-trial-expiring-email', 'check-subscription-at-expiry',
+      'send-trial-expired-email', 'check-subscription-before-churn', 'check-churn-suppression', 'send-churn-feedback-email',
+    ]) expect(runs).toContain(id)
+    expect((step.sleepUntil.mock.calls as unknown as [string, Date][]).map((c) => c[0])).toEqual(['sleep-until-warning', 'sleep-until-expired'])
+    expect(step.sleep).toHaveBeenCalledWith('sleep-before-churn-email', '3 days')
   })
 })
