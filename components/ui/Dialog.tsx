@@ -1,10 +1,22 @@
 'use client'
 
-import { useRef, type ReactNode } from 'react'
+import { useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useFocusTrap } from '@/lib/hooks/use-focus-trap'
+
+const subscribeNoop = () => () => {}
+
+/**
+ * False during server rendering, true in the browser. The portal below needs
+ * `document.body`, which does not exist on the server, so a Dialog that is
+ * `open` on its FIRST render (a `?connect=hostaway` deep link seeds state from
+ * the URL) used to throw `document is not defined` and fail the whole page.
+ */
+function useIsClient(): boolean {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false)
+}
 
 interface DialogProps {
   open: boolean
@@ -33,10 +45,11 @@ export function Dialog({
   maxWidthClassName = 'max-w-lg',
 }: Readonly<DialogProps>) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const isClient = useIsClient()
 
   useFocusTrap(panelRef, open, onClose)
 
-  if (!open) return null
+  if (!open || !isClient) return null
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center print:hidden">
