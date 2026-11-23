@@ -8,6 +8,20 @@ import { isManagerKind, isTaskStatus, isWorkerTeam, type ManagerRunKind, type Ta
 import { centralDayStart, type TeamSetting } from './policy'
 import { fetchRollup, type GtmRollup } from './rollup'
 import { buildMetrics, type ManagerMetrics } from './manager/brief'
+import {
+  ACTION_CATALOG,
+  ACTION_KINDS,
+  INSTRUCTION_HISTORY_LIMIT,
+  cadenceDaysFor,
+  lastActivityAt,
+  learnFromHistory,
+  mayOfferStanding,
+  readStoredProposal,
+  recordsFromRows,
+  type ActionKind,
+  type InstructionHistoryRow,
+  type ProposedAction,
+} from './manager/instructions'
 import { loadTeamSettings } from './tasks'
 
 /**
@@ -54,6 +68,33 @@ export interface DecisionItem {
   createdAt:     string
 }
 
+/** One reply to a brief, or one standing run, as the Manager panel shows it. */
+export interface InstructionItem {
+  id:          string
+  source:      'human' | 'standing'
+  instruction: string
+  status:      string
+  reply:       string | null
+  proposal:    ProposedAction[]
+  /** what carrying it out did, one sentence per action */
+  outcomes:    string[]
+  createdAt:   string
+}
+
+/** One instruction type: what the manager has learned about it and whether it may repeat it alone. */
+export interface PlaybookItem {
+  kind:           ActionKind
+  label:          string
+  description:    string
+  standing:       boolean
+  approved:       number
+  rejected:       number
+  cadenceDays:    number
+  /** the manager would like to take this over: enough approvals, no rejections, not yet granted */
+  offered:        boolean
+  lastRunAt:      string | null
+}
+
 export interface ReadyDraft {
   id:          string
   company:     string | null
@@ -89,6 +130,7 @@ export const DRAFT_QUALITY_WINDOW_DAYS = 30
 export const MAX_READY_DRAFTS = 25
 export const MAX_READY_CALLS = 25
 export const MAX_QUALITY_NOTES = 5
+export const MAX_INSTRUCTIONS_SHOWN = 15
 
 export interface AgentsDashboardData {
   now:        string
@@ -98,6 +140,8 @@ export interface AgentsDashboardData {
   approvals:  ApprovalItem[]
   recent:     RecentTask[]
   decisions:  DecisionItem[]
+  instructions: InstructionItem[]
+  playbook:   PlaybookItem[]
   readyDrafts:  ReadyDraft[]
   readyCalls:   ReadyCall[]
   draftQuality: DraftQuality
@@ -182,11 +226,70 @@ export async function loadReadyCalls(supabase: SupabaseClient<Database>): Promis
   })
 }
 
+function outcomeSummaries(result: Json | null): string[] {
+  if (!Array.isArray(result)) return []
+  return result.flatMap((r) => {
+    const summary = typeof r === 'object' && r !== null && !Array.isArray(r) ? r.summary : null
+    return typeof summary === 'string' ? [summary] : []
+  })
+}
+
+interface PlaybookRow { action_kind: string; standing: boolean; last_standing_run_at: string | null }
+
+async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
+  instructions: InstructionItem[]
+  playbook:     PlaybookItem[]
+}> {
+  const [recentRes, historyRes, playbookRes] = await Promise.all([
+    supabase.from('manager_instructions')
+      .select('id, source, instruction, status, reply, proposal, result, created_at')
+      .order('created_at', { ascending: false })
+      .limit(MAX_INSTRUCTIONS_SHOWN),
+    supabase.from('manager_instructions')
+      .select('source, status, action_kinds, decided_at')
+      .eq('source', 'human')
+      .order('created_at', { ascending: false })
+      .limit(INSTRUCTION_HISTORY_LIMIT),
+    supabase.from('manager_playbook')
+      .select('action_kind, standing, last_standing_run_at')
+      .limit(ACTION_KINDS.length),
+  ])
+
+  const instructions = unwrapList(recentRes, { site: `${SITE}.instructions` }).flatMap((r): InstructionItem[] =>
+    r.source === 'human' || r.source === 'standing'
+      ? [{
+          id: r.id, source: r.source, instruction: r.instruction, status: r.status, reply: r.reply,
+          proposal: readStoredProposal(r.proposal), outcomes: outcomeSummaries(r.result), createdAt: r.created_at,
+        }]
+      : [])
+
+  const history = unwrapList<InstructionHistoryRow>(historyRes, { site: `${SITE}.instructionHistory` })
+  const learned = learnFromHistory(recordsFromRows(history))
+  const rows = unwrapList<PlaybookRow>(playbookRes, { site: `${SITE}.playbook` })
+
+  const playbook = learned.map((l): PlaybookItem => {
+    const row = rows.find((p) => p.action_kind === l.kind)
+    const standing = row?.standing === true
+    return {
+      kind:        l.kind,
+      label:       ACTION_CATALOG[l.kind].label,
+      description: ACTION_CATALOG[l.kind].description,
+      standing,
+      approved:    l.approved,
+      rejected:    l.rejected,
+      cadenceDays: cadenceDaysFor(l),
+      offered:     !standing && mayOfferStanding(l),
+      lastRunAt:   lastActivityAt(l, row?.last_standing_run_at ?? null),
+    }
+  })
+  return { instructions, playbook }
+}
+
 export async function loadAgentsDashboard(
   supabase: SupabaseClient<Database>,
   now: Date = new Date(),
 ): Promise<AgentsDashboardData> {
-  const [settings, rolled, approvalRows, recentRows, decisionRows, readiness, readyCalls] = await Promise.all([
+  const [settings, rolled, approvalRows, recentRows, decisionRows, readiness, readyCalls, instructionData] = await Promise.all([
     loadTeamSettings(supabase),
     fetchRollup(supabase, {
       touchesSince: new Date(now.getTime() - SEVEN_DAYS_MS),
@@ -210,6 +313,7 @@ export async function loadAgentsDashboard(
       .limit(MAX_DECISIONS_SHOWN),
     loadDraftReadiness(supabase, now),
     loadReadyCalls(supabase),
+    loadInstructions(supabase),
   ])
 
   if (!rolled.ok) {
@@ -241,6 +345,8 @@ export async function loadAgentsDashboard(
     approvals,
     recent,
     decisions,
+    instructions: instructionData.instructions,
+    playbook:     instructionData.playbook,
     readyDrafts:  readiness.readyDrafts,
     readyCalls,
     draftQuality: readiness.draftQuality,

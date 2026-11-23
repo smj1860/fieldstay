@@ -11,7 +11,7 @@ import { vi } from 'vitest'
  */
 export interface Scripted { data?: unknown; error?: { code?: string; message: string } | null; count?: number | null }
 
-type Op = 'select' | 'insert' | 'update' | 'delete'
+type Op = 'select' | 'insert' | 'update' | 'upsert' | 'delete'
 export interface RecordedCall { table: string; op: Op; payload?: unknown; filters: [string, unknown[]][] }
 
 export function fakeSupabase(script: Record<string, Scripted[]>, rpc: Scripted[] = []) {
@@ -32,7 +32,7 @@ export function fakeSupabase(script: Record<string, Scripted[]>, rpc: Scripted[]
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     const begin = (op: Op, payload?: unknown) => { call ??= { table, op, payload, filters: [] }; if (!calls.includes(call)) calls.push(call) }
-    for (const op of ['select', 'insert', 'update', 'delete'] as const) {
+    for (const op of ['select', 'insert', 'update', 'upsert', 'delete'] as const) {
       chain[op] = vi.fn((payload?: unknown) => { begin(op, op === 'select' ? undefined : payload); return chain })
     }
     for (const f of ['eq', 'neq', 'in', 'is', 'or', 'not', 'ilike', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {

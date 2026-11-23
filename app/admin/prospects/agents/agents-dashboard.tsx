@@ -8,6 +8,7 @@ import { DraftQualityPanel, FunnelSnapshot, KpiRow, QueueMatrix, RecentTasks } f
 import { ReadyCalls } from './ready-calls'
 import { ReadyToSend } from './ready-to-send'
 import { ManagerPanel } from './manager-panel'
+import { ManagerInstructions } from './manager-instructions'
 import { MasterSwitch, TeamCard } from './team-controls'
 
 const TEAM_ORDER: readonly SettingsTeam[] = ['manager', ...WORKER_TEAMS]
@@ -30,6 +31,7 @@ export async function AgentsDashboard() {
   const ages: Record<string, string> = {}
   for (const a of data.approvals) ages[a.id] = timeAgo(a.createdAt, now)
   for (const d of data.decisions) ages[d.id] = timeAgo(d.createdAt, now)
+  for (const i of data.instructions) ages[i.id] = timeAgo(i.createdAt, now)
   for (const r of data.readyDrafts) ages[r.id] = r.approvedAt ? timeAgo(r.approvedAt, now) : ''
   for (const c of data.readyCalls) ages[c.id] = c.approvedAt ? timeAgo(c.approvedAt, now) : ''
 
@@ -44,6 +46,13 @@ export async function AgentsDashboard() {
         <ApprovalInbox items={data.approvals} totalWaiting={data.metrics.needsApproval} ages={ages} />
         <ManagerPanel latest={data.decisions[0] ?? null} history={data.decisions} ages={ages} />
       </div>
+
+      <ManagerInstructions
+        briefId={data.decisions[0]?.id ?? null}
+        instructions={data.instructions}
+        playbook={data.playbook}
+        ages={ages}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ReadyToSend drafts={data.readyDrafts} ages={ages} />

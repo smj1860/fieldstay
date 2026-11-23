@@ -43,7 +43,11 @@ const PROSPECT_WRITERS = new Set<string>([
 ])
 
 /** The only agent files that may call a model. Each must bill it (see the pairing test). */
-const LLM_CALLERS = new Set<string>(['lib/gtm/manager/narrate.ts', 'lib/gtm/teams/sales-ops-draft.ts'])
+const LLM_CALLERS = new Set<string>([
+  'lib/gtm/manager/narrate.ts',
+  'lib/gtm/manager/interpret.ts',       // reads a person's reply to a brief; billed by gtm-manager-instruction.ts
+  'lib/gtm/teams/sales-ops-draft.ts',
+])
 
 const PROSPECT_TABLE = /\.from\(\s*['"](prospect_accounts|prospect_contacts|prospect_touches)['"]\s*\)\s*\.(insert|update|upsert|delete)\b/
 const PROSPECT_DELETE = /\.from\(\s*['"](prospect_accounts|prospect_contacts)['"]\s*\)\s*\.delete\b/
@@ -136,6 +140,28 @@ function briefBuilderViolations(code: string): string[] {
   return problems
 }
 
+/**
+ * The manager's instruction rules, as code. A reply to a brief becomes work only
+ * through apply.ts, so that file is held to the three things that keep a manager
+ * acting alone (under a standing permission) from being more than a queue writer:
+ * every task it creates waits for a person, it never names a requiresApproval of
+ * false, and it imports no sender. And nothing in agent code may switch a
+ * standing permission on: that is a person's click, in a Server Action.
+ */
+function instructionApplierViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/requiresApproval:\s*true/.test(code)) problems.push('does not create its tasks as needing approval')
+  if (/requiresApproval:(?!\s*true\b)/.test(code)) problems.push('lets a task skip approval')
+  if (/\.from\(\s*['"]prospect_/.test(code)) problems.push('touches a prospect table')
+  return problems
+}
+
+const STANDING_GRANT = /\bstanding\s*:\s*true\b/
+
+function standingGrantViolations(files: readonly Source[]): string[] {
+  return files.filter((f) => STANDING_GRANT.test(f.code)).map((f) => f.path)
+}
+
 function unbilledModelCallers(files: readonly Source[]): string[] {
   return files.filter((f) => LLM_IMPORT.test(f.code) && !LLM_CALLERS.has(f.path)).map((f) => f.path)
 }
@@ -204,10 +230,27 @@ describe('guardrail: GTM agent boundaries', () => {
     expect(briefBuilderViolations(builder!.code)).toEqual([])
   })
 
+  it('the manager applies an instruction only by queueing work that still waits for a person', () => {
+    const applier = sources.find((x) => x.path === 'lib/gtm/manager/apply.ts')
+    expect(applier, 'lib/gtm/manager/apply.ts should be scanned').toBeDefined()
+    expect(instructionApplierViolations(applier!.code)).toEqual([])
+  })
+
+  it('no agent code grants a standing permission: only a person\'s click does', () => {
+    expect(
+      standingGrantViolations(sources),
+      'A standing permission is the person saying "do this on your own". It is written by setStandingPermission() ' +
+      '(a Server Action behind requirePlatformAdmin), never by the manager, or it would be granting itself authority.',
+    ).toEqual([])
+  })
+
   it('every function that triggers a model call also records its usage', () => {
     const manager = sources.find((s) => s.path === 'lib/inngest/functions/gtm-manager.ts')!
     expect(manager.code).toContain('narrateBrief(')
     expect(manager.code).toContain('recordUsage(')
+    const reply = sources.find((s) => s.path === 'lib/inngest/functions/gtm-manager-instruction.ts')!
+    expect(reply.code).toContain('interpretInstruction(')
+    expect(reply.code).toContain('recordUsage(')
   })
 
   // A scan that passes because it is broken looks exactly like one that passes
@@ -288,6 +331,21 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(briefBuilderViolations(`import { sendSMS } from '@/lib/sms/telnyx'`)).toContain('reaches a database, a queue or a sender')
       expect(briefBuilderViolations(`await fetch(u)`)).toContain('makes a network call')
       expect(briefBuilderViolations(`import { getAnthropicClient } from '@/lib/support/anthropic-client'`)).toContain('imports a model client')
+    })
+
+    it('the instruction applier rules', () => {
+      const good = `enqueueTask(s, { requiresApproval: true })`
+      expect(instructionApplierViolations(good)).toEqual([])
+      expect(instructionApplierViolations(`enqueueTask(s, {})`)).toContain('does not create its tasks as needing approval')
+      expect(instructionApplierViolations(`${good}; enqueueTask(s, { requiresApproval: false })`)).toContain('lets a task skip approval')
+      expect(instructionApplierViolations(`${good}; enqueueTask(s, { requiresApproval: skip })`)).toContain('lets a task skip approval')
+      expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').update({})`)).toContain('touches a prospect table')
+    })
+
+    it('a standing permission written by agent code', () => {
+      expect(standingGrantViolations(src(`upsert({ action_kind: k, standing: true })`))).toHaveLength(1)
+      expect(standingGrantViolations(src(`.eq('standing', true)`))).toEqual([])
+      expect(standingGrantViolations(src(`upsert({ standing: false })`))).toEqual([])
     })
 
     it('an unbilled model caller', () => {

@@ -281,6 +281,9 @@ const EXCEPTIONS: Record<string, string> = {
   // with `concurrency: { limit: 10 }`, matching the six converted in the
   // 2026-07-30 pass.
 
+  'lib/inngest/functions/gtm-manager-instruction.ts:252':
+    'Bounded by the instruction catalog — `plan.due` is a subset of ACTION_KINDS (three entries, one per catalog action), filtered from the playbook rows a person granted; it cannot grow with tenants or data. One step per kind is the intended retry boundary: each kind applies and records independently, keyed per kind per day.',
+
   'lib/inngest/functions/flagged-turnover-wo.ts:102':
     'Bounded by one org\'s PM count — a per-event handler whose `managers` is `getPmMembers(supabase, org_id, { roles: [...] })`. The org scope is a JS ARGUMENT here, which the scan cannot tell apart from the identically-named column in a `.select(\'id, org_id, ...\')` list, so no token can express it. Team size, not tenant count.',
 

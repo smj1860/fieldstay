@@ -1542,4 +1542,11 @@ export type FieldStayEvents = {
       requested_by: string
     }
   },
+
+  /** A person replied to the manager's brief. The manager reads it and writes a proposal onto the row; it creates no task. */
+  'gtm/manager.instruction.submitted': {
+    data: {
+      instruction_id: string
+    }
+  },
 }

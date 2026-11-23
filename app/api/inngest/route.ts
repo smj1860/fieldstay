@@ -204,6 +204,7 @@ import { freezeWatchCron, freezeWatchOrg } from '@/lib/inngest/functions/cron/fr
 import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 import { prospectingCrawlDispatch, prospectingCrawlProfile } from '@/lib/inngest/functions/prospecting-crawl'
 import { gtmManagerMorning, gtmManagerEvening, gtmManagerManual } from '@/lib/inngest/functions/gtm-manager'
+import { gtmManagerInstruction, gtmManagerStanding } from '@/lib/inngest/functions/gtm-manager-instruction'
 import { gtmTaskStallSweep } from '@/lib/inngest/functions/gtm-stall-sweep'
 import { gtmSalesOpsDrain } from '@/lib/inngest/functions/gtm-sales-ops'
 import { gtmLeadGenDrain } from '@/lib/inngest/functions/gtm-lead-gen'
@@ -231,6 +232,8 @@ export const { GET, POST, PUT } = serve({
     gtmManagerMorning,
     gtmManagerEvening,
     gtmManagerManual,
+    gtmManagerInstruction,
+    gtmManagerStanding,
     gtmTaskStallSweep,
     gtmRevOpsDrain,
     gtmRevOpsWeekly,

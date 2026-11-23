@@ -900,6 +900,30 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   reaching out from what was read is the opposite of "say who you are and why you are writing". What
   fits instead: a person reads the groups they already belong to and pastes a post or a note onto the
   account, which the call brief already quotes.
+- **Manager instructions (2026-11-23): a person replies to a brief and the manager proposes; over time a
+  person can let it repeat what it has learned.** `manager_instructions` (one row per reply or standing run)
+  and `manager_playbook` (one row per instruction type, `standing` defaults false). A reply is read by ONE
+  billed model call (`lib/gtm/manager/interpret.ts`, Haiku, `tool_choice: auto`) that can only CHOOSE from the
+  catalog in `lib/gtm/manager/instructions.ts` (`requeue_failed`, `run_funnel_report`,
+  `propose_queue_candidates`); `readInterpretation()` drops anything else and regenerates the summary a person
+  approves, so the words are ours, not the model's. The proposal sits on the row until a person approves it in
+  the dashboard (`decideManagerInstruction`), and ONLY that approval carries it out, through
+  `lib/gtm/manager/apply.ts`, the single place an instruction becomes work. Every action only queues a task
+  (`enqueueTask`, always `requiresApproval: true`) or puts a failed one back with a status-guarded UPDATE, so
+  even a manager acting alone hands a person something to read before anything moves. **None of the three can
+  send, call, text, close or delete, and adding an action to the catalog is the decision to let it run
+  unattended once granted, so it needs a reason.** The manager's `autonomy` stays `propose_only` and
+  `buildSettingsUpdate()` still refuses to change it: a standing permission is a separate, per-type grant.
+  **Learning** is a pure function of the history (`learnFromHistory`): only HUMAN approvals teach it, a reply
+  it could not read is neither approval nor rejection, and the rhythm is the median gap between the DAYS a person
+  approved on (three clicks one afternoon are one day), clamped to 1-14 days, default 7. It OFFERS a type once
+  approved 3 times on 2 different days with no rejection (`mayOfferStanding`); the grant is the person's click
+  (`setStandingPermission`), and the same rule is re-checked server-side so a hand-built request cannot grant a
+  type nobody approved. `cron-gtm-manager-standing` (7:30am CT) repeats a granted type when its rhythm says it is
+  due, and holds back while 10 or more items already wait for a person. Nothing in agent code may write
+  `standing: true` (`gtm-agent-boundaries`). `authenticated` has SELECT only on both tables, so every write goes
+  through a Server Action after `requirePlatformAdmin()` or an Inngest step. A proposal stuck in `applying` (a
+  process that died mid-apply) is not swept yet.
 - **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
   nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
   reaches FieldStay only when a person says so (a button in an account's edit window, with an optional
