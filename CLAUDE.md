@@ -905,7 +905,8 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   and `manager_playbook` (one row per instruction type, `standing` defaults false). A reply is read by ONE
   billed model call (`lib/gtm/manager/interpret.ts`, Haiku, `tool_choice: auto`) that can only CHOOSE from the
   catalog in `lib/gtm/manager/instructions.ts` (`requeue_failed`, `run_funnel_report`,
-  `propose_queue_candidates`); `readInterpretation()` drops anything else and regenerates the summary a person
+  `propose_queue_candidates`, `redraft_rejected`, `enrich_ownerrez`; the last two take an optional count, clamped
+  to 5 and 10 by `ACCOUNT_BATCH_MAX`); `readInterpretation()` drops anything else and regenerates the summary a person
   approves, so the words are ours, not the model's. The proposal sits on the row until a person approves it in
   the dashboard (`decideManagerInstruction`), and ONLY that approval carries it out, through
   `lib/gtm/manager/apply.ts`, the single place an instruction becomes work. Every action only queues a task
@@ -924,6 +925,21 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   `standing: true` (`gtm-agent-boundaries`). `authenticated` has SELECT only on both tables, so every write goes
   through a Server Action after `requirePlatformAdmin()` or an Inngest step. A proposal stuck in `applying` (a
   process that died mid-apply) is not swept yet.
+  **A reply with several parts is answered in parts (2026-11-23).** The model proposes the actions that cover
+  what it can and lists every other part in `unmet`; nothing is dropped silently and one uncovered part no
+  longer refuses the whole reply. `unmet` is stored on the row (`manager_instructions.unmet`), shown on the card,
+  and tallied (`tallyUnmet`, repeats of the same words, so it under-counts) into the "Asked for, but it cannot do
+  yet" list: that list is the evidence for which action to build next. The model is also handed live COUNTS
+  (`InstructionFacts`, `lib/gtm/manager/facts.ts`: failed tasks by team, accounts with a rejected draft, OwnerRez
+  accounts with no email, items waiting) and never an account, a contact or a note, so a proposal can be specific
+  and "what would help?" has an answer. `redraft_rejected` reuses the rejection notes Sales Ops already feeds
+  into every draft (`loadRejectionFeedback`), skips an account with a draft waiting or that has left the
+  draftable stages, and keys per account per day so it bypasses the 14-day Rev Ops dedupe on purpose.
+  `enrich_ownerrez` reads `pms ILIKE 'OwnerRez'` in the database and uses Rev Ops's own enrich dedupe key, so an
+  account both paths pick is queued once. `apply.ts` may READ prospect tables to choose accounts and may not
+  write them (`gtm-agent-boundaries`). **The weekly Rev Ops handoff is OwnerRez-first** (`ownerrezFirstPool`: a
+  second database read, not a sort, for the same reason the queue proposal filters in the query): OwnerRez is the
+  founder's priority outreach, so it leads without anyone having to ask.
 - **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
   nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
   reaches FieldStay only when a person says so (a button in an account's edit window, with an optional

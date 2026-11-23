@@ -3562,6 +3562,7 @@ export type Database = {
           result: Json | null
           source: string
           status: string
+          unmet: string[]
           updated_at: string
         }
         Insert: {
@@ -3581,6 +3582,7 @@ export type Database = {
           result?: Json | null
           source?: string
           status?: string
+          unmet?: string[]
           updated_at?: string
         }
         Update: {
@@ -3600,6 +3602,7 @@ export type Database = {
           result?: Json | null
           source?: string
           status?: string
+          unmet?: string[]
           updated_at?: string
         }
         Relationships: [

@@ -156,8 +156,10 @@ describe('loadReportInput', () => {
         { count: 14, error: null },                                                            // stale count
         { data: [{ company: 'Acme', status: 'emailed', last_touch_at: '2026-10-26T13:00:00Z' }], error: null }, // stale examples
         { count: 120, error: null }, { count: 6, error: null }, { count: 9, error: null },     // hygiene
-        { data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null },                        // enrich candidate pool
-        { data: [{ id: 'd1' }, { id: 'd2' }], error: null },                                   // draft candidate pool
+        { data: [], error: null },                                                             // enrich pool, OwnerRez accounts
+        { data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null },                        // enrich pool, everyone
+        { data: [], error: null },                                                             // draft pool, OwnerRez accounts
+        { data: [{ id: 'd1' }, { id: 'd2' }], error: null },                                   // draft pool, everyone
       ],
       'agent_tasks:select': [
         { data: [{ prospect_id: 'b' }], error: null },                                         // Lead Gen already looked at b
@@ -179,6 +181,27 @@ describe('loadReportInput', () => {
     expect(input.spendTodayCents).toBe(2)
   })
 
+  it('puts OwnerRez accounts first in both handoffs, reads them in the database, and offers no account twice', async () => {
+    const { client, calls } = fakeSupabase({
+      'prospect_accounts:select': [
+        { count: 0, error: null }, { data: [], error: null },
+        { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null },
+        { data: [{ id: 'o1' }, { id: 'o2' }], error: null },            // enrich pool, OwnerRez accounts
+        { data: [{ id: 'x1' }, { id: 'o1' }, { id: 'x2' }], error: null }, // enrich pool, everyone (o1 repeats)
+        { data: [{ id: 'od1' }], error: null },                          // draft pool, OwnerRez accounts
+        { data: [{ id: 'xd1' }, { id: 'od1' }], error: null },           // draft pool, everyone
+      ],
+      'agent_tasks:select': [{ data: [], error: null }, { data: [], error: null }],
+    }, [{ data: { funnel: {}, touches: {}, tasks: [], spend: [] } }, { data: { funnel: {}, touches: {}, tasks: [], spend: [] } }])
+
+    const input = await loadReportInput(client, NOW)
+    expect(input.enrichCandidates).toEqual(['o1', 'o2', 'x1', 'x2'])
+    expect(input.draftCandidates).toEqual(['od1', 'xd1'])
+    const pools = calls.filter((c) => c.table === 'prospect_accounts' && c.filters.some(([f, a]) => f === 'limit' && a[0] === 50))
+    expect(pools).toHaveLength(4)
+    expect(pools.map((c) => c.filters.some(([f, a]) => f === 'ilike' && a[0] === 'pms' && a[1] === 'OwnerRez'))).toEqual([true, false, true, false])
+  })
+
   it('fails loudly if the rollup cannot be read, instead of reporting zeros as fact', async () => {
     const { client } = fakeSupabase({
       'prospect_accounts:select': [{ count: 0, error: null }],
@@ -189,7 +212,7 @@ describe('loadReportInput', () => {
 
   it('offers no candidates when none qualify, without asking about tasks', async () => {
     const { client, calls } = fakeSupabase({
-      'prospect_accounts:select': [{ count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null }, { data: [], error: null }, { data: [], error: null }],
+      'prospect_accounts:select': [{ count: 0, error: null }, { data: [], error: null }, { count: 0, error: null }, { count: 0, error: null }, { count: 0, error: null }, { data: [], error: null }, { data: [], error: null }, { data: [], error: null }, { data: [], error: null }],
     }, [{ data: {} }, { data: {} }])
     const input = await loadReportInput(client, NOW)
     expect(input.enrichCandidates).toEqual([])

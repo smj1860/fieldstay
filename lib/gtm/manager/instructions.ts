@@ -21,7 +21,13 @@ import { isWorkerTeam, type WorkerTeam } from '../constants'
  * reason, and none may send, call, text, close or delete.
  */
 
-export const ACTION_KINDS = ['requeue_failed', 'run_funnel_report', 'propose_queue_candidates'] as const
+export const ACTION_KINDS = [
+  'requeue_failed',
+  'run_funnel_report',
+  'propose_queue_candidates',
+  'redraft_rejected',
+  'enrich_ownerrez',
+] as const
 export type ActionKind = (typeof ACTION_KINDS)[number]
 
 export function isActionKind(value: unknown): value is ActionKind {
@@ -32,8 +38,10 @@ interface CatalogEntry {
   label:       string
   /** Shown to the model and to the person: what this does, in one sentence. */
   description: string
-  /** The one parameter any action takes: which team's failed tasks. Only requeue_failed. */
+  /** Which team's failed tasks. Only requeue_failed. */
   takesTeam:   boolean
+  /** How many accounts to take on, bounded by the executor. Only the two account-batch actions. */
+  takesLimit:  boolean
 }
 
 export const ACTION_CATALOG: Record<ActionKind, CatalogEntry> = {
@@ -41,20 +49,41 @@ export const ACTION_CATALOG: Record<ActionKind, CatalogEntry> = {
     label:       'Retry failed tasks',
     description: 'Puts tasks that failed in the last 7 days back in their team\'s queue for another try. Optionally limited to one team.',
     takesTeam:   true,
+    takesLimit:  false,
   },
   run_funnel_report: {
     label:       'Write the funnel report',
     description: 'Asks Rev Ops for a funnel report now. It still waits for your approval before it hands anything to another team.',
     takesTeam:   false,
+    takesLimit:  false,
   },
   propose_queue_candidates: {
     label:       'Suggest accounts to queue',
     description: 'Asks Lead Gen to propose accounts that are ready for a first email. Nothing moves until you approve the list.',
     takesTeam:   false,
+    takesLimit:  false,
+  },
+  redraft_rejected: {
+    label:       'Redraft rejected drafts',
+    description: 'Asks Sales Ops to write a fresh draft for accounts whose draft you rejected in the last 30 days, using the notes you left on rejected drafts. Skips an account that has replied or already has a draft waiting. You still review every draft. At most 5 at a time.',
+    takesTeam:   false,
+    takesLimit:  true,
+  },
+  enrich_ownerrez: {
+    label:       'Find contact details for OwnerRez accounts',
+    description: 'Asks Lead Gen to read the public website of OwnerRez accounts that have no email yet, and propose contact details. You approve what gets saved. At most 10 at a time.',
+    takesTeam:   false,
+    takesLimit:  true,
   },
 }
 
-export interface ActionParams { team?: WorkerTeam }
+export interface ActionParams { team?: WorkerTeam; limit?: number }
+
+/** The most one action may take on at once. Each account is something for a person to read or approve. */
+export const ACCOUNT_BATCH_MAX: Record<'redraft_rejected' | 'enrich_ownerrez', number> = {
+  redraft_rejected: 5,
+  enrich_ownerrez:  10,
+}
 
 export interface ProposedAction {
   kind:    ActionKind
@@ -72,7 +101,22 @@ const TEAM_NAMES: Record<WorkerTeam, string> = {
 
 export function describeAction(kind: ActionKind, params: ActionParams): string {
   const base = ACTION_CATALOG[kind].label
-  return params.team ? `${base} (${TEAM_NAMES[params.team]} only)` : base
+  if (params.team) return `${base} (${TEAM_NAMES[params.team]} only)`
+  if (params.limit) return `${base} (up to ${params.limit})`
+  return base
+}
+
+/** A requested count, clamped to what this action allows. Anything that is not a positive whole number means "the default". */
+export function clampLimit(kind: ActionKind, raw: unknown): number | undefined {
+  if (!ACTION_CATALOG[kind].takesLimit) return undefined
+  const max = ACCOUNT_BATCH_MAX[kind as keyof typeof ACCOUNT_BATCH_MAX]
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) return undefined
+  return Math.min(raw, max)
+}
+
+/** The count an action actually takes: what was asked for within the ceiling, else the ceiling. */
+export function effectiveLimit(kind: keyof typeof ACCOUNT_BATCH_MAX, params: ActionParams): number {
+  return params.limit ?? ACCOUNT_BATCH_MAX[kind]
 }
 
 // ── reading the model's answer ──────────────────────────────────────────────
@@ -85,19 +129,39 @@ const MAX_REPLY_CHARS = 600
 const modelAnswer = z.object({
   reply:   z.string(),
   actions: z.array(z.object({
-    kind: z.string(),
-    team: z.string().nullish(),
+    kind:  z.string(),
+    team:  z.string().nullish(),
+    limit: z.number().nullish(),
   })),
+  /** Parts of the request that are not on the list, in the person's own terms. Optional: an older answer has none. */
+  unmet:   z.array(z.string()).nullish(),
 })
 
 export interface Interpretation {
   reply:   string
   actions: ProposedAction[]
+  /** What was asked for that no action covers. Shown to the person, and the evidence for what to build next. */
+  unmet:   string[]
+}
+
+export const MAX_UNMET = 5
+export const MAX_UNMET_CHARS = 160
+
+function cleanUnmet(raw: readonly string[] | null | undefined): string[] {
+  return (raw ?? [])
+    .map((u) => noEmDash(u).replaceAll(/\s+/g, ' ').trim().slice(0, MAX_UNMET_CHARS))
+    .filter((u) => u.length > 0)
+    .slice(0, MAX_UNMET)
+}
+
+/** A comma in place of the dash and the spaces around it, so "a — b" reads "a, b" and not "a , b". */
+function noEmDash(text: string): string {
+  return text.replaceAll(/\s*—\s*/g, ', ')
 }
 
 /** The same rule as everywhere else customer-readable: copy never carries an em dash. */
 function cleanReply(text: string): string {
-  return text.replaceAll('—', ',').trim().slice(0, MAX_REPLY_CHARS)
+  return noEmDash(text).trim().slice(0, MAX_REPLY_CHARS)
 }
 
 /**
@@ -116,14 +180,15 @@ export function readInterpretation(raw: unknown): Interpretation | null {
   for (const item of parsed.data.actions) {
     if (!isActionKind(item.kind)) continue
     const team = ACTION_CATALOG[item.kind].takesTeam && isWorkerTeam(item.team) ? item.team : undefined
-    const params: ActionParams = team ? { team } : {}
-    const key = `${item.kind}:${team ?? ''}`
+    const limit = clampLimit(item.kind, item.limit)
+    const params: ActionParams = { ...(team ? { team } : {}), ...(limit ? { limit } : {}) }
+    const key = `${item.kind}:${team ?? ''}:${limit ?? ''}`
     if (seen.has(key)) continue
     seen.add(key)
     actions.push({ kind: item.kind, params, summary: describeAction(item.kind, params) })
     if (actions.length >= MAX_ACTIONS_PER_INSTRUCTION) break
   }
-  return { reply: cleanReply(parsed.data.reply), actions }
+  return { reply: cleanReply(parsed.data.reply), actions, unmet: cleanUnmet(parsed.data.unmet) }
 }
 
 /** What a stored proposal column holds, read back defensively: it is JSON a person approves from. */
@@ -133,9 +198,10 @@ export function readStoredProposal(value: unknown): ProposedAction[] {
     if (typeof item !== 'object' || item === null) return []
     const { kind, params } = item as { kind?: unknown; params?: unknown }
     if (!isActionKind(kind)) return []
-    const teamRaw = typeof params === 'object' && params !== null ? (params as { team?: unknown }).team : undefined
-    const team = ACTION_CATALOG[kind].takesTeam && isWorkerTeam(teamRaw) ? teamRaw : undefined
-    const clean: ActionParams = team ? { team } : {}
+    const raw = typeof params === 'object' && params !== null ? (params as { team?: unknown; limit?: unknown }) : {}
+    const team = ACTION_CATALOG[kind].takesTeam && isWorkerTeam(raw.team) ? raw.team : undefined
+    const limit = clampLimit(kind, raw.limit)
+    const clean: ActionParams = { ...(team ? { team } : {}), ...(limit ? { limit } : {}) }
     return [{ kind, params: clean, summary: describeAction(kind, clean) }]
   })
 }
@@ -267,3 +333,60 @@ export function lastActivityAt(learning: KindLearning, lastStandingRunAt: string
 
 /** How many history rows the learning looks at. A ceiling, not a page size: it is the most recent decisions that show the rhythm. */
 export const INSTRUCTION_HISTORY_LIMIT = 500
+
+// ── what the manager can see when it reads a reply ──────────────────────────
+
+/**
+ * Live counts handed to the model with a reply, so a proposal can be specific
+ * ("3 failed Lead Gen tasks") and "what would help most?" has an answer. COUNTS
+ * ONLY, on purpose: no company, no contact, no draft text, no note a person
+ * wrote. It is an allowlist, in the same spirit as narrationFacts().
+ */
+export interface InstructionFacts {
+  failedByTeam:            Partial<Record<WorkerTeam, number>>
+  /** accounts whose draft was rejected in the last 30 days and that have no draft waiting */
+  rejectedDraftAccounts:   number
+  /** OwnerRez accounts with no email yet and a site to read */
+  ownerrezNeedingContact:  number
+  waitingForApproval:      number
+}
+
+export function renderFacts(facts: InstructionFacts): string {
+  const failed = Object.entries(facts.failedByTeam)
+    .filter(([, n]) => typeof n === 'number' && n > 0)
+    .map(([team, n]) => `${TEAM_NAMES[team as WorkerTeam]} ${n}`)
+  return [
+    'Current counts:',
+    `- Failed tasks in the last 7 days: ${failed.length ? failed.join(', ') : 'none'}`,
+    `- Accounts whose draft was rejected in the last 30 days and could be redrafted: ${facts.rejectedDraftAccounts}`,
+    `- OwnerRez accounts with no email yet: ${facts.ownerrezNeedingContact}`,
+    `- Items waiting for the person's approval: ${facts.waitingForApproval}`,
+  ].join('\n')
+}
+
+// ── what people keep asking for that is not on the list ─────────────────────
+
+export interface UnmetTally { request: string; count: number }
+
+export const MAX_UNMET_SHOWN = 8
+
+/**
+ * Groups the "could not do" phrases from past replies, most-asked first. The
+ * phrases are the manager's own wording of what a person asked for, so two
+ * replies that mean the same thing rarely match exactly: this counts only
+ * repeats of the same words (case and spacing aside), which under-counts and
+ * never over-counts. The list is a prompt for what to build next, not a statistic.
+ */
+export function tallyUnmet(rows: readonly (readonly string[])[]): UnmetTally[] {
+  const byKey = new Map<string, UnmetTally>()
+  for (const phrases of rows) {
+    for (const phrase of phrases) {
+      const key = phrase.toLowerCase().replaceAll(/\s+/g, ' ').trim()
+      if (!key) continue
+      const seen = byKey.get(key)
+      if (seen) seen.count += 1
+      else byKey.set(key, { request: phrase.trim(), count: 1 })
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b.count - a.count || a.request.localeCompare(b.request)).slice(0, MAX_UNMET_SHOWN)
+}

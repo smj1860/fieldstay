@@ -18,7 +18,9 @@ import {
   mayOfferStanding,
   readStoredProposal,
   recordsFromRows,
+  tallyUnmet,
   type ActionKind,
+  type UnmetTally,
   type InstructionHistoryRow,
   type ProposedAction,
 } from './manager/instructions'
@@ -76,6 +78,8 @@ export interface InstructionItem {
   status:      string
   reply:       string | null
   proposal:    ProposedAction[]
+  /** the parts of the reply no action covers */
+  unmet:       string[]
   /** what carrying it out did, one sentence per action */
   outcomes:    string[]
   createdAt:   string
@@ -142,6 +146,7 @@ export interface AgentsDashboardData {
   decisions:  DecisionItem[]
   instructions: InstructionItem[]
   playbook:   PlaybookItem[]
+  unmetRequests: UnmetTally[]
   readyDrafts:  ReadyDraft[]
   readyCalls:   ReadyCall[]
   draftQuality: DraftQuality
@@ -236,13 +241,16 @@ function outcomeSummaries(result: Json | null): string[] {
 
 interface PlaybookRow { action_kind: string; standing: boolean; last_standing_run_at: string | null }
 
+export const UNMET_HISTORY_READ = 60
+
 async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
-  instructions: InstructionItem[]
-  playbook:     PlaybookItem[]
+  instructions:  InstructionItem[]
+  playbook:      PlaybookItem[]
+  unmetRequests: UnmetTally[]
 }> {
-  const [recentRes, historyRes, playbookRes] = await Promise.all([
+  const [recentRes, historyRes, playbookRes, unmetRes] = await Promise.all([
     supabase.from('manager_instructions')
-      .select('id, source, instruction, status, reply, proposal, result, created_at')
+      .select('id, source, instruction, status, reply, proposal, unmet, result, created_at')
       .order('created_at', { ascending: false })
       .limit(MAX_INSTRUCTIONS_SHOWN),
     supabase.from('manager_instructions')
@@ -253,13 +261,19 @@ async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
     supabase.from('manager_playbook')
       .select('action_kind, standing, last_standing_run_at')
       .limit(ACTION_KINDS.length),
+    supabase.from('manager_instructions')
+      .select('unmet')
+      .eq('source', 'human')
+      .filter('unmet', 'neq', '{}')
+      .order('created_at', { ascending: false })
+      .limit(UNMET_HISTORY_READ),
   ])
 
   const instructions = unwrapList(recentRes, { site: `${SITE}.instructions` }).flatMap((r): InstructionItem[] =>
     r.source === 'human' || r.source === 'standing'
       ? [{
           id: r.id, source: r.source, instruction: r.instruction, status: r.status, reply: r.reply,
-          proposal: readStoredProposal(r.proposal), outcomes: outcomeSummaries(r.result), createdAt: r.created_at,
+          proposal: readStoredProposal(r.proposal), unmet: r.unmet ?? [], outcomes: outcomeSummaries(r.result), createdAt: r.created_at,
         }]
       : [])
 
@@ -282,7 +296,8 @@ async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
       lastRunAt:   lastActivityAt(l, row?.last_standing_run_at ?? null),
     }
   })
-  return { instructions, playbook }
+  const unmetRows = unwrapList<{ unmet: string[] | null }>(unmetRes, { site: `${SITE}.unmet` })
+  return { instructions, playbook, unmetRequests: tallyUnmet(unmetRows.map((r) => r.unmet ?? [])) }
 }
 
 export async function loadAgentsDashboard(
@@ -347,6 +362,7 @@ export async function loadAgentsDashboard(
     decisions,
     instructions: instructionData.instructions,
     playbook:     instructionData.playbook,
+    unmetRequests: instructionData.unmetRequests,
     readyDrafts:  readiness.readyDrafts,
     readyCalls,
     draftQuality: readiness.draftQuality,

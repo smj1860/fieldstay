@@ -1,5 +1,5 @@
 import 'server-only'
-import { unwrapCount, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapCount, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import type { createServiceClient } from '@/lib/supabase/server'
 import type { AgentTask } from '@/types/database'
 import type { Json } from '@/types/database.generated'
@@ -84,31 +84,55 @@ async function loadHygiene(supabase: ServiceClient) {
 }
 
 /**
+ * OwnerRez accounts first, then everyone else, in that order and without repeats.
+ *
+ * OwnerRez is the founder's priority outreach, so it leads every weekly handoff
+ * rather than waiting to be asked for. It is applied in the DATABASE as a second
+ * read, not by sorting the first one: a bounded read of the best-scored accounts
+ * would never reach an OwnerRez account that scores lower, which is the same trap
+ * that made the queue proposal filter on pms in the query. Both reads carry the
+ * same filters, so what changes is only the order.
+ */
+async function ownerrezFirstPool(
+  run: (ownerrezOnly: boolean) => PromiseLike<PostgrestResult<{ id: string }[]>>,
+  site: string,
+): Promise<string[]> {
+  const [ownerrez, everyone] = await Promise.all([run(true), run(false)])
+  const first = unwrapList<{ id: string }>(ownerrez, { site: `${site}.ownerrez` })
+  const rest = unwrapList<{ id: string }>(everyone, { site: `${site}.all` })
+  return [...new Set([...first, ...rest].map((p) => p.id))]
+}
+
+/**
  * Accounts worth asking Lead Gen about: still early in the funnel, no email on
  * file, and a site to read. Best-scored first. Anything Lead Gen already looked
  * at in the last ENRICH_RECHECK_DAYS is dropped, or the same ten accounts would
  * be offered every week and the cap would never reach the next ones.
  */
 async function loadEnrichCandidates(supabase: ServiceClient, now: Date): Promise<string[]> {
-  const poolRes = await supabase.from('prospect_accounts').select('id')
-    .in('status', ['new', 'researching', 'needs_contact_info'])
-    .is('email', null)
-    .or('website.not.is.null,domain.not.is.null')
-    .order('score_a', { ascending: false, nullsFirst: false })
-    .order('id', { ascending: true })
-    .limit(CANDIDATE_POOL)
-  const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.candidates.pool` })
+  const pool = await ownerrezFirstPool((ownerrezOnly) => {
+    let query = supabase.from('prospect_accounts').select('id')
+      .in('status', ['new', 'researching', 'needs_contact_info'])
+      .is('email', null)
+      .or('website.not.is.null,domain.not.is.null')
+      .order('score_a', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
+      .limit(CANDIDATE_POOL)
+    // A filter may follow the limit: they are all parameters of the one request.
+    if (ownerrezOnly) query = query.ilike('pms', 'OwnerRez')
+    return query
+  }, `${SITE}.candidates.pool`)
   if (pool.length === 0) return []
 
   const since = new Date(now.getTime() - ENRICH_RECHECK_DAYS * DAY_MS).toISOString()
   const askedRes = await supabase.from('agent_tasks').select('prospect_id')
     .eq('task_type', 'enrich_account')
-    .in('prospect_id', pool.map((p) => p.id))
+    .in('prospect_id', pool)
     .gte('created_at', since)
-    .limit(CANDIDATE_POOL)
+    .limit(pool.length)
   const asked = unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.candidates.asked` })
   const skip = new Set(asked.map((a) => a.prospect_id))
-  return pool.map((p) => p.id).filter((id) => !skip.has(id)).slice(0, MAX_LEAD_GEN_HANDOFFS)
+  return pool.filter((id) => !skip.has(id)).slice(0, MAX_LEAD_GEN_HANDOFFS)
 }
 
 /**
@@ -119,26 +143,29 @@ async function loadEnrichCandidates(supabase: ServiceClient, now: Date): Promise
  */
 async function loadDraftCandidates(supabase: ServiceClient, now: Date): Promise<string[]> {
   const cutoff = new Date(now.getTime() - STALE_TOUCH_DAYS * DAY_MS).toISOString()
-  const poolRes = await supabase.from('prospect_accounts').select('id')
-    .in('status', [...DRAFTABLE_STAGES])
-    .not('email', 'is', null)
-    .neq('email_status', 'bounced')
-    .or(`last_touch_at.is.null,last_touch_at.lt.${cutoff}`)
-    .order('score_a', { ascending: false, nullsFirst: false })
-    .order('id', { ascending: true })
-    .limit(CANDIDATE_POOL)
-  const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.drafts.pool` })
+  const pool = await ownerrezFirstPool((ownerrezOnly) => {
+    let query = supabase.from('prospect_accounts').select('id')
+      .in('status', [...DRAFTABLE_STAGES])
+      .not('email', 'is', null)
+      .neq('email_status', 'bounced')
+      .or(`last_touch_at.is.null,last_touch_at.lt.${cutoff}`)
+      .order('score_a', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
+      .limit(CANDIDATE_POOL)
+    if (ownerrezOnly) query = query.ilike('pms', 'OwnerRez')
+    return query
+  }, `${SITE}.drafts.pool`)
   if (pool.length === 0) return []
 
   const since = new Date(now.getTime() - DRAFT_RECHECK_DAYS * DAY_MS).toISOString()
   const askedRes = await supabase.from('agent_tasks').select('prospect_id')
     .eq('task_type', 'draft_outreach')
-    .in('prospect_id', pool.map((p) => p.id))
+    .in('prospect_id', pool)
     .gte('created_at', since)
-    .limit(CANDIDATE_POOL)
+    .limit(pool.length)
   const asked = unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.drafts.asked` })
   const skip = new Set(asked.map((a) => a.prospect_id))
-  return pool.map((p) => p.id).filter((id) => !skip.has(id)).slice(0, MAX_SALES_OPS_HANDOFFS)
+  return pool.filter((id) => !skip.has(id)).slice(0, MAX_SALES_OPS_HANDOFFS)
 }
 
 export async function loadReportInput(supabase: ServiceClient, now: Date): Promise<ReportInput> {

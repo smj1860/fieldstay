@@ -51,6 +51,7 @@ export async function AgentsDashboard() {
         briefId={data.decisions[0]?.id ?? null}
         instructions={data.instructions}
         playbook={data.playbook}
+        unmetRequests={data.unmetRequests}
         ages={ages}
       />
 
