@@ -4,7 +4,7 @@ import { getAnthropicClient } from '@/lib/support/anthropic-client'
 import { ANTHROPIC_TIMEOUT_MS } from '@/lib/http/timeout'
 import { reportError } from '@/lib/observability/report-error'
 import { WORKER_TEAMS } from '../constants'
-import { ACTION_CATALOG, ACTION_KINDS, readInterpretation, type Interpretation } from './instructions'
+import { ACTION_CATALOG, ACTION_KINDS, MAX_UNMET_CHARS, readInterpretation, renderFacts, type InstructionFacts, type Interpretation } from './instructions'
 import { MANAGER_MODEL } from './narrate'
 
 /**
@@ -38,13 +38,19 @@ export const PROPOSE_ACTIONS_TOOL: Anthropic.Messages.Tool = {
           type: 'object',
           properties: {
             kind: { type: 'string', enum: [...ACTION_KINDS] },
-            team: { type: 'string', enum: [...WORKER_TEAMS], description: 'Only for requeue_failed, and only when the person named a team.' },
+            team:  { type: 'string', enum: [...WORKER_TEAMS], description: 'Only for requeue_failed, and only when the person named a team.' },
+            limit: { type: 'integer', minimum: 1, description: 'Only for redraft_rejected and enrich_ownerrez, and only when the person named a number.' },
           },
           required: ['kind'],
         },
       },
+      unmet: {
+        type: 'array',
+        description: `Each part of the instruction that no catalog action covers, as a short phrase in the person's own terms (under ${MAX_UNMET_CHARS} characters). Empty when everything is covered.`,
+        items: { type: 'string' },
+      },
     },
-    required: ['reply', 'actions'],
+    required: ['reply', 'actions', 'unmet'],
   },
 }
 
@@ -56,7 +62,9 @@ export function interpretSystemPrompt(): string {
     catalog,
     'Rules:',
     '- You cannot send email, text, call, change an account, close or delete anything, or change settings. If the instruction asks for any of that, propose nothing and say plainly that you cannot.',
-    '- Do not guess. If the instruction is vague or asks for something not on the list, propose nothing and say what you can do instead.',
+    '- Do not guess. If the instruction is vague, propose nothing and say what you can do instead.',
+    '- If the instruction has several parts, propose the actions that cover the parts you can, and list every part you cannot cover in `unmet`. Do not drop a part silently and do not refuse the whole thing because one part is off the list.',
+    '- If the person asks what would help, or leaves the choice to you, use the current counts to recommend one or two actions and propose them.',
     '- Do not propose more than the instruction asks for.',
     '- Every action only queues work for a team. The person still approves what the team produces.',
     `Answer only by calling the ${PROPOSE_ACTIONS_TOOL.name} tool. Write nothing outside that call.`,
@@ -77,8 +85,9 @@ function readCall(content: Anthropic.Messages.ContentBlock[]): Interpretation | 
 }
 
 /** Throws on a transport or API failure so the step is retried. A malformed answer is a result, not a throw. */
-export async function interpretInstruction(instruction: string, briefText: string | null): Promise<InterpretCall> {
-  const context = briefText ? `Your latest brief, for context:\n${briefText}\n\n` : ''
+export async function interpretInstruction(instruction: string, briefText: string | null, facts: InstructionFacts): Promise<InterpretCall> {
+  const brief = briefText ? `Your latest brief, for context:\n${briefText}\n\n` : ''
+  const context = `${brief}${renderFacts(facts)}\n\n`
   try {
     const res = await getAnthropicClient().messages.create(
       {

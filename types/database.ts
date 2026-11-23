@@ -3279,6 +3279,7 @@ export interface ManagerInstruction {
   reply:        string | null
   proposal:     Json
   action_kinds: string[]
+  unmet:        string[]
   result:       Json | null
   model:        string | null
   decided_by:   string | null
@@ -3290,7 +3291,7 @@ export interface ManagerInstruction {
 }
 
 export interface ManagerPlaybook {
-  action_kind:          'requeue_failed' | 'run_funnel_report' | 'propose_queue_candidates'
+  action_kind:          'requeue_failed' | 'run_funnel_report' | 'propose_queue_candidates' | 'redraft_rejected' | 'enrich_ownerrez'
   standing:             boolean
   granted_by:           string | null
   granted_at:           string | null

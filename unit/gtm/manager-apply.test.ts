@@ -92,3 +92,117 @@ describe('requeue_failed', () => {
     expect(fake.calls.some((c) => c.op === 'update')).toBe(false)
   })
 })
+
+describe('redraft_rejected', () => {
+  const action = (limit?: number) => ({ kind: 'redraft_rejected' as const, params: limit ? { limit } : {}, summary: '' })
+  const queuedOk = () => mocks.enqueueTask.mockResolvedValue({ ok: true, id: 't' })
+
+  it('asks Sales Ops for a fresh draft for accounts it rejected, each needing approval, keyed per account per day', async () => {
+    queuedOk()
+    const fake = fakeSupabase({
+      'agent_tasks:select':       [
+        { data: [{ prospect_id: 'p1' }, { prospect_id: 'p2' }, { prospect_id: 'p1' }], error: null },
+        { data: [], error: null },
+      ],
+      'prospect_accounts:select': [{ data: [{ id: 'p1' }, { id: 'p2' }], error: null }],
+    })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out.ok).toBe(true)
+    expect(out.summary).toContain('redraft 2 accounts')
+    expect(mocks.enqueueTask.mock.calls.map((c) => c[1])).toEqual([
+      expect.objectContaining({ team: 'sales_ops', taskType: 'draft_outreach', origin: 'manager', requiresApproval: true, prospectId: 'p1', dedupeKey: 'sales_ops:draft_outreach:p1:redraft:2026-11-23' }),
+      expect.objectContaining({ prospectId: 'p2', dedupeKey: 'sales_ops:draft_outreach:p2:redraft:2026-11-23' }),
+    ])
+  })
+
+  it('skips an account that already has a draft waiting, or that has moved on', async () => {
+    queuedOk()
+    const fake = fakeSupabase({
+      'agent_tasks:select':       [
+        { data: [{ prospect_id: 'p1' }, { prospect_id: 'p2' }, { prospect_id: 'p3' }], error: null },
+        { data: [{ prospect_id: 'p1' }], error: null },
+      ],
+      // p3 has replied since: it is not in a draftable stage.
+      'prospect_accounts:select': [{ data: [{ id: 'p1' }, { id: 'p2' }], error: null }],
+    })
+    await applyAction(fake.client, action(), ctx)
+    expect(mocks.enqueueTask.mock.calls.map((c) => c[1].prospectId)).toEqual(['p2'])
+  })
+
+  it('takes on no more than it was asked for, and never past its own ceiling', async () => {
+    queuedOk()
+    const rows = Array.from({ length: 9 }, (_, i) => ({ prospect_id: `p${i}` }))
+    const ids = rows.map((r) => ({ id: r.prospect_id }))
+    const world = () => fakeSupabase({
+      'agent_tasks:select':       [{ data: rows, error: null }, { data: [], error: null }],
+      'prospect_accounts:select': [{ data: ids, error: null }],
+    })
+    await applyAction(world().client, action(2), ctx)
+    expect(mocks.enqueueTask).toHaveBeenCalledTimes(2)
+    mocks.enqueueTask.mockClear()
+    await applyAction(world().client, action(), ctx)
+    expect(mocks.enqueueTask).toHaveBeenCalledTimes(5)
+  })
+
+  it('says so, and queues nothing, when nothing was rejected', async () => {
+    const fake = fakeSupabase({ 'agent_tasks:select': [{ data: [], error: null }] })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out).toMatchObject({ ok: true })
+    expect(out.summary).toMatch(/nothing to redo/)
+    expect(mocks.enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it('reports a switched-off team as not done', async () => {
+    mocks.enqueueTask.mockResolvedValue({ ok: false, reason: 'team_off' })
+    const fake = fakeSupabase({
+      'agent_tasks:select':       [{ data: [{ prospect_id: 'p1' }], error: null }, { data: [], error: null }],
+      'prospect_accounts:select': [{ data: [{ id: 'p1' }], error: null }],
+    })
+    expect(await applyAction(fake.client, action(), ctx)).toMatchObject({ ok: false })
+  })
+})
+
+describe('enrich_ownerrez', () => {
+  const action = (limit?: number) => ({ kind: 'enrich_ownerrez' as const, params: limit ? { limit } : {}, summary: '' })
+
+  it('asks Lead Gen about OwnerRez accounts with no email, with the same key Rev Ops uses so none is queued twice', async () => {
+    mocks.enqueueTask.mockResolvedValue({ ok: true, id: 't' })
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: [{ id: 'p1' }, { id: 'p2' }], error: null }],
+      'agent_tasks:select':       [{ data: [{ prospect_id: 'p2' }], error: null }],
+    })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out.summary).toContain('1 OwnerRez account')
+    const period = Math.floor(ctx.now.getTime() / (30 * 86_400_000))
+    expect(mocks.enqueueTask.mock.calls[0][1]).toMatchObject({
+      team: 'lead_gen', taskType: 'enrich_account', origin: 'manager', requiresApproval: true, prospectId: 'p1',
+      dedupeKey: `lead_gen:enrich_account:p1:${period}`,
+    })
+    expect(mocks.enqueueTask).toHaveBeenCalledTimes(1)
+    const filters = fake.calls[0].filters
+    expect(filters).toContainEqual(['ilike', ['pms', 'OwnerRez']])
+    expect(filters).toContainEqual(['is', ['email', null]])
+  })
+
+  it('stops at its ceiling of ten', async () => {
+    mocks.enqueueTask.mockResolvedValue({ ok: true, id: 't' })
+    const pool = Array.from({ length: 30 }, (_, i) => ({ id: `p${i}` }))
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: pool, error: null }],
+      'agent_tasks:select':       [{ data: [], error: null }],
+    })
+    await applyAction(fake.client, action(), ctx)
+    expect(mocks.enqueueTask).toHaveBeenCalledTimes(10)
+  })
+
+  it('says so when every one was already looked at, or there are none', async () => {
+    const none = fakeSupabase({ 'prospect_accounts:select': [{ data: [], error: null }] })
+    expect((await applyAction(none.client, action(), ctx)).summary).toMatch(/No OwnerRez accounts/)
+    const seen = fakeSupabase({
+      'prospect_accounts:select': [{ data: [{ id: 'p1' }], error: null }],
+      'agent_tasks:select':       [{ data: [{ prospect_id: 'p1' }], error: null }],
+    })
+    expect((await applyAction(seen.client, action(), ctx)).summary).toMatch(/already looked at/)
+    expect(mocks.enqueueTask).not.toHaveBeenCalled()
+  })
+})

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { MAX_INSTRUCTION_CHARS } from '@/lib/gtm/manager/instructions'
+import type { UnmetTally } from '@/lib/gtm/manager/instructions'
 import type { InstructionItem, PlaybookItem } from '@/lib/gtm/dashboard'
 import {
   decideManagerInstruction,
@@ -59,9 +60,9 @@ function ReplyBox({ briefId }: Readonly<{ briefId: string | null }>) {
         placeholder="For example: retry the failed drafts, or write the funnel report now."
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="mt-2 flex items-center gap-3">
-        <Button type="button" variant="primary" disabled={pending || text.trim().length === 0} onClick={send}>
-          Send to the manager
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <Button type="button" variant="primary" className="w-full sm:w-auto" disabled={pending || text.trim().length === 0} onClick={send}>
+          {pending ? 'Sending...' : 'Send to the manager'}
         </Button>
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
           The manager reads it and proposes what to do. Nothing happens until you approve.
@@ -101,15 +102,23 @@ function InstructionRow({ item, age }: Readonly<{ item: InstructionItem; age: st
           {item.proposal.map((a) => <li key={`${a.kind}-${a.params.team ?? ''}`}>{a.summary}</li>)}
         </ul>
       )}
+      {item.unmet.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Not covered by anything it can do yet:</p>
+          <ul className="mt-1 list-disc pl-5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            {item.unmet.map((u) => <li key={u}>{u}</li>)}
+          </ul>
+        </div>
+      )}
       {item.outcomes.length > 0 && (
         <ul className="mt-2 list-disc pl-5 text-sm" style={{ color: 'var(--text-secondary)' }}>
           {item.outcomes.map((o) => <li key={o}>{o}</li>)}
         </ul>
       )}
       {item.status === 'proposed' && (
-        <div className="mt-2 flex gap-2">
-          <Button type="button" variant="primary" disabled={pending} onClick={() => decide('approve')}>Approve</Button>
-          <Button type="button" variant="danger" disabled={pending} onClick={() => decide('reject')}>Reject</Button>
+        <div className="mt-3 flex gap-2">
+          <Button type="button" variant="primary" className="grow sm:grow-0" disabled={pending} onClick={() => decide('approve')}>Approve</Button>
+          <Button type="button" variant="danger" className="grow sm:grow-0" disabled={pending} onClick={() => decide('reject')}>Reject</Button>
         </div>
       )}
       {error && <p role="alert" className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
@@ -150,7 +159,7 @@ function PlaybookRow({ item }: Readonly<{ item: PlaybookItem }>) {
       </div>
       <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{item.description}</p>
       <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{learnedText(item)}</p>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
         {item.offered && (
           <Button type="button" variant="primary" disabled={pending} onClick={() => change(true)}>
             Let the manager do this on its own
@@ -167,12 +176,28 @@ function PlaybookRow({ item }: Readonly<{ item: PlaybookItem }>) {
   )
 }
 
+function UnmetList({ items }: Readonly<{ items: UnmetTally[] }>) {
+  if (items.length === 0) return null
+  return (
+    <div className="mt-4">
+      <h4 className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Asked for, but it cannot do yet</h4>
+      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+        Parts of your replies that no action covers. Repeats of the same words are counted. This is the list of what to build next.
+      </p>
+      <ul className="mt-2 list-disc pl-5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+        {items.map((u) => <li key={u.request}>{u.request}{u.count > 1 ? ` (${u.count} times)` : ''}</li>)}
+      </ul>
+    </div>
+  )
+}
+
 export function ManagerInstructions({
-  briefId, instructions, playbook, ages,
+  briefId, instructions, playbook, unmetRequests, ages,
 }: Readonly<{
   briefId: string | null
   instructions: InstructionItem[]
   playbook: PlaybookItem[]
+  unmetRequests: UnmetTally[]
   ages: Record<string, string>
 }>) {
   const waiting = instructions.filter((i) => i.status === 'proposed').length
@@ -197,8 +222,14 @@ export function ManagerInstructions({
         </ul>
       )}
 
-      <h4 className="text-xs font-semibold mt-5" style={{ color: 'var(--text-primary)' }}>What the manager can do, and what it has learned</h4>
-      <ul>{playbook.map((p) => <PlaybookRow key={p.kind} item={p} />)}</ul>
+      <UnmetList items={unmetRequests} />
+
+      <details className="mt-5" open={playbook.some((p) => p.offered || p.standing)}>
+        <summary className="text-xs font-semibold cursor-pointer" style={{ color: 'var(--text-primary)' }}>
+          What the manager can do, and what it has learned
+        </summary>
+        <ul>{playbook.map((p) => <PlaybookRow key={p.kind} item={p} />)}</ul>
+      </details>
     </Card>
   )
 }

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
+  ACCOUNT_BATCH_MAX,
   ACTION_KINDS,
+  clampLimit,
+  describeAction,
+  renderFacts,
+  tallyUnmet,
   STANDING_HOLD_AT_WAITING,
   cadenceDaysFor,
   checkInstructionText,
@@ -61,7 +66,7 @@ describe('readInterpretation', () => {
   })
 
   it('never carries an em dash into the reply a person reads', () => {
-    expect(readInterpretation({ reply: 'Done — retrying.', actions: [] })?.reply).toBe('Done , retrying.')
+    expect(readInterpretation({ reply: 'Done — retrying.', actions: [] })?.reply).toBe('Done, retrying.')
   })
 
   it('reads nothing from an answer that is the wrong shape', () => {
@@ -203,5 +208,96 @@ describe('recordsFromRows', () => {
       { source: 'human', status: 'applied', action_kinds: ['run_funnel_report'], decided_at: null },
       { source: 'robot', status: 'applied', action_kinds: [], decided_at: null },
     ])).toHaveLength(1)
+  })
+})
+
+describe('account-batch actions and what the manager could not do', () => {
+  it('clamps a requested count to what the action allows, and ignores a count it does not take', () => {
+    const out = readInterpretation({
+      reply: 'ok',
+      actions: [
+        { kind: 'redraft_rejected', limit: 99 },
+        { kind: 'enrich_ownerrez', limit: 3 },
+        { kind: 'requeue_failed', limit: 4 },
+      ],
+    })
+    expect(out?.actions).toEqual([
+      { kind: 'redraft_rejected', params: { limit: ACCOUNT_BATCH_MAX.redraft_rejected }, summary: 'Redraft rejected drafts (up to 5)' },
+      { kind: 'enrich_ownerrez', params: { limit: 3 }, summary: 'Find contact details for OwnerRez accounts (up to 3)' },
+      { kind: 'requeue_failed', params: {}, summary: 'Retry failed tasks' },
+    ])
+  })
+
+  it('treats a count that is not a positive whole number as "the default"', () => {
+    expect(clampLimit('redraft_rejected', 0)).toBeUndefined()
+    expect(clampLimit('redraft_rejected', -2)).toBeUndefined()
+    expect(clampLimit('redraft_rejected', 2.5)).toBeUndefined()
+    expect(clampLimit('redraft_rejected', '3')).toBeUndefined()
+    expect(describeAction('enrich_ownerrez', {})).toBe('Find contact details for OwnerRez accounts')
+  })
+
+  it('keeps the parts of a request that no action covers, tidied and bounded', () => {
+    const out = readInterpretation({
+      reply: 'ok',
+      actions: [{ kind: 'run_funnel_report' }],
+      unmet: ['  Send  notes\nto Sales Ops — now ', '', 'x'.repeat(500), 'a', 'b', 'c', 'd'],
+    })
+    expect(out?.unmet[0]).toBe('Send notes to Sales Ops, now')
+    expect(out?.unmet.every((u) => u.length > 0 && u.length <= 160)).toBe(true)
+    expect(out?.unmet).toHaveLength(5)
+  })
+
+  it('reads an older answer with no unmet list as having none', () => {
+    expect(readInterpretation({ reply: 'ok', actions: [] })?.unmet).toEqual([])
+  })
+
+  it('answers with partial actions when only some of a request is covered', () => {
+    const out = readInterpretation({
+      reply: 'I can do the first part.',
+      actions: [{ kind: 'redraft_rejected' }],
+      unmet: ['change what Lead Gen works on'],
+    })
+    expect(out?.actions).toHaveLength(1)
+    expect(out?.unmet).toEqual(['change what Lead Gen works on'])
+  })
+})
+
+describe('renderFacts', () => {
+  it('shows counts and nothing else', () => {
+    const text = renderFacts({
+      failedByTeam: { lead_gen: 3, sales_ops: 0 },
+      rejectedDraftAccounts: 4,
+      ownerrezNeedingContact: 31,
+      waitingForApproval: 2,
+    })
+    expect(text).toContain('Lead Gen 3')
+    expect(text).not.toContain('Sales Ops')
+    expect(text).toContain('could be redrafted: 4')
+    expect(text).toContain('OwnerRez accounts with no email yet: 31')
+    expect(text).toContain('waiting for the person\'s approval: 2')
+  })
+
+  it('says "none" rather than leaving the failures line blank', () => {
+    expect(renderFacts({ failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0 }))
+      .toContain('Failed tasks in the last 7 days: none')
+  })
+})
+
+describe('tallyUnmet', () => {
+  it('counts repeats of the same words, most asked first, ignoring case and spacing', () => {
+    const out = tallyUnmet([
+      ['Send notes to Sales Ops'],
+      ['send  notes to sales ops', 'Change what Lead Gen works on'],
+      ['Change what Lead Gen works on', 'Send notes to Sales Ops'],
+    ])
+    expect(out).toEqual([
+      { request: 'Send notes to Sales Ops', count: 3 },
+      { request: 'Change what Lead Gen works on', count: 2 },
+    ])
+  })
+
+  it('is empty when nothing was ever left uncovered', () => {
+    expect(tallyUnmet([])).toEqual([])
+    expect(tallyUnmet([[], ['  ']])).toEqual([])
   })
 })

@@ -145,14 +145,15 @@ function briefBuilderViolations(code: string): string[] {
  * through apply.ts, so that file is held to the three things that keep a manager
  * acting alone (under a standing permission) from being more than a queue writer:
  * every task it creates waits for a person, it never names a requiresApproval of
- * false, and it imports no sender. And nothing in agent code may switch a
+ * false, it writes no prospect table (it may READ them, to choose which accounts
+ * to queue work for), and it imports no sender. And nothing in agent code may switch a
  * standing permission on: that is a person's click, in a Server Action.
  */
 function instructionApplierViolations(code: string): string[] {
   const problems: string[] = []
   if (!/requiresApproval:\s*true/.test(code)) problems.push('does not create its tasks as needing approval')
   if (/requiresApproval:(?!\s*true\b)/.test(code)) problems.push('lets a task skip approval')
-  if (/\.from\(\s*['"]prospect_/.test(code)) problems.push('touches a prospect table')
+  if (PROSPECT_TABLE.test(code)) problems.push('writes a prospect table')
   return problems
 }
 
@@ -339,7 +340,9 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(instructionApplierViolations(`enqueueTask(s, {})`)).toContain('does not create its tasks as needing approval')
       expect(instructionApplierViolations(`${good}; enqueueTask(s, { requiresApproval: false })`)).toContain('lets a task skip approval')
       expect(instructionApplierViolations(`${good}; enqueueTask(s, { requiresApproval: skip })`)).toContain('lets a task skip approval')
-      expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').update({})`)).toContain('touches a prospect table')
+      expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').update({})`)).toContain('writes a prospect table')
+      // Reading accounts to choose which to queue work for is the point of the batch actions: only writing is refused.
+      expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').select('id')`)).toEqual([])
     })
 
     it('a standing permission written by agent code', () => {

@@ -281,7 +281,7 @@ const EXCEPTIONS: Record<string, string> = {
   // with `concurrency: { limit: 10 }`, matching the six converted in the
   // 2026-07-30 pass.
 
-  'lib/inngest/functions/gtm-manager-instruction.ts:249':
+  'lib/inngest/functions/gtm-manager-instruction.ts:259':
     'Bounded by the instruction catalog — `plan.due` is a subset of ACTION_KINDS (three entries, one per catalog action), filtered from the playbook rows a person granted; it cannot grow with tenants or data. One step per kind is the intended retry boundary: each kind applies and records independently, keyed per kind per day.',
 
   'lib/inngest/functions/flagged-turnover-wo.ts:102':

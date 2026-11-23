@@ -2,12 +2,13 @@ import 'server-only'
 import { unwrapList } from '@/lib/supabase/unwrap'
 import type { createServiceClient } from '@/lib/supabase/server'
 import type { Json } from '@/types/database.generated'
-import { isWorkerTeam, type TaskOrigin, type WorkerTeam } from '../constants'
+import { OPEN_TASK_STATUSES, isWorkerTeam, type TaskOrigin, type WorkerTeam } from '../constants'
 import { centralDateKey, isTeamRunnable } from '../policy'
 import { enqueueTask, loadTeamSettings, type EnqueueResult } from '../tasks'
 import { QUEUE_TASK_TYPE } from '../teams/lead-gen-queue'
 import { REV_OPS_TASK_TYPES } from '../teams/rev-ops'
-import type { ProposedAction } from './instructions'
+import { DRAFTABLE_STAGES } from '../teams/sales-ops-eligibility'
+import { effectiveLimit, type ActionParams, type ProposedAction } from './instructions'
 
 /**
  * Carries out ONE catalog action, whether a person approved it or the manager is
@@ -33,6 +34,14 @@ const SITE = 'gtm.manager.apply'
 export const REQUEUE_WINDOW_DAYS = 7
 export const MAX_REQUEUE_PER_RUN = 25
 const DAY_MS = 86_400_000
+
+/** How far back a rejected draft is still worth another go. */
+export const REDRAFT_WINDOW_DAYS = 30
+/** An account Lead Gen already looked at is not asked about again for this long. Matches Rev Ops, so both paths dedupe on one key. */
+const ENRICH_RECHECK_DAYS = 30
+/** Candidates read before the filters. A short, known list: the filters need every one. */
+const CANDIDATE_POOL = 50
+const ENRICH_STAGES = ['new', 'researching', 'needs_contact_info'] as const
 
 export interface ApplyContext {
   now:    Date
@@ -123,11 +132,129 @@ async function requeueFailed(supabase: ServiceClient, ctx: ApplyContext, team: W
   return { kind: 'requeue_failed', ok: true, summary: `Put ${count} failed ${count === 1 ? 'task' : 'tasks'} back in the queue for another try.` }
 }
 
+/** Tallies enqueue results into "queued" and the reasons the rest were not. */
+function tallyResults(results: readonly EnqueueResult[]): { queued: number; refused: number; firstRefusal: string | null } {
+  const queuedCount = results.filter((r) => r.ok).length
+  const refusals = results.flatMap((r) => (r.ok ? [] : [r]))
+  const hardRefusals = refusals.filter((r) => r.reason !== 'duplicate')
+  return {
+    queued:       queuedCount,
+    refused:      hardRefusals.length,
+    firstRefusal: hardRefusals.length ? REFUSALS[hardRefusals[0].reason] : null,
+  }
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+async function redraftRejected(supabase: ServiceClient, ctx: ApplyContext, params: ActionParams): Promise<ActionOutcome> {
+  const kind = 'redraft_rejected' as const
+  const since = new Date(ctx.now.getTime() - REDRAFT_WINDOW_DAYS * DAY_MS).toISOString()
+
+  const rejectedRes = await supabase.from('agent_tasks').select('prospect_id')
+    .eq('team', 'sales_ops').eq('task_type', 'draft_outreach').eq('status', 'rejected')
+    .not('prospect_id', 'is', null)
+    .gte('decided_at', since)
+    .order('decided_at', { ascending: false })
+    .limit(CANDIDATE_POOL)
+  const rejected = unwrapList<{ prospect_id: string | null }>(rejectedRes, { site: `${SITE}.redraft.rejected` })
+  const ids = [...new Set(rejected.flatMap((r) => (r.prospect_id ? [r.prospect_id] : [])))]
+  if (ids.length === 0) return { kind, ok: true, summary: 'No drafts were rejected in the last 30 days, so there was nothing to redo.' }
+
+  const liveRes = await supabase.from('agent_tasks').select('prospect_id')
+    .eq('team', 'sales_ops').eq('task_type', 'draft_outreach')
+    .in('status', [...OPEN_TASK_STATUSES])
+    .in('prospect_id', ids)
+    .limit(ids.length)
+  const live = new Set(unwrapList<{ prospect_id: string | null }>(liveRes, { site: `${SITE}.redraft.live` }).map((r) => r.prospect_id))
+
+  // An account that has moved on (replied, in a trial, closed) is not redrafted: it needs a person, not a template.
+  const stageRes = await supabase.from('prospect_accounts').select('id')
+    .in('id', ids).in('status', [...DRAFTABLE_STAGES]).limit(ids.length)
+  const draftable = new Set(unwrapList<{ id: string }>(stageRes, { site: `${SITE}.redraft.stage` }).map((r) => r.id))
+
+  const chosen = ids.filter((id) => !live.has(id) && draftable.has(id)).slice(0, effectiveLimit(kind, params))
+  if (chosen.length === 0) {
+    return { kind, ok: true, summary: 'Every account with a rejected draft already has a draft waiting or has moved on, so nothing was redone.' }
+  }
+
+  const day = centralDateKey(ctx.now)
+  const results: EnqueueResult[] = []
+  for (const prospectId of chosen) {
+    results.push(await enqueueTask(supabase, {
+      team:             'sales_ops',
+      taskType:         'draft_outreach',
+      origin:           ctx.origin,
+      prospectId,
+      priority:         55,
+      requiresApproval: true,
+      dedupeKey:        `sales_ops:draft_outreach:${prospectId}:redraft:${day}`,
+      now:              ctx.now,
+    }))
+  }
+  const tally = tallyResults(results)
+  if (tally.queued === 0 && tally.firstRefusal) return { kind, ok: false, summary: tally.firstRefusal }
+  return {
+    kind, ok: true,
+    summary: `Asked Sales Ops to redraft ${plural(tally.queued, 'account', 'accounts')}, using the notes you left on rejected drafts. Each new draft will wait for your approval.`,
+  }
+}
+
+async function enrichOwnerrez(supabase: ServiceClient, ctx: ApplyContext, params: ActionParams): Promise<ActionOutcome> {
+  const kind = 'enrich_ownerrez' as const
+
+  const poolRes = await supabase.from('prospect_accounts').select('id')
+    .ilike('pms', 'OwnerRez')
+    .in('status', [...ENRICH_STAGES])
+    .is('email', null)
+    .or('website.not.is.null,domain.not.is.null')
+    .order('score_a', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: true })
+    .limit(CANDIDATE_POOL)
+  const pool = unwrapList<{ id: string }>(poolRes, { site: `${SITE}.enrich.pool` }).map((p) => p.id)
+  if (pool.length === 0) return { kind, ok: true, summary: 'No OwnerRez accounts are missing an email and have a site to read.' }
+
+  const since = new Date(ctx.now.getTime() - ENRICH_RECHECK_DAYS * DAY_MS).toISOString()
+  const askedRes = await supabase.from('agent_tasks').select('prospect_id')
+    .eq('task_type', 'enrich_account').in('prospect_id', pool).gte('created_at', since).limit(pool.length)
+  const asked = new Set(unwrapList<{ prospect_id: string | null }>(askedRes, { site: `${SITE}.enrich.asked` }).map((r) => r.prospect_id))
+
+  const chosen = pool.filter((id) => !asked.has(id)).slice(0, effectiveLimit(kind, params))
+  if (chosen.length === 0) {
+    return { kind, ok: true, summary: 'Lead Gen has already looked at every OwnerRez account that is missing an email in the last 30 days.' }
+  }
+
+  // The same key Rev Ops uses, so an account both paths pick is queued once.
+  const period = Math.floor(ctx.now.getTime() / (ENRICH_RECHECK_DAYS * DAY_MS))
+  const results: EnqueueResult[] = []
+  for (const prospectId of chosen) {
+    results.push(await enqueueTask(supabase, {
+      team:             'lead_gen',
+      taskType:         'enrich_account',
+      origin:           ctx.origin,
+      prospectId,
+      priority:         65,
+      requiresApproval: true,
+      dedupeKey:        `lead_gen:enrich_account:${prospectId}:${period}`,
+      now:              ctx.now,
+    }))
+  }
+  const tally = tallyResults(results)
+  if (tally.queued === 0 && tally.firstRefusal) return { kind, ok: false, summary: tally.firstRefusal }
+  return {
+    kind, ok: true,
+    summary: `Asked Lead Gen to look for contact details for ${plural(tally.queued, 'OwnerRez account', 'OwnerRez accounts')}. What it finds will wait for your approval.`,
+  }
+}
+
 export async function applyAction(supabase: ServiceClient, action: ProposedAction, ctx: ApplyContext): Promise<ActionOutcome> {
   switch (action.kind) {
     case 'run_funnel_report':         return runReport(supabase, ctx)
     case 'propose_queue_candidates':  return runQueueProposal(supabase, ctx)
     case 'requeue_failed':            return requeueFailed(supabase, ctx, action.params.team)
+    case 'redraft_rejected':          return redraftRejected(supabase, ctx, action.params)
+    case 'enrich_ownerrez':           return enrichOwnerrez(supabase, ctx, action.params)
   }
 }
 

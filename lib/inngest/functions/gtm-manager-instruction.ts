@@ -9,9 +9,12 @@ import { fetchRollup, spentTodayCents } from '@/lib/gtm/rollup'
 import { mayNarrate }          from '@/lib/gtm/manager/brief'
 import { applyAction, outcomesJson } from '@/lib/gtm/manager/apply'
 import { interpretInstruction } from '@/lib/gtm/manager/interpret'
+import { loadInstructionFacts } from '@/lib/gtm/manager/facts'
 import {
   ACTION_KINDS,
   INSTRUCTION_HISTORY_LIMIT,
+  MAX_UNMET,
+  type InstructionFacts,
   cadenceDaysFor,
   describeAction,
   holdStanding,
@@ -52,11 +55,14 @@ const UNAVAILABLE_REPLY =
   'Nothing was done. You can send it again once that is sorted.'
 const UNCLEAR_REPLY = 'I could not turn that into an action. Nothing was done. Try asking for one of the actions listed below.'
 
+const NO_FACTS: InstructionFacts = { failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0 }
+
 interface Loaded {
-  found:      boolean
+  found:       boolean
   instruction: string
-  briefText:  string | null
-  canModel:   boolean
+  briefText:   string | null
+  canModel:    boolean
+  facts:       InstructionFacts
 }
 
 async function load(instructionId: string): Promise<Loaded> {
@@ -70,7 +76,7 @@ async function load(instructionId: string): Promise<Loaded> {
   if (rowRes.error) throw rowRes.error
   const row = rowRes.data
   // Gone, or already read by an earlier attempt of this event: nothing to do.
-  if (!row || row.status !== 'interpreting') return { found: false, instruction: '', briefText: null, canModel: false }
+  if (!row || row.status !== 'interpreting') return { found: false, instruction: '', briefText: null, canModel: false, facts: NO_FACTS }
 
   let briefText: string | null = null
   if (row.brief_id) {
@@ -89,12 +95,14 @@ async function load(instructionId: string): Promise<Loaded> {
     capCents:        manager?.daily_cost_cap_cents ?? 0,
     hasApiKey:       Boolean(process.env.ANTHROPIC_API_KEY),
   })
-  return { found: true, instruction: row.instruction, briefText, canModel }
+  // Only read when the model will be called: the counts are for the prompt and nothing else.
+  const facts = canModel ? await loadInstructionFacts(supabase, now) : NO_FACTS
+  return { found: true, instruction: row.instruction, briefText, canModel, facts }
 }
 
 async function writeResult(
   instructionId: string,
-  input: { status: 'proposed' | 'unclear'; reply: string; proposal: Json; kinds: string[]; model: string | null },
+  input: { status: 'proposed' | 'unclear'; reply: string; proposal: Json; kinds: string[]; unmet: string[]; model: string | null },
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'inngest:gtm-manager-instruction.write' })
   const { error } = await supabase
@@ -104,6 +112,7 @@ async function writeResult(
       reply:        input.reply,
       proposal:     input.proposal,
       action_kinds: input.kinds,
+      unmet:        input.unmet.slice(0, MAX_UNMET),
       model:        input.model,
       updated_at:   new Date().toISOString(),
     })
@@ -126,12 +135,12 @@ export const gtmManagerInstruction = inngest.createFunction(
 
     if (!loaded.canModel) {
       await step.run('write-unavailable', () => writeResult(id, {
-        status: 'unclear', reply: UNAVAILABLE_REPLY, proposal: [], kinds: [], model: null,
+        status: 'unclear', reply: UNAVAILABLE_REPLY, proposal: [], kinds: [], unmet: [], model: null,
       }))
       return { skipped: false as const, status: 'unclear' as const }
     }
 
-    const call = await step.run('interpret', () => interpretInstruction(loaded.instruction, loaded.briefText))
+    const call = await step.run('interpret', () => interpretInstruction(loaded.instruction, loaded.briefText, loaded.facts))
 
     // Billed before the answer is judged: the call cost money either way.
     await step.run('bill', async () => {
@@ -152,6 +161,7 @@ export const gtmManagerInstruction = inngest.createFunction(
       reply:    interpretation?.reply || UNCLEAR_REPLY,
       proposal: (interpretation?.actions ?? []) as unknown as Json,
       kinds:    interpretation?.actions.map((a) => a.kind) ?? [],
+      unmet:    interpretation?.unmet ?? [],
       model:    call.model,
     }))
     return { skipped: false as const, status }
