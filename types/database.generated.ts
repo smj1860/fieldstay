@@ -3544,6 +3544,101 @@ export type Database = {
         }
         Relationships: []
       }
+      manager_instructions: {
+        Row: {
+          action_kinds: string[]
+          applied_at: string | null
+          brief_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          dedupe_key: string | null
+          id: string
+          instruction: string
+          model: string | null
+          proposal: Json
+          reply: string | null
+          requested_by: string | null
+          result: Json | null
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          action_kinds?: string[]
+          applied_at?: string | null
+          brief_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          dedupe_key?: string | null
+          id?: string
+          instruction: string
+          model?: string | null
+          proposal?: Json
+          reply?: string | null
+          requested_by?: string | null
+          result?: Json | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          action_kinds?: string[]
+          applied_at?: string | null
+          brief_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          dedupe_key?: string | null
+          id?: string
+          instruction?: string
+          model?: string | null
+          proposal?: Json
+          reply?: string | null
+          requested_by?: string | null
+          result?: Json | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_instructions_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: false
+            referencedRelation: "manager_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      manager_playbook: {
+        Row: {
+          action_kind: string
+          granted_at: string | null
+          granted_by: string | null
+          last_standing_run_at: string | null
+          standing: boolean
+          updated_at: string
+        }
+        Insert: {
+          action_kind: string
+          granted_at?: string | null
+          granted_by?: string | null
+          last_standing_run_at?: string | null
+          standing?: boolean
+          updated_at?: string
+        }
+        Update: {
+          action_kind?: string
+          granted_at?: string | null
+          granted_by?: string | null
+          last_standing_run_at?: string | null
+          standing?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string

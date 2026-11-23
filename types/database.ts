@@ -2665,6 +2665,8 @@ export interface HandWrittenRowMap {
   agent_tasks:                         AgentTask
   agent_usage:                         AgentUsage
   manager_decisions:                   ManagerDecision
+  manager_instructions:                ManagerInstruction
+  manager_playbook:                    ManagerPlaybook
   str_prospects:                       StrProspect
   travel_time_cache:                   TravelTimeCache
 }
@@ -3265,4 +3267,33 @@ export interface ManagerDecision {
   requested_by:    string | null
   dedupe_key:      string | null
   created_at:      string
+}
+
+export interface ManagerInstruction {
+  id:           string
+  source:       'human' | 'standing'
+  instruction:  string
+  brief_id:     string | null
+  requested_by: string | null
+  status:       'interpreting' | 'proposed' | 'unclear' | 'rejected' | 'applying' | 'applied' | 'failed'
+  reply:        string | null
+  proposal:     Json
+  action_kinds: string[]
+  result:       Json | null
+  model:        string | null
+  decided_by:   string | null
+  decided_at:   string | null
+  applied_at:   string | null
+  dedupe_key:   string | null
+  created_at:   string
+  updated_at:   string
+}
+
+export interface ManagerPlaybook {
+  action_kind:          'requeue_failed' | 'run_funnel_report' | 'propose_queue_candidates'
+  standing:             boolean
+  granted_by:           string | null
+  granted_at:           string | null
+  last_standing_run_at: string | null
+  updated_at:           string
 }
