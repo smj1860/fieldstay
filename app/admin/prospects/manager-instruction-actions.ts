@@ -85,9 +85,10 @@ export async function submitManagerInstruction(
     } catch (sendErr) {
       // The row would sit as "reading" for ever. Say so on the row and to the person.
       reportError(sendErr, { site: 'serverAction.admin.prospects.submitInstruction.send' })
-      await service.from('manager_instructions')
+      const marked = await service.from('manager_instructions')
         .update({ status: 'unclear', reply: 'I could not be woken to read this. Nothing was done. Please send it again.' })
         .eq('id', data.id)
+      if (marked.error) reportError(marked.error, { site: 'serverAction.admin.prospects.submitInstruction.mark' })
       return { error: 'Could not reach the manager. Please try again.' }
     }
 
@@ -193,14 +194,12 @@ export async function setStandingPermission(kind: string, enabled: boolean): Pro
     if (enabled) {
       // The offer is made by the manager, but the rule is enforced here: a
       // hand-built request cannot grant a type nobody has approved enough.
-      const history = unwrapList<InstructionHistoryRow>(
-        await supabase.from('manager_instructions')
-          .select('source, status, action_kinds, decided_at')
-          .eq('source', 'human')
-          .order('created_at', { ascending: false })
-          .limit(INSTRUCTION_HISTORY_LIMIT),
-        { site: 'serverAction.admin.prospects.setStandingPermission.history' },
-      )
+      const historyRes = await supabase.from('manager_instructions')
+        .select('source, status, action_kinds, decided_at')
+        .eq('source', 'human')
+        .order('created_at', { ascending: false })
+        .limit(INSTRUCTION_HISTORY_LIMIT)
+      const history = unwrapList<InstructionHistoryRow>(historyRes, { site: 'serverAction.admin.prospects.setStandingPermission.history' })
       const learned = learnFromHistory(recordsFromRows(history)).find((l) => l.kind === kind)
       if (!learned || !mayOfferStanding(learned)) {
         return { error: 'You have not approved this type often enough yet for the manager to take it over.' }

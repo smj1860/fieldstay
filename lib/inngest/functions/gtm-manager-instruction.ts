@@ -181,20 +181,17 @@ export async function planStanding(): Promise<StandingPlan> {
   const waitingRes = await supabase.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('status', 'needs_approval')
   if (holdStanding(unwrapCount(waitingRes, { site: `${SITE}.waiting` }))) return { skip: 'inbox_full', due: [], ...base }
 
-  const playbook = unwrapList<PlaybookRow>(
-    await supabase.from('manager_playbook').select('action_kind, last_standing_run_at').eq('standing', true).limit(ACTION_KINDS.length),
-    { site: `${SITE}.playbook` },
-  )
+  const playbookRes = await supabase.from('manager_playbook')
+    .select('action_kind, last_standing_run_at').eq('standing', true).limit(ACTION_KINDS.length)
+  const playbook = unwrapList<PlaybookRow>(playbookRes, { site: `${SITE}.playbook` })
   if (playbook.length === 0) return { skip: 'none_due', due: [], ...base }
 
-  const history = unwrapList<InstructionHistoryRow>(
-    await supabase.from('manager_instructions')
-      .select('source, status, action_kinds, decided_at')
-      .eq('source', 'human')
-      .order('created_at', { ascending: false })
-      .limit(INSTRUCTION_HISTORY_LIMIT),
-    { site: `${SITE}.history` },
-  )
+  const historyRes = await supabase.from('manager_instructions')
+    .select('source, status, action_kinds, decided_at')
+    .eq('source', 'human')
+    .order('created_at', { ascending: false })
+    .limit(INSTRUCTION_HISTORY_LIMIT)
+  const history = unwrapList<InstructionHistoryRow>(historyRes, { site: `${SITE}.history` })
   const learning = learnFromHistory(recordsFromRows(history))
 
   const due: DueKind[] = []
