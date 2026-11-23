@@ -157,6 +157,21 @@ function instructionApplierViolations(code: string): string[] {
   return problems
 }
 
+/**
+ * The manager's morning plan proposes and nothing else. It writes a row a person
+ * approves, so it must never carry anything out itself (no applyAction, no
+ * enqueueTask) and never write a row in any state but 'proposed'. Approving the
+ * row is what queues work, and that is a person's click.
+ */
+function planWriterViolations(code: string): string[] {
+  const problems: string[] = []
+  if (!/status\s*:\s*['"]proposed['"]/.test(code)) problems.push('does not write its plan as a proposal')
+  if (/status\s*:\s*['"](applying|applied|approved)['"]/.test(code)) problems.push('writes a plan in a decided state')
+  if (/\b(applyAction|enqueueTask)\s*\(/.test(code)) problems.push('carries work out itself instead of proposing it')
+  if (!/source\s*:\s*['"]manager['"]/.test(code)) problems.push('does not mark its rows as the manager\'s')
+  return problems
+}
+
 const STANDING_GRANT = /\bstanding\s*:\s*true\b/
 
 function standingGrantViolations(files: readonly Source[]): string[] {
@@ -235,6 +250,12 @@ describe('guardrail: GTM agent boundaries', () => {
     const applier = sources.find((x) => x.path === 'lib/gtm/manager/apply.ts')
     expect(applier, 'lib/gtm/manager/apply.ts should be scanned').toBeDefined()
     expect(instructionApplierViolations(applier!.code)).toEqual([])
+  })
+
+  it('the morning plan only proposes: a person\'s approval is what queues anything', () => {
+    const planner = sources.find((x) => x.path === 'lib/inngest/functions/gtm-manager-plan.ts')
+    expect(planner, 'lib/inngest/functions/gtm-manager-plan.ts should be scanned').toBeDefined()
+    expect(planWriterViolations(planner!.code)).toEqual([])
   })
 
   it('no agent code grants a standing permission: only a person\'s click does', () => {
@@ -343,6 +364,16 @@ describe('guardrail: GTM agent boundaries', () => {
       expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').update({})`)).toContain('writes a prospect table')
       // Reading accounts to choose which to queue work for is the point of the batch actions: only writing is refused.
       expect(instructionApplierViolations(`${good}; supabase.from('prospect_accounts').select('id')`)).toEqual([])
+    })
+
+    it('the morning plan rules', () => {
+      const good = `insert({ source: 'manager', status: 'proposed', proposal })`
+      expect(planWriterViolations(good)).toEqual([])
+      expect(planWriterViolations(`insert({ source: 'manager' })`)).toContain('does not write its plan as a proposal')
+      expect(planWriterViolations(`${good}; update({ status: 'applied' })`)).toContain('writes a plan in a decided state')
+      expect(planWriterViolations(`${good}; await applyAction(s, a, c)`)).toContain('carries work out itself instead of proposing it')
+      expect(planWriterViolations(`${good}; await enqueueTask(s, {})`)).toContain('carries work out itself instead of proposing it')
+      expect(planWriterViolations(`insert({ status: 'proposed' })`)).toContain('does not mark its rows as the manager\'s')
     })
 
     it('a standing permission written by agent code', () => {

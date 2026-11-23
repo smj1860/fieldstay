@@ -20,6 +20,22 @@ created from a maintenance schedule, the right vendor is selected and notified.
 
 ---
 
+## Working Agreements With the Founder
+
+- **Asking for a PR means seeing it all the way to merge (standing instruction, 2026-11-23).** When the
+  founder asks for a pull request, take it to the merge: open it, watch it, fix whatever CI finds, apply
+  any migration it needs, and squash-merge it yourself once every check is green and it is mergeable.
+  Do not stop to ask "should I merge?". This is the founder's own instruction, given in their words, and it
+  covers a PR they asked for in that request. It does NOT cover opening a PR nobody asked for (that stays
+  off by default), and it does not stretch to any other outward action.
+  The limits are the ones that were always true: never merge red or conflicted CI, never skip, disable or
+  quarantine a test to get green, and a migration the change depends on goes to the E2E project AND production
+  BEFORE the merge, because the merge deploys the code that reads it (see "Adding new schema"). If something
+  genuinely blocks the merge (a failure that is not this PR's and cannot be shown to be unrelated, a step only
+  the founder can do), stop, say exactly what blocks it and what is needed, and leave the PR open.
+
+---
+
 ## Tech Stack — Non-Negotiable
 
 | Layer | Tool | Notes |
@@ -915,7 +931,8 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   send, call, text, close or delete, and adding an action to the catalog is the decision to let it run
   unattended once granted, so it needs a reason.** The manager's `autonomy` stays `propose_only` and
   `buildSettingsUpdate()` still refuses to change it: a standing permission is a separate, per-type grant.
-  **Learning** is a pure function of the history (`learnFromHistory`): only HUMAN approvals teach it, a reply
+  **Learning** is a pure function of the history (`learnFromHistory`): a person's decisions teach it, on their own
+  replies AND on the manager's plans (a rejection of its own plan is the clearest "no"), a reply
   it could not read is neither approval nor rejection, and the rhythm is the median gap between the DAYS a person
   approved on (three clicks one afternoon are one day), clamped to 1-14 days, default 7. It OFFERS a type once
   approved 3 times on 2 different days with no rejection (`mayOfferStanding`); the grant is the person's click
@@ -940,6 +957,37 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   write them (`gtm-agent-boundaries`). **The weekly Rev Ops handoff is OwnerRez-first** (`ownerrezFirstPool`: a
   second database read, not a sort, for the same reason the queue proposal filters in the query): OwnerRez is the
   founder's priority outreach, so it leads without anyone having to ask.
+- **The manager takes the initiative, and how far that goes (2026-11-24). The founder's goal is a manager
+  that runs and coordinates the agents on its own; this is the staircase toward it, and the order is the point.**
+  **Built:** (1) a person's replies, read into proposals; (2) a per-type standing grant, per type revocable;
+  (3) **a morning plan** (`cron-gtm-manager-plan`, 7:20am CT, `lib/inngest/functions/gtm-manager-plan.ts`): the
+  manager reads the day's counts and PROPOSES, as one `manager_instructions` row with `source = 'manager'`,
+  the instruction types the pipeline calls for, decided in the same card and by the same
+  `decideManagerInstruction` as a reply; (4) **triggers** (`lib/gtm/manager/triggers.ts`): a type comes due on a
+  CONDITION (failed tasks exist; accounts have a rejected draft and Sales Ops is not already full; OwnerRez
+  accounts lack an email and Lead Gen is not already full), each with a minimum gap, or on a SCHEDULE (the
+  funnel report and queue proposal, which Rev Ops already owns weekly). **One definition of "warranted" serves
+  both readers**: the plan proposes a warranted type a person has not handed over, and a standing run executes a
+  warranted type a person has. They cannot disagree. Deterministic, no model, every condition names the count it
+  read. The plan stays quiet while the inbox holds 10 or more items, while a previous plan is still unanswered,
+  for a type a person rejected in the last 7 days, and for a type already handed over; it proposes at most 3.
+  The standing runner stops at `MANAGER_DAILY_ACTION_CAP` (6) runs a Central day. A condition that stays true is
+  acted on at most once per minimum gap, so a task that keeps failing is retried daily (bounded by that gap, the
+  25-task cap and the team caps) rather than every run; a per-task retry count would need a column and is not built.
+  **Not built, in order, and each needs the one before it to have held:** (5) an approve and reject rate per
+  worker task type on the dashboard, as EVIDENCE of which outputs a person accepts nearly every time (the same
+  shape as Draft quality: it reports and draws no conclusion); (6) the manager approving the LOW-RISK worker
+  outputs a person has accepted nearly every time (saving a contact found on a prospect's own site, moving
+  accounts to `queued`), behind a hold window of a few hours in which a person can veto, and a pause the moment
+  the reject rate rises; (7) outcome tracking (replies, meetings per action) reported as evidence, never as an
+  automatic weight change, like the friction loop.
+  **Rules that do not move without a design re-review with the founder:** the catalog is the ceiling, and every
+  action only queues work; **no agent contacts a person, ever, until the two open decisions below are made on
+  purpose** (sending from inside FieldStay, and any voice path); the manager's `autonomy` stays `propose_only`
+  and a grant is per type and a person's click; nothing in agent code writes `standing: true`; the master
+  switch stops everything; a cap fails closed. Step 6 changes who approves worker output, which is exactly the
+  invariant the Queue proposals bullet's OPEN QUESTION is about, so it is a decision for the founder, not a
+  refactor, and must never be built as a side effect of something else.
 - **"They replied" (`markProspectReplied`, 2026-11-19) is how a reply gets into the system, because
   nothing reads an inbox.** Email goes out from the founder's own mailbox, so a prospect's answer
   reaches FieldStay only when a person says so (a button in an account's edit window, with an optional

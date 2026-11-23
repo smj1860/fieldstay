@@ -3271,7 +3271,7 @@ export interface ManagerDecision {
 
 export interface ManagerInstruction {
   id:           string
-  source:       'human' | 'standing'
+  source:       'human' | 'manager' | 'standing'
   instruction:  string
   brief_id:     string | null
   requested_by: string | null

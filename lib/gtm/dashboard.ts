@@ -21,10 +21,13 @@ import {
   tallyUnmet,
   type ActionKind,
   type UnmetTally,
+  isInstructionSource,
   type InstructionHistoryRow,
+  type InstructionSource,
   type ProposedAction,
 } from './manager/instructions'
 import { loadTeamSettings } from './tasks'
+import { describeTrigger } from './manager/triggers'
 
 /**
  * Everything the Agents view of the Prospecting Funnel renders, in one load.
@@ -73,7 +76,7 @@ export interface DecisionItem {
 /** One reply to a brief, or one standing run, as the Manager panel shows it. */
 export interface InstructionItem {
   id:          string
-  source:      'human' | 'standing'
+  source:      InstructionSource
   instruction: string
   status:      string
   reply:       string | null
@@ -94,6 +97,8 @@ export interface PlaybookItem {
   approved:       number
   rejected:       number
   cadenceDays:    number
+  /** how it comes due, in a sentence: on a condition or on the person's rhythm */
+  trigger:        string
   /** the manager would like to take this over: enough approvals, no rejections, not yet granted */
   offered:        boolean
   lastRunAt:      string | null
@@ -255,7 +260,7 @@ async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
       .limit(MAX_INSTRUCTIONS_SHOWN),
     supabase.from('manager_instructions')
       .select('source, status, action_kinds, decided_at')
-      .eq('source', 'human')
+      .in('source', ['human', 'manager'])
       .order('created_at', { ascending: false })
       .limit(INSTRUCTION_HISTORY_LIMIT),
     supabase.from('manager_playbook')
@@ -270,7 +275,7 @@ async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
   ])
 
   const instructions = unwrapList(recentRes, { site: `${SITE}.instructions` }).flatMap((r): InstructionItem[] =>
-    r.source === 'human' || r.source === 'standing'
+    isInstructionSource(r.source)
       ? [{
           id: r.id, source: r.source, instruction: r.instruction, status: r.status, reply: r.reply,
           proposal: readStoredProposal(r.proposal), unmet: r.unmet ?? [], outcomes: outcomeSummaries(r.result), createdAt: r.created_at,
@@ -292,6 +297,7 @@ async function loadInstructions(supabase: SupabaseClient<Database>): Promise<{
       approved:    l.approved,
       rejected:    l.rejected,
       cadenceDays: cadenceDaysFor(l),
+      trigger:     describeTrigger(l.kind, cadenceDaysFor(l)),
       offered:     !standing && mayOfferStanding(l),
       lastRunAt:   lastActivityAt(l, row?.last_standing_run_at ?? null),
     }

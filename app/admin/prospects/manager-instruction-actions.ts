@@ -161,7 +161,7 @@ export async function decideManagerInstruction(
         updated_at: decidedAt,
       })
       .eq('id', instructionId)
-      .eq('source', 'human')
+      .in('source', ['human', 'manager'])
       .eq('status', 'proposed')
       .select('id, proposal')
       .maybeSingle()
@@ -196,7 +196,7 @@ export async function setStandingPermission(kind: string, enabled: boolean): Pro
       // hand-built request cannot grant a type nobody has approved enough.
       const historyRes = await supabase.from('manager_instructions')
         .select('source, status, action_kinds, decided_at')
-        .eq('source', 'human')
+        .in('source', ['human', 'manager'])
         .order('created_at', { ascending: false })
         .limit(INSTRUCTION_HISTORY_LIMIT)
       const history = unwrapList<InstructionHistoryRow>(historyRes, { site: 'serverAction.admin.prospects.setStandingPermission.history' })

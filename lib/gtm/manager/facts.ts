@@ -49,18 +49,22 @@ async function rejectedDraftAccounts(supabase: ServiceClient, now: Date): Promis
 }
 
 export async function loadInstructionFacts(supabase: ServiceClient, now: Date): Promise<InstructionFacts> {
-  const [failed, rejected, ownerrez, waiting] = await Promise.all([
+  const [failed, rejected, ownerrez, waiting, openLeadGen, openSalesOps] = await Promise.all([
     failedByTeam(supabase, now),
     rejectedDraftAccounts(supabase, now),
     supabase.from('prospect_accounts').select('id', { count: 'exact', head: true })
       .ilike('pms', 'OwnerRez').in('status', ['new', 'researching', 'needs_contact_info']).is('email', null)
       .or('website.not.is.null,domain.not.is.null'),
     supabase.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('status', 'needs_approval'),
+    supabase.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('team', 'lead_gen').in('status', [...OPEN_TASK_STATUSES]),
+    supabase.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('team', 'sales_ops').in('status', [...OPEN_TASK_STATUSES]),
   ])
   return {
     failedByTeam:           failed,
     rejectedDraftAccounts:  rejected,
     ownerrezNeedingContact: unwrapCount(ownerrez, { site: `${SITE}.ownerrez` }),
     waitingForApproval:     unwrapCount(waiting, { site: `${SITE}.waiting` }),
+    openLeadGenTasks:       unwrapCount(openLeadGen, { site: `${SITE}.openLeadGen` }),
+    openSalesOpsTasks:      unwrapCount(openSalesOps, { site: `${SITE}.openSalesOps` }),
   }
 }

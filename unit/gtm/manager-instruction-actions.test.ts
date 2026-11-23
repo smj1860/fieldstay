@@ -74,6 +74,14 @@ describe('decideManagerInstruction', () => {
     expect(service.calls[1].payload).toMatchObject({ status: 'applied' })
   })
 
+  it('decides the manager\'s own plan as it decides a reply: the claim covers both sources', async () => {
+    state.apply.mockResolvedValue({ kind: 'run_funnel_report', ok: true, summary: 'ok' })
+    const { service } = world({}, { 'manager_instructions:update': [{ data: { id: 'i1', proposal }, error: null }, { error: null }] })
+    await decideManagerInstruction('i1', 'approve')
+    expect(service.calls[0].filters).toContainEqual(['in', ['source', ['human', 'manager']]])
+    expect(service.calls[0].filters).toContainEqual(['eq', ['status', 'proposed']])
+  })
+
   it('does nothing when the proposal was already decided: the guard matched no row', async () => {
     world({}, { 'manager_instructions:update': [{ data: null, error: null }] })
     const out = await decideManagerInstruction('i1', 'approve')
