@@ -120,6 +120,14 @@ describe('learnFromHistory', () => {
     expect(requeue.approved).toBe(0)
   })
 
+  it('counts a person\'s decision on the manager\'s own plan, approved or rejected', () => {
+    const [requeue] = learnFromHistory([
+      { source: 'manager', status: 'applied', kinds: ['requeue_failed'], decidedAt: '2026-11-02T15:00:00Z' },
+      { source: 'manager', status: 'rejected', kinds: ['requeue_failed'], decidedAt: '2026-11-03T15:00:00Z' },
+    ])
+    expect(requeue).toMatchObject({ approved: 1, rejected: 1 })
+  })
+
   it('learns nothing from its own standing runs', () => {
     const [requeue] = learnFromHistory([
       { source: 'standing', status: 'applied', kinds: ['requeue_failed'], decidedAt: '2026-11-02T15:00:00Z' },
@@ -269,16 +277,19 @@ describe('renderFacts', () => {
       rejectedDraftAccounts: 4,
       ownerrezNeedingContact: 31,
       waitingForApproval: 2,
+      openLeadGenTasks: 4,
+      openSalesOpsTasks: 1,
     })
-    expect(text).toContain('Lead Gen 3')
-    expect(text).not.toContain('Sales Ops')
+    // A team with no failures is left off the failed line.
+    expect(text).toContain('Failed tasks in the last 7 days: Lead Gen 3\n')
     expect(text).toContain('could be redrafted: 4')
     expect(text).toContain('OwnerRez accounts with no email yet: 31')
     expect(text).toContain('waiting for the person\'s approval: 2')
+    expect(text).toContain('Open Lead Gen tasks: 4. Open Sales Ops tasks: 1')
   })
 
   it('says "none" rather than leaving the failures line blank', () => {
-    expect(renderFacts({ failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0 }))
+    expect(renderFacts({ failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0, openLeadGenTasks: 0, openSalesOpsTasks: 0 }))
       .toContain('Failed tasks in the last 7 days: none')
   })
 })

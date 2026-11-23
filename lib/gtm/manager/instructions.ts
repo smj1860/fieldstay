@@ -229,8 +229,21 @@ export const STANDING_HOLD_AT_WAITING = 10
 
 const DAY_MS = 86_400_000
 
+/**
+ * Where an instruction row came from. 'human' is a person's own reply, 'manager'
+ * is a plan the manager proposed for a person to approve, and 'standing' is the
+ * manager repeating a type a person granted. A person's DECISION on a 'human' or
+ * 'manager' row is evidence of what they want; a 'standing' run is the manager
+ * acting and is evidence of nothing.
+ */
+export type InstructionSource = 'human' | 'manager' | 'standing'
+
+export function isInstructionSource(value: unknown): value is InstructionSource {
+  return value === 'human' || value === 'manager' || value === 'standing'
+}
+
 export interface InstructionRecord {
-  source:    'human' | 'standing'
+  source:    InstructionSource
   status:    string
   kinds:     readonly string[]
   decidedAt: string | null
@@ -265,10 +278,15 @@ function cadenceFrom(approvalTimes: readonly number[]): number | null {
   return Math.min(MAX_CADENCE_DAYS, Math.max(MIN_CADENCE_DAYS, rounded))
 }
 
-/** Only HUMAN instructions teach the manager anything: its own standing runs are not evidence about what a person wants. */
+/**
+ * A person's decisions teach the manager: replies they wrote AND plans the manager
+ * proposed that they approved or rejected (a rejection of its own plan is the
+ * clearest "no" there is). Its own standing runs are not evidence about what a
+ * person wants, so they never count.
+ */
 export function learnFromHistory(records: readonly InstructionRecord[]): KindLearning[] {
   return ACTION_KINDS.map((kind): KindLearning => {
-    const mine = records.filter((r) => r.source === 'human' && r.kinds.includes(kind))
+    const mine = records.filter((r) => r.source !== 'standing' && r.kinds.includes(kind))
     const approvals = mine.filter((r) => APPROVED_STATUSES.has(r.status) && r.decidedAt !== null)
     const times = approvals.flatMap((r) => (r.decidedAt ? [new Date(r.decidedAt).getTime()] : []))
     return {
@@ -320,7 +338,7 @@ export interface InstructionHistoryRow {
 
 export function recordsFromRows(rows: readonly InstructionHistoryRow[]): InstructionRecord[] {
   return rows.flatMap((r): InstructionRecord[] =>
-    r.source === 'human' || r.source === 'standing'
+    isInstructionSource(r.source)
       ? [{ source: r.source, status: r.status, kinds: r.action_kinds ?? [], decidedAt: r.decided_at }]
       : [])
 }
@@ -349,6 +367,9 @@ export interface InstructionFacts {
   /** OwnerRez accounts with no email yet and a site to read */
   ownerrezNeedingContact:  number
   waitingForApproval:      number
+  /** open (queued, working, waiting or approved) tasks per team, so a batch is not piled onto an unfinished one */
+  openLeadGenTasks:        number
+  openSalesOpsTasks:       number
 }
 
 export function renderFacts(facts: InstructionFacts): string {
@@ -361,6 +382,7 @@ export function renderFacts(facts: InstructionFacts): string {
     `- Accounts whose draft was rejected in the last 30 days and could be redrafted: ${facts.rejectedDraftAccounts}`,
     `- OwnerRez accounts with no email yet: ${facts.ownerrezNeedingContact}`,
     `- Items waiting for the person's approval: ${facts.waitingForApproval}`,
+    `- Open Lead Gen tasks: ${facts.openLeadGenTasks}. Open Sales Ops tasks: ${facts.openSalesOpsTasks}`,
   ].join('\n')
 }
 

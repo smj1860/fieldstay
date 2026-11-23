@@ -93,6 +93,7 @@ function InstructionRow({ item, age }: Readonly<{ item: InstructionItem; age: st
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={status.tone}>{status.label}</Badge>
         {item.source === 'standing' && <Badge tone="gold">On its own</Badge>}
+        {item.source === 'manager' && <Badge tone="blue">Manager&apos;s plan</Badge>}
         <span className="text-xs ml-auto" style={{ color: 'var(--text-muted)' }}>{age}</span>
       </div>
       <p className="text-sm mt-1" style={{ color: 'var(--text-primary)' }}>{item.instruction}</p>
@@ -129,11 +130,7 @@ function InstructionRow({ item, age }: Readonly<{ item: InstructionItem; age: st
 function learnedText(item: PlaybookItem): string {
   const times = item.approved === 1 ? 'time' : 'times'
   const rejected = item.rejected > 0 ? ` and rejected it ${item.rejected}` : ''
-  const days = item.cadenceDays === 1 ? 'day' : 'days'
-  const rhythm = item.standing
-    ? ` It repeats about every ${item.cadenceDays} ${days}, and holds back while 10 or more items are waiting for you.`
-    : ''
-  return `You have approved this ${item.approved} ${times}${rejected}.${rhythm}`
+  return `You have approved this ${item.approved} ${times}${rejected}.`
 }
 
 function PlaybookRow({ item }: Readonly<{ item: PlaybookItem }>) {
@@ -159,6 +156,9 @@ function PlaybookRow({ item }: Readonly<{ item: PlaybookItem }>) {
       </div>
       <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{item.description}</p>
       <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{learnedText(item)}</p>
+      <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+        {item.standing ? `Handed over. ${item.trigger}` : `If you hand it over: ${item.trigger}`} It holds back while 10 or more items wait for you.
+      </p>
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
         {item.offered && (
           <Button type="button" variant="primary" disabled={pending} onClick={() => change(true)}>

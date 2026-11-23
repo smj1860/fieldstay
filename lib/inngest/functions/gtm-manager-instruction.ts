@@ -2,7 +2,7 @@ import type { Json }           from '@/types/database.generated'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError }         from '@/lib/observability/report-error'
-import { unwrapCount, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapCount } from '@/lib/supabase/unwrap'
 import { centralDateKey, centralDayStart, isTeamRunnable, settingFor } from '@/lib/gtm/policy'
 import { loadTeamSettings, recordUsage } from '@/lib/gtm/tasks'
 import { fetchRollup, spentTodayCents } from '@/lib/gtm/rollup'
@@ -10,21 +10,15 @@ import { mayNarrate }          from '@/lib/gtm/manager/brief'
 import { applyAction, outcomesJson } from '@/lib/gtm/manager/apply'
 import { interpretInstruction } from '@/lib/gtm/manager/interpret'
 import { loadInstructionFacts } from '@/lib/gtm/manager/facts'
+import { loadLearningContext, type LearningContext } from '@/lib/gtm/manager/history'
+import { MANAGER_DAILY_ACTION_CAP, TRIGGERS, triggerFires } from '@/lib/gtm/manager/triggers'
 import {
-  ACTION_KINDS,
-  INSTRUCTION_HISTORY_LIMIT,
   MAX_UNMET,
   type InstructionFacts,
   cadenceDaysFor,
   describeAction,
   holdStanding,
-  isActionKind,
-  lastActivityAt,
-  learnFromHistory,
-  recordsFromRows,
-  standingDue,
   type ActionKind,
-  type InstructionHistoryRow,
 } from '@/lib/gtm/manager/instructions'
 
 // ============================================================================
@@ -55,7 +49,9 @@ const UNAVAILABLE_REPLY =
   'Nothing was done. You can send it again once that is sorted.'
 const UNCLEAR_REPLY = 'I could not turn that into an action. Nothing was done. Try asking for one of the actions listed below.'
 
-const NO_FACTS: InstructionFacts = { failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0 }
+const NO_FACTS: InstructionFacts = {
+  failedByTeam: {}, rejectedDraftAccounts: 0, ownerrezNeedingContact: 0, waitingForApproval: 0, openLeadGenTasks: 0, openSalesOpsTasks: 0,
+}
 
 interface Loaded {
   found:       boolean
@@ -170,14 +166,40 @@ export const gtmManagerInstruction = inngest.createFunction(
 
 // ── standing instructions ───────────────────────────────────────────────────
 
-interface PlaybookRow { action_kind: string; last_standing_run_at: string | null }
 interface DueKind { kind: ActionKind; cadenceDays: number }
 
 export interface StandingPlan {
-  skip: 'manager_off' | 'inbox_full' | 'none_due' | null
+  skip: 'manager_off' | 'inbox_full' | 'daily_cap' | 'none_due' | null
   due:  DueKind[]
   dateKey: string
   nowIso:  string
+}
+
+/** The standing runs already made today, which is what the daily ceiling counts. */
+async function standingRunsToday(supabase: ReturnType<typeof createServiceClient>, now: Date): Promise<number> {
+  const res = await supabase.from('manager_instructions')
+    .select('id', { count: 'exact', head: true })
+    .eq('source', 'standing')
+    .gte('created_at', centralDayStart(now).toISOString())
+  return unwrapCount(res, { site: `${SITE}.standingToday` })
+}
+
+/** Which of the granted types are warranted right now. A type with a condition needs the live counts; one on a schedule does not. */
+async function dueKinds(
+  supabase: ReturnType<typeof createServiceClient>,
+  context: LearningContext,
+  now: Date,
+): Promise<DueKind[]> {
+  const needsFacts = [...context.granted].some((kind) => TRIGGERS[kind].type === 'condition')
+  const facts = needsFacts ? await loadInstructionFacts(supabase, now) : NO_FACTS
+  const due: DueKind[] = []
+  for (const kind of context.granted) {
+    const learned = context.learning.find((l) => l.kind === kind)
+    if (!learned) continue
+    const cadenceDays = cadenceDaysFor(learned)
+    if (triggerFires(kind, { facts, now, lastRunAt: context.lastRunAt[kind] ?? null, cadenceDays })) due.push({ kind, cadenceDays })
+  }
+  return due
 }
 
 export async function planStanding(): Promise<StandingPlan> {
@@ -191,29 +213,11 @@ export async function planStanding(): Promise<StandingPlan> {
   const waitingRes = await supabase.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('status', 'needs_approval')
   if (holdStanding(unwrapCount(waitingRes, { site: `${SITE}.waiting` }))) return { skip: 'inbox_full', due: [], ...base }
 
-  const playbookRes = await supabase.from('manager_playbook')
-    .select('action_kind, last_standing_run_at').eq('standing', true).limit(ACTION_KINDS.length)
-  const playbook = unwrapList<PlaybookRow>(playbookRes, { site: `${SITE}.playbook` })
-  if (playbook.length === 0) return { skip: 'none_due', due: [], ...base }
+  const remaining = MANAGER_DAILY_ACTION_CAP - await standingRunsToday(supabase, now)
+  if (remaining <= 0) return { skip: 'daily_cap', due: [], ...base }
 
-  const historyRes = await supabase.from('manager_instructions')
-    .select('source, status, action_kinds, decided_at')
-    .eq('source', 'human')
-    .order('created_at', { ascending: false })
-    .limit(INSTRUCTION_HISTORY_LIMIT)
-  const history = unwrapList<InstructionHistoryRow>(historyRes, { site: `${SITE}.history` })
-  const learning = learnFromHistory(recordsFromRows(history))
-
-  const due: DueKind[] = []
-  for (const row of playbook) {
-    if (!isActionKind(row.action_kind)) continue
-    const learned = learning.find((l) => l.kind === row.action_kind)
-    if (!learned) continue
-    const cadenceDays = cadenceDaysFor(learned)
-    if (standingDue({ now, lastRunAt: lastActivityAt(learned, row.last_standing_run_at), cadenceDays })) {
-      due.push({ kind: row.action_kind, cadenceDays })
-    }
-  }
+  const context = await loadLearningContext(supabase)
+  const due = (await dueKinds(supabase, context, now)).slice(0, remaining)
   return { skip: due.length === 0 ? 'none_due' : null, due, ...base }
 }
 
