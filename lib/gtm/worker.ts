@@ -3,7 +3,7 @@ import { reportError } from '@/lib/observability/report-error'
 import type { createServiceClient } from '@/lib/supabase/server'
 import type { AgentTask } from '@/types/database'
 import type { WorkerTeam } from './constants'
-import { isTeamRunnable, settingFor, centralDayStart, type TeamSetting } from './policy'
+import { isTeamRunnable, isWorkingHours, managerApproves, settingFor, centralDayStart, MANAGER_APPROVAL_NOTE, type TeamSetting } from './policy'
 import { fetchRollup, spentTodayCents } from './rollup'
 import {
   claimNextTask,
@@ -32,6 +32,8 @@ export interface TaskContext {
   supabase: ServiceClient
   setting:  TeamSetting
   now:      Date
+  /** True when the manager approves this task itself (managerApproves()). Decided once per task by workOne(). */
+  managerApproves?: boolean
 }
 
 /** What doing a task produced. */
@@ -56,7 +58,7 @@ export interface TaskHandler {
 export type HandlerRegistry = Record<string, TaskHandler>
 
 export type WorkResult =
-  | { worked: false; reason: 'team_off' | 'cost_cap' | 'empty' }
+  | { worked: false; reason: 'team_off' | 'off_hours' | 'cost_cap' | 'empty' }
   | { worked: true; stage: ClaimStage; taskType: string; result: 'proposed' | 'nothing' | 'executed' | 'failed' | 'lost_claim' }
 
 /** Whether the team has already spent today's model budget. A team that spends nothing never trips this. */
@@ -101,7 +103,8 @@ async function settle(
   if (outcome.kind === 'nothing') {
     return (await finishTask(ctx.supabase, task, outcome.output)).ok ? 'nothing' : 'lost_claim'
   }
-  const done = await completeTask(ctx.supabase, task, outcome.output, ctx.setting.autonomy)
+  const approval = ctx.managerApproves ? { note: MANAGER_APPROVAL_NOTE, now: ctx.now } : undefined
+  const done = await completeTask(ctx.supabase, task, outcome.output, ctx.setting.autonomy, approval)
   return done.ok ? 'proposed' : 'lost_claim'
 }
 
@@ -115,6 +118,8 @@ export async function workOne(
   const settings = await loadTeamSettings(supabase)
   const setting = settingFor(settings, team)
   if (!setting || !isTeamRunnable(settings, team)) return { worked: false, reason: 'team_off' }
+  // Outside 8am to 6pm Central nothing is claimed: the queue keeps, and the first run in the window drains it.
+  if (!isWorkingHours(now)) return { worked: false, reason: 'off_hours' }
   if (await overBudget(supabase, setting, team, now)) return { worked: false, reason: 'cost_cap' }
 
   const claimed = await claimWork(supabase, team, registry)
@@ -129,7 +134,7 @@ export async function workOne(
   }
 
   try {
-    const result = await settle({ supabase, setting, now }, task, stage, handler)
+    const result = await settle({ supabase, setting, now, managerApproves: managerApproves(settings, team, task.task_type) }, task, stage, handler)
     return { worked: true, stage, taskType: task.task_type, result }
   } catch (err) {
     reportError(err, { site: `gtm.worker.${team}`, extra: { taskId: task.id, taskType: task.task_type, stage } })

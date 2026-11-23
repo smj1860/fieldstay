@@ -16,8 +16,12 @@ export const ACTIVE_OUTREACH_STAGES = ['emailed', 'called', 'texted', 'replied',
 /** An active account with no touch for this long is called out as stalled. */
 export const STALE_TOUCH_DAYS = 7
 
-/** How many accounts one approval can hand to Lead Gen. A pace, so one click cannot queue the whole backlog. */
-export const MAX_LEAD_GEN_HANDOFFS = 10
+/**
+ * How many accounts one report can hand to Lead Gen. A pace, so one report cannot queue the whole backlog.
+ * 40, not 10 (2026-11-19): at 10 a week, ~3,000 accounts without an email would take years. It stays under
+ * Lead Gen's 50 tasks a day so the queue-proposal task still fits the same day.
+ */
+export const MAX_LEAD_GEN_HANDOFFS = 40
 
 /**
  * How many accounts one approval can hand to Sales Ops. Lower than Lead Gen's on

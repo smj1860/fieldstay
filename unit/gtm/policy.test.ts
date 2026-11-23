@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  budgetVerdict, centralDateKey, centralDayStart, childDepth, estimateCostCents, finishStatus, isTeamRunnable,
+  AUTO_APPROVABLE, budgetVerdict, centralDateKey, centralDayStart, childDepth, estimateCostCents, finishStatus, isTeamRunnable, isWorkingHours, managerApproves,
   type TeamSetting,
 } from '@/lib/gtm/policy'
 import { MAX_TASK_DEPTH, type SettingsTeam } from '@/lib/gtm/constants'
@@ -113,5 +113,54 @@ describe('the Central Time day the caps reset on', () => {
 
   it('gives the same key for every instant of one Central day', () => {
     expect(centralDateKey(new Date('2026-11-18T06:00:00Z'))).toBe(centralDateKey(new Date('2026-11-19T05:59:59Z')))
+  })
+})
+
+describe('managerApproves', () => {
+  const auto = (team: SettingsTeam): TeamSetting => ({ ...row(team, true), autonomy: 'auto_low_risk' })
+  const on = [row('global', true), row('manager', true), auto('lead_gen'), auto('rev_ops'), auto('sales_ops')]
+
+  it('approves the three low-risk task types when the team is set to auto and the manager is running', () => {
+    expect(managerApproves(on, 'lead_gen', 'enrich_account')).toBe(true)
+    expect(managerApproves(on, 'lead_gen', 'queue_candidates')).toBe(true)
+    expect(managerApproves(on, 'rev_ops', 'weekly_funnel_report')).toBe(true)
+  })
+
+  // The last step of an email is a person's. A Sales Ops team set to auto still gets none of its work approved.
+  it('NEVER approves a Sales Ops draft or call brief, however the team is set', () => {
+    expect(managerApproves(on, 'sales_ops', 'draft_outreach')).toBe(false)
+    expect(managerApproves(on, 'sales_ops', 'call_brief')).toBe(false)
+    expect([...AUTO_APPROVABLE].some((k) => k.startsWith('sales_ops/'))).toBe(false)
+  })
+
+  it('needs the team set to auto: turning an agent on does not by itself turn auto-approval on', () => {
+    const propose = [row('global', true), row('manager', true), row('lead_gen', true)]
+    expect(managerApproves(propose, 'lead_gen', 'enrich_account')).toBe(false)
+  })
+
+  it('needs the manager itself running, and the master switch', () => {
+    expect(managerApproves([row('global', true), row('manager', false), auto('lead_gen')], 'lead_gen', 'enrich_account')).toBe(false)
+    expect(managerApproves([row('global', false), row('manager', true), auto('lead_gen')], 'lead_gen', 'enrich_account')).toBe(false)
+    expect(managerApproves([auto('lead_gen')], 'lead_gen', 'enrich_account')).toBe(false)
+  })
+
+  it('does not approve a task type that is not on the list', () => {
+    expect(managerApproves(on, 'lead_gen', 'anything_else')).toBe(false)
+  })
+})
+
+describe('isWorkingHours (8am to 6pm Central)', () => {
+  // November is CST (UTC-6); July is CDT (UTC-5), so the same wall-clock hour is a different UTC hour.
+  it.each([
+    ['2026-11-19T13:59:59Z', false], // 7:59am CST
+    ['2026-11-19T14:00:00Z', true],  // 8:00am CST
+    ['2026-11-19T23:59:59Z', true],  // 5:59pm CST
+    ['2026-11-20T00:00:00Z', false], // 6:00pm CST
+    ['2026-07-15T12:59:59Z', false], // 7:59am CDT
+    ['2026-07-15T13:00:00Z', true],  // 8:00am CDT
+    ['2026-07-15T22:59:59Z', true],  // 5:59pm CDT
+    ['2026-07-15T23:00:00Z', false], // 6:00pm CDT
+  ])('%s -> %s', (iso, expected) => {
+    expect(isWorkingHours(new Date(iso))).toBe(expected)
   })
 })
