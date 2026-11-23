@@ -358,16 +358,22 @@ export class OwnerRezApiClient {
    * Resolves the next page URL, or null when the collection is exhausted.
    *
    * `next_page_url` is OwnerRez's documented mechanism and is authoritative
-   * when present — critically, it works even if `limit` is ignored, which
-   * matters because OwnerRez's OpenAPI spec declares `limit`/`offset` on ZERO
-   * operations even though the response echoes both back. If we trusted our
-   * requested page size instead, a server that quietly capped us at 20 while
-   * we asked for 100 would look like a short final page and we would stop
-   * early — the exact bug this replaces, in a new disguise.
+   * when present. Since their November 2026 release the list endpoints return a
+   * CURSOR link there, and the instruction is to request it exactly as returned
+   * until it is null. Offset paging is deprecated and an offset above 0 returns
+   * 400 from 2027-01-05, so this function NEVER builds a continuation URL of
+   * its own: it follows theirs or it stops.
    *
-   * The offset fallback covers the other direction: a response that omits
-   * next_page_url but is clearly full. Over-fetching one duplicate page is
-   * harmless (every caller upserts by OwnerRez id); stopping early is not.
+   * It must not read `page.offset` either. A page reached through a cursor
+   * reports offset 0, so an offset computed from it re-requests the same page
+   * forever (until the page ceiling throws) rather than advancing.
+   *
+   * With the field ABSENT, a short or empty page is the end of the collection.
+   * A FULL page with no continuation is ambiguous (the last page of a collection
+   * that happens to be exactly a page long looks identical to a truncated one),
+   * and the callers reconcile deletions against this list, so guessing either
+   * way is unsafe: it THROWS. Stopping would silently drop records and treat
+   * them as deleted; guessing an offset is the thing that stops working in 2027.
    */
   private nextPageUrl<T>(
     page: OwnerRezPagedResponse<T>,
@@ -379,23 +385,22 @@ export class OwnerRezApiClient {
     // a bug (caught by this function's own test): OwnerRez documents null as
     // "there are no more pages", so a null on a FULL page still ends the
     // collection. Only a field that is missing entirely means "this server
-    // doesn't tell me", which is what the offset fallback below is for.
+    // doesn't tell me".
     if (page?.next_page_url !== undefined) {
       return page.next_page_url ? this.assertOwnerRezUrl(page.next_page_url, path) : null
     }
 
-    // No continuation field at all: only keep going if the page came back full.
     // Note the `?? PAGE_SIZE` sits INSIDE Number() — Number(null) is 0, which
     // ?? would happily accept, and a pageSize of 0 makes `received < pageSize`
-    // permanently false and the loop unbounded.
+    // permanently false.
     const requested = Number(current.searchParams.get('limit') ?? PAGE_SIZE)
     const pageSize  = page?.limit ?? (requested > 0 ? requested : PAGE_SIZE)
     if (received === 0 || received < pageSize) return null
 
-    const offset = (page?.offset ?? Number(current.searchParams.get('offset') ?? 0)) + received
-    const next = new URL(current.toString())
-    next.searchParams.set('offset', String(offset))
-    return next
+    throw new Error(
+      `[OwnerRez:${this.userId}] ${path}: response omitted next_page_url on a full page, ` +
+      `refusing to guess whether more records exist`
+    )
   }
 
   /**
