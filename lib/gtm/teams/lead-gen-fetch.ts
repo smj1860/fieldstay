@@ -1,6 +1,6 @@
 import 'server-only'
 import { LEAD_GEN_PAGE_TIMEOUT_MS, LEAD_GEN_ROBOTS_TIMEOUT_MS } from '@/lib/http/timeout'
-import { safeFetch } from '@/lib/security/url-guard'
+import { safeFetch, UnsafeUrlError } from '@/lib/security/url-guard'
 import { robotsAllows } from './robots'
 import { extractFromPage, type PageFindings } from './lead-gen-extract'
 
@@ -74,7 +74,42 @@ function followUps(origin: string, homepage: PageFindings): string[] {
   return (linked.length > 0 ? linked : FALLBACK_PATHS.map((p) => `${origin}${p}`)).slice(0, MAX_PAGES - 1)
 }
 
+/**
+ * Errors that say the site itself is broken in a way no retry will fix: an
+ * expired or mismatched certificate, a domain that no longer resolves, a
+ * refused connection. Node reports them as `TypeError: fetch failed` with the
+ * real reason on `cause.code`. A timeout is deliberately NOT here: a slow
+ * site may answer tomorrow, and the task retries it.
+ */
+const PERMANENT_NETWORK_CODES = new Set([
+  'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'ENOTFOUND', 'ECONNREFUSED', 'EPROTO',
+])
+
+export function isPermanentSiteError(err: unknown): boolean {
+  if (err instanceof UnsafeUrlError) return !err.message.startsWith('Timed out')
+  if (!(err instanceof Error)) return false
+  const code = (err.cause as { code?: unknown } | undefined)?.code
+  if (typeof code === 'string' && PERMANENT_NETWORK_CODES.has(code)) return true
+  return /certificate has expired/i.test((err.cause as Error | undefined)?.message ?? '')
+}
+
+/**
+ * A permanently broken site is a real answer ("nothing to read here"), not a
+ * failure: it closes the task as nothing found instead of retrying forever and
+ * paging Sentry for a stranger's expired certificate.
+ */
 export async function researchSite(siteUrl: string): Promise<SiteResearch> {
+  try {
+    return await readSite(siteUrl)
+  } catch (err) {
+    if (isPermanentSiteError(err)) return { pages: [], robotsBlocked: false }
+    throw err
+  }
+}
+
+async function readSite(siteUrl: string): Promise<SiteResearch> {
   const origin = new URL(siteUrl).origin
   const robots = await readRobots(origin)
   const home = `${origin}/`

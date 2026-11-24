@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const safeFetch = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/security/url-guard', () => ({ safeFetch }))
+const UnsafeUrlError = vi.hoisted(() => class UnsafeUrlError extends Error {})
+vi.mock('@/lib/security/url-guard', () => ({ safeFetch, UnsafeUrlError }))
 
-import { MAX_PAGES, researchSite, LEAD_GEN_USER_AGENT } from '@/lib/gtm/teams/lead-gen-fetch'
+import { MAX_PAGES, researchSite, isPermanentSiteError, LEAD_GEN_USER_AGENT } from '@/lib/gtm/teams/lead-gen-fetch'
 
 // ============================================================================
 // The polite-crawler promises, asserted: identify ourselves, obey robots.txt,
@@ -129,5 +130,36 @@ describe('researchSite', () => {
   it('propagates a network failure from the safe fetcher so the task is retried', async () => {
     safeFetch.mockRejectedValue(new Error('Refusing private address'))
     await expect(researchSite(HOME)).rejects.toThrow('private address')
+  })
+})
+
+// A stranger's broken site is an answer, not a fault: Sentry 1P was a prospect
+// whose HTTPS certificate had expired, retried and reported on every attempt.
+describe('permanently broken sites', () => {
+  function fetchFailed(code: string): TypeError {
+    return new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) })
+  }
+
+  it('closes as nothing found when the certificate has expired', async () => {
+    safeFetch.mockRejectedValue(fetchFailed('CERT_HAS_EXPIRED'))
+    expect(await researchSite(HOME)).toEqual({ pages: [], robotsBlocked: false })
+  })
+
+  it('closes as nothing found when the domain no longer resolves', async () => {
+    safeFetch.mockRejectedValue(new UnsafeUrlError('Could not resolve host acmerentals.com'))
+    expect(await researchSite(HOME)).toEqual({ pages: [], robotsBlocked: false })
+  })
+
+  it('still throws on a timeout so the task retries', async () => {
+    safeFetch.mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    await expect(researchSite(HOME)).rejects.toThrow()
+    safeFetch.mockRejectedValue(new UnsafeUrlError('Timed out validating/fetching URL'))
+    await expect(researchSite(HOME)).rejects.toThrow()
+  })
+
+  it('classifies only known permanent causes', () => {
+    expect(isPermanentSiteError(fetchFailed('ECONNREFUSED'))).toBe(true)
+    expect(isPermanentSiteError(fetchFailed('ECONNRESET'))).toBe(false)
+    expect(isPermanentSiteError('nope')).toBe(false)
   })
 })
