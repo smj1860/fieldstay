@@ -44,6 +44,7 @@
 // Enforced by unit/guardrails/token-not-in-step-state.test.ts.
 // ============================================================
 
+import { NonRetriableError } from 'inngest'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient }         from '@/lib/supabase/server'
@@ -225,7 +226,12 @@ export async function refreshHospitableToken(
   )
 
   if (!currentRefreshToken) {
-    throw new Error(
+    // Nothing to exchange and nothing a retry can conjure up. A plain Error
+    // here read as transient to integration-token-refresh-handler, which
+    // retried, exhausted, and never reached its mark-revoked + reconnect-email
+    // steps: the customer was never told and the failure repeated hourly.
+    // Hostex already throws NonRetriableError for the same condition.
+    throw new NonRetriableError(
       `[Hospitable] No refresh token in Vault for user ${userId}. ` +
       `User must re-authorize.`
     )
@@ -253,6 +259,13 @@ export async function refreshHospitableToken(
 
   if (!result) {
     await markConnectionError(userId)
+    // invalid_grant / invalid_client will never succeed on retry: surface it as
+    // terminal so the handler marks the connection revoked and emails the PM.
+    if (lastError instanceof TerminalRefreshError) {
+      throw new NonRetriableError(
+        `[Hospitable] Token refresh rejected for user ${userId}: ${lastError.message}`
+      )
+    }
     throw new Error(
       `[Hospitable] Token refresh failed after 2 attempts for user ${userId}: ` +
       (lastError?.message ?? 'unknown')
