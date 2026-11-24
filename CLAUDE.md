@@ -921,8 +921,8 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   and `manager_playbook` (one row per instruction type, `standing` defaults false). A reply is read by ONE
   billed model call (`lib/gtm/manager/interpret.ts`, Haiku, `tool_choice: auto`) that can only CHOOSE from the
   catalog in `lib/gtm/manager/instructions.ts` (`requeue_failed`, `run_funnel_report`,
-  `propose_queue_candidates`, `redraft_rejected`, `enrich_ownerrez`; the last two take an optional count, clamped
-  to 5 and 10 by `ACCOUNT_BATCH_MAX`); `readInterpretation()` drops anything else and regenerates the summary a person
+  `propose_queue_candidates`, `redraft_rejected`, `enrich_ownerrez`, `draft_meeting_requests`; the last three take an
+  optional count, clamped to 5, 10 and 5 by `ACCOUNT_BATCH_MAX`); `readInterpretation()` drops anything else and regenerates the summary a person
   approves, so the words are ours, not the model's. The proposal sits on the row until a person approves it in
   the dashboard (`decideManagerInstruction`), and ONLY that approval carries it out, through
   `lib/gtm/manager/apply.ts`, the single place an instruction becomes work. Every action only queues a task
@@ -957,6 +957,21 @@ are hints), one step per unit of work, concurrency 1 per team. The step loop liv
   write them (`gtm-agent-boundaries`). **The weekly Rev Ops handoff is OwnerRez-first** (`ownerrezFirstPool`: a
   second database read, not a sort, for the same reason the queue proposal filters in the query): OwnerRez is the
   founder's priority outreach, so it leads without anyone having to ask.
+- **Meeting requests for a list a person supplied (2026-11-24).** The founder pastes or links a list of
+  accounts (the first was 22 OwnerRez operators in AL, GA, TN and the Florida Panhandle). Someone loads them
+  into `prospect_accounts` by hand, outside the agents, with `source = 'founder_list_<date>'` and `pms =
+  'OwnerRez'`, and queues Lead Gen enrichment (`origin = 'human'`). The `draft_meeting_requests` action then
+  asks Sales Ops (`draft_outreach` with `input.intent = 'meeting_request'`) for a first email that asks to meet
+  face to face, for up to 5 list accounts that have an email and no open draft. **The queue step is skipped for
+  these accounts on purpose and only for them**: `draftEligibility(target, 'meeting_request')` also accepts
+  `new`, `researching` and `needs_contact_info`, because the founder chose the accounts and every draft still
+  needs approval and is still sent by a person. It still refuses replied, in-conversation and closed accounts,
+  a missing email and a bounce. The action only READS prospects (`source LIKE 'founder\_list\_%'`) and
+  `gtm-agent-boundaries` holds it to that. The voice (`draft-5`) gained `meeting_ask` (a meeting request that
+  never asks to meet in person fails) and `invented_visit` (any draft claiming the sender will be in their area,
+  nearby or can drop by fails, because nothing says so). The ask is also in the prompt: let them choose when and
+  where, no date, no length, never "quick". Its trigger is `schedule`, so the morning plan never proposes it
+  unprompted. Migration `20261124180000` widened the playbook CHECK.
 - **The manager takes the initiative, and how far that goes (2026-11-24). The founder's goal is a manager
   that runs and coordinates the agents on its own; this is the staircase toward it, and the order is the point.**
   **Built:** (1) a person's replies, read into proposals; (2) a per-type standing grant, per type revocable;

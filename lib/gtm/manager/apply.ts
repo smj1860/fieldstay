@@ -42,6 +42,10 @@ const ENRICH_RECHECK_DAYS = 30
 /** Candidates read before the filters. A short, known list: the filters need every one. */
 const CANDIDATE_POOL = 50
 const ENRICH_STAGES = ['new', 'researching', 'needs_contact_info'] as const
+/** Accounts a person supplied by hand carry this source prefix (founder_list_<date>), and only they get meeting requests. */
+export const FOUNDER_LIST_SOURCE = 'founder\\_list\\_%'
+/** Stages a meeting request may start from: nothing has gone out yet. */
+const MEETING_REQUEST_STAGES = [...ENRICH_STAGES, 'queued'] as const
 
 export interface ApplyContext {
   now:    Date
@@ -248,6 +252,58 @@ async function enrichOwnerrez(supabase: ServiceClient, ctx: ApplyContext, params
   }
 }
 
+async function draftMeetingRequests(supabase: ServiceClient, ctx: ApplyContext, params: ActionParams): Promise<ActionOutcome> {
+  const kind = 'draft_meeting_requests' as const
+
+  const poolRes = await supabase.from('prospect_accounts').select('id, email_status')
+    .like('source', FOUNDER_LIST_SOURCE)
+    .ilike('pms', 'OwnerRez')
+    .in('status', [...MEETING_REQUEST_STAGES])
+    .not('email', 'is', null)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(CANDIDATE_POOL)
+  const pool = unwrapList<{ id: string; email_status: string | null }>(poolRes, { site: `${SITE}.meeting.pool` })
+    .filter((p) => p.email_status !== 'bounced')
+    .map((p) => p.id)
+  if (pool.length === 0) {
+    return { kind, ok: true, summary: 'None of the accounts from your lists has an email yet and is waiting for a first email. Approve what Lead Gen finds first.' }
+  }
+
+  // An account with a draft already waiting does not get a second one.
+  const liveRes = await supabase.from('agent_tasks').select('prospect_id')
+    .eq('team', 'sales_ops').eq('task_type', 'draft_outreach')
+    .in('status', [...OPEN_TASK_STATUSES])
+    .in('prospect_id', pool)
+    .limit(pool.length)
+  const live = new Set(unwrapList<{ prospect_id: string | null }>(liveRes, { site: `${SITE}.meeting.live` }).map((r) => r.prospect_id))
+
+  const chosen = pool.filter((id) => !live.has(id)).slice(0, effectiveLimit(kind, params))
+  if (chosen.length === 0) return { kind, ok: true, summary: 'Every account from your lists that has an email already has a draft waiting.' }
+
+  const period = Math.floor(ctx.now.getTime() / (ENRICH_RECHECK_DAYS * DAY_MS))
+  const results: EnqueueResult[] = []
+  for (const prospectId of chosen) {
+    results.push(await enqueueTask(supabase, {
+      team:             'sales_ops',
+      taskType:         'draft_outreach',
+      origin:           ctx.origin,
+      prospectId,
+      input:            { intent: 'meeting_request' },
+      priority:         60,
+      requiresApproval: true,
+      dedupeKey:        `sales_ops:draft_outreach:${prospectId}:meeting:${period}`,
+      now:              ctx.now,
+    }))
+  }
+  const tally = tallyResults(results)
+  if (tally.queued === 0 && tally.firstRefusal) return { kind, ok: false, summary: tally.firstRefusal }
+  return {
+    kind, ok: true,
+    summary: `Asked Sales Ops to draft a meeting request for ${plural(tally.queued, 'account', 'accounts')} from your lists. You review each draft and send it yourself.`,
+  }
+}
+
 export async function applyAction(supabase: ServiceClient, action: ProposedAction, ctx: ApplyContext): Promise<ActionOutcome> {
   switch (action.kind) {
     case 'run_funnel_report':         return runReport(supabase, ctx)
@@ -255,6 +311,7 @@ export async function applyAction(supabase: ServiceClient, action: ProposedActio
     case 'requeue_failed':            return requeueFailed(supabase, ctx, action.params.team)
     case 'redraft_rejected':          return redraftRejected(supabase, ctx, action.params)
     case 'enrich_ownerrez':           return enrichOwnerrez(supabase, ctx, action.params)
+    case 'draft_meeting_requests':    return draftMeetingRequests(supabase, ctx, action.params)
   }
 }
 

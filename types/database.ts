@@ -3291,7 +3291,7 @@ export interface ManagerInstruction {
 }
 
 export interface ManagerPlaybook {
-  action_kind:          'requeue_failed' | 'run_funnel_report' | 'propose_queue_candidates' | 'redraft_rejected' | 'enrich_ownerrez'
+  action_kind:          'requeue_failed' | 'run_funnel_report' | 'propose_queue_candidates' | 'redraft_rejected' | 'enrich_ownerrez' | 'draft_meeting_requests'
   standing:             boolean
   granted_by:           string | null
   granted_at:           string | null

@@ -35,7 +35,7 @@ export function fakeSupabase(script: Record<string, Scripted[]>, rpc: Scripted[]
     for (const op of ['select', 'insert', 'update', 'upsert', 'delete'] as const) {
       chain[op] = vi.fn((payload?: unknown) => { begin(op, op === 'select' ? undefined : payload); return chain })
     }
-    for (const f of ['eq', 'neq', 'in', 'is', 'or', 'not', 'ilike', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    for (const f of ['eq', 'neq', 'in', 'is', 'or', 'not', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
       chain[f] = vi.fn((...args: unknown[]) => { call?.filters.push([f, args]); return chain })
     }
     const resolve = () => Promise.resolve(next(`${table}:${call?.op ?? 'select'}`))

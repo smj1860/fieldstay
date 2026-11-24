@@ -16,7 +16,7 @@
  * Pure: no I/O, so the rules are pinned by tests and safe to import anywhere.
  */
 
-export const VOICE_GUIDE_VERSION = 'draft-4'
+export const VOICE_GUIDE_VERSION = 'draft-5'
 
 /** What the guide has and has not been through. Shown on the dashboard, so nobody mistakes it for approved. */
 export const VOICE_GUIDE_STATUS = 'Draft. Derived from the homepage copy, with honesty rules, tone notes and founder-confirmed product facts; not yet reviewed by the founder in full.'
@@ -71,14 +71,20 @@ export type VoiceRule =
   | 'em_dash' | 'subject_length' | 'subject_style' | 'body_length' | 'banned_phrase' | 'pricing'
   | 'link' | 'placeholder' | 'greeting' | 'exclamation' | 'signature' | 'emoji'
   | 'false_familiarity' | 'sender_overclaim' | 'pressure' | 'presumed_problem' | 'social_proof' | 'unbacked_claim' | 'opt_out'
+  | 'invented_visit' | 'meeting_ask'
 
 export interface VoiceIssue { rule: VoiceRule; detail: string }
 
 export interface DraftText { subject: string; body: string }
 
+/** What a draft is for. `meeting_request` asks, plainly, for a face-to-face meeting. */
+export type DraftIntent = 'standard' | 'meeting_request'
+
 export interface DraftContext {
   /** The recipient's first name when it is known. Decides the greeting. */
   firstName?: string | null
+  /** Defaults to a standard outreach draft. */
+  intent?: DraftIntent
 }
 
 export const MAX_SUBJECT_CHARS = 60
@@ -127,6 +133,17 @@ export const PRESSURE: readonly string[] = [
 export const PRESUMED_PROBLEM: readonly string[] = [
   'you\'re losing', 'you are losing', 'costing you', 'you\'re struggling', 'you are struggling', 'you\'re wasting',
   'you are wasting', 'you probably', 'i\'m sure you', 'i am sure you', 'you must be', 'you surely',
+]
+/**
+ * A claim that the sender will be nearby, is travelling or can drop in. Nothing
+ * we know says so, and a meeting request is exactly where a model reaches for it
+ * ("I will be in your area next week"). Asking to meet is honest; inventing a
+ * reason to be there is not.
+ */
+export const INVENTED_VISIT: readonly string[] = [
+  'i\'ll be in', 'i will be in', 'i\'m in your area', 'i am in your area', 'in your area', 'in your neighborhood',
+  'passing through', 'when i\'m in', 'when i am in', 'i\'ll be visiting', 'i will be visiting', 'stop by', 'drop by',
+  'swing by', 'i\'m nearby', 'i am nearby', 'i\'m local', 'i am local',
 ]
 export const SOCIAL_PROOF: readonly string[] = [
   'trusted by', 'our customers', 'our clients', 'other property managers', 'other managers', 'managers like you',
@@ -277,10 +294,19 @@ function honestyIssues(all: string, body: string): VoiceIssue[] {
     ...phraseRule(all, PRESSURE, 'pressure', 'No urgency or "quick" framing. Nothing here is urgent.'),
     ...phraseRule(all, PRESUMED_PROBLEM, 'presumed_problem', 'You do not know their problems. Ask a question instead of stating one.'),
     ...phraseRule(all, SOCIAL_PROOF, 'social_proof', 'Do not cite customers or other managers. Say only what the product does.'),
+    ...phraseRule(all, INVENTED_VISIT, 'invented_visit', 'Do not say you will be in their area or can drop by. Ask to meet at a time and place that suits them.'),
   ]
   if (hasUnbackedClaim(all)) issues.push({ rule: 'unbacked_claim', detail: 'States a percentage or a saving nobody has measured. Say what the product does, not what it will save them.' })
   if (!OPT_OUT.test(body)) issues.push({ rule: 'opt_out', detail: 'Add a sincere way out near the end, for example "If this is not useful, tell me and I will stop."' })
   return issues
+}
+
+/** An in-person ask, in any ordinary wording. A phrase list, since a model words it many ways. */
+const IN_PERSON = /\b(?:face[- ]to[- ]face|in person|in-person|meet (?:you |with you )?(?:in person|face)|sit down (?:together|with you)|meet up)\b/i
+
+function meetingAskIssues(all: string, intent: DraftIntent | undefined): VoiceIssue[] {
+  if (intent !== 'meeting_request') return []
+  return IN_PERSON.test(all) ? [] : [{ rule: 'meeting_ask', detail: 'This email asks for a meeting. Ask plainly to meet face to face, at a time and place that suits them.' }]
 }
 
 /** Every way a draft breaks the voice. An empty list is a pass. */
@@ -293,6 +319,7 @@ export function checkDraft(draft: DraftText, context: DraftContext = {}): VoiceI
     ...linkIssues(all),
     ...greetingIssue(draft.body, context.firstName),
     ...honestyIssues(all, draft.body),
+    ...meetingAskIssues(all, context.intent),
   ]
   if (DASHES.test(all)) issues.push({ rule: 'em_dash', detail: 'Uses a dash as punctuation. Use a comma or a period.' })
   if (draft.body.includes('!')) issues.push({ rule: 'exclamation', detail: 'The body has an exclamation mark.' })

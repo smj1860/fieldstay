@@ -118,3 +118,17 @@ describe('systemPrompt: links', () => {
     expect(prompt).toContain('Never invent a path')
   })
 })
+
+describe('userPrompt: meeting requests', () => {
+  it('asks for a face-to-face meeting and forbids an invented visit', () => {
+    const prompt = userPrompt(brief({ intent: 'meeting_request' }))
+    expect(prompt).toContain('meet face to face')
+    expect(prompt).toContain('Never say you will be in their area')
+    expect(prompt).toContain('Let them choose when and where')
+    expect(prompt).not.toContain('"intent"')
+  })
+
+  it('adds nothing for a standard draft', () => {
+    expect(userPrompt(brief())).not.toContain('meet face to face')
+  })
+})

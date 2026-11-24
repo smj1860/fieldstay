@@ -1,6 +1,6 @@
 import {
   MAX_BODY_WORDS, MAX_SUBJECT_CHARS, LANDING_PATHS, MIN_BODY_WORDS, PRODUCT_FACTS, SENDER_FACTS, VOICE_GUIDE, describeIssues,
-  type VoiceIssue,
+  type DraftIntent, type VoiceIssue,
 } from '../brand/voice'
 
 /**
@@ -27,6 +27,8 @@ export interface DraftBrief {
   priorTouches:       { type: string; daysAgo: number }[]
   /** the founder's notes on drafts they rejected, most recent first */
   feedback:           string[]
+  /** meeting_request asks plainly for a face-to-face meeting. Defaults to standard. */
+  intent?:            DraftIntent
 }
 
 const MAX_FEEDBACK_NOTES = 5
@@ -65,6 +67,18 @@ export function systemPrompt(feedback: readonly string[]): string {
   ].join('\n')
 }
 
+/**
+ * What changes when the email is a meeting request. The ask is the whole point
+ * of it, so it is stated, and so is each way a model tends to make one dishonest.
+ */
+export const MEETING_REQUEST_RULES: readonly string[] = [
+  'This email asks to meet face to face. Say so plainly, once, in your own words (for example: "I would like to meet you in person").',
+  'Let them choose when and where. Do not propose a date, a place or a length of time, and never call it quick.',
+  'Never say you will be in their area, are travelling, are nearby or can drop by. Nothing says so. Ask to meet at a time and place that suits them.',
+  'Say in a sentence why a meeting, using only the product facts you were given. Do not invent a reason.',
+  'Keep the way out: if they would rather not meet, or this is not useful, they can say so and you will stop.',
+]
+
 export function greetingFor(firstName: string | null): string {
   const name = firstName?.trim()
   return name ? `Hi ${name},` : 'Hi there,'
@@ -72,12 +86,13 @@ export function greetingFor(firstName: string | null): string {
 
 /** The recipient context as data. Feedback is in the system prompt, not here. */
 export function userPrompt(brief: DraftBrief, issues: readonly VoiceIssue[] = []): string {
-  const { feedback: _feedback, ...recipient } = brief
+  const { feedback: _feedback, intent, ...recipient } = brief
   const lines = [
     brief.kind === 'first_touch'
       ? 'Write a first email to this prospect. Nothing has been sent to them before.'
       : 'Write a short follow-up to this prospect. They have not replied to what was sent before. Do not repeat the first email and do not say you are checking in.',
     `Open the body with exactly: ${greetingFor(brief.contactFirstName)}`,
+    ...(intent === 'meeting_request' ? ['', ...MEETING_REQUEST_RULES] : []),
     '',
     'Recipient (data):',
     JSON.stringify(recipient, null, 2),

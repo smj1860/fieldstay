@@ -39,7 +39,7 @@ export const PROPOSE_ACTIONS_TOOL: Anthropic.Messages.Tool = {
           properties: {
             kind: { type: 'string', enum: [...ACTION_KINDS] },
             team:  { type: 'string', enum: [...WORKER_TEAMS], description: 'Only for requeue_failed, and only when the person named a team.' },
-            limit: { type: 'integer', minimum: 1, description: 'Only for redraft_rejected and enrich_ownerrez, and only when the person named a number.' },
+            limit: { type: 'integer', minimum: 1, description: 'Only for redraft_rejected, enrich_ownerrez and draft_meeting_requests, and only when the person named a number.' },
           },
           required: ['kind'],
         },
