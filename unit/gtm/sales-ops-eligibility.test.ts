@@ -73,3 +73,20 @@ describe('statusAfterReply', () => {
     expect(statusAfterReply(status)).toBeNull()
   })
 })
+
+describe('draftEligibility: meeting requests', () => {
+  it.each(['new', 'researching', 'needs_contact_info', 'queued'])('lets a meeting request start from %s when there is an email', (status) => {
+    expect(draftEligibility(target({ status }), 'meeting_request')).toEqual({ ok: true })
+  })
+
+  it('still refuses a conversation, a closed account, a missing email and a bounce', () => {
+    expect(draftEligibility(target({ status: 'replied' }), 'meeting_request')).toMatchObject({ reason: 'in_conversation' })
+    expect(draftEligibility(target({ status: 'lost' }), 'meeting_request')).toMatchObject({ reason: 'closed' })
+    expect(draftEligibility(target({ status: 'new', email: null }), 'meeting_request')).toMatchObject({ reason: 'no_email' })
+    expect(draftEligibility(target({ status: 'new', email_status: 'bounced' }), 'meeting_request')).toMatchObject({ reason: 'email_bounced' })
+  })
+
+  it('leaves the standard rule alone', () => {
+    expect(draftEligibility(target({ status: 'new' }))).toEqual({ ok: false, reason: 'not_ready' })
+  })
+})

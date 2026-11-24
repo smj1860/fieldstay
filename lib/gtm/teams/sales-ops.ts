@@ -3,7 +3,7 @@ import { unwrapList } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import type { createServiceClient } from '@/lib/supabase/server'
 import type { AgentTask } from '@/types/database'
-import { VOICE_GUIDE_VERSION, checkDraft, type DraftText, type VoiceIssue } from '../brand/voice'
+import { VOICE_GUIDE_VERSION, checkDraft, type DraftIntent, type DraftText, type VoiceIssue } from '../brand/voice'
 import { recordUsage, type JsonObject } from '../tasks'
 import type { HandlerRegistry, TaskContext, TaskHandler, WorkOutcome } from '../worker'
 import { generateDraft } from './sales-ops-draft'
@@ -33,6 +33,7 @@ const SITE = 'gtm.sales-ops'
 const DAY_MS = 86_400_000
 /** One try plus one correction. A draft that cannot pass in two is not worth a third call. */
 export const MAX_DRAFT_ATTEMPTS = 2
+const PRE_OUTREACH_STATUSES: ReadonlySet<string> = new Set(['new', 'researching', 'needs_contact_info', 'queued'])
 const RECENT_TOUCHES_READ = 5
 const FEEDBACK_NOTES_READ = 5
 
@@ -89,7 +90,13 @@ export async function loadRejectionFeedback(supabase: ServiceClient): Promise<st
   return rows.map((r) => r.decision_note?.trim() ?? '').filter(Boolean)
 }
 
-export function buildBrief(prospect: ProspectRow, touches: DraftBrief['priorTouches'], feedback: string[], now: Date): DraftBrief {
+/** What a draft task asks for. Anything but the one known intent is a standard draft. */
+export function intentOf(task: Pick<AgentTask, 'input'>): DraftIntent {
+  const input = task.input as { intent?: unknown } | null
+  return input?.intent === 'meeting_request' ? 'meeting_request' : 'standard'
+}
+
+export function buildBrief(prospect: ProspectRow, touches: DraftBrief['priorTouches'], feedback: string[], now: Date, intent: DraftIntent = 'standard'): DraftBrief {
   const sent = touches.some((t) => ['emailed', 'called', 'texted', 'visited_no_contact'].includes(t.type))
   return {
     company:            prospect.company,
@@ -99,10 +106,13 @@ export function buildBrief(prospect: ProspectRow, touches: DraftBrief['priorTouc
     portfolioSize:      prospect.portfolio_size,
     contactFirstName:   firstNameOf(prospect.contact_name),
     contactTitle:       prospect.contact_title,
-    kind:               sent || prospect.status !== 'queued' ? 'follow_up' : 'first_touch',
+    // Nothing has gone out and the account is still before its first outreach: a first touch.
+    // ('queued' was the only such stage until meeting requests, which accept earlier ones too.)
+    kind:               sent || !PRE_OUTREACH_STATUSES.has(prospect.status) ? 'follow_up' : 'first_touch',
     daysSinceLastTouch: daysAgo(prospect.last_touch_at, now),
     priorTouches:       touches,
     feedback,
+    intent,
   }
 }
 
@@ -138,7 +148,7 @@ async function draftWithinVoice(
       issues = [{ rule: 'body_length', detail: 'You did not call the write_draft tool. Call it with a subject and a body.' }]
       continue
     }
-    issues = checkDraft(call.draft, { firstName: brief.contactFirstName })
+    issues = checkDraft(call.draft, { firstName: brief.contactFirstName, intent: brief.intent })
     if (issues.length === 0) return { ...call.draft, attempts: attempt + 1 }
   }
   throw new Error(`Draft failed the voice check after ${MAX_DRAFT_ATTEMPTS} tries: ${summarize(issues)}`)
@@ -155,14 +165,15 @@ async function runDraft(task: AgentTask, ctx: TaskContext): Promise<WorkOutcome>
   if (!prospect) return nothing('account_not_found', 'The account no longer exists.')
 
   // Re-check the live row. The account can change between the report being approved and now.
-  const eligible = draftEligibility(prospect)
+  const intent = intentOf(task)
+  const eligible = draftEligibility(prospect, intent)
   if (!eligible.ok) return nothing(eligible.reason, INELIGIBLE_SUMMARY[eligible.reason])
 
   const [touches, feedback] = await Promise.all([
     loadRecentTouches(ctx.supabase, prospect.id, ctx.now),
     loadRejectionFeedback(ctx.supabase),
   ])
-  const brief = buildBrief(prospect, touches, feedback, ctx.now)
+  const brief = buildBrief(prospect, touches, feedback, ctx.now, intent)
   const draft = await draftWithinVoice(task, ctx, brief)
 
   const recipient = brief.contactFirstName ? `${prospect.contact_name?.trim()}` : 'the contact'
@@ -172,6 +183,7 @@ async function runDraft(task: AgentTask, ctx: TaskContext): Promise<WorkOutcome>
     summary:     `To ${recipient} at ${prospect.company}. Voice check passed (${VOICE_GUIDE_VERSION}). Review it, then send it from your own mailbox.`,
     voice_check: { passed: true, version: VOICE_GUIDE_VERSION, attempts: draft.attempts },
     kind:        brief.kind,
+    intent,
   } as JsonObject }
 }
 

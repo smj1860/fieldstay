@@ -329,3 +329,28 @@ describe('the product facts', () => {
     expect(PRODUCT_FACTS[1]).toMatch(/automatic scheduling of crew/)
   })
 })
+
+describe('checkDraft: meeting requests', () => {
+  const ASK = 'Hi Dana, running thirty cabins on Lake Martin means a lot of Friday turnovers. FieldStay creates each turnover from the booking, suggests who should take it, and lets the crew work from a phone checklist even with no signal. I would like to meet you face to face, at a time and place that suits you, and show you how it works on one of your cabins. If this is not useful, tell me and I will stop.'
+  const meet = (d: DraftText) => checkDraft(d, { firstName: 'Dana', intent: 'meeting_request' }).map((i) => i.rule)
+
+  it('passes when it plainly asks to meet in person', () => {
+    expect(meet({ subject: 'Meeting in person', body: ASK })).toEqual([])
+  })
+
+  it('fails a meeting request that never asks to meet', () => {
+    expect(meet(GOOD)).toContain('meeting_ask')
+  })
+
+  it('does not ask a standard draft to meet', () => {
+    expect(checkDraft(GOOD, { firstName: 'Dana' })).toEqual([])
+  })
+
+  it.each(['I will be in your area next week.', 'I am nearby and can drop by.', 'I will be visiting Lake Martin soon.'])('refuses an invented reason to be there (%s)', (line) => {
+    expect(meet({ subject: 'Meeting in person', body: `${ASK} ${line}` })).toContain('invented_visit')
+  })
+
+  it('refuses an invented visit in any draft, not only meeting requests', () => {
+    expect(rules(withBody(`${GOOD_BODY} I will be in your area soon.`))).toContain('invented_visit')
+  })
+})

@@ -27,6 +27,7 @@ export const ACTION_KINDS = [
   'propose_queue_candidates',
   'redraft_rejected',
   'enrich_ownerrez',
+  'draft_meeting_requests',
 ] as const
 export type ActionKind = (typeof ACTION_KINDS)[number]
 
@@ -75,14 +76,21 @@ export const ACTION_CATALOG: Record<ActionKind, CatalogEntry> = {
     takesTeam:   false,
     takesLimit:  true,
   },
+  draft_meeting_requests: {
+    label:       'Draft meeting requests for your list',
+    description: 'Asks Sales Ops to write a first email, asking to meet face to face, to the OwnerRez accounts you supplied in a list that have an email and have not been contacted. You review and send every draft yourself. At most 5 at a time.',
+    takesTeam:   false,
+    takesLimit:  true,
+  },
 }
 
 export interface ActionParams { team?: WorkerTeam; limit?: number }
 
 /** The most one action may take on at once. Each account is something for a person to read or approve. */
-export const ACCOUNT_BATCH_MAX: Record<'redraft_rejected' | 'enrich_ownerrez', number> = {
-  redraft_rejected: 5,
-  enrich_ownerrez:  10,
+export const ACCOUNT_BATCH_MAX: Record<'redraft_rejected' | 'enrich_ownerrez' | 'draft_meeting_requests', number> = {
+  redraft_rejected:       5,
+  enrich_ownerrez:        10,
+  draft_meeting_requests: 5,
 }
 
 export interface ProposedAction {

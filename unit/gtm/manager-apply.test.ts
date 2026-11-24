@@ -206,3 +206,64 @@ describe('enrich_ownerrez', () => {
     expect(mocks.enqueueTask).not.toHaveBeenCalled()
   })
 })
+
+describe('draft_meeting_requests', () => {
+  const action = (limit?: number) => ({ kind: 'draft_meeting_requests' as const, params: limit ? { limit } : {}, summary: '' })
+  const queuedOk = () => mocks.enqueueTask.mockResolvedValue({ ok: true, id: 't' })
+
+  it('asks Sales Ops for a meeting-request draft for each list account with an email, each needing approval', async () => {
+    queuedOk()
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: [{ id: 'p1', email_status: 'unknown' }, { id: 'p2', email_status: 'valid' }, { id: 'p3', email_status: 'bounced' }], error: null }],
+      'agent_tasks:select':       [{ data: [], error: null }],
+    })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out.summary).toContain('2 accounts')
+    expect(mocks.enqueueTask.mock.calls.map((c) => c[1])).toEqual([
+      expect.objectContaining({ team: 'sales_ops', taskType: 'draft_outreach', origin: 'manager', requiresApproval: true, prospectId: 'p1', input: { intent: 'meeting_request' } }),
+      expect.objectContaining({ prospectId: 'p2' }),
+    ])
+    expect(String(mocks.enqueueTask.mock.calls[0][1].dedupeKey)).toMatch(/^sales_ops:draft_outreach:p1:meeting:\d+$/)
+  })
+
+  it('reads only accounts from a founder list that run OwnerRez, and never writes a prospect', async () => {
+    queuedOk()
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: [], error: null }],
+    })
+    await applyAction(fake.client, action(), ctx)
+    const read = fake.calls.find((c) => c.table === 'prospect_accounts')!
+    expect(read.filters).toContainEqual(['like', ['source', 'founder\\_list\\_%']])
+    expect(read.filters).toContainEqual(['ilike', ['pms', 'OwnerRez']])
+    expect(fake.calls.some((c) => c.table === 'prospect_accounts' && c.op !== 'select')).toBe(false)
+  })
+
+  it('skips an account that already has a draft waiting, and says so when nothing is left', async () => {
+    queuedOk()
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: [{ id: 'p1', email_status: null }, { id: 'p2', email_status: null }], error: null }],
+      'agent_tasks:select':       [{ data: [{ prospect_id: 'p1' }, { prospect_id: 'p2' }], error: null }],
+    })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out.summary).toContain('already has a draft waiting')
+    expect(mocks.enqueueTask).not.toHaveBeenCalled()
+  })
+
+  it('says to approve Lead Gen first when no list account has an email yet', async () => {
+    const fake = fakeSupabase({ 'prospect_accounts:select': [{ data: [], error: null }] })
+    const out = await applyAction(fake.client, action(), ctx)
+    expect(out).toMatchObject({ ok: true })
+    expect(out.summary).toContain('Approve what Lead Gen finds first')
+  })
+
+  it('never takes on more than its ceiling of five', async () => {
+    queuedOk()
+    const rows = Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, email_status: null }))
+    const fake = fakeSupabase({
+      'prospect_accounts:select': [{ data: rows, error: null }],
+      'agent_tasks:select':       [{ data: [], error: null }],
+    })
+    await applyAction(fake.client, action(), ctx)
+    expect(mocks.enqueueTask).toHaveBeenCalledTimes(5)
+  })
+})

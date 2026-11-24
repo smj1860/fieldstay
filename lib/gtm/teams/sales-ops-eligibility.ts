@@ -22,10 +22,23 @@ export type IneligibleReason = 'closed' | 'in_conversation' | 'not_ready' | 'no_
 
 export interface DraftTarget { status: string; email: string | null; email_status: string | null }
 
-export function draftEligibility(target: DraftTarget): { ok: true } | { ok: false; reason: IneligibleReason } {
+/**
+ * Stages before any outreach. A meeting request is for accounts the founder
+ * supplied by hand (a list they pasted), so it does not wait for the queue
+ * step: the founder already chose these accounts. It still needs an email, still
+ * refuses anyone who replied or is closed, and still ends in a draft a person
+ * reads and sends.
+ */
+const BEFORE_OUTREACH = ['new', 'researching', 'needs_contact_info'] as const
+
+export function draftEligibility(
+  target: DraftTarget,
+  intent: 'standard' | 'meeting_request' = 'standard',
+): { ok: true } | { ok: false; reason: IneligibleReason } {
   if ((CLOSED as readonly string[]).includes(target.status)) return { ok: false, reason: 'closed' }
   if ((IN_CONVERSATION as readonly string[]).includes(target.status)) return { ok: false, reason: 'in_conversation' }
-  if (!(DRAFTABLE_STAGES as readonly string[]).includes(target.status)) return { ok: false, reason: 'not_ready' }
+  const stages: readonly string[] = intent === 'meeting_request' ? [...BEFORE_OUTREACH, ...DRAFTABLE_STAGES] : DRAFTABLE_STAGES
+  if (!stages.includes(target.status)) return { ok: false, reason: 'not_ready' }
   if (!target.email) return { ok: false, reason: 'no_email' }
   if (target.email_status === 'bounced') return { ok: false, reason: 'email_bounced' }
   return { ok: true }

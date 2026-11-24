@@ -75,6 +75,8 @@ export const TRIGGERS: Record<ActionKind, Trigger> = {
   // a person can still hand them to the manager, and then they repeat on the rhythm the person showed.
   run_funnel_report:        { type: 'schedule' },
   propose_queue_candidates: { type: 'schedule' },
+  // A person's own list is the trigger, so the plan never proposes this one unprompted; handed over, it repeats on their rhythm.
+  draft_meeting_requests:   { type: 'schedule' },
 }
 
 /** The sentence the playbook shows for how a type comes due. */
